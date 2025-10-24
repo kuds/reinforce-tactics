@@ -137,7 +137,7 @@ while not game.game_over:
 
 ## Game Rules
 
-![](Images/rt_demo.gif)
+![](images/rt_demo.gif)
 
 ### Units
 
