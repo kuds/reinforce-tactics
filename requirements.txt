@@ -1,0 +1,12 @@
+gymnasium
+pettingzoo
+pygame-ce
+stable-baselines3
+argparse
+numpy
+opencv-python
+torch
+tensorboard
+matplotlib
+typing
+pandas

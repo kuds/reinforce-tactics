@@ -1,0 +1,93 @@
+<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Circle -->
+  <circle cx="200" cy="200" r="190" fill="#1a1a2e" stroke="#16213e" stroke-width="4"/>
+  
+  <!-- Tactical Grid Base -->
+  <g id="grid-base">
+    <!-- Grid lines -->
+    <line x1="120" y1="160" x2="280" y2="160" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+    <line x1="120" y1="200" x2="280" y2="200" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+    <line x1="120" y1="240" x2="280" y2="240" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+    
+    <line x1="160" y1="120" x2="160" y2="280" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+    <line x1="200" y1="120" x2="200" y2="280" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+    <line x1="240" y1="120" x2="240" y2="280" stroke="#0f3460" stroke-width="2" opacity="0.5"/>
+  </g>
+  
+  <!-- Central Shield/Badge -->
+  <g id="shield">
+    <path d="M 200 100 L 260 130 L 260 220 Q 260 270 200 300 Q 140 270 140 220 L 140 130 Z" 
+          fill="#e94560" stroke="#c72c41" stroke-width="3"/>
+    
+    <!-- Inner shield detail -->
+    <path d="M 200 120 L 245 142 L 245 215 Q 245 255 200 280 Q 155 255 155 215 L 155 142 Z" 
+          fill="#ff6b6b" opacity="0.3"/>
+  </g>
+  
+  <!-- Reinforcement Learning Cycle/Arrows -->
+  <g id="rl-cycle">
+    <!-- Arrow 1 - Top Right -->
+    <path d="M 235 150 Q 270 150 270 185" 
+          fill="none" stroke="#4ecca3" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="275,180 270,195 265,180" fill="#4ecca3"/>
+    
+    <!-- Arrow 2 - Bottom Right -->
+    <path d="M 270 215 Q 270 250 235 250" 
+          fill="none" stroke="#4ecca3" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="240,255 225,250 240,245" fill="#4ecca3"/>
+    
+    <!-- Arrow 3 - Bottom Left -->
+    <path d="M 165 250 Q 130 250 130 215" 
+          fill="none" stroke="#4ecca3" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="125,220 130,205 135,220" fill="#4ecca3"/>
+    
+    <!-- Arrow 4 - Top Left -->
+    <path d="M 130 185 Q 130 150 165 150" 
+          fill="none" stroke="#4ecca3" stroke-width="4" stroke-linecap="round"/>
+    <polygon points="160,145 175,150 160,155" fill="#4ecca3"/>
+  </g>
+  
+  <!-- Tactical Units Icons -->
+  <g id="units">
+    <!-- Warrior -->
+    <rect x="185" y="180" width="14" height="14" fill="#ffd93d" stroke="#2d2d2d" stroke-width="1.5"/>
+    <rect x="187" y="175" width="10" height="5" fill="#ffd93d" stroke="#2d2d2d" stroke-width="1.5"/>
+    
+    <!-- Mini sword -->
+    <line x1="203" y1="188" x2="210" y2="195" stroke="#c72c41" stroke-width="2"/>
+    
+    <!-- Mini tower/building -->
+    <rect x="180" y="205" width="10" height="12" fill="#6c5ce7" stroke="#2d2d2d" stroke-width="1.5"/>
+    <polygon points="185,205 180,200 190,200" fill="#6c5ce7" stroke="#2d2d2d" stroke-width="1.5"/>
+    
+    <!-- Neural node connections -->
+    <circle cx="210" cy="175" r="3" fill="#4ecca3"/>
+    <circle cx="175" cy="185" r="3" fill="#4ecca3"/>
+    <circle cx="215" cy="210" r="3" fill="#4ecca3"/>
+    
+    <line x1="210" y1="175" x2="192" y2="180" stroke="#4ecca3" stroke-width="1" opacity="0.6"/>
+    <line x1="175" y1="185" x2="185" y2="195" stroke="#4ecca3" stroke-width="1" opacity="0.6"/>
+    <line x1="192" y1="194" x2="215" y2="210" stroke="#4ecca3" stroke-width="1" opacity="0.6"/>
+  </g>
+  
+  <!-- Game Title -->
+  <g id="title">
+    <text x="200" y="330" font-family="Arial, sans-serif" font-size="32" font-weight="bold" 
+          fill="#4ecca3" text-anchor="middle">REINFORCE</text>
+    <text x="200" y="360" font-family="Arial, sans-serif" font-size="28" font-weight="bold" 
+          fill="#ffd93d" text-anchor="middle">TACTICS</text>
+  </g>
+  
+  <!-- Subtle "RL" Badge -->
+  <g id="rl-badge">
+    <circle cx="280" cy="100" r="25" fill="#0f3460" stroke="#4ecca3" stroke-width="2"/>
+    <text x="280" y="108" font-family="monospace" font-size="20" font-weight="bold" 
+          fill="#4ecca3" text-anchor="middle">RL</text>
+  </g>
+  
+  <!-- Strategic Grid Accent -->
+  <g id="grid-accent" opacity="0.3">
+    <rect x="115" y="115" width="45" height="45" fill="none" stroke="#4ecca3" stroke-width="2"/>
+    <rect x="240" y="240" width="45" height="45" fill="none" stroke="#ffd93d" stroke-width="2"/>
+  </g>
+</svg>
