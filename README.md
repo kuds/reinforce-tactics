@@ -1,5 +1,7 @@
 # Reinforce Tactics - 2D Turn-Based Strategy Game
 
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/:user/:repo/total)
+
 ![](images/reinforce_tactics_logo.svg)
 
 A modular turn-based strategy game built with Pygame and Gymnasium for reinforcement learning.
