@@ -1,6 +1,7 @@
 """
 Language and translation system
 """
+from typing import Optional
 
 TRANSLATIONS = {
     'english': {
@@ -14,6 +15,13 @@ TRANSLATIONS = {
         'menu_settings': 'Settings',
         'menu_exit': 'Exit',
         'press_esc': 'Press ESC to exit',
+        
+        # Main Menu (alternative keys used in menus.py)
+        'main_menu.title': 'Reinforce Tactics',
+        'main_menu.new_game': 'New Game',
+        'main_menu.load_game': 'Load Game',
+        'main_menu.settings': 'Settings',
+        'main_menu.quit': 'Quit',
         
         # Settings Menu
         'settings_title': 'SETTINGS',
@@ -30,11 +38,51 @@ TRANSLATIONS = {
         'settings_saved': 'Settings saved!',
         'settings_reset_confirm': 'Reset all settings to defaults?',
         
+        # Settings Menu (alternative keys)
+        'settings.title': 'Settings',
+        'settings.language': 'Language',
+        'settings.sound': 'Sound',
+        'settings.fullscreen': 'Fullscreen',
+        
         # Map Selection
         'map_select_title': 'Select Map',
         'map_select': 'Select',
         'map_random': 'Random Map',
         'map_back': 'Back',
+        
+        # New Game Menu
+        'new_game.title': 'Select Map',
+        
+        # Save/Load Game
+        'save_game.title': 'Save Game',
+        'save_game.enter_name': 'Enter save name:',
+        'save_game.instructions': 'Press ENTER to save, ESC to cancel',
+        'load_game.title': 'Load Game',
+        
+        # Language Menu
+        'language.title': 'Select Language',
+        
+        # Pause Menu
+        'pause.title': 'Paused',
+        'pause.resume': 'Resume',
+        'pause.save': 'Save Game',
+        'pause.load': 'Load Game',
+        'pause.settings': 'Settings',
+        'pause.main_menu': 'Main Menu',
+        'pause.quit': 'Quit',
+        
+        # Game Over
+        'game_over.title': 'Game Over',
+        'game_over.winner': 'Player {player} Wins!',
+        'game_over.save_replay': 'Save Replay',
+        'game_over.new_game': 'New Game',
+        'game_over.main_menu': 'Main Menu',
+        'game_over.quit': 'Quit',
+        
+        # Common
+        'common.back': 'Back',
+        'common.confirm': 'Confirm',
+        'common.cancel': 'Cancel',
         
         # Game
         'player': 'Player',
@@ -54,6 +102,7 @@ TRANSLATIONS = {
         'warrior': 'Warrior',
         'mage': 'Mage',
         'cleric': 'Cleric',
+        'barbarian': 'Barbarian',
         'health': 'Health',
         'attack': 'Attack',
         'movement': 'Movement',
@@ -83,6 +132,13 @@ TRANSLATIONS = {
         'menu_exit': 'Quitter',
         'press_esc': 'Appuyez sur ESC pour quitter',
         
+        # Main Menu (alternative keys)
+        'main_menu.title': 'Reinforce Tactics',
+        'main_menu.new_game': 'Nouvelle Partie',
+        'main_menu.load_game': 'Charger Partie',
+        'main_menu.settings': 'Paramètres',
+        'main_menu.quit': 'Quitter',
+        
         # Settings Menu
         'settings_title': 'PARAMÈTRES',
         'settings_language': 'Langue',
@@ -98,11 +154,51 @@ TRANSLATIONS = {
         'settings_saved': 'Paramètres enregistrés!',
         'settings_reset_confirm': 'Réinitialiser tous les paramètres?',
         
+        # Settings Menu (alternative keys)
+        'settings.title': 'Paramètres',
+        'settings.language': 'Langue',
+        'settings.sound': 'Son',
+        'settings.fullscreen': 'Plein Écran',
+        
         # Map Selection
         'map_select_title': 'Sélectionner la Carte',
         'map_select': 'Sélectionner',
         'map_random': 'Carte Aléatoire',
         'map_back': 'Retour',
+        
+        # New Game Menu
+        'new_game.title': 'Sélectionner la Carte',
+        
+        # Save/Load Game
+        'save_game.title': 'Sauvegarder',
+        'save_game.enter_name': 'Nom de la sauvegarde:',
+        'save_game.instructions': 'Appuyez sur ENTRÉE pour sauvegarder, ESC pour annuler',
+        'load_game.title': 'Charger Partie',
+        
+        # Language Menu
+        'language.title': 'Choisir la Langue',
+        
+        # Pause Menu
+        'pause.title': 'Pause',
+        'pause.resume': 'Reprendre',
+        'pause.save': 'Sauvegarder',
+        'pause.load': 'Charger',
+        'pause.settings': 'Paramètres',
+        'pause.main_menu': 'Menu Principal',
+        'pause.quit': 'Quitter',
+        
+        # Game Over
+        'game_over.title': 'Partie Terminée',
+        'game_over.winner': 'Joueur {player} Gagne!',
+        'game_over.save_replay': 'Sauvegarder Replay',
+        'game_over.new_game': 'Nouvelle Partie',
+        'game_over.main_menu': 'Menu Principal',
+        'game_over.quit': 'Quitter',
+        
+        # Common
+        'common.back': 'Retour',
+        'common.confirm': 'Confirmer',
+        'common.cancel': 'Annuler',
         
         # Game
         'player': 'Joueur',
@@ -122,6 +218,7 @@ TRANSLATIONS = {
         'warrior': 'Guerrier',
         'mage': 'Mage',
         'cleric': 'Clerc',
+        'barbarian': 'Barbare',
         'health': 'Santé',
         'attack': 'Attaque',
         'movement': 'Mouvement',
@@ -151,6 +248,13 @@ TRANSLATIONS = {
         'menu_exit': '종료',
         'press_esc': 'ESC를 눌러 종료',
         
+        # Main Menu (alternative keys)
+        'main_menu.title': 'Reinforce Tactics',
+        'main_menu.new_game': '새 게임',
+        'main_menu.load_game': '불러오기',
+        'main_menu.settings': '설정',
+        'main_menu.quit': '종료',
+        
         # Settings Menu
         'settings_title': '설정',
         'settings_language': '언어',
@@ -166,11 +270,51 @@ TRANSLATIONS = {
         'settings_saved': '설정이 저장되었습니다!',
         'settings_reset_confirm': '모든 설정을 기본값으로 재설정하시겠습니까?',
         
+        # Settings Menu (alternative keys)
+        'settings.title': '설정',
+        'settings.language': '언어',
+        'settings.sound': '소리',
+        'settings.fullscreen': '전체 화면',
+        
         # Map Selection
         'map_select_title': '맵 선택',
         'map_select': '선택',
         'map_random': '무작위 맵',
         'map_back': '뒤로',
+        
+        # New Game Menu
+        'new_game.title': '맵 선택',
+        
+        # Save/Load Game
+        'save_game.title': '게임 저장',
+        'save_game.enter_name': '저장 이름 입력:',
+        'save_game.instructions': 'ENTER로 저장, ESC로 취소',
+        'load_game.title': '게임 불러오기',
+        
+        # Language Menu
+        'language.title': '언어 선택',
+        
+        # Pause Menu
+        'pause.title': '일시 정지',
+        'pause.resume': '계속',
+        'pause.save': '저장',
+        'pause.load': '불러오기',
+        'pause.settings': '설정',
+        'pause.main_menu': '메인 메뉴',
+        'pause.quit': '종료',
+        
+        # Game Over
+        'game_over.title': '게임 종료',
+        'game_over.winner': '플레이어 {player} 승리!',
+        'game_over.save_replay': '리플레이 저장',
+        'game_over.new_game': '새 게임',
+        'game_over.main_menu': '메인 메뉴',
+        'game_over.quit': '종료',
+        
+        # Common
+        'common.back': '뒤로',
+        'common.confirm': '확인',
+        'common.cancel': '취소',
         
         # Game
         'player': '플레이어',
@@ -190,6 +334,7 @@ TRANSLATIONS = {
         'warrior': '전사',
         'mage': '마법사',
         'cleric': '성직자',
+        'barbarian': '야만인',
         'health': '체력',
         'attack': '공격력',
         'movement': '이동력',
@@ -219,6 +364,13 @@ TRANSLATIONS = {
         'menu_exit': 'Salir',
         'press_esc': 'Presiona ESC para salir',
         
+        # Main Menu (alternative keys)
+        'main_menu.title': 'Reinforce Tactics',
+        'main_menu.new_game': 'Nuevo Juego',
+        'main_menu.load_game': 'Cargar Juego',
+        'main_menu.settings': 'Configuración',
+        'main_menu.quit': 'Salir',
+        
         # Settings Menu
         'settings_title': 'CONFIGURACIÓN',
         'settings_language': 'Idioma',
@@ -234,11 +386,51 @@ TRANSLATIONS = {
         'settings_saved': '¡Configuración guardada!',
         'settings_reset_confirm': '¿Restablecer toda la configuración?',
         
+        # Settings Menu (alternative keys)
+        'settings.title': 'Configuración',
+        'settings.language': 'Idioma',
+        'settings.sound': 'Sonido',
+        'settings.fullscreen': 'Pantalla Completa',
+        
         # Map Selection
         'map_select_title': 'Seleccionar Mapa',
         'map_select': 'Seleccionar',
         'map_random': 'Mapa Aleatorio',
         'map_back': 'Atrás',
+        
+        # New Game Menu
+        'new_game.title': 'Seleccionar Mapa',
+        
+        # Save/Load Game
+        'save_game.title': 'Guardar Juego',
+        'save_game.enter_name': 'Nombre del guardado:',
+        'save_game.instructions': 'Presiona ENTER para guardar, ESC para cancelar',
+        'load_game.title': 'Cargar Juego',
+        
+        # Language Menu
+        'language.title': 'Seleccionar Idioma',
+        
+        # Pause Menu
+        'pause.title': 'Pausa',
+        'pause.resume': 'Continuar',
+        'pause.save': 'Guardar',
+        'pause.load': 'Cargar',
+        'pause.settings': 'Configuración',
+        'pause.main_menu': 'Menú Principal',
+        'pause.quit': 'Salir',
+        
+        # Game Over
+        'game_over.title': 'Fin del Juego',
+        'game_over.winner': '¡Jugador {player} Gana!',
+        'game_over.save_replay': 'Guardar Repetición',
+        'game_over.new_game': 'Nuevo Juego',
+        'game_over.main_menu': 'Menú Principal',
+        'game_over.quit': 'Salir',
+        
+        # Common
+        'common.back': 'Atrás',
+        'common.confirm': 'Confirmar',
+        'common.cancel': 'Cancelar',
         
         # Game
         'player': 'Jugador',
@@ -258,6 +450,7 @@ TRANSLATIONS = {
         'warrior': 'Guerrero',
         'mage': 'Mago',
         'cleric': 'Clérigo',
+        'barbarian': 'Bárbaro',
         'health': 'Salud',
         'attack': 'Ataque',
         'movement': 'Movimiento',
@@ -283,54 +476,163 @@ LANGUAGE_NAMES = {
     'spanish': 'Español'
 }
 
+# Language code mappings (for flexibility)
+LANGUAGE_CODES = {
+    'en': 'english',
+    'fr': 'french',
+    'ko': 'korean',
+    'es': 'spanish',
+    'english': 'english',
+    'french': 'french',
+    'korean': 'korean',
+    'spanish': 'spanish',
+}
+
 
 class Language:
     """Language manager for translations."""
     
-    def __init__(self, language='english'):
-        """Initialize language manager."""
-        self.current_language = language.lower()
-        if self.current_language not in TRANSLATIONS:
-            print(f"⚠️  Language '{language}' not found, using English")
-            self.current_language = 'english'
+    def __init__(self, language: str = 'english'):
+        """
+        Initialize language manager.
+        
+        Args:
+            language: Language name or code (e.g., 'english', 'en', 'french', 'fr')
+        """
+        self.set_language(language)
     
-    def set_language(self, language):
-        """Set current language."""
-        language = language.lower()
-        if language in TRANSLATIONS:
-            self.current_language = language
-            print(f"✅ Language set to: {LANGUAGE_NAMES[language]}")
+    def set_language(self, language: str) -> bool:
+        """
+        Set current language.
+        
+        Args:
+            language: Language name or code
+            
+        Returns:
+            True if language was set successfully
+        """
+        # Normalize language code
+        lang_key = language.lower()
+        normalized = LANGUAGE_CODES.get(lang_key, lang_key)
+        
+        if normalized in TRANSLATIONS:
+            self.current_language = normalized
+            print(f"✅ Language set to: {LANGUAGE_NAMES.get(normalized, normalized)}")
+            return True
         else:
-            print(f"❌ Language '{language}' not available")
+            print(f"❌ Language '{language}' not available, using English")
+            self.current_language = 'english'
+            return False
     
-    def get(self, key, default=None):
-        """Get translation for key."""
+    def get(self, key: str, default: Optional[str] = None) -> str:
+        """
+        Get translation for key.
+        
+        Args:
+            key: Translation key (e.g., 'main_menu.title')
+            default: Default value if key not found
+            
+        Returns:
+            Translated string
+        """
         translations = TRANSLATIONS.get(self.current_language, TRANSLATIONS['english'])
-        return translations.get(key, default or key)
+        result = translations.get(key)
+        
+        # If not found in current language, try English as fallback
+        if result is None and self.current_language != 'english':
+            result = TRANSLATIONS['english'].get(key)
+        
+        return result if result is not None else (default or key)
     
-    def get_all_languages(self):
+    def get_all_languages(self) -> list:
         """Get list of all available languages."""
         return list(TRANSLATIONS.keys())
     
-    def get_language_display_name(self, language=None):
-        """Get display name for language."""
+    def get_language_display_name(self, language: Optional[str] = None) -> str:
+        """
+        Get display name for language.
+        
+        Args:
+            language: Language code (uses current if None)
+            
+        Returns:
+            Display name (e.g., 'English', 'Français')
+        """
         if language is None:
             language = self.current_language
-        return LANGUAGE_NAMES.get(language, language.capitalize())
+        
+        # Normalize
+        normalized = LANGUAGE_CODES.get(language.lower(), language.lower())
+        return LANGUAGE_NAMES.get(normalized, language.capitalize())
+    
+    def get_current_language(self) -> str:
+        """Get current language code."""
+        return self.current_language
 
 
 # Global language instance
-_language_instance = None
+_language_instance: Optional[Language] = None
 
-def get_language():
-    """Get global language instance."""
+
+def get_language() -> Language:
+    """
+    Get global language instance.
+    
+    Creates instance on first call using settings if available.
+    
+    Returns:
+        Language instance
+    """
     global _language_instance
     if _language_instance is None:
-        from reinforcetactics.utils.settings import get_settings
-        settings = get_settings()
-        _language_instance = Language(settings.get_language())
+        # Try to get language from settings
+        try:
+            from reinforcetactics.utils.settings import get_settings
+            settings = get_settings()
+            _language_instance = Language(settings.get_language())
+        except (ImportError, Exception):
+            # Fallback to English if settings not available
+            _language_instance = Language('english')
     return _language_instance
 
-def t(key, default=None):
-    """Shorthand for translation."""
+
+def reset_language(lang_code: str = 'english') -> Language:
+    """
+    Reset global language instance to a new language.
+    
+    This function was missing and is needed by menus.py LanguageMenu._set_language()
+    
+    Args:
+        lang_code: Language code or name (e.g., 'en', 'english', 'fr', 'french')
+        
+    Returns:
+        The new Language instance
+    """
+    global _language_instance
+    _language_instance = Language(lang_code)
+    
+    # Also try to persist to settings
+    try:
+        from reinforcetactics.utils.settings import get_settings
+        settings = get_settings()
+        # Normalize the language code
+        normalized = LANGUAGE_CODES.get(lang_code.lower(), lang_code.lower())
+        settings.set_language(normalized)
+    except (ImportError, Exception):
+        pass  # Settings not available, just update in-memory
+    
+    return _language_instance
+
+
+def t(key: str, default: Optional[str] = None) -> str:
+    """
+    Shorthand for translation.
+    
+    Args:
+        key: Translation key
+        default: Default value if not found
+        
+    Returns:
+        Translated string
+    """
     return get_language().get(key, default)
