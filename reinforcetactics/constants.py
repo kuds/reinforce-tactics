@@ -1,6 +1,37 @@
 """
 Game constants for the 2D Strategy Game.
 """
+from enum import Enum
+
+
+class TileType(Enum):
+    """Enumeration of tile types in the game."""
+    GRASS = 'p'
+    WATER = 'w'
+    MOUNTAIN = 'm'
+    FOREST = 'f'
+    ROAD = 'r'
+    BUILDING = 'b'
+    HEADQUARTERS = 'h'
+    TOWER = 't'
+    OCEAN = 'o'
+    
+    @classmethod
+    def from_code(cls, code: str) -> 'TileType':
+        """Get TileType from single-letter code."""
+        for tile_type in cls:
+            if tile_type.value == code:
+                return tile_type
+        raise ValueError(f"Unknown tile code: {code}")
+    
+    def is_walkable(self) -> bool:
+        """Check if this tile type can be walked on."""
+        return self not in (TileType.WATER, TileType.OCEAN, TileType.MOUNTAIN)
+    
+    def is_capturable(self) -> bool:
+        """Check if this tile type can be captured."""
+        return self in (TileType.TOWER, TileType.HEADQUARTERS, TileType.BUILDING)
+
 
 # Display settings
 TILE_SIZE = 32
@@ -10,15 +41,25 @@ MIN_MAP_SIZE = 20
 # Tile type colors (fallback when images aren't available)
 # Made more distinct and vibrant
 TILE_COLORS = {
-    'p': (100, 200, 100),    # Grass - Bright green
-    'w': (50, 120, 200),     # Water - Blue
-    'm': (150, 150, 150),    # Mountain - Light gray
-    'f': (34, 139, 34),      # Forest - Forest green
-    'r': (160, 130, 80),     # Road - Brown/tan
-    'b': (180, 180, 180),    # Building - Light gray (will be colored by player)
-    'h': (200, 200, 50),     # Headquarters - Yellow base (will be colored by player)
-    't': (220, 220, 220),    # Tower - Light gray
-    'o': (0, 39, 232)        # Ocean - Dark Blue
+    TileType.GRASS.value: (100, 200, 100),      # Grass - Bright green
+    TileType.WATER.value: (50, 120, 200),       # Water - Blue
+    TileType.MOUNTAIN.value: (150, 150, 150),   # Mountain - Light gray
+    TileType.FOREST.value: (34, 139, 34),       # Forest - Forest green
+    TileType.ROAD.value: (160, 130, 80),        # Road - Brown/tan
+    TileType.BUILDING.value: (180, 180, 180),   # Building - Light gray (will be colored by player)
+    TileType.HEADQUARTERS.value: (200, 200, 50),# Headquarters - Yellow base (will be colored by player)
+    TileType.TOWER.value: (220, 220, 220),      # Tower - Light gray
+    TileType.OCEAN.value: (0, 39, 232),         # Ocean - Dark Blue
+    # Keep string keys for backwards compatibility
+    'p': (100, 200, 100),
+    'w': (50, 120, 200),
+    'm': (150, 150, 150),
+    'f': (34, 139, 34),
+    'r': (160, 130, 80),
+    'b': (180, 180, 180),
+    'h': (200, 200, 50),
+    't': (220, 220, 220),
+    'o': (0, 39, 232),
 }
 
 # Player colors - Made more vibrant
@@ -108,8 +149,19 @@ COUNTER_ATTACK_MULTIPLIER = 0.9
 PARALYZE_DURATION = 3
 HEAL_AMOUNT = 5
 
-# Tile type mapping
+# Tile type mapping (string code -> display name)
+# Kept for backwards compatibility
 TILE_TYPES = {
+    TileType.GRASS.value: 'GRASS',
+    TileType.WATER.value: 'WATER',
+    TileType.MOUNTAIN.value: 'MOUNTAIN',
+    TileType.FOREST.value: 'FOREST',
+    TileType.ROAD.value: 'ROAD',
+    TileType.BUILDING.value: 'BUILDING',
+    TileType.HEADQUARTERS.value: 'HEADQUARTERS',
+    TileType.TOWER.value: 'TOWER',
+    TileType.OCEAN.value: 'OCEAN',
+    # Also keep simple string keys for backwards compatibility
     'p': 'GRASS',
     'w': 'WATER',
     'm': 'MOUNTAIN',
