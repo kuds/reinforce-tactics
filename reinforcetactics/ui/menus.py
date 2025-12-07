@@ -1,46 +1,58 @@
 """
 Menu system for the strategy game.
-Fixed version: Added datetime import, fixed language reset mechanism.
+Self-contained menus that manage their own pygame screen and navigation.
 """
 from __future__ import annotations
 import os
 import sys
-from datetime import datetime  # FIX: Added missing import
+from datetime import datetime
 from typing import Optional, List, Tuple, Callable, Any, Dict
+from pathlib import Path
 
 import pygame
 
 from reinforcetactics.constants import TILE_SIZE
-from reinforcetactics.utils.language import Language, get_language, reset_language
+from reinforcetactics.utils.language import get_language, reset_language
 
 
 class Menu:
-    """Base class for game menus."""
+    """Base class for game menus. Manages its own screen if not provided."""
 
-    def __init__(self, screen: pygame.Surface, title: str = "") -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None, title: str = "") -> None:
         """
         Initialize the menu.
-        
+
         Args:
-            screen: Pygame display surface
+            screen: Optional pygame display surface. If None, creates its own.
             title: Menu title
         """
-        self.screen = screen
+        # Initialize pygame if not already done
+        if not pygame.get_init():
+            pygame.init()
+
+        # Create screen if not provided
+        self.owns_screen = screen is None
+        if self.owns_screen:
+            self.screen = pygame.display.set_mode((800, 600))
+            pygame.display.set_caption("Reinforce Tactics")
+        else:
+            self.screen = screen
+
         self.title = title
         self.running = True
         self.selected_index = 0
         self.options: List[Tuple[str, Callable[[], Any]]] = []
-        
+
         # Colors
         self.bg_color = (30, 30, 40)
         self.text_color = (255, 255, 255)
         self.selected_color = (255, 200, 50)
         self.title_color = (100, 200, 255)
-        
+
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.option_font = pygame.font.Font(None, 36)
-        
+
         # Get language instance
         self.lang = get_language()
 
@@ -51,10 +63,10 @@ class Menu:
     def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
         """
         Handle input events.
-        
+
         Args:
             event: Pygame event
-            
+
         Returns:
             Result of selected option callback, if any
         """
@@ -69,69 +81,70 @@ class Menu:
                     return callback()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
-        
+
         return None
 
     def draw(self) -> None:
         """Draw the menu."""
         self.screen.fill(self.bg_color)
-        
+
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
-        
+
         # Draw title
         if self.title:
             title_surface = self.title_font.render(self.title, True, self.title_color)
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=50)
             self.screen.blit(title_surface, title_rect)
-        
+
         # Draw options
         start_y = screen_height // 3
         spacing = 50
-        
+
         for i, (text, _) in enumerate(self.options):
             color = self.selected_color if i == self.selected_index else self.text_color
-            
+
             # Add selection indicator
             display_text = f"> {text}" if i == self.selected_index else f"  {text}"
-            
+
             text_surface = self.option_font.render(display_text, True, color)
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
             self.screen.blit(text_surface, text_rect)
-        
+
         pygame.display.flip()
 
     def run(self) -> Optional[Any]:
         """
         Run the menu loop.
-        
+
         Returns:
             Result from selected option, or None
         """
         result = None
         clock = pygame.time.Clock()
-        
+
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-                
+
                 result = self.handle_input(event)
                 if result is not None:
                     return result
-            
+
             self.draw()
             clock.tick(30)
-        
+
         return result
 
 
 class MainMenu(Menu):
-    """Main menu for the game."""
+    """Main menu for the game. Handles navigation to sub-menus internally."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
-        super().__init__(screen, self._get_title())
+    def __init__(self) -> None:
+        """Initialize main menu with self-managed screen."""
+        super().__init__(None, self._get_title())
         self._setup_options()
 
     def _get_title(self) -> str:
@@ -139,16 +152,100 @@ class MainMenu(Menu):
 
     def _setup_options(self) -> None:
         lang = get_language()
-        self.add_option(lang.get('main_menu.new_game', 'New Game'), lambda: 'new_game')
-        self.add_option(lang.get('main_menu.load_game', 'Load Game'), lambda: 'load_game')
-        self.add_option(lang.get('main_menu.settings', 'Settings'), lambda: 'settings')
-        self.add_option(lang.get('main_menu.quit', 'Quit'), lambda: 'quit')
+        self.add_option(lang.get('main_menu.new_game', 'New Game'), self._new_game)
+        self.add_option(lang.get('main_menu.load_game', 'Load Game'), self._load_game)
+        self.add_option(lang.get('main_menu.watch_replay', 'Watch Replay'), self._watch_replay)
+        self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
+        self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
+
+    def _new_game(self) -> Dict[str, Any]:
+        """Handle new game - show map selection and return result."""
+        map_menu = MapSelectionMenu(self.screen)
+        selected_map = map_menu.run()
+
+        if selected_map:
+            # Return dictionary with new game info
+            return {
+                'type': 'new_game',
+                'map': selected_map,
+                'mode': 'human_vs_computer'  # Default mode
+            }
+        return None  # Cancelled
+
+    def _load_game(self) -> Dict[str, Any]:
+        """Handle load game - show load menu and return result."""
+        load_menu = LoadGameMenu(self.screen)
+        save_path = load_menu.run()
+
+        if save_path:
+            return {
+                'type': 'load_game',
+                'save_path': save_path
+            }
+        return None  # Cancelled
+
+    def _watch_replay(self) -> Dict[str, Any]:
+        """Handle watch replay - show replay menu and return result."""
+        replay_menu = ReplaySelectionMenu(self.screen)
+        replay_path = replay_menu.run()
+
+        if replay_path:
+            return {
+                'type': 'watch_replay',
+                'replay_path': replay_path
+            }
+        return None  # Cancelled
+
+    def _settings(self) -> Dict[str, Any]:
+        """Handle settings - show settings menu."""
+        settings_menu = SettingsMenu(self.screen)
+        settings_menu.run()
+        # Return to main menu after settings
+        return None  # pylint: disable=useless-return
+
+    def _quit(self) -> Dict[str, Any]:
+        """Handle quit."""
+        return {'type': 'exit'}
+
+    def run(self) -> Optional[Dict[str, Any]]:
+        """
+        Run the main menu loop with internal navigation.
+
+        Returns:
+            Dict with 'type' key indicating action, or None if cancelled
+        """
+        result = None
+        clock = pygame.time.Clock()
+
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return {'type': 'exit'}
+
+                result = self.handle_input(event)
+                if result is not None:
+                    # If we got a dict back, that's our final result
+                    if isinstance(result, dict):
+                        return result
+                    # Otherwise stay in menu loop
+
+            self.draw()
+            clock.tick(30)
+
+        return result if isinstance(result, dict) else {'type': 'exit'}
 
 
-class NewGameMenu(Menu):
-    """Menu for starting a new game."""
+class MapSelectionMenu(Menu):
+    """Menu for selecting a map when starting a new game."""
 
-    def __init__(self, screen: pygame.Surface, maps_dir: str = "maps") -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps") -> None:
+        """
+        Initialize map selection menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+            maps_dir: Directory containing map files
+        """
         super().__init__(screen, get_language().get('new_game.title', 'Select Map'))
         self.maps_dir = maps_dir
         self.available_maps: List[str] = []
@@ -163,27 +260,51 @@ class NewGameMenu(Menu):
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
                         if f.endswith('.csv'):
-                            self.available_maps.append(os.path.join(subdir, f))
+                            map_path = os.path.join(subdir, f)
+                            self.available_maps.append(map_path)
+
+        # Add random map option
+        self.available_maps.insert(0, "random")
 
     def _setup_options(self) -> None:
+        """Setup menu options for available maps."""
         for map_file in self.available_maps:
-            display_name = os.path.splitext(os.path.basename(map_file))[0]
+            if map_file == "random":
+                display_name = get_language().get('new_game.random_map', 'Random Map')
+            else:
+                display_name = os.path.splitext(os.path.basename(map_file))[0]
             self.add_option(display_name, lambda m=map_file: m)
-        
+
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+
+    def run(self) -> Optional[str]:
+        """
+        Run map selection menu.
+
+        Returns:
+            Selected map path string, or None if cancelled
+        """
+        return super().run()
 
 
 class SaveGameMenu(Menu):
     """Menu for saving the game."""
 
-    def __init__(self, screen: pygame.Surface, game_state: Any) -> None:
+    def __init__(self, game: Any, screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize save game menu.
+
+        Args:
+            game: Game state object to save
+            screen: Optional pygame surface. If None, creates its own.
+        """
         super().__init__(screen, get_language().get('save_game.title', 'Save Game'))
-        self.game_state = game_state
-        # FIX: datetime is now properly imported at module level
+        self.game = game
         self.input_text = f"save_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.input_active = True
 
     def handle_input(self, event: pygame.event.Event) -> Optional[str]:
+        """Handle keyboard input for filename entry."""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
                 if self.input_text:
@@ -196,31 +317,44 @@ class SaveGameMenu(Menu):
                 # Add character if printable
                 if event.unicode.isprintable() and len(self.input_text) < 50:
                     self.input_text += event.unicode
-        
+
         return None
 
     def _save_game(self) -> Optional[str]:
         """Save the game with current filename."""
-        filepath = self.game_state.save_to_file(f"saves/{self.input_text}.json")
+        # Ensure saves directory exists
+        saves_dir = Path("saves")
+        saves_dir.mkdir(exist_ok=True)
+
+        filepath = self.game.save_to_file(f"saves/{self.input_text}.json")
         return filepath
+
+    def run(self) -> Optional[str]:
+        """
+        Run save game menu.
+
+        Returns:
+            Path to saved file, or None if cancelled
+        """
+        return super().run()
 
     def draw(self) -> None:
         self.screen.fill(self.bg_color)
-        
+
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
-        
+
         # Draw title
         title_surface = self.title_font.render(self.title, True, self.title_color)
         title_rect = title_surface.get_rect(centerx=screen_width // 2, y=50)
         self.screen.blit(title_surface, title_rect)
-        
+
         # Draw input prompt
         prompt = get_language().get('save_game.enter_name', 'Enter save name:')
         prompt_surface = self.option_font.render(prompt, True, self.text_color)
         prompt_rect = prompt_surface.get_rect(centerx=screen_width // 2, y=screen_height // 3)
         self.screen.blit(prompt_surface, prompt_rect)
-        
+
         # Draw input box
         input_width = 400
         input_height = 40
@@ -232,12 +366,12 @@ class SaveGameMenu(Menu):
         )
         pygame.draw.rect(self.screen, (50, 50, 60), input_rect)
         pygame.draw.rect(self.screen, self.selected_color, input_rect, 2)
-        
+
         # Draw input text
         text_surface = self.option_font.render(self.input_text, True, self.text_color)
         text_rect = text_surface.get_rect(midleft=(input_rect.x + 10, input_rect.centery))
         self.screen.blit(text_surface, text_rect)
-        
+
         # Draw cursor
         cursor_x = text_rect.right + 2
         pygame.draw.line(
@@ -247,20 +381,29 @@ class SaveGameMenu(Menu):
             (cursor_x, input_rect.y + input_height - 5),
             2
         )
-        
+
         # Draw instructions
-        instructions = get_language().get('save_game.instructions', 'Press ENTER to save, ESC to cancel')
+        lang = get_language()
+        instructions = lang.get('save_game.instructions',
+                               'Press ENTER to save, ESC to cancel')
         inst_surface = self.option_font.render(instructions, True, (150, 150, 150))
         inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=screen_height // 2 + 50)
         self.screen.blit(inst_surface, inst_rect)
-        
+
         pygame.display.flip()
 
 
 class LoadGameMenu(Menu):
     """Menu for loading saved games."""
 
-    def __init__(self, screen: pygame.Surface, saves_dir: str = "saves") -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None, saves_dir: str = "saves") -> None:
+        """
+        Initialize load game menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+            saves_dir: Directory containing save files
+        """
         super().__init__(screen, get_language().get('load_game.title', 'Load Game'))
         self.saves_dir = saves_dir
         self.save_files: List[str] = []
@@ -281,18 +424,215 @@ class LoadGameMenu(Menu):
             )
 
     def _setup_options(self) -> None:
-        for save_file in self.save_files:
-            display_name = os.path.splitext(save_file)[0]
-            filepath = os.path.join(self.saves_dir, save_file)
-            self.add_option(display_name, lambda p=filepath: p)
-        
+        """Setup menu options for available save files."""
+        if not self.save_files:
+            # No saves available
+            lang = get_language()
+            self.add_option(lang.get('load_game.no_saves', 'No saved games found'), lambda: None)
+        else:
+            for save_file in self.save_files:
+                display_name = os.path.splitext(save_file)[0]
+                filepath = os.path.join(self.saves_dir, save_file)
+                self.add_option(display_name, lambda p=filepath: p)
+
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+
+    def run(self) -> Optional[str]:
+        """
+        Run load game menu.
+
+        Returns:
+            Path to selected save file, or None if cancelled
+        """
+        return super().run()
+
+
+class ReplaySelectionMenu(Menu):
+    """Menu for selecting a replay to watch."""
+
+    def __init__(self, screen: Optional[pygame.Surface] = None,
+                 replays_dir: str = "replays") -> None:
+        """
+        Initialize replay selection menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+            replays_dir: Directory containing replay files
+        """
+        super().__init__(screen, get_language().get('replay.title', 'Select Replay'))
+        self.replays_dir = replays_dir
+        self.replay_files: List[str] = []
+        self._load_replays()
+        self._setup_options()
+
+    def _load_replays(self) -> None:
+        """Load available replay files."""
+        if os.path.exists(self.replays_dir):
+            self.replay_files = [
+                f for f in os.listdir(self.replays_dir)
+                if f.endswith('.json')
+            ]
+            # Sort by modification time (newest first)
+            self.replay_files.sort(
+                key=lambda f: os.path.getmtime(os.path.join(self.replays_dir, f)),
+                reverse=True
+            )
+
+    def _setup_options(self) -> None:
+        """Setup menu options for available replay files."""
+        if not self.replay_files:
+            # No replays available
+            lang = get_language()
+            self.add_option(lang.get('replay.no_replays', 'No replays found'), lambda: None)
+        else:
+            for replay_file in self.replay_files:
+                display_name = os.path.splitext(replay_file)[0]
+                filepath = os.path.join(self.replays_dir, replay_file)
+                self.add_option(display_name, lambda p=filepath: p)
+
+        self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+
+    def run(self) -> Optional[str]:
+        """
+        Run replay selection menu.
+
+        Returns:
+            Path to selected replay file, or None if cancelled
+        """
+        return super().run()
+
+
+class BuildingMenu:
+    """In-game menu for creating units from buildings."""
+
+    def __init__(self, game: Any, building_pos: Tuple[int, int]) -> None:
+        """
+        Initialize building menu.
+
+        Args:
+            game: Game state object
+            building_pos: (x, y) position of the building
+        """
+        self.game = game
+        self.building_pos = building_pos
+        self.screen = None  # Will use renderer's screen
+
+        # Menu appearance
+        self.width = 200
+        self.height = 250
+        self.bg_color = (40, 40, 50, 230)  # Semi-transparent
+        self.text_color = (255, 255, 255)
+        self.selected_color = (255, 200, 50)
+        self.border_color = (100, 100, 120)
+
+        # Unit types that can be created
+        self.unit_types = ['soldier', 'tank', 'artillery']
+        self.selected_index = 0
+
+        # Font
+        self.font = pygame.font.Font(None, 24)
+
+    def handle_click(self, mouse_pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
+        """
+        Handle mouse click on the menu.
+
+        Args:
+            mouse_pos: (x, y) mouse position
+
+        Returns:
+            Dict with action info, or None
+        """
+        # Calculate menu position
+        menu_x = self.building_pos[0] * TILE_SIZE + TILE_SIZE
+        menu_y = self.building_pos[1] * TILE_SIZE
+
+        # Check if click is inside menu
+        if not (menu_x <= mouse_pos[0] <= menu_x + self.width and
+                menu_y <= mouse_pos[1] <= menu_y + self.height):
+            return {'type': 'close'}
+
+        # Check which option was clicked
+        option_height = 40
+        start_y = menu_y + 40
+
+        for i, unit_type in enumerate(self.unit_types):
+            option_y = start_y + i * option_height
+            if option_y <= mouse_pos[1] <= option_y + option_height:
+                return {
+                    'type': 'create_unit',
+                    'unit_type': unit_type,
+                    'building_pos': self.building_pos
+                }
+
+        # Check close button
+        close_y = start_y + len(self.unit_types) * option_height
+        if close_y <= mouse_pos[1] <= close_y + option_height:
+            return {'type': 'close'}
+
+        return None
+
+    def draw(self, screen: pygame.Surface) -> None:
+        """
+        Draw the building menu.
+
+        Args:
+            screen: Pygame surface to draw on
+        """
+        self.screen = screen
+
+        # Calculate menu position (to the right of the building)
+        menu_x = self.building_pos[0] * TILE_SIZE + TILE_SIZE
+        menu_y = self.building_pos[1] * TILE_SIZE
+
+        # Create semi-transparent surface
+        menu_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        menu_surface.fill(self.bg_color)
+
+        # Draw border
+        pygame.draw.rect(menu_surface, self.border_color,
+                        (0, 0, self.width, self.height), 2)
+
+        # Draw title
+        title = get_language().get('building_menu.title', 'Create Unit')
+        title_surface = self.font.render(title, True, self.text_color)
+        menu_surface.blit(title_surface, (10, 10))
+
+        # Draw unit options
+        option_height = 40
+        start_y = 40
+
+        for i, unit_type in enumerate(self.unit_types):
+            option_y = start_y + i * option_height
+
+            # Get cost (simplified - you may want to get from game config)
+            unit_costs = {'soldier': 100, 'tank': 300, 'artillery': 250}
+            cost = unit_costs.get(unit_type, 100)
+
+            # Display name
+            display_text = f"{unit_type.capitalize()} (${cost})"
+            text_surface = self.font.render(display_text, True, self.text_color)
+            menu_surface.blit(text_surface, (10, option_y + 10))
+
+        # Draw close button
+        close_y = start_y + len(self.unit_types) * option_height
+        close_text = get_language().get('common.close', 'Close')
+        close_surface = self.font.render(close_text, True, self.text_color)
+        menu_surface.blit(close_surface, (10, close_y + 10))
+
+        # Blit to screen
+        screen.blit(menu_surface, (menu_x, menu_y))
 
 
 class SettingsMenu(Menu):
     """Settings menu."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize settings menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+        """
         super().__init__(screen, get_language().get('settings.title', 'Settings'))
         self._setup_options()
 
@@ -310,7 +650,6 @@ class SettingsMenu(Menu):
     def _toggle_sound(self) -> None:
         """Toggle sound on/off."""
         # TODO: Implement sound toggle
-        pass
 
     def _toggle_fullscreen(self) -> None:
         """Toggle fullscreen mode."""
@@ -327,20 +666,26 @@ class LanguageMenu(Menu):
         'es': 'Español'
     }
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize language menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+        """
         super().__init__(screen, get_language().get('language.title', 'Select Language'))
         self._setup_options()
 
     def _setup_options(self) -> None:
         for code, name in self.LANGUAGES.items():
             self.add_option(name, lambda c=code: self._set_language(c))
-        
+
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
 
     def _set_language(self, lang_code: str) -> str:
         """
         Set the game language.
-        
+
         FIX: Use proper reset_language() function instead of trying to
         mutate module-level variable.
         """
@@ -352,7 +697,13 @@ class LanguageMenu(Menu):
 class PauseMenu(Menu):
     """In-game pause menu."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize pause menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+        """
         super().__init__(screen, get_language().get('pause.title', 'Paused'))
         self._setup_options()
 
@@ -369,11 +720,20 @@ class PauseMenu(Menu):
 class GameOverMenu(Menu):
     """Game over screen."""
 
-    def __init__(self, screen: pygame.Surface, winner: int, game_state: Any) -> None:
+    def __init__(self, winner: int, game_state: Any,
+                 screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize game over menu.
+
+        Args:
+            winner: Player number who won
+            game_state: Game state object
+            screen: Optional pygame surface. If None, creates its own.
+        """
         lang = get_language()
         title = lang.get('game_over.title', 'Game Over')
         super().__init__(screen, title)
-        
+
         self.winner = winner
         self.game_state = game_state
         self._setup_options()
@@ -391,16 +751,17 @@ class GameOverMenu(Menu):
 
     def draw(self) -> None:
         super().draw()
-        
+
         # Draw winner announcement
         lang = get_language()
-        winner_text = lang.get('game_over.winner', 'Player {player} Wins!').format(player=self.winner)
-        
+        winner_template = lang.get('game_over.winner', 'Player {player} Wins!')
+        winner_text = winner_template.format(player=self.winner)
+
         winner_surface = self.title_font.render(winner_text, True, self.selected_color)
         winner_rect = winner_surface.get_rect(
             centerx=self.screen.get_width() // 2,
             y=100
         )
         self.screen.blit(winner_surface, winner_rect)
-        
+
         pygame.display.flip()
