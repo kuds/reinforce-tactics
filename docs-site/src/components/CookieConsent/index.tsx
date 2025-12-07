@@ -7,19 +7,28 @@ export default function CookieConsent(): JSX.Element | null {
   const [showBanner, setShowBanner] = useState(false);
 
   useEffect(() => {
-    // Check if user has already made a choice
-    const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
-    if (!consent) {
+    // Only run in browser environment
+    if (typeof window === 'undefined') return;
+    
+    try {
+      // Check if user has already made a choice
+      const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
+      if (!consent) {
+        setShowBanner(true);
+      } else if (consent === 'accepted') {
+        // If consent was previously given, enable analytics
+        enableAnalytics();
+      }
+    } catch (error) {
+      // If localStorage is not available, show banner as fallback
       setShowBanner(true);
-    } else if (consent === 'accepted') {
-      // If consent was previously given, enable analytics
-      enableAnalytics();
     }
   }, []);
 
   const enableAnalytics = () => {
     // Enable Google Analytics by setting the consent
-    if (window.gtag) {
+    // Only run in browser environment
+    if (typeof window !== 'undefined' && window.gtag) {
       window.gtag('consent', 'update', {
         'analytics_storage': 'granted'
       });
@@ -27,20 +36,34 @@ export default function CookieConsent(): JSX.Element | null {
   };
 
   const handleAccept = () => {
-    localStorage.setItem(COOKIE_CONSENT_KEY, 'accepted');
-    enableAnalytics();
-    setShowBanner(false);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(COOKIE_CONSENT_KEY, 'accepted');
+      }
+      enableAnalytics();
+      setShowBanner(false);
+    } catch (error) {
+      // If localStorage fails, just hide the banner
+      setShowBanner(false);
+    }
   };
 
   const handleDecline = () => {
-    localStorage.setItem(COOKIE_CONSENT_KEY, 'declined');
-    // Analytics remains disabled (default state)
-    if (window.gtag) {
-      window.gtag('consent', 'update', {
-        'analytics_storage': 'denied'
-      });
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(COOKIE_CONSENT_KEY, 'declined');
+        // Analytics remains disabled (default state)
+        if (window.gtag) {
+          window.gtag('consent', 'update', {
+            'analytics_storage': 'denied'
+          });
+        }
+      }
+      setShowBanner(false);
+    } catch (error) {
+      // If localStorage fails, just hide the banner
+      setShowBanner(false);
     }
-    setShowBanner(false);
   };
 
   if (!showBanner) {
