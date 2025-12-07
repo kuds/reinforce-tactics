@@ -3,6 +3,7 @@ Menu system for the strategy game.
 Self-contained menus that manage their own pygame screen and navigation.
 """
 from __future__ import annotations
+import json
 import os
 import sys
 from datetime import datetime
@@ -437,14 +438,26 @@ class LoadGameMenu(Menu):
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
 
-    def run(self) -> Optional[str]:
+    def run(self) -> Optional[Dict[str, Any]]:
         """
         Run load game menu.
 
         Returns:
-            Path to selected save file, or None if cancelled
+            Dict with loaded save data, or None if cancelled
         """
-        return super().run()
+        selected_path = super().run()
+
+        if not selected_path:
+            return None
+
+        # Load the actual save data from the file
+        try:
+            with open(selected_path, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            return save_data
+        except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
+            print(f"Error loading save file: {e}")
+            return None
 
 
 class ReplaySelectionMenu(Menu):
