@@ -48,11 +48,19 @@ class Menu:
         self.bg_color = (30, 30, 40)
         self.text_color = (255, 255, 255)
         self.selected_color = (255, 200, 50)
+        self.hover_color = (200, 180, 100)
         self.title_color = (100, 200, 255)
+        self.option_bg_color = (50, 50, 65)
+        self.option_bg_hover_color = (70, 70, 90)
+        self.option_bg_selected_color = (80, 80, 100)
 
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.option_font = pygame.font.Font(None, 36)
+
+        # Mouse tracking
+        self.hover_index = -1
+        self.option_rects: List[pygame.Rect] = []
 
         # Get language instance
         self.lang = get_language()
@@ -82,6 +90,24 @@ class Menu:
                     return callback()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                mouse_pos = event.pos
+                # Check if any option was clicked
+                for i, rect in enumerate(self.option_rects):
+                    if rect.collidepoint(mouse_pos):
+                        self.selected_index = i
+                        if self.options:
+                            _, callback = self.options[i]
+                            return callback()
+        elif event.type == pygame.MOUSEMOTION:
+            # Update hover state
+            mouse_pos = event.pos
+            self.hover_index = -1
+            for i, rect in enumerate(self.option_rects):
+                if rect.collidepoint(mouse_pos):
+                    self.hover_index = i
+                    break
 
         return None
 
@@ -100,17 +126,55 @@ class Menu:
 
         # Draw options
         start_y = screen_height // 3
-        spacing = 50
+        spacing = 60
+        self.option_rects = []
 
         for i, (text, _) in enumerate(self.options):
-            color = self.selected_color if i == self.selected_index else self.text_color
+            # Determine styling based on state
+            is_selected = i == self.selected_index
+            is_hovered = i == self.hover_index
+
+            # Choose colors
+            if is_selected:
+                text_color = self.selected_color
+                bg_color = self.option_bg_selected_color
+            elif is_hovered:
+                text_color = self.hover_color
+                bg_color = self.option_bg_hover_color
+            else:
+                text_color = self.text_color
+                bg_color = self.option_bg_color
 
             # Add selection indicator
-            display_text = f"> {text}" if i == self.selected_index else f"  {text}"
+            display_text = f"> {text}" if is_selected else f"  {text}"
 
-            text_surface = self.option_font.render(display_text, True, color)
+            # Render text
+            text_surface = self.option_font.render(display_text, True, text_color)
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
+
+            # Create background rectangle with padding
+            padding_x = 40
+            padding_y = 10
+            bg_rect = pygame.Rect(
+                text_rect.x - padding_x,
+                text_rect.y - padding_y,
+                text_rect.width + 2 * padding_x,
+                text_rect.height + 2 * padding_y
+            )
+
+            # Draw rounded background rectangle
+            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
+            
+            # Draw border for selected/hovered
+            if is_selected or is_hovered:
+                border_color = self.selected_color if is_selected else self.hover_color
+                pygame.draw.rect(self.screen, border_color, bg_rect, width=2, border_radius=8)
+
+            # Draw text
             self.screen.blit(text_surface, text_rect)
+
+            # Store rect for click detection
+            self.option_rects.append(bg_rect)
 
         pygame.display.flip()
 
@@ -260,7 +324,8 @@ class MapSelectionMenu(Menu):
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
                         if f.endswith('.csv'):
-                            self.available_maps.append(os.path.join(subdir, f))
+                            # Store full path including maps/ prefix
+                            self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
 
         # Add random map option
         self.available_maps.insert(0, "random")
