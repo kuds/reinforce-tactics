@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pygame
 
-from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
 from reinforcetactics.utils.language import get_language, reset_language
 
 
@@ -241,7 +241,7 @@ class MainMenu(Menu):
         # Return None to stay in menu when cancelled
         return None
 
-    def _load_game(self) -> Dict[str, Any]:
+    def _load_game(self) -> Optional[Dict[str, Any]]:
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
         save_path = load_menu.run()
@@ -253,7 +253,7 @@ class MainMenu(Menu):
             }
         return None  # Cancelled
 
-    def _watch_replay(self) -> Dict[str, Any]:
+    def _watch_replay(self) -> Optional[Dict[str, Any]]:
         """Handle watch replay - show replay menu and return result."""
         replay_menu = ReplaySelectionMenu(self.screen)
         replay_path = replay_menu.run()
@@ -689,7 +689,6 @@ class BuildingMenu:
             option_y = start_y + i * option_height
 
             # Get unit name and cost from UNIT_DATA
-            from reinforcetactics.constants import UNIT_DATA
             unit_info = UNIT_DATA.get(unit_type, {})
             unit_name = unit_info.get('name', unit_type)
             cost = unit_info.get('cost', 100)
