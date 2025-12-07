@@ -223,10 +223,13 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
 
-    def _new_game(self) -> Dict[str, Any]:
+    def _new_game(self) -> Optional[Dict[str, Any]]:
         """Handle new game - show map selection and return result."""
         map_menu = MapSelectionMenu(self.screen)
         selected_map = map_menu.run()
+        
+        # Clear event queue to prevent double-processing
+        pygame.event.clear()
 
         if selected_map:
             # Return dictionary with new game info
@@ -235,7 +238,8 @@ class MainMenu(Menu):
                 'map': selected_map,
                 'mode': 'human_vs_computer'  # Default mode
             }
-        return None  # Cancelled
+        # Return None to stay in menu when cancelled
+        return None
 
     def _load_game(self) -> Dict[str, Any]:
         """Handle load game - show load menu and return result."""
@@ -336,7 +340,11 @@ class MapSelectionMenu(Menu):
             if map_file == "random":
                 display_name = get_language().get('new_game.random_map', 'Random Map')
             else:
-                display_name = os.path.splitext(os.path.basename(map_file))[0]
+                # Include the subdirectory in the display name to distinguish duplicates
+                # e.g., "1v1/6x6_beginner" instead of just "6x6_beginner"
+                relative_path = map_file.replace(self.maps_dir + os.sep, '')
+                # Remove .csv extension
+                display_name = os.path.splitext(relative_path)[0]
             self.add_option(display_name, lambda m=map_file: m)
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
@@ -601,8 +609,8 @@ class BuildingMenu:
         self.selected_color = (255, 200, 50)
         self.border_color = (100, 100, 120)
 
-        # Unit types that can be created
-        self.unit_types = ['soldier', 'tank', 'artillery']
+        # Unit types that can be created (use UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric, B=Barbarian)
+        self.unit_types = ['W', 'M', 'C']  # Warrior, Mage, Cleric
         self.selected_index = 0
 
         # Font
@@ -680,13 +688,14 @@ class BuildingMenu:
         for i, unit_type in enumerate(self.unit_types):
             option_y = start_y + i * option_height
 
-            # Get cost from game if available, otherwise use defaults
-            # TODO: Move these costs to game configuration or constants
-            default_costs = {'soldier': 100, 'tank': 300, 'artillery': 250}
-            cost = default_costs.get(unit_type, 100)
+            # Get unit name and cost from UNIT_DATA
+            from reinforcetactics.constants import UNIT_DATA
+            unit_info = UNIT_DATA.get(unit_type, {})
+            unit_name = unit_info.get('name', unit_type)
+            cost = unit_info.get('cost', 100)
 
             # Display name
-            display_text = f"{unit_type.capitalize()} (${cost})"
+            display_text = f"{unit_name} (${cost})"
             text_surface = self.font.render(display_text, True, self.text_color)
             menu_surface.blit(text_surface, (10, option_y + 10))
 
