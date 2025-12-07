@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pygame
 
-from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
 from reinforcetactics.utils.language import get_language, reset_language
 
 
@@ -48,11 +48,19 @@ class Menu:
         self.bg_color = (30, 30, 40)
         self.text_color = (255, 255, 255)
         self.selected_color = (255, 200, 50)
+        self.hover_color = (200, 180, 100)
         self.title_color = (100, 200, 255)
+        self.option_bg_color = (50, 50, 65)
+        self.option_bg_hover_color = (70, 70, 90)
+        self.option_bg_selected_color = (80, 80, 100)
 
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.option_font = pygame.font.Font(None, 36)
+
+        # Mouse tracking
+        self.hover_index = -1
+        self.option_rects: List[pygame.Rect] = []
 
         # Get language instance
         self.lang = get_language()
@@ -82,6 +90,24 @@ class Menu:
                     return callback()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                mouse_pos = event.pos
+                # Check if any option was clicked
+                for i, rect in enumerate(self.option_rects):
+                    if rect.collidepoint(mouse_pos):
+                        self.selected_index = i
+                        if self.options:
+                            _, callback = self.options[i]
+                            return callback()
+        elif event.type == pygame.MOUSEMOTION:
+            # Update hover state
+            mouse_pos = event.pos
+            self.hover_index = -1
+            for i, rect in enumerate(self.option_rects):
+                if rect.collidepoint(mouse_pos):
+                    self.hover_index = i
+                    break
 
         return None
 
@@ -100,17 +126,55 @@ class Menu:
 
         # Draw options
         start_y = screen_height // 3
-        spacing = 50
+        spacing = 60
+        self.option_rects = []
 
         for i, (text, _) in enumerate(self.options):
-            color = self.selected_color if i == self.selected_index else self.text_color
+            # Determine styling based on state
+            is_selected = i == self.selected_index
+            is_hovered = i == self.hover_index
+
+            # Choose colors
+            if is_selected:
+                text_color = self.selected_color
+                bg_color = self.option_bg_selected_color
+            elif is_hovered:
+                text_color = self.hover_color
+                bg_color = self.option_bg_hover_color
+            else:
+                text_color = self.text_color
+                bg_color = self.option_bg_color
 
             # Add selection indicator
-            display_text = f"> {text}" if i == self.selected_index else f"  {text}"
+            display_text = f"> {text}" if is_selected else f"  {text}"
 
-            text_surface = self.option_font.render(display_text, True, color)
+            # Render text
+            text_surface = self.option_font.render(display_text, True, text_color)
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
+
+            # Create background rectangle with padding
+            padding_x = 40
+            padding_y = 10
+            bg_rect = pygame.Rect(
+                text_rect.x - padding_x,
+                text_rect.y - padding_y,
+                text_rect.width + 2 * padding_x,
+                text_rect.height + 2 * padding_y
+            )
+
+            # Draw rounded background rectangle
+            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
+
+            # Draw border for selected/hovered
+            if is_selected or is_hovered:
+                border_color = self.selected_color if is_selected else self.hover_color
+                pygame.draw.rect(self.screen, border_color, bg_rect, width=2, border_radius=8)
+
+            # Draw text
             self.screen.blit(text_surface, text_rect)
+
+            # Store rect for click detection
+            self.option_rects.append(bg_rect)
 
         pygame.display.flip()
 
@@ -123,6 +187,9 @@ class Menu:
         """
         result = None
         clock = pygame.time.Clock()
+        
+        # Draw once before event loop to populate option_rects
+        self.draw()
 
         while self.running:
             for event in pygame.event.get():
@@ -159,10 +226,13 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
 
-    def _new_game(self) -> Dict[str, Any]:
+    def _new_game(self) -> Optional[Dict[str, Any]]:
         """Handle new game - show map selection and return result."""
         map_menu = MapSelectionMenu(self.screen)
         selected_map = map_menu.run()
+        
+        # Clear event queue to prevent double-processing
+        pygame.event.clear()
 
         if selected_map:
             # Return dictionary with new game info
@@ -171,9 +241,10 @@ class MainMenu(Menu):
                 'map': selected_map,
                 'mode': 'human_vs_computer'  # Default mode
             }
-        return None  # Cancelled
+        # Return None to stay in menu when cancelled
+        return None
 
-    def _load_game(self) -> Dict[str, Any]:
+    def _load_game(self) -> Optional[Dict[str, Any]]:
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
         save_path = load_menu.run()
@@ -185,7 +256,7 @@ class MainMenu(Menu):
             }
         return None  # Cancelled
 
-    def _watch_replay(self) -> Dict[str, Any]:
+    def _watch_replay(self) -> Optional[Dict[str, Any]]:
         """Handle watch replay - show replay menu and return result."""
         replay_menu = ReplaySelectionMenu(self.screen)
         replay_path = replay_menu.run()
@@ -260,7 +331,8 @@ class MapSelectionMenu(Menu):
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
                         if f.endswith('.csv'):
-                            self.available_maps.append(os.path.join(subdir, f))
+                            # Store full path including maps/ prefix
+                            self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
 
         # Add random map option
         self.available_maps.insert(0, "random")
@@ -271,7 +343,11 @@ class MapSelectionMenu(Menu):
             if map_file == "random":
                 display_name = get_language().get('new_game.random_map', 'Random Map')
             else:
-                display_name = os.path.splitext(os.path.basename(map_file))[0]
+                # Include the subdirectory in the display name to distinguish duplicates
+                # e.g., "1v1/6x6_beginner" instead of just "6x6_beginner"
+                relative_path = map_file.replace(self.maps_dir + os.sep, '')
+                # Remove .csv extension
+                display_name = os.path.splitext(relative_path)[0]
             self.add_option(display_name, lambda m=map_file: m)
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
@@ -536,8 +612,8 @@ class BuildingMenu:
         self.selected_color = (255, 200, 50)
         self.border_color = (100, 100, 120)
 
-        # Unit types that can be created
-        self.unit_types = ['soldier', 'tank', 'artillery']
+        # Unit types that can be created (use UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric, B=Barbarian)
+        self.unit_types = ['W', 'M', 'C']  # Warrior, Mage, Cleric
         self.selected_index = 0
 
         # Font
@@ -615,13 +691,13 @@ class BuildingMenu:
         for i, unit_type in enumerate(self.unit_types):
             option_y = start_y + i * option_height
 
-            # Get cost from game if available, otherwise use defaults
-            # TODO: Move these costs to game configuration or constants
-            default_costs = {'soldier': 100, 'tank': 300, 'artillery': 250}
-            cost = default_costs.get(unit_type, 100)
+            # Get unit name and cost from UNIT_DATA
+            unit_info = UNIT_DATA.get(unit_type, {})
+            unit_name = unit_info.get('name', unit_type)
+            cost = unit_info.get('cost', 100)
 
             # Display name
-            display_text = f"{unit_type.capitalize()} (${cost})"
+            display_text = f"{unit_name} (${cost})"
             text_surface = self.font.render(display_text, True, self.text_color)
             menu_surface.blit(text_surface, (10, option_y + 10))
 
