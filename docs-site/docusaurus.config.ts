@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Reinforce Tactics',
-  tagline: 'Turned based strategy game with the goal of developing reinforcement learning algorithms',
+  tagline: 'Turn-based strategy game with the goal of developing reinforcement learning algorithms',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -51,10 +51,18 @@ const config: Config = {
           customCss: './src/css/custom.css',
         },
         // Configure Google Analytics plugin
-        // IMPORTANT: Replace 'G-XXXXXXXXXX' with your actual Google Analytics tracking ID
-        // You can find this in your Google Analytics account under Admin > Data Streams
+        // IMPORTANT: Replace 'G-XXXXXXXXXX' with your actual Google Analytics 4 (GA4) Measurement ID
+        // 
+        // To get your tracking ID:
+        // 1. Go to Google Analytics (https://analytics.google.com/)
+        // 2. Navigate to Admin > Data Streams
+        // 3. Select your web stream
+        // 4. Copy the Measurement ID (format: G-XXXXXXXXXX)
+        // 
+        // Note: If you don't replace this placeholder, analytics tracking will not work,
+        // but the site will still function normally.
         gtag: {
-          trackingID: 'G-XXXXXXXXXX', // Replace with your actual tracking ID
+          trackingID: 'G-XXXXXXXXXX', // Replace with your actual GA4 Measurement ID
           anonymizeIP: true,
         },
       } satisfies Preset.Options,
