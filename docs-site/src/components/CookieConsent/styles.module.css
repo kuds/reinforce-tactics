@@ -1,0 +1,118 @@
+.cookieConsent {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--ifm-background-surface-color);
+  border-top: 2px solid var(--ifm-color-primary);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 9999;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.cookieConsentContent {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.cookieConsentText {
+  flex: 1;
+  min-width: 300px;
+}
+
+.cookieConsentText strong {
+  display: block;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+  color: var(--ifm-color-primary);
+}
+
+.cookieConsentText p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ifm-color-secondary-darkest);
+}
+
+html[data-theme='dark'] .cookieConsentText p {
+  color: var(--ifm-color-secondary-lightest);
+}
+
+.cookieConsentLink {
+  color: var(--ifm-color-primary);
+  text-decoration: underline;
+}
+
+.cookieConsentLink:hover {
+  color: var(--ifm-color-primary-dark);
+}
+
+.cookieConsentButtons {
+  display: flex;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.cookieConsentButtonAccept,
+.cookieConsentButtonDecline {
+  padding: 0.6rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cookieConsentButtonAccept {
+  background-color: var(--ifm-color-primary);
+  color: white;
+}
+
+.cookieConsentButtonAccept:hover {
+  background-color: var(--ifm-color-primary-dark);
+  transform: translateY(-1px);
+}
+
+.cookieConsentButtonDecline {
+  background-color: var(--ifm-background-color);
+  color: var(--ifm-color-emphasis-700);
+  border: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.cookieConsentButtonDecline:hover {
+  background-color: var(--ifm-color-emphasis-100);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .cookieConsentContent {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .cookieConsentButtons {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .cookieConsentButtonAccept,
+  .cookieConsentButtonDecline {
+    flex: 1;
+  }
+}

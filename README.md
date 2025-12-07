@@ -317,7 +317,7 @@ This will build the site and deploy it to the `gh-pages` branch.
 
 ### Configuring Google Analytics
 
-The documentation site includes Google Analytics integration. To set up tracking:
+The documentation site includes Google Analytics integration with GDPR-compliant cookie consent. To set up tracking:
 
 1. Open `docs-site/docusaurus.config.ts`
 2. Find the `gtag` configuration section
@@ -331,6 +331,8 @@ gtag: {
   anonymizeIP: true,
 },
 ```
+
+**Cookie Consent Banner**: The site includes a cookie consent banner that appears on first visit. Analytics tracking is disabled by default and only enabled when users accept cookies. The user's choice is stored in localStorage.
 
 ### Documentation Structure
 
