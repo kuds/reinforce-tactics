@@ -164,7 +164,7 @@ class Menu:
 
             # Draw rounded background rectangle
             pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
-            
+
             # Draw border for selected/hovered
             if is_selected or is_hovered:
                 border_color = self.selected_color if is_selected else self.hover_color
