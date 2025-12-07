@@ -26,7 +26,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ### UI Components
 - [x] `ui/__init__.py` - UI module initialization
 - [x] `ui/renderer.py` - Pygame rendering system
-- [x] `ui/menus.py` - All menu classes (Main, Map, Load, Replay, Building, Unit Action)
+- [x] `ui/menus.py` - All menu classes (MainMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, BuildingMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
 
 ### Reinforcement Learning
 - [x] `rl/__init__.py` - RL module initialization
@@ -100,7 +100,7 @@ Game controller that bridges GameState and UI.
 """
 from core.game_state import GameState
 from ui.renderer import Renderer
-from ui.menus import BuildingMenu, UnitActionMenu
+from ui.menus import BuildingMenu, SaveGameMenu, PauseMenu
 from game.bot import SimpleBot
 import pygame
 
@@ -254,13 +254,48 @@ python train_rl_agent.py train --total-timesteps 1000 --check-env
 4. **All game mechanics** - Combat, structures, economy, status effects
 5. **Action encoding** - Multi-discrete action space
 6. **File I/O** - Save/load, map loading, random generation
+7. **Menu system** - Self-contained menus with internal navigation
+
+### Menu System API
+
+All menu classes are **self-contained** and can be used without manually creating a pygame screen:
+
+```python
+from reinforcetactics.ui.menus import MainMenu, MapSelectionMenu, LoadGameMenu
+
+# Menus create their own screen if needed
+main_menu = MainMenu()  # No screen parameter required
+result = main_menu.run()  # Returns dict with user's choice
+
+# MainMenu handles internal navigation automatically
+if result['type'] == 'new_game':
+    # Result includes: {'type': 'new_game', 'map': 'path/to/map.csv', 'mode': 'human_vs_computer'}
+    start_game(result['map'], result['mode'])
+elif result['type'] == 'load_game':
+    # LoadGameMenu returns dict with save data already loaded
+    save_data = result.get('save_data')
+elif result['type'] == 'watch_replay':
+    # Result includes: {'type': 'watch_replay', 'replay_path': 'path/to/replay.json'}
+    watch_replay(result['replay_path'])
+```
+
+**Available Menu Classes:**
+- `MainMenu()` - Main game menu with navigation to sub-menus
+- `MapSelectionMenu()` - Select map for new game
+- `LoadGameMenu()` - Load saved game (returns loaded dict)
+- `SaveGameMenu(game)` - Save current game
+- `ReplaySelectionMenu()` - Select replay to watch
+- `BuildingMenu(game, building_pos)` - In-game unit creation
+- `PauseMenu()` - In-game pause menu
+- `SettingsMenu()` - Game settings
+- `LanguageMenu()` - Language selection
+- `GameOverMenu(winner, game_state)` - Game over screen
 
 ### What's Missing
 
-1. **GUI game loop** - Need to create `main.py` and `game/controller.py`
-2. **Interactive gameplay** - Event handling for human players
-3. **Replay playback** - Video recording and replay viewing
-4. **Menus integration** - Connect menus to game controller
+1. **GUI game loop** - `main.py` exists but `game/controller.py` would help organize game loop logic
+2. **Interactive gameplay** - Event handling for human players (partially implemented in main.py)
+3. **Replay playback** - Video recording and replay viewing (replay selection menu exists, but playback needs implementation)
 
 ### Implementation Priority
 
