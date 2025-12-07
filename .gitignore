@@ -8,3 +8,6 @@
 /reinforcetactics/game/__pycache__
 /reinforcetactics/core/__pycache__
 /reinforcetactics/__pycache__
+/tests/__pycache__
+*.pyc
+**/__pycache__/
