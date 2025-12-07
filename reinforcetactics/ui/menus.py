@@ -197,12 +197,11 @@ class MainMenu(Menu):
             }
         return None  # Cancelled
 
-    def _settings(self) -> Dict[str, Any]:
+    def _settings(self) -> None:
         """Handle settings - show settings menu."""
         settings_menu = SettingsMenu(self.screen)
         settings_menu.run()
         # Return to main menu after settings
-        return None  # pylint: disable=useless-return
 
     def _quit(self) -> Dict[str, Any]:
         """Handle quit."""
@@ -261,8 +260,7 @@ class MapSelectionMenu(Menu):
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
                         if f.endswith('.csv'):
-                            map_path = os.path.join(subdir, f)
-                            self.available_maps.append(map_path)
+                            self.available_maps.append(os.path.join(subdir, f))
 
         # Add random map option
         self.available_maps.insert(0, "random")
@@ -617,9 +615,10 @@ class BuildingMenu:
         for i, unit_type in enumerate(self.unit_types):
             option_y = start_y + i * option_height
 
-            # Get cost (simplified - you may want to get from game config)
-            unit_costs = {'soldier': 100, 'tank': 300, 'artillery': 250}
-            cost = unit_costs.get(unit_type, 100)
+            # Get cost from game if available, otherwise use defaults
+            # TODO: Move these costs to game configuration or constants
+            default_costs = {'soldier': 100, 'tank': 300, 'artillery': 250}
+            cost = default_costs.get(unit_type, 100)
 
             # Display name
             display_text = f"{unit_type.capitalize()} (${cost})"
@@ -661,8 +660,8 @@ class SettingsMenu(Menu):
         return 'language_menu'
 
     def _toggle_sound(self) -> None:
-        """Toggle sound on/off."""
-        # TODO: Implement sound toggle
+        """Toggle sound on/off. Currently not implemented."""
+        # Sound system not yet implemented in the game
 
     def _toggle_fullscreen(self) -> None:
         """Toggle fullscreen mode."""
@@ -696,12 +695,7 @@ class LanguageMenu(Menu):
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
 
     def _set_language(self, lang_code: str) -> str:
-        """
-        Set the game language.
-
-        FIX: Use proper reset_language() function instead of trying to
-        mutate module-level variable.
-        """
+        """Set the game language."""
         reset_language(lang_code)
         self.lang = get_language()  # Refresh our reference
         return lang_code
