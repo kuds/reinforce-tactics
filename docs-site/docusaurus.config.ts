@@ -136,6 +136,10 @@ const config: Config = {
           title: 'More',
           items: [
             {
+              label: 'Finding Theta',
+              href: 'https://findingtheta.com',
+            },
+            {
               label: 'Main README',
               href: 'https://github.com/kuds/reinforce-tactics#readme',
             },
