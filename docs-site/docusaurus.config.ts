@@ -62,7 +62,7 @@ const config: Config = {
         // Note: If you don't replace this placeholder, analytics tracking will not work,
         // but the site will still function normally.
         gtag: {
-          trackingID: 'G-XXXXXXXXXX', // Replace with your actual GA4 Measurement ID
+          trackingID: 'G-7ETBJXYY4L', // Replace with your actual GA4 Measurement ID
           anonymizeIP: true,
         },
       } satisfies Preset.Options,
