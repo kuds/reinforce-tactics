@@ -278,6 +278,67 @@ python -c "from rl import StrategyGameEnv; env = StrategyGameEnv(); env.reset();
 
 **Invalid actions during training**: Action masking not fully implemented yet, agent will learn to avoid invalid actions through penalties
 
+## Documentation Site
+
+This project includes a comprehensive Docusaurus-based documentation site located in the `docs-site/` directory.
+
+### Running the Documentation Site Locally
+
+```bash
+# Navigate to the docs site directory
+cd docs-site
+
+# Install dependencies (first time only)
+npm install
+
+# Start the development server
+npm start
+```
+
+The site will be available at `http://localhost:3000`.
+
+### Building for Production
+
+```bash
+cd docs-site
+npm run build
+```
+
+The static files will be generated in the `docs-site/build/` directory.
+
+### Deploying to GitHub Pages
+
+```bash
+cd docs-site
+npm run deploy
+```
+
+This will build the site and deploy it to the `gh-pages` branch.
+
+### Configuring Google Analytics
+
+The documentation site includes Google Analytics integration. To set up tracking:
+
+1. Open `docs-site/docusaurus.config.ts`
+2. Find the `gtag` configuration section
+3. Replace `'G-XXXXXXXXXX'` with your actual Google Analytics tracking ID
+4. The tracking ID can be found in your Google Analytics account under **Admin > Data Streams**
+
+Example:
+```typescript
+gtag: {
+  trackingID: 'G-YOUR-TRACKING-ID', // Replace with your actual tracking ID
+  anonymizeIP: true,
+},
+```
+
+### Documentation Structure
+
+The documentation includes:
+- **Getting Started**: Overview and quick start guide
+- **Implementation Status**: Current state of features and development roadmap
+- **Project Timeline**: Research timeline and task list
+
 ## License
 
 MIT License - feel free to use and modify!
