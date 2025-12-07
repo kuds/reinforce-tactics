@@ -187,6 +187,9 @@ class Menu:
         """
         result = None
         clock = pygame.time.Clock()
+        
+        # Draw once before event loop to populate option_rects
+        self.draw()
 
         while self.running:
             for event in pygame.event.get():
