@@ -1,5 +1,13 @@
 # Reinforce Tactics - 2D Turn-Based Strategy Game
 
+[![GitHub Stars](https://img.shields.io/github/stars/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/network/members)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/commits/main)
+[![GitHub Issues](https://img.shields.io/github/issues/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/issues)
+[![GitHub License](https://img.shields.io/github/license/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/blob/main/LICENSE)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/deploy-docusaurus.yml)](https://github.com/kuds/reinforce-tactics/actions/workflows/deploy-docusaurus.yml)
+[![Documentation](https://img.shields.io/badge/docs-reinforcetactics.com-blue)](https://reinforcetactics.com)
+
 ![](images/reinforce_tactics_logo.svg)
 
 A modular turn-based strategy game built with Pygame and Gymnasium for reinforcement learning.
