@@ -344,8 +344,12 @@ class GameModeMenu(Menu):
                 item_path = os.path.join(self.maps_dir, item)
                 if os.path.isdir(item_path):
                     # Check if folder contains .csv maps
-                    if any(f.endswith('.csv') for f in os.listdir(item_path)):
-                        self.available_modes.append(item)
+                    try:
+                        if any(f.endswith('.csv') for f in os.listdir(item_path)):
+                            self.available_modes.append(item)
+                    except (OSError, PermissionError):
+                        # Skip directories that can't be read
+                        continue
         self.available_modes.sort()
 
     def _setup_options(self) -> None:
@@ -688,8 +692,7 @@ class BuildingMenu:
         self.selected_color = (255, 200, 50)
         self.border_color = (100, 100, 120)
 
-        # Unit types that can be created
-        # Use UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric, B=Barbarian
+        # Unit types that can be created (UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric)
         self.unit_types = ['W', 'M', 'C']  # Warrior, Mage, Cleric
         self.selected_index = 0
 
