@@ -492,3 +492,13 @@ class TestPlayerConfigMenu:
         for config in result['players']:
             assert config['type'] == 'computer'
             assert config['bot_type'] == 'SimpleBot'
+
+    def test_player_config_invalid_game_mode(self, pygame_init):
+        """Test that invalid game mode raises ValueError."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+        
+        with pytest.raises(ValueError) as excinfo:
+            PlayerConfigMenu(game_mode="3v3")
+        
+        assert "Invalid game_mode" in str(excinfo.value)
+        assert "Must be '1v1' or '2v2'" in str(excinfo.value)

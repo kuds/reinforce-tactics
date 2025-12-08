@@ -541,7 +541,14 @@ class PlayerConfigMenu:
         Args:
             screen: Optional pygame surface. If None, creates its own.
             game_mode: Game mode ("1v1" or "2v2")
+        
+        Raises:
+            ValueError: If game_mode is not "1v1" or "2v2"
         """
+        # Validate game_mode
+        if game_mode not in ["1v1", "2v2"]:
+            raise ValueError(f"Invalid game_mode: {game_mode}. Must be '1v1' or '2v2'")
+        
         # Initialize pygame if not already done
         if not pygame.get_init():
             pygame.init()
@@ -727,6 +734,8 @@ class PlayerConfigMenu:
         """
         padding_x = 20
         padding_y = 10
+        # Container width for centered buttons
+        button_container_width = 200
 
         # Render text
         text_color = self.disabled_color if disabled else self.text_color
@@ -739,7 +748,7 @@ class PlayerConfigMenu:
 
         # Adjust position if centered
         if centered:
-            button_x = x + (200 - button_width) // 2
+            button_x = x + (button_container_width - button_width) // 2
         else:
             button_x = x
 

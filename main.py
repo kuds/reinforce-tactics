@@ -457,11 +457,15 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                         game.end_turn()
 
                         # Bots play if it's their turn
-                        while game.current_player in bots and not game.game_over:
+                        # Safety counter to prevent infinite loops
+                        max_bot_turns = num_players * 2
+                        bot_turn_count = 0
+                        while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
                             current_bot = bots[game.current_player]
                             print(f"Bot (Player {game.current_player}) is thinking...")
                             current_bot.take_turn()
                             game.end_turn()
+                            bot_turn_count += 1
                             print(f"Bot finished. Player {game.current_player}'s turn\n")
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -504,11 +508,15 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             game.end_turn()
 
                             # Bots play if it's their turn
-                            while game.current_player in bots and not game.game_over:
+                            # Safety counter to prevent infinite loops
+                            max_bot_turns = num_players * 2
+                            bot_turn_count = 0
+                            while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
                                 current_bot = bots[game.current_player]
                                 print(f"Bot (Player {game.current_player}) is thinking...")
                                 current_bot.take_turn()
                                 game.end_turn()
+                                bot_turn_count += 1
                                 print(f"Bot finished. Player {game.current_player}'s turn\n")
                             continue
 
@@ -630,10 +638,13 @@ def load_saved_game():
         # Create renderer
         renderer = Renderer(game)
         
-        # Create bots for all computer players (assume all non-player-1 are bots for loaded games)
+        # Create bots for computer players
+        # TODO: Save and restore player configurations with game state for better fidelity
+        # For now, assume all non-player-1 players are bots in loaded games
         bots = {}
         for player_num in range(2, game.num_players + 1):
             bots[player_num] = SimpleBot(game, player=player_num)
+            print(f"Bot created for Player {player_num} (loaded game)")
         
         # Game loop
         clock = pygame.time.Clock()
@@ -677,11 +688,15 @@ def load_saved_game():
                         game.end_turn()
                         
                         # Bots play if it's their turn
-                        while game.current_player in bots and not game.game_over:
+                        # Safety counter to prevent infinite loops
+                        max_bot_turns = game.num_players * 2
+                        bot_turn_count = 0
+                        while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
                             current_bot = bots[game.current_player]
                             print(f"Bot (Player {game.current_player}) is thinking...")
                             current_bot.take_turn()
                             game.end_turn()
+                            bot_turn_count += 1
                             print(f"Bot finished. Player {game.current_player}'s turn\n")
                 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
