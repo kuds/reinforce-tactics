@@ -325,7 +325,8 @@ def play_mode(args):
     if menu_result['type'] == 'new_game':
         start_new_game(
             mode=menu_result.get('mode', 'human_vs_computer'),
-            selected_map=menu_result.get('map')
+            selected_map=menu_result.get('map'),
+            player_configs=menu_result.get('players')
         )
     elif menu_result['type'] == 'load_game':
         load_saved_game()
@@ -335,8 +336,8 @@ def play_mode(args):
         print("Settings menu not yet implemented")
         pygame.quit()
 
-def start_new_game(mode='human_vs_computer', selected_map=None):
-    """Start a new game with the specified mode and map."""
+def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=None):
+    """Start a new game with the specified mode, map, and player configurations."""
     import pygame
     from pathlib import Path
     from reinforcetactics.core.game_state import GameState
@@ -360,11 +361,18 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
         print("Map selection cancelled")
         return
 
+    # Determine number of players from mode or player_configs
+    num_players = 2
+    if mode == '2v2':
+        num_players = 4
+    elif player_configs:
+        num_players = len(player_configs)
+
     try:
         # Load or generate map
         if selected_map == "random":
             print("Generating random map...")
-            map_data = FileIO.generate_random_map(20, 20, num_players=2)
+            map_data = FileIO.generate_random_map(20, 20, num_players=num_players)
             map_file_used = None
         else:
             print(f"Loading map: {selected_map}")
@@ -376,7 +384,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
             return
 
         # Create game state
-        game = GameState(map_data, num_players=2)
+        game = GameState(map_data, num_players=num_players)
 
         # Store map file for saving
         if map_file_used:
@@ -385,11 +393,21 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
         # Create renderer
         renderer = Renderer(game)
 
-        # Create bot if needed
-        bot = None
-        if mode == 'human_vs_computer':
-            bot = SimpleBot(game, player=2)
-            print("Bot created for Player 2")
+        # Create bots based on player configurations
+        bots = {}
+        if player_configs:
+            for i, config in enumerate(player_configs):
+                player_num = i + 1
+                if config['type'] == 'computer':
+                    bot_type = config.get('bot_type', 'SimpleBot')
+                    if bot_type == 'SimpleBot':
+                        bots[player_num] = SimpleBot(game, player=player_num)
+                        print(f"Bot created for Player {player_num} ({bot_type})")
+        else:
+            # Legacy mode: Create bot for player 2 if mode is human_vs_computer
+            if mode == 'human_vs_computer':
+                bots[2] = SimpleBot(game, player=2)
+                print("Bot created for Player 2")
 
         # Game loop variables
         clock = pygame.time.Clock()
@@ -438,11 +456,16 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
                         selected_unit = None
                         game.end_turn()
 
-                        # Bot plays if it's player 2's turn and bot exists
-                        if bot and game.current_player == 2:
-                            print("Bot is thinking...")
-                            bot.take_turn()
+                        # Bots play if it's their turn
+                        # Safety counter to prevent infinite loops
+                        max_bot_turns = num_players * 2
+                        bot_turn_count = 0
+                        while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
+                            current_bot = bots[game.current_player]
+                            print(f"Bot (Player {game.current_player}) is thinking...")
+                            current_bot.take_turn()
                             game.end_turn()
+                            bot_turn_count += 1
                             print(f"Bot finished. Player {game.current_player}'s turn\n")
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -484,10 +507,16 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
                             selected_unit = None
                             game.end_turn()
 
-                            if bot and game.current_player == 2:
-                                print("Bot is thinking...")
-                                bot.take_turn()
+                            # Bots play if it's their turn
+                            # Safety counter to prevent infinite loops
+                            max_bot_turns = num_players * 2
+                            bot_turn_count = 0
+                            while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
+                                current_bot = bots[game.current_player]
+                                print(f"Bot (Player {game.current_player}) is thinking...")
+                                current_bot.take_turn()
                                 game.end_turn()
+                                bot_turn_count += 1
                                 print(f"Bot finished. Player {game.current_player}'s turn\n")
                             continue
 
@@ -609,8 +638,13 @@ def load_saved_game():
         # Create renderer
         renderer = Renderer(game)
         
-        # Create bot for player 2 if needed
-        bot = SimpleBot(game, player=2) if game.num_players == 2 else None
+        # Create bots for computer players
+        # TODO: Save and restore player configurations with game state for better fidelity
+        # For now, assume all non-player-1 players are bots in loaded games
+        bots = {}
+        for player_num in range(2, game.num_players + 1):
+            bots[player_num] = SimpleBot(game, player=player_num)
+            print(f"Bot created for Player {player_num} (loaded game)")
         
         # Game loop
         clock = pygame.time.Clock()
@@ -653,11 +687,16 @@ def load_saved_game():
                         print(f"\nPlayer {game.current_player} ended turn")
                         game.end_turn()
                         
-                        # Bot plays if it's player 2's turn and bot exists
-                        if bot and game.current_player == 2:
-                            print("Bot is thinking...")
-                            bot.take_turn()
+                        # Bots play if it's their turn
+                        # Safety counter to prevent infinite loops
+                        max_bot_turns = game.num_players * 2
+                        bot_turn_count = 0
+                        while game.current_player in bots and not game.game_over and bot_turn_count < max_bot_turns:
+                            current_bot = bots[game.current_player]
+                            print(f"Bot (Player {game.current_player}) is thinking...")
+                            current_bot.take_turn()
                             game.end_turn()
+                            bot_turn_count += 1
                             print(f"Bot finished. Player {game.current_player}'s turn\n")
                 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
