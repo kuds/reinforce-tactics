@@ -342,8 +342,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import (
-        MapSelectionMenu, SaveGameMenu,
-        BuildingMenu
+        MapSelectionMenu, SaveGameMenu
     )
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
@@ -458,23 +457,6 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
                             if menu_result:
                                 if menu_result['type'] == 'close':
                                     active_menu = None
-                                elif menu_result['type'] == 'create_unit':
-                                    # Create unit at building
-                                    unit_type = menu_result['unit_type']
-                                    building_pos = menu_result['building_pos']
-                                    unit = game.create_unit(unit_type, building_pos[0], building_pos[1])
-                                    if unit:
-                                        print(f"Created {unit_type} at {building_pos}")
-                                    else:
-                                        print(f"Failed to create {unit_type}")
-                                    active_menu = None
-                                elif menu_result['type'] == 'unit_action':
-                                    # Handle unit action
-                                    action = menu_result['action']
-                                    if action == 'wait':
-                                        selected_unit.end_unit_turn()
-                                        selected_unit = None
-                                    active_menu = None
                             # Continue to prevent further processing
                             continue
 
@@ -514,23 +496,14 @@ def start_new_game(mode='human_vs_computer', selected_map=None):
                             print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
                             continue  # Stop processing more events this frame
 
-                        # Priority 2: Own building clicked (for creating units)
-                        elif (clicked_tile and clicked_tile.type == 'b' and
-                              clicked_tile.player == game.current_player and
-                              not clicked_unit):  # Only if no unit on it
-                            active_menu = BuildingMenu(game, (grid_x, grid_y))
-                            menu_opened_time = current_time  # Record when menu opened
-                            print(f"Opened building menu at ({grid_x}, {grid_y})")
-                            continue  # CRITICAL: Stop processing remaining events!
-
-                        # Priority 3: Movement with selected unit
+                        # Priority 2: Movement with selected unit
                         elif selected_unit and selected_unit.can_move:
                             if game.move_unit(selected_unit, grid_x, grid_y):
                                 print(f"Moved {selected_unit.type} to ({grid_x}, {grid_y})")
                                 selected_unit = None
                             continue  # Stop processing more events this frame
 
-                        # Priority 4: Deselect
+                        # Priority 3: Deselect
                         else:
                             selected_unit = None
                             continue  # Stop processing more events this frame

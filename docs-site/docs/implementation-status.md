@@ -26,7 +26,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ### UI Components
 - [x] `ui/__init__.py` - UI module initialization
 - [x] `ui/renderer.py` - Pygame rendering system
-- [x] `ui/menus.py` - All menu classes (MainMenu, GameModeMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, BuildingMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
+- [x] `ui/menus.py` - All menu classes (MainMenu, GameModeMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
 
 ### Reinforcement Learning
 - [x] `rl/__init__.py` - RL module initialization
@@ -100,7 +100,7 @@ Game controller that bridges GameState and UI.
 """
 from core.game_state import GameState
 from ui.renderer import Renderer
-from ui.menus import BuildingMenu, SaveGameMenu, PauseMenu
+from ui.menus import SaveGameMenu, PauseMenu
 from game.bot import SimpleBot
 import pygame
 
@@ -286,7 +286,6 @@ elif result['type'] == 'watch_replay':
 - `LoadGameMenu()` - Load saved game (returns loaded dict)
 - `SaveGameMenu(game)` - Save current game
 - `ReplaySelectionMenu()` - Select replay to watch
-- `BuildingMenu(game, building_pos)` - In-game unit creation
 - `PauseMenu()` - In-game pause menu
 - `SettingsMenu()` - Game settings
 - `LanguageMenu()` - Language selection
