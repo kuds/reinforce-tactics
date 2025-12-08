@@ -26,7 +26,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ### UI Components
 - [x] `ui/__init__.py` - UI module initialization
 - [x] `ui/renderer.py` - Pygame rendering system
-- [x] `ui/menus.py` - All menu classes (MainMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, BuildingMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
+- [x] `ui/menus.py` - All menu classes (MainMenu, GameModeMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, BuildingMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
 
 ### Reinforcement Learning
 - [x] `rl/__init__.py` - RL module initialization
@@ -269,7 +269,7 @@ result = main_menu.run()  # Returns dict with user's choice
 
 # MainMenu handles internal navigation automatically
 if result['type'] == 'new_game':
-    # Result includes: {'type': 'new_game', 'map': 'path/to/map.csv', 'mode': 'human_vs_computer'}
+    # Result includes: {'type': 'new_game', 'map': 'path/to/map.csv', 'mode': '1v1' or '2v2'}
     start_game(result['map'], result['mode'])
 elif result['type'] == 'load_game':
     # LoadGameMenu returns dict with save data already loaded
@@ -281,7 +281,8 @@ elif result['type'] == 'watch_replay':
 
 **Available Menu Classes:**
 - `MainMenu()` - Main game menu with navigation to sub-menus
-- `MapSelectionMenu()` - Select map for new game
+- `GameModeMenu(screen, maps_dir)` - Select game mode (1v1 or 2v2)
+- `MapSelectionMenu(screen, maps_dir, game_mode)` - Select map for new game
 - `LoadGameMenu()` - Load saved game (returns loaded dict)
 - `SaveGameMenu(game)` - Save current game
 - `ReplaySelectionMenu()` - Select replay to watch
@@ -290,6 +291,11 @@ elif result['type'] == 'watch_replay':
 - `SettingsMenu()` - Game settings
 - `LanguageMenu()` - Language selection
 - `GameOverMenu(winner, game_state)` - Game over screen
+
+**New Game Flow:**
+The "New Game" menu now uses a two-step selection process:
+1. **Game Mode Selection** - User chooses between "1v1" or "2v2" (dynamically discovered from `maps/` folder structure)
+2. **Map Selection** - User selects a map from the chosen game mode folder (displays only relevant maps)
 
 ### What's Missing
 

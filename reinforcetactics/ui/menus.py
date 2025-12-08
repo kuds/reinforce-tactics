@@ -129,6 +129,17 @@ class Menu:
         spacing = 60
         self.option_rects = []
 
+        # Calculate maximum option width for uniform sizing
+        padding_x = 40
+        padding_y = 10
+        max_text_width = 0
+        for text, _ in self.options:
+            display_text = f"> {text}"  # Use the selected format for consistent width
+            text_surface = self.option_font.render(display_text, True, self.text_color)
+            max_text_width = max(max_text_width, text_surface.get_width())
+
+        uniform_width = max_text_width + 2 * padding_x
+
         for i, (text, _) in enumerate(self.options):
             # Determine styling based on state
             is_selected = i == self.selected_index
@@ -152,13 +163,11 @@ class Menu:
             text_surface = self.option_font.render(display_text, True, text_color)
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
 
-            # Create background rectangle with padding
-            padding_x = 40
-            padding_y = 10
+            # Create background rectangle with uniform width
             bg_rect = pygame.Rect(
-                text_rect.x - padding_x,
+                (screen_width - uniform_width) // 2,  # Center the uniform-width box
                 text_rect.y - padding_y,
-                text_rect.width + 2 * padding_x,
+                uniform_width,
                 text_rect.height + 2 * padding_y
             )
 
@@ -187,7 +196,7 @@ class Menu:
         """
         result = None
         clock = pygame.time.Clock()
-        
+
         # Draw once before event loop to populate option_rects
         self.draw()
 
@@ -227,21 +236,26 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
 
     def _new_game(self) -> Optional[Dict[str, Any]]:
-        """Handle new game - show map selection and return result."""
-        map_menu = MapSelectionMenu(self.screen)
+        """Handle new game - show game mode selection, then map selection."""
+        # Step 1: Select game mode
+        mode_menu = GameModeMenu(self.screen)
+        selected_mode = mode_menu.run()
+        pygame.event.clear()
+
+        if not selected_mode:
+            return None  # User cancelled
+
+        # Step 2: Select map from chosen mode
+        map_menu = MapSelectionMenu(self.screen, game_mode=selected_mode)
         selected_map = map_menu.run()
-        
-        # Clear event queue to prevent double-processing
         pygame.event.clear()
 
         if selected_map:
-            # Return dictionary with new game info
             return {
                 'type': 'new_game',
                 'map': selected_map,
-                'mode': 'human_vs_computer'  # Default mode
+                'mode': selected_mode,  # Now contains "1v1" or "2v2"
             }
-        # Return None to stay in menu when cancelled
         return None
 
     def _load_game(self) -> Optional[Dict[str, Any]]:
@@ -306,19 +320,66 @@ class MainMenu(Menu):
         return result if isinstance(result, dict) else {'type': 'exit'}
 
 
+class GameModeMenu(Menu):
+    """Menu for selecting game mode (1v1 or 2v2)."""
+
+    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps") -> None:
+        """
+        Initialize game mode menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+            maps_dir: Directory containing map subdirectories
+        """
+        super().__init__(screen, get_language().get('new_game.select_mode', 'Select Game Mode'))
+        self.maps_dir = maps_dir
+        self.available_modes: List[str] = []
+        self._load_modes()
+        self._setup_options()
+
+    def _load_modes(self) -> None:
+        """Discover available game mode folders."""
+        if os.path.exists(self.maps_dir):
+            for item in os.listdir(self.maps_dir):
+                item_path = os.path.join(self.maps_dir, item)
+                if os.path.isdir(item_path):
+                    # Check if folder contains .csv maps
+                    if any(f.endswith('.csv') for f in os.listdir(item_path)):
+                        self.available_modes.append(item)
+        self.available_modes.sort()
+
+    def _setup_options(self) -> None:
+        """Setup menu options for available game modes."""
+        for mode in self.available_modes:
+            self.add_option(mode, lambda m=mode: m)
+        self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+
+    def run(self) -> Optional[str]:
+        """
+        Run game mode selection menu.
+
+        Returns:
+            Selected game mode string (e.g., "1v1" or "2v2"), or None if cancelled
+        """
+        return super().run()
+
+
 class MapSelectionMenu(Menu):
     """Menu for selecting a map when starting a new game."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps") -> None:
+    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps",
+                 game_mode: Optional[str] = None) -> None:
         """
         Initialize map selection menu.
 
         Args:
             screen: Optional pygame surface. If None, creates its own.
             maps_dir: Directory containing map files
+            game_mode: Optional game mode to filter maps (e.g., "1v1", "2v2")
         """
         super().__init__(screen, get_language().get('new_game.title', 'Select Map'))
         self.maps_dir = maps_dir
+        self.game_mode = game_mode
         self.available_maps: List[str] = []
         self._load_maps()
         self._setup_options()
@@ -326,13 +387,24 @@ class MapSelectionMenu(Menu):
     def _load_maps(self) -> None:
         """Load available map files."""
         if os.path.exists(self.maps_dir):
-            for subdir in ['1v1', '2v2']:
-                subdir_path = os.path.join(self.maps_dir, subdir)
+            if self.game_mode:
+                # Load maps only from the specified game mode subfolder
+                subdir_path = os.path.join(self.maps_dir, self.game_mode)
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
                         if f.endswith('.csv'):
                             # Store full path including maps/ prefix
-                            self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
+                            map_path = os.path.join(self.maps_dir, self.game_mode, f)
+                            self.available_maps.append(map_path)
+            else:
+                # Load maps from all subdirectories (backward compatibility)
+                for subdir in ['1v1', '2v2']:
+                    subdir_path = os.path.join(self.maps_dir, subdir)
+                    if os.path.exists(subdir_path):
+                        for f in os.listdir(subdir_path):
+                            if f.endswith('.csv'):
+                                # Store full path including maps/ prefix
+                                self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
 
         # Add random map option
         self.available_maps.insert(0, "random")
@@ -343,11 +415,15 @@ class MapSelectionMenu(Menu):
             if map_file == "random":
                 display_name = get_language().get('new_game.random_map', 'Random Map')
             else:
-                # Include the subdirectory in the display name to distinguish duplicates
-                # e.g., "1v1/6x6_beginner" instead of just "6x6_beginner"
-                relative_path = map_file.replace(self.maps_dir + os.sep, '')
-                # Remove .csv extension
-                display_name = os.path.splitext(relative_path)[0]
+                if self.game_mode:
+                    # Show just the filename when game mode is already selected
+                    display_name = os.path.splitext(os.path.basename(map_file))[0]
+                else:
+                    # Include the subdirectory in the display name to distinguish duplicates
+                    # e.g., "1v1/6x6_beginner" instead of just "6x6_beginner"
+                    relative_path = map_file.replace(self.maps_dir + os.sep, '')
+                    # Remove .csv extension
+                    display_name = os.path.splitext(relative_path)[0]
             self.add_option(display_name, lambda m=map_file: m)
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
@@ -612,7 +688,8 @@ class BuildingMenu:
         self.selected_color = (255, 200, 50)
         self.border_color = (100, 100, 120)
 
-        # Unit types that can be created (use UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric, B=Barbarian)
+        # Unit types that can be created
+        # Use UNIT_DATA keys: W=Warrior, M=Mage, C=Cleric, B=Barbarian
         self.unit_types = ['W', 'M', 'C']  # Warrior, Mage, Cleric
         self.selected_index = 0
 
