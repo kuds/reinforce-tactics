@@ -323,7 +323,10 @@ def play_mode(args):
     
     # Handle menu selection
     if menu_result['type'] == 'new_game':
-        start_new_game(menu_result.get('mode', 'human_vs_computer'))
+        start_new_game(
+            mode=menu_result.get('mode', 'human_vs_computer'),
+            selected_map=menu_result.get('map')
+        )
     elif menu_result['type'] == 'load_game':
         load_saved_game()
     elif menu_result['type'] == 'watch_replay':
@@ -332,8 +335,8 @@ def play_mode(args):
         print("Settings menu not yet implemented")
         pygame.quit()
 
-def start_new_game(mode='human_vs_computer'):
-    """Start a new game with the specified mode."""
+def start_new_game(mode='human_vs_computer', selected_map=None):
+    """Start a new game with the specified mode and map."""
     import pygame
     from pathlib import Path
     from reinforcetactics.core.game_state import GameState
@@ -348,9 +351,10 @@ def start_new_game(mode='human_vs_computer'):
 
     print(f"\n🎮 Starting new game: {mode}\n")
 
-    # Show map selection
-    map_menu = MapSelectionMenu()
-    selected_map = map_menu.run()
+    # Use provided map or show map selection
+    if selected_map is None:
+        map_menu = MapSelectionMenu()
+        selected_map = map_menu.run()
 
     if not selected_map:
         print("Map selection cancelled")

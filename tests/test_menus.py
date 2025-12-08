@@ -2,7 +2,7 @@
 import os
 import pygame
 import pytest
-from reinforcetactics.ui.menus import Menu, MapSelectionMenu
+from reinforcetactics.ui.menus import Menu, MapSelectionMenu, GameModeMenu
 
 
 @pytest.fixture
@@ -141,3 +141,141 @@ class TestMapSelectionMenu:
                 result = callback()
                 self._assert_valid_map_path(result)
                 break
+
+    def test_map_selection_with_game_mode(self, pygame_init):
+        """Test that MapSelectionMenu filters maps by game_mode."""
+        # Test with 1v1 mode
+        menu_1v1 = MapSelectionMenu(maps_dir="maps", game_mode="1v1")
+        for map_path in menu_1v1.available_maps:
+            if map_path != "random":
+                assert "1v1" in map_path, f"Map {map_path} should be from 1v1 folder"
+                assert "2v2" not in map_path, f"Map {map_path} should not be from 2v2 folder"
+
+        # Test with 2v2 mode
+        menu_2v2 = MapSelectionMenu(maps_dir="maps", game_mode="2v2")
+        for map_path in menu_2v2.available_maps:
+            if map_path != "random":
+                assert "2v2" in map_path, f"Map {map_path} should be from 2v2 folder"
+                assert "1v1" not in map_path, f"Map {map_path} should not be from 1v1 folder"
+
+    def test_map_selection_display_names_without_folder(self, pygame_init):
+        """Test that display names don't include folder prefix when game_mode is set."""
+        menu = MapSelectionMenu(maps_dir="maps", game_mode="1v1")
+
+        # Check that display names don't include the folder prefix
+        for text, _ in menu.options:
+            if text != "Random Map" and text != "Back":
+                # Display name should not contain "1v1/"
+                assert "1v1" not in text, f"Display name '{text}' should not contain '1v1'"
+                assert "/" not in text, f"Display name '{text}' should not contain '/'"
+
+
+class TestGameModeMenu:
+    """Test game mode selection menu."""
+
+    def test_game_mode_menu_discovers_modes(self, pygame_init):
+        """Test that GameModeMenu discovers available game modes."""
+        menu = GameModeMenu(maps_dir="maps")
+
+        # Should find both 1v1 and 2v2 modes
+        assert "1v1" in menu.available_modes, "Should discover 1v1 mode"
+        assert "2v2" in menu.available_modes, "Should discover 2v2 mode"
+
+    def test_game_mode_menu_creates_options(self, pygame_init):
+        """Test that GameModeMenu creates menu options for discovered modes."""
+        menu = GameModeMenu(maps_dir="maps")
+
+        # Check that options include the modes (excluding Back button)
+        option_texts = [text for text, _ in menu.options]
+        assert "1v1" in option_texts, "1v1 should be in menu options"
+        assert "2v2" in option_texts, "2v2 should be in menu options"
+        assert "Back" in option_texts, "Back button should be in menu options"
+
+    def test_game_mode_menu_returns_selected_mode(self, pygame_init):
+        """Test that GameModeMenu returns the selected mode."""
+        menu = GameModeMenu(maps_dir="maps")
+
+        # Find the 1v1 option and test its callback
+        for text, callback in menu.options:
+            if text == "1v1":
+                result = callback()
+                assert result == "1v1", "Selecting 1v1 should return '1v1'"
+                break
+
+        # Find the 2v2 option and test its callback
+        for text, callback in menu.options:
+            if text == "2v2":
+                result = callback()
+                assert result == "2v2", "Selecting 2v2 should return '2v2'"
+                break
+
+    def test_game_mode_menu_back_returns_none(self, pygame_init):
+        """Test that selecting Back in GameModeMenu returns None."""
+        menu = GameModeMenu(maps_dir="maps")
+
+        # Find the Back option and test its callback
+        for text, callback in menu.options:
+            if text == "Back":
+                result = callback()
+                assert result is None, "Selecting Back should return None"
+                break
+
+
+class TestUniformMenuWidths:
+    """Test uniform menu option widths."""
+
+    def test_menu_options_have_uniform_width(self, pygame_init):
+        """Test that all menu option backgrounds have the same width."""
+        menu = Menu(title="Test Menu")
+        menu.add_option("Short", lambda: None)
+        menu.add_option("Much Longer Option Text", lambda: None)
+        menu.add_option("Medium Length", lambda: None)
+
+        # Draw menu to create option rects
+        menu.draw()
+
+        # Check that all option rects have the same width
+        if len(menu.option_rects) > 1:
+            first_width = menu.option_rects[0].width
+            for rect in menu.option_rects[1:]:
+                assert rect.width == first_width, \
+                    "All option background rectangles should have the same width"
+
+    def test_uniform_width_based_on_longest_option(self, pygame_init):
+        """Test that uniform width is based on the longest option text."""
+        menu = Menu(title="Test Menu")
+        menu.add_option("Short", lambda: None)
+        menu.add_option("This is a very long option text", lambda: None)
+        menu.add_option("Medium", lambda: None)
+
+        # Draw menu to create option rects
+        menu.draw()
+
+        # The width should accommodate the longest option
+        # Calculate what the width should be for the longest option
+        padding_x = 40
+        longest_text = "> This is a very long option text"  # With selection indicator
+        text_surface = menu.option_font.render(longest_text, True, menu.text_color)
+        expected_width = text_surface.get_width() + 2 * padding_x
+
+        # All rects should have this width
+        for rect in menu.option_rects:
+            assert rect.width == expected_width, \
+                "All option rects should have width based on longest option"
+
+    def test_uniform_width_boxes_are_centered(self, pygame_init):
+        """Test that uniform width boxes are centered on screen."""
+        menu = Menu(title="Test Menu")
+        menu.add_option("Option 1", lambda: None)
+        menu.add_option("Option 2", lambda: None)
+
+        # Draw menu to create option rects
+        menu.draw()
+
+        screen_width = menu.screen.get_width()
+
+        # Check that all option rects are centered
+        for rect in menu.option_rects:
+            expected_x = (screen_width - rect.width) // 2
+            assert rect.x == expected_x, \
+                f"Option rect should be centered at x={expected_x}, but is at x={rect.x}"
