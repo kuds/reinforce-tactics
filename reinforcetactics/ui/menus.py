@@ -679,8 +679,9 @@ class PlayerConfigMenu:
         self.screen.blit(title_surface, title_rect)
 
         # Starting Y position for player configurations
-        start_y = 100
-        spacing_y = 100
+        # Use more compact spacing for 2v2 to fit all elements on screen
+        start_y = 80
+        spacing_y = 85 if self.num_players > 2 else 100
 
         # Draw each player's configuration
         for i in range(self.num_players):
