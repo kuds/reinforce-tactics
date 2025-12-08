@@ -52,6 +52,18 @@ TRANSLATIONS = {
         
         # New Game Menu
         'new_game.title': 'Select Map',
+        'new_game.select_mode': 'Select Game Mode',
+        
+        # Player Configuration Menu
+        'player_config.title': 'Configure Players',
+        'player_config.player': 'Player {number}',
+        'player_config.type_human': 'Human',
+        'player_config.type_computer': 'Computer',
+        'player_config.difficulty': 'Difficulty',
+        'player_config.difficulty_simple': 'SimpleBot',
+        'player_config.difficulty_normal': 'NormalBot (Coming Soon)',
+        'player_config.difficulty_hard': 'HardBot (Coming Soon)',
+        'player_config.start_game': 'Start Game',
         
         # Save/Load Game
         'save_game.title': 'Save Game',
@@ -168,6 +180,18 @@ TRANSLATIONS = {
         
         # New Game Menu
         'new_game.title': 'Sélectionner la Carte',
+        'new_game.select_mode': 'Choisir le Mode de Jeu',
+        
+        # Player Configuration Menu
+        'player_config.title': 'Configurer les Joueurs',
+        'player_config.player': 'Joueur {number}',
+        'player_config.type_human': 'Humain',
+        'player_config.type_computer': 'Ordinateur',
+        'player_config.difficulty': 'Difficulté',
+        'player_config.difficulty_simple': 'SimpleBot',
+        'player_config.difficulty_normal': 'NormalBot (Bientôt)',
+        'player_config.difficulty_hard': 'HardBot (Bientôt)',
+        'player_config.start_game': 'Commencer',
         
         # Save/Load Game
         'save_game.title': 'Sauvegarder',
@@ -284,6 +308,18 @@ TRANSLATIONS = {
         
         # New Game Menu
         'new_game.title': '맵 선택',
+        'new_game.select_mode': '게임 모드 선택',
+        
+        # Player Configuration Menu
+        'player_config.title': '플레이어 설정',
+        'player_config.player': '플레이어 {number}',
+        'player_config.type_human': '인간',
+        'player_config.type_computer': '컴퓨터',
+        'player_config.difficulty': '난이도',
+        'player_config.difficulty_simple': 'SimpleBot',
+        'player_config.difficulty_normal': 'NormalBot (곧 출시)',
+        'player_config.difficulty_hard': 'HardBot (곧 출시)',
+        'player_config.start_game': '게임 시작',
         
         # Save/Load Game
         'save_game.title': '게임 저장',
@@ -400,6 +436,18 @@ TRANSLATIONS = {
         
         # New Game Menu
         'new_game.title': 'Seleccionar Mapa',
+        'new_game.select_mode': 'Seleccionar Modo de Juego',
+        
+        # Player Configuration Menu
+        'player_config.title': 'Configurar Jugadores',
+        'player_config.player': 'Jugador {number}',
+        'player_config.type_human': 'Humano',
+        'player_config.type_computer': 'Computadora',
+        'player_config.difficulty': 'Dificultad',
+        'player_config.difficulty_simple': 'SimpleBot',
+        'player_config.difficulty_normal': 'NormalBot (Próximamente)',
+        'player_config.difficulty_hard': 'HardBot (Próximamente)',
+        'player_config.start_game': 'Comenzar Juego',
         
         # Save/Load Game
         'save_game.title': 'Guardar Juego',
