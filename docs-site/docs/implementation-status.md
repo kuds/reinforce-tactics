@@ -26,7 +26,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ### UI Components
 - [x] `ui/__init__.py` - UI module initialization
 - [x] `ui/renderer.py` - Pygame rendering system
-- [x] `ui/menus.py` - All menu classes (MainMenu, GameModeMenu, MapSelectionMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, BuildingMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
+- [x] `ui/menus.py` - All menu classes (MainMenu, GameModeMenu, MapSelectionMenu, PlayerConfigMenu, LoadGameMenu, SaveGameMenu, ReplaySelectionMenu, SettingsMenu, LanguageMenu, PauseMenu, GameOverMenu)
 
 ### Reinforcement Learning
 - [x] `rl/__init__.py` - RL module initialization
@@ -100,7 +100,7 @@ Game controller that bridges GameState and UI.
 """
 from core.game_state import GameState
 from ui.renderer import Renderer
-from ui.menus import BuildingMenu, SaveGameMenu, PauseMenu
+from ui.menus import SaveGameMenu, PauseMenu
 from game.bot import SimpleBot
 import pygame
 
@@ -283,19 +283,20 @@ elif result['type'] == 'watch_replay':
 - `MainMenu()` - Main game menu with navigation to sub-menus
 - `GameModeMenu(screen, maps_dir)` - Select game mode (1v1 or 2v2)
 - `MapSelectionMenu(screen, maps_dir, game_mode)` - Select map for new game
+- `PlayerConfigMenu(screen, game_mode)` - Configure players as human or computer
 - `LoadGameMenu()` - Load saved game (returns loaded dict)
 - `SaveGameMenu(game)` - Save current game
 - `ReplaySelectionMenu()` - Select replay to watch
-- `BuildingMenu(game, building_pos)` - In-game unit creation
 - `PauseMenu()` - In-game pause menu
 - `SettingsMenu()` - Game settings
 - `LanguageMenu()` - Language selection
 - `GameOverMenu(winner, game_state)` - Game over screen
 
 **New Game Flow:**
-The "New Game" menu now uses a two-step selection process:
+The "New Game" menu now uses a three-step selection process:
 1. **Game Mode Selection** - User chooses between "1v1" or "2v2" (dynamically discovered from `maps/` folder structure)
 2. **Map Selection** - User selects a map from the chosen game mode folder (displays only relevant maps)
+3. **Player Configuration** - User configures each player as human or computer (with bot difficulty selection for computer players)
 
 ### What's Missing
 
