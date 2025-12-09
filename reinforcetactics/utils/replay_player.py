@@ -100,6 +100,33 @@ class ReplayPlayer:
                 if unit:
                     self.game_state.seize(unit)
             
+            elif action_type == 'paralyze':
+                paralyzer_pos = action['paralyzer_pos']
+                target_pos = action['target_pos']
+                paralyzer = self.game_state.get_unit_at_position(*paralyzer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if paralyzer and target:
+                    self.game_state.paralyze(paralyzer, target)
+            
+            elif action_type == 'heal':
+                healer_pos = action['healer_pos']
+                target_pos = action['target_pos']
+                healer = self.game_state.get_unit_at_position(*healer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if healer and target:
+                    self.game_state.heal(healer, target)
+            
+            elif action_type == 'cure':
+                curer_pos = action['curer_pos']
+                target_pos = action['target_pos']
+                curer = self.game_state.get_unit_at_position(*curer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if curer and target:
+                    self.game_state.cure(curer, target)
+            
+            elif action_type == 'resign':
+                self.game_state.resign(action['player'])
+            
             elif action_type == 'end_turn':
                 # Don't record this action again
                 old_history = self.game_state.action_history

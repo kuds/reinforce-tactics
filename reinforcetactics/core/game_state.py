@@ -41,6 +41,18 @@ class GameState:
         
         # Optional map file reference for saving
         self.map_file_used: Optional[str] = None
+        
+        # Store initial map data for replays (as 2D list of tile codes)
+        import pandas as pd
+        if isinstance(map_data, pd.DataFrame):
+            self.initial_map_data: List[List[str]] = map_data.values.tolist()
+        elif isinstance(map_data, np.ndarray):
+            self.initial_map_data: List[List[str]] = map_data.tolist()
+        else:
+            self.initial_map_data: List[List[str]] = [list(row) for row in map_data]
+        
+        # Player configurations (human vs bot)
+        self.player_configs: List[Dict[str, Any]] = []
 
         # Action history for replay
         self.action_history: List[Dict[str, Any]] = []
@@ -563,6 +575,7 @@ class GameState:
             'game_over': self.game_over,
             'winner': self.winner,
             'map_file': self.map_file_used,
+            'player_configs': self.player_configs,
             'units': [unit.to_dict() for unit in self.units],
             'tiles': self.grid.to_dict()['tiles']
         }
@@ -627,7 +640,9 @@ class GameState:
             'game_over': self.game_over,
             'start_time': self.game_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
-            'map_file': self.map_file_used
+            'map_file': self.map_file_used,
+            'initial_map': self.initial_map_data,
+            'player_configs': self.player_configs
         }
         
         return FileIO.save_replay(self.action_history, game_info, filepath)
@@ -650,8 +665,15 @@ class GameState:
         game.turn_number = save_data.get('turn_number', 0)
         game.game_over = save_data.get('game_over', False)
         game.winner = save_data.get('winner')
-        game.player_gold = save_data.get('player_gold', game.player_gold)
+        
+        # Fix player_gold dictionary key type (JSON serializes as strings)
+        saved_gold = save_data.get('player_gold', {})
+        game.player_gold = {int(k): v for k, v in saved_gold.items()}
+        
         game.map_file_used = save_data.get('map_file')
+        
+        # Restore player_configs (backward compatible with old saves)
+        game.player_configs = save_data.get('player_configs', [])
         
         # Restore units
         game.units = []
