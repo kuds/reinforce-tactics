@@ -3,6 +3,7 @@ LLM-powered bots for playing Reinforce Tactics using OpenAI, Claude, and Gemini.
 """
 import os
 import json
+import re
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -26,7 +27,7 @@ UNIT TYPES:
    - Strong melee fighter
 2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can PARALYZE enemies (disable them for turns)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 4, Defense 3, Movement 2
+3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 3, Movement 2
    - Can HEAL allies and CURE paralyzed units
 
 BUILDING TYPES:
@@ -110,7 +111,18 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         """Call the LLM API and return the response text."""
 
     def take_turn(self):
-        """Execute the bot's turn using LLM guidance."""
+        """
+        Execute the bot's turn using LLM guidance.
+
+        This method orchestrates the entire turn-taking process:
+        1. Serializes the current game state into JSON
+        2. Calls the LLM API with retry logic
+        3. Parses the LLM response
+        4. Validates and executes the suggested actions
+
+        The method handles errors gracefully and will fall back to ending
+        the turn if the LLM fails to respond or provides invalid actions.
+        """
         logger.info("LLM Bot (Player %s) is thinking...", self.bot_player)
 
         # Serialize game state
@@ -386,7 +398,6 @@ You can take multiple actions in one turn."""
             pass
 
         # Try to extract JSON from markdown code blocks
-        import re
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
         if json_match:
             try:
