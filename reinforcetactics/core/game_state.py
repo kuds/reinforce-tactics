@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Callable
 
 import numpy as np
+import pandas as pd
 
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.grid import TileGrid
@@ -43,7 +44,6 @@ class GameState:
         self.map_file_used: Optional[str] = None
         
         # Store initial map data for replays (as 2D list of tile codes)
-        import pandas as pd
         if isinstance(map_data, pd.DataFrame):
             self.initial_map_data: List[List[str]] = map_data.values.tolist()
         elif isinstance(map_data, np.ndarray):

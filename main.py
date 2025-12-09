@@ -761,6 +761,7 @@ def load_saved_game():
 def watch_replay():
     """Watch a replay."""
     import pygame
+    import pandas as pd
     from pathlib import Path
     from reinforcetactics.ui.menus import ReplaySelectionMenu
     from reinforcetactics.utils.file_io import FileIO
@@ -790,7 +791,6 @@ def watch_replay():
         # Try to load the actual map used in replay
         if 'initial_map' in game_info:
             # Use stored map data
-            import pandas as pd
             map_data = pd.DataFrame(game_info['initial_map'])
             print("✅ Using stored map from replay")
         else:
