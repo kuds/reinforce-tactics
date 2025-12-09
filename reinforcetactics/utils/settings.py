@@ -72,7 +72,7 @@ class Settings:
             self.settings = settings
 
         try:
-            with open(self.settings_file, 'w') as f:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=2)
             print(f"✅ Settings saved to {self.settings_file}")
             return True
