@@ -133,6 +133,50 @@ class Menu:
         elif self.selected_index >= self.scroll_offset + self.max_visible_options:
             self.scroll_offset = self.selected_index - self.max_visible_options + 1
 
+    def _populate_option_rects(self) -> None:
+        """Populate option_rects for click detection without drawing to screen."""
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+        
+        start_y = screen_height // 3
+        spacing = self.option_spacing
+        self.option_rects = []
+        
+        # Calculate maximum option width for uniform sizing
+        padding_x = 40
+        padding_y = 10
+        max_text_width = 0
+        for text, _ in self.options:
+            display_text = f"> {text}"
+            text_surface = self.option_font.render(display_text, True, self.text_color)
+            max_text_width = max(max_text_width, text_surface.get_width())
+        
+        uniform_width = max_text_width + 2 * padding_x
+        
+        # Determine which options to display (with scrolling)
+        total_options = len(self.options)
+        start_index = self.scroll_offset
+        end_index = min(total_options, start_index + self.max_visible_options)
+        
+        # Calculate rects for visible options
+        for display_i, option_i in enumerate(range(start_index, end_index)):
+            text, _ = self.options[option_i]
+            is_selected = option_i == self.selected_index
+            display_text = f"> {text}" if is_selected else f"  {text}"
+            
+            text_surface = self.option_font.render(display_text, True, self.text_color)
+            text_rect = text_surface.get_rect(centerx=screen_width // 2, 
+                                              y=start_y + display_i * spacing)
+            
+            bg_rect = pygame.Rect(
+                (screen_width - uniform_width) // 2,
+                text_rect.y - padding_y,
+                uniform_width,
+                text_rect.height + 2 * padding_y
+            )
+            
+            self.option_rects.append(bg_rect)
+
     def draw(self) -> None:
         """Draw the menu."""
         self.screen.fill(self.bg_color)
@@ -251,8 +295,12 @@ class Menu:
         result = None
         clock = pygame.time.Clock()
 
-        # Don't draw before the event loop - causes double-click issue
-        # option_rects will be populated on first draw() call in the loop
+        # Populate option_rects before event loop for click detection
+        # Don't call draw() here to avoid double-display issue
+        self._populate_option_rects()
+        
+        # Clear any residual events AFTER option_rects are populated
+        pygame.event.clear()
 
         while self.running:
             for event in pygame.event.get():
@@ -325,6 +373,7 @@ class MainMenu(Menu):
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
         save_path = load_menu.run()
+        pygame.event.clear()
 
         if save_path:
             return {
@@ -337,6 +386,7 @@ class MainMenu(Menu):
         """Handle watch replay - show replay menu and return result."""
         replay_menu = ReplaySelectionMenu(self.screen)
         replay_path = replay_menu.run()
+        pygame.event.clear()
 
         if replay_path:
             return {
@@ -349,6 +399,7 @@ class MainMenu(Menu):
         """Handle settings - show settings menu."""
         settings_menu = SettingsMenu(self.screen)
         settings_menu.run()
+        pygame.event.clear()
         # Return to main menu after settings
 
     def _quit(self) -> Dict[str, Any]:
@@ -364,6 +415,12 @@ class MainMenu(Menu):
         """
         result = None
         clock = pygame.time.Clock()
+
+        # Populate option_rects before event loop for click detection
+        self._populate_option_rects()
+        
+        # Clear any residual events AFTER option_rects are populated
+        pygame.event.clear()
 
         while self.running:
             for event in pygame.event.get():
@@ -852,6 +909,9 @@ class PlayerConfigMenu:
 
         # Draw once before event loop to populate interactive_elements
         self.draw()
+        
+        # Clear any residual events AFTER draw populates interactive_elements
+        pygame.event.clear()
 
         while self.running:
             for event in pygame.event.get():

@@ -331,7 +331,7 @@ def play_mode(args):
     elif menu_result['type'] == 'load_game':
         load_saved_game()
     elif menu_result['type'] == 'watch_replay':
-        watch_replay()
+        watch_replay(menu_result.get('replay_path'))
     elif menu_result['type'] == 'settings':
         print("Settings menu not yet implemented")
         pygame.quit()
@@ -758,8 +758,12 @@ def load_saved_game():
         import traceback
         traceback.print_exc()
 
-def watch_replay():
-    """Watch a replay."""
+def watch_replay(replay_path=None):
+    """Watch a replay.
+    
+    Args:
+        replay_path (str, optional): Path to replay file. If None, shows replay selection menu.
+    """
     import pygame
     import pandas as pd
     from pathlib import Path
@@ -769,9 +773,10 @@ def watch_replay():
     
     print("\n📼 Loading replay...\n")
     
-    # Show replay selection menu
-    replay_menu = ReplaySelectionMenu()
-    replay_path = replay_menu.run()
+    # Show replay selection menu only if replay_path not provided
+    if not replay_path:
+        replay_menu = ReplaySelectionMenu()
+        replay_path = replay_menu.run()
     
     if not replay_path:
         print("Replay selection cancelled")
