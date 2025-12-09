@@ -94,8 +94,12 @@ class Menu:
                 self._ensure_selected_visible()
             elif event.key == pygame.K_RETURN:
                 if self.options:
-                    _, callback = self.options[self.selected_index]
-                    return callback()
+                    text, callback = self.options[self.selected_index]
+                    result = callback()
+                    # If callback returns None and it's a Back button, exit the menu
+                    if result is None and self._is_back_option(text):
+                        self.running = False
+                    return result
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -108,8 +112,12 @@ class Menu:
                         actual_index = i + self.scroll_offset
                         if actual_index < len(self.options):
                             self.selected_index = actual_index
-                            _, callback = self.options[actual_index]
-                            return callback()
+                            text, callback = self.options[actual_index]
+                            result = callback()
+                            # If callback returns None and it's a Back button, exit the menu
+                            if result is None and self._is_back_option(text):
+                                self.running = False
+                            return result
             elif event.button == 4:  # Mouse wheel up
                 self.scroll_offset = max(0, self.scroll_offset - 1)
             elif event.button == 5:  # Mouse wheel down
@@ -125,6 +133,20 @@ class Menu:
                     break
 
         return None
+    
+    def _is_back_option(self, text: str) -> bool:
+        """
+        Check if an option text represents a Back button.
+
+        Args:
+            text: The option text to check
+
+        Returns:
+            True if the option is a Back button, False otherwise
+        """
+        # Check for common Back button text in various languages
+        back_keywords = ['back', 'retour', 'zurück', 'volver', 'voltar', 'indietro', '返回', '戻る']
+        return text.lower().strip() in back_keywords
     
     def _ensure_selected_visible(self) -> None:
         """Ensure the selected option is visible by adjusting scroll offset."""
