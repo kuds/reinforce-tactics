@@ -62,6 +62,11 @@ class Menu:
         self.hover_index = -1
         self.option_rects: List[pygame.Rect] = []
 
+        # Scrolling support
+        self.scroll_offset = 0
+        self.max_visible_options = 8  # Maximum options visible at once
+        self.option_spacing = 60
+
         # Get language instance
         self.lang = get_language()
 
@@ -82,8 +87,10 @@ class Menu:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_UP:
                 self.selected_index = (self.selected_index - 1) % len(self.options)
+                self._ensure_selected_visible()
             elif event.key == pygame.K_DOWN:
                 self.selected_index = (self.selected_index + 1) % len(self.options)
+                self._ensure_selected_visible()
             elif event.key == pygame.K_RETURN:
                 if self.options:
                     _, callback = self.options[self.selected_index]
@@ -96,20 +103,34 @@ class Menu:
                 # Check if any option was clicked
                 for i, rect in enumerate(self.option_rects):
                     if rect.collidepoint(mouse_pos):
-                        self.selected_index = i
-                        if self.options:
-                            _, callback = self.options[i]
+                        # Get the actual option index accounting for scroll
+                        actual_index = i + self.scroll_offset
+                        if actual_index < len(self.options):
+                            self.selected_index = actual_index
+                            _, callback = self.options[actual_index]
                             return callback()
+            elif event.button == 4:  # Mouse wheel up
+                self.scroll_offset = max(0, self.scroll_offset - 1)
+            elif event.button == 5:  # Mouse wheel down
+                max_scroll = max(0, len(self.options) - self.max_visible_options)
+                self.scroll_offset = min(max_scroll, self.scroll_offset + 1)
         elif event.type == pygame.MOUSEMOTION:
             # Update hover state
             mouse_pos = event.pos
             self.hover_index = -1
             for i, rect in enumerate(self.option_rects):
                 if rect.collidepoint(mouse_pos):
-                    self.hover_index = i
+                    self.hover_index = i + self.scroll_offset
                     break
 
         return None
+    
+    def _ensure_selected_visible(self) -> None:
+        """Ensure the selected option is visible by adjusting scroll offset."""
+        if self.selected_index < self.scroll_offset:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= self.scroll_offset + self.max_visible_options:
+            self.scroll_offset = self.selected_index - self.max_visible_options + 1
 
     def draw(self) -> None:
         """Draw the menu."""
@@ -124,9 +145,9 @@ class Menu:
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=50)
             self.screen.blit(title_surface, title_rect)
 
-        # Draw options
+        # Draw options with scrolling support
         start_y = screen_height // 3
-        spacing = 60
+        spacing = self.option_spacing
         self.option_rects = []
 
         # Calculate maximum option width for uniform sizing
@@ -140,10 +161,18 @@ class Menu:
 
         uniform_width = max_text_width + 2 * padding_x
 
-        for i, (text, _) in enumerate(self.options):
+        # Determine which options to display (with scrolling)
+        total_options = len(self.options)
+        start_index = self.scroll_offset
+        end_index = min(total_options, start_index + self.max_visible_options)
+
+        # Draw visible options
+        for display_i, option_i in enumerate(range(start_index, end_index)):
+            text, _ = self.options[option_i]
+            
             # Determine styling based on state
-            is_selected = i == self.selected_index
-            is_hovered = i == self.hover_index
+            is_selected = option_i == self.selected_index
+            is_hovered = option_i == self.hover_index
 
             # Choose colors
             if is_selected:
@@ -161,7 +190,8 @@ class Menu:
 
             # Render text
             text_surface = self.option_font.render(display_text, True, text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
+            text_rect = text_surface.get_rect(centerx=screen_width // 2, 
+                                              y=start_y + display_i * spacing)
 
             # Create background rectangle with uniform width
             bg_rect = pygame.Rect(
@@ -185,6 +215,31 @@ class Menu:
             # Store rect for click detection
             self.option_rects.append(bg_rect)
 
+        # Draw scroll indicators if needed
+        if total_options > self.max_visible_options:
+            indicator_font = pygame.font.Font(None, 24)
+            
+            # Show up arrow if not at top
+            if self.scroll_offset > 0:
+                up_text = indicator_font.render("▲ Scroll Up", True, self.hover_color)
+                up_rect = up_text.get_rect(centerx=screen_width // 2, y=start_y - 30)
+                self.screen.blit(up_text, up_rect)
+            
+            # Show down arrow if not at bottom
+            if end_index < total_options:
+                down_text = indicator_font.render("▼ Scroll Down", True, self.hover_color)
+                down_y = start_y + self.max_visible_options * spacing + 10
+                down_rect = down_text.get_rect(centerx=screen_width // 2, y=down_y)
+                self.screen.blit(down_text, down_rect)
+            
+            # Show position indicator (e.g., "3 / 15")
+            pos_text = indicator_font.render(
+                f"{self.scroll_offset + 1}-{end_index} / {total_options}",
+                True, self.text_color
+            )
+            pos_rect = pos_text.get_rect(right=screen_width - 20, bottom=screen_height - 20)
+            self.screen.blit(pos_text, pos_rect)
+
         pygame.display.flip()
 
     def run(self) -> Optional[Any]:
@@ -197,8 +252,8 @@ class Menu:
         result = None
         clock = pygame.time.Clock()
 
-        # Draw once before event loop to populate option_rects
-        self.draw()
+        # Don't draw before the event loop - causes double-click issue
+        # option_rects will be populated on first draw() call in the loop
 
         while self.running:
             for event in pygame.event.get():
