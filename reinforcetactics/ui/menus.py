@@ -251,6 +251,9 @@ class Menu:
         result = None
         clock = pygame.time.Clock()
 
+        # Clear any residual events from before this menu started
+        pygame.event.clear()
+
         # Don't draw before the event loop - causes double-click issue
         # option_rects will be populated on first draw() call in the loop
 
@@ -367,6 +370,9 @@ class MainMenu(Menu):
         """
         result = None
         clock = pygame.time.Clock()
+
+        # Clear any residual events from before this menu started
+        pygame.event.clear()
 
         while self.running:
             for event in pygame.event.get():
@@ -852,6 +858,9 @@ class PlayerConfigMenu:
         """
         result = None
         clock = pygame.time.Clock()
+
+        # Clear any residual events from before this menu started
+        pygame.event.clear()
 
         # Draw once before event loop to populate interactive_elements
         self.draw()
