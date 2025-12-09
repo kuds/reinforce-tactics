@@ -325,6 +325,7 @@ class MainMenu(Menu):
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
         save_path = load_menu.run()
+        pygame.event.clear()
 
         if save_path:
             return {
@@ -337,6 +338,7 @@ class MainMenu(Menu):
         """Handle watch replay - show replay menu and return result."""
         replay_menu = ReplaySelectionMenu(self.screen)
         replay_path = replay_menu.run()
+        pygame.event.clear()
 
         if replay_path:
             return {
@@ -349,6 +351,7 @@ class MainMenu(Menu):
         """Handle settings - show settings menu."""
         settings_menu = SettingsMenu(self.screen)
         settings_menu.run()
+        pygame.event.clear()
         # Return to main menu after settings
 
     def _quit(self) -> Dict[str, Any]:
