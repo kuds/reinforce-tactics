@@ -14,6 +14,43 @@ def pygame_init():
     pygame.quit()
 
 
+def assert_back_button_exits_menu(menu):
+    """
+    Helper to test that clicking Back button sets running to False.
+    
+    Args:
+        menu: Menu instance to test
+    """
+    # Draw menu to populate option_rects
+    menu.draw()
+    
+    # Ensure menu is running initially
+    assert menu.running is True
+    
+    # Find the Back option index
+    back_index = None
+    for i, (text, _) in enumerate(menu.options):
+        if text == "Back":
+            back_index = i
+            break
+    
+    assert back_index is not None, "Should have Back option"
+    
+    # Simulate clicking the Back button
+    if back_index < len(menu.option_rects):
+        rect = menu.option_rects[back_index]
+        event = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {'button': 1, 'pos': rect.center}
+        )
+        
+        result = menu.handle_input(event)
+        
+        # Should return None and set running to False
+        assert result is None, "Back button should return None"
+        assert menu.running is False, "Back button should set running to False"
+
+
 class TestMenuMouseInput:
     """Test menu mouse input handling."""
 
@@ -170,6 +207,11 @@ class TestMapSelectionMenu:
                 assert "1v1" not in text, f"Display name '{text}' should not contain '1v1'"
                 assert "/" not in text, f"Display name '{text}' should not contain '/'"
 
+    def test_map_selection_back_button_exits_menu(self, pygame_init):
+        """Test that clicking Back button in MapSelectionMenu sets running to False."""
+        menu = MapSelectionMenu(maps_dir="maps", game_mode="1v1")
+        assert_back_button_exits_menu(menu)
+
 
 class TestGameModeMenu:
     """Test game mode selection menu."""
@@ -220,6 +262,11 @@ class TestGameModeMenu:
                 result = callback()
                 assert result is None, "Selecting Back should return None"
                 break
+
+    def test_game_mode_menu_back_button_exits_menu(self, pygame_init):
+        """Test that clicking Back button in GameModeMenu sets running to False."""
+        menu = GameModeMenu(maps_dir="maps")
+        assert_back_button_exits_menu(menu)
 
 
 class TestUniformMenuWidths:
