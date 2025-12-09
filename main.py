@@ -347,6 +347,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
     )
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
+    from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
     from reinforcetactics.constants import TILE_SIZE
 
     print(f"\n🎮 Starting new game: {mode}\n")
@@ -412,9 +413,27 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                 player_num = i + 1
                 if config['type'] == 'computer':
                     bot_type = config.get('bot_type', 'SimpleBot')
-                    if bot_type == 'SimpleBot':
-                        bots[player_num] = SimpleBot(game, player=player_num)
+                    try:
+                        if bot_type == 'SimpleBot':
+                            bots[player_num] = SimpleBot(game, player=player_num)
+                        elif bot_type == 'OpenAIBot':
+                            bots[player_num] = OpenAIBot(game, player=player_num)
+                        elif bot_type == 'ClaudeBot':
+                            bots[player_num] = ClaudeBot(game, player=player_num)
+                        elif bot_type == 'GeminiBot':
+                            bots[player_num] = GeminiBot(game, player=player_num)
+                        else:
+                            print(f"⚠️  Unknown bot type '{bot_type}', using SimpleBot")
+                            bots[player_num] = SimpleBot(game, player=player_num)
                         print(f"Bot created for Player {player_num} ({bot_type})")
+                    except ValueError as e:
+                        print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
+                        print(f"   Falling back to SimpleBot")
+                        bots[player_num] = SimpleBot(game, player=player_num)
+                    except ImportError as e:
+                        print(f"❌ Missing dependency for {bot_type}: {e}")
+                        print(f"   Falling back to SimpleBot")
+                        bots[player_num] = SimpleBot(game, player=player_num)
         else:
             # Legacy mode: Create bot for player 2 if mode is human_vs_computer
             if mode == 'human_vs_computer':
@@ -611,6 +630,7 @@ def load_saved_game():
     from reinforcetactics.ui.menus import LoadGameMenu, SaveGameMenu
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
+    from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
     from reinforcetactics.constants import TILE_SIZE
     
     print("\n💾 Loading saved game...\n")
@@ -652,9 +672,27 @@ def load_saved_game():
                 player_num = i + 1
                 if config['type'] == 'computer':
                     bot_type = config.get('bot_type', 'SimpleBot')
-                    if bot_type == 'SimpleBot':
-                        bots[player_num] = SimpleBot(game, player=player_num)
+                    try:
+                        if bot_type == 'SimpleBot':
+                            bots[player_num] = SimpleBot(game, player=player_num)
+                        elif bot_type == 'OpenAIBot':
+                            bots[player_num] = OpenAIBot(game, player=player_num)
+                        elif bot_type == 'ClaudeBot':
+                            bots[player_num] = ClaudeBot(game, player=player_num)
+                        elif bot_type == 'GeminiBot':
+                            bots[player_num] = GeminiBot(game, player=player_num)
+                        else:
+                            print(f"⚠️  Unknown bot type '{bot_type}', using SimpleBot")
+                            bots[player_num] = SimpleBot(game, player=player_num)
                         print(f"Bot created for Player {player_num} ({bot_type})")
+                    except ValueError as e:
+                        print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
+                        print(f"   Falling back to SimpleBot")
+                        bots[player_num] = SimpleBot(game, player=player_num)
+                    except ImportError as e:
+                        print(f"❌ Missing dependency for {bot_type}: {e}")
+                        print(f"   Falling back to SimpleBot")
+                        bots[player_num] = SimpleBot(game, player=player_num)
         else:
             # Fallback for old saves without player_configs
             # Assume all non-player-1 players are bots
