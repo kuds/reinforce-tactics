@@ -1212,7 +1212,8 @@ class UnitPurchaseMenu:
         self.title_font = pygame.font.Font(None, 28)
         self.option_font = pygame.font.Font(None, 24)
 
-        # Unit types to display (not including Barbarian as it's expensive)
+        # Unit types to display (basic units only: Warrior, Mage, Cleric)
+        # Barbarian is excluded as it costs 400g vs 200-250g for basic units
         self.unit_types = ['W', 'M', 'C']
 
         # Interactive elements
@@ -1284,7 +1285,11 @@ class UnitPurchaseMenu:
                     if unit:
                         return {'type': 'unit_created', 'unit': unit}
                     else:
-                        # Failed to create (shouldn't happen if affordability check is correct)
+                        # Failed to create - position occupied or insufficient gold
+                        # This shouldn't happen if UI logic is correct
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Failed to create unit {unit_type} at {self.building_pos}")
                         return None
 
         return None

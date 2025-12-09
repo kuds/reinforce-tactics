@@ -1,5 +1,6 @@
 """Tests for the menu system."""
 import os
+import numpy as np
 import pygame
 import pytest
 from reinforcetactics.ui.menus import Menu, MapSelectionMenu, GameModeMenu
@@ -510,14 +511,12 @@ class TestUnitPurchaseMenu:
     @pytest.fixture
     def mock_game_state(self):
         """Create a mock game state for testing."""
-        import numpy as np
-        from reinforcetactics.core.game_state import GameState
-        
         # Create a simple 10x10 map with an HQ at (5, 5)
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'h_1'  # HQ owned by player 1
         map_data[6][6] = 'b_1'  # Building owned by player 1
         
+        from reinforcetactics.core.game_state import GameState
         game = GameState(map_data, num_players=2)
         game.current_player = 1
         game.player_gold[1] = 300  # Enough to buy any unit
@@ -526,13 +525,11 @@ class TestUnitPurchaseMenu:
     @pytest.fixture
     def poor_game_state(self):
         """Create a mock game state with low gold."""
-        import numpy as np
-        from reinforcetactics.core.game_state import GameState
-        
         # Create a simple 10x10 map with an HQ at (5, 5)
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'h_1'  # HQ owned by player 1
         
+        from reinforcetactics.core.game_state import GameState
         game = GameState(map_data, num_players=2)
         game.current_player = 1
         game.player_gold[1] = 50  # Not enough to buy any unit
