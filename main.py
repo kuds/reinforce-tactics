@@ -762,7 +762,7 @@ def watch_replay(replay_path=None):
     """Watch a replay.
     
     Args:
-        replay_path: Path to replay file. If None, shows replay selection menu.
+        replay_path (str, optional): Path to replay file. If None, shows replay selection menu.
     """
     import pygame
     import pandas as pd
