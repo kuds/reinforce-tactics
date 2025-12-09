@@ -389,6 +389,19 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         if map_file_used:
             game.map_file_used = map_file_used
 
+        # Set player configurations for saving/replay
+        if player_configs:
+            game.player_configs = player_configs
+        else:
+            # Generate default player configs based on mode
+            game.player_configs = []
+            for i in range(num_players):
+                if i == 0:  # First player is always human in legacy modes
+                    game.player_configs.append({'type': 'human', 'bot_type': None})
+                else:
+                    # Other players are bots in legacy modes
+                    game.player_configs.append({'type': 'computer', 'bot_type': 'SimpleBot'})
+
         # Create renderer
         renderer = Renderer(game)
 
@@ -631,13 +644,23 @@ def load_saved_game():
         # Create renderer
         renderer = Renderer(game)
         
-        # Create bots for computer players
-        # TODO: Save and restore player configurations with game state for better fidelity
-        # For now, assume all non-player-1 players are bots in loaded games
+        # Create bots based on saved player_configs
         bots = {}
-        for player_num in range(2, game.num_players + 1):
-            bots[player_num] = SimpleBot(game, player=player_num)
-            print(f"Bot created for Player {player_num} (loaded game)")
+        if game.player_configs:
+            # Use saved player configurations
+            for i, config in enumerate(game.player_configs):
+                player_num = i + 1
+                if config['type'] == 'computer':
+                    bot_type = config.get('bot_type', 'SimpleBot')
+                    if bot_type == 'SimpleBot':
+                        bots[player_num] = SimpleBot(game, player=player_num)
+                        print(f"Bot created for Player {player_num} ({bot_type})")
+        else:
+            # Fallback for old saves without player_configs
+            # Assume all non-player-1 players are bots
+            for player_num in range(2, game.num_players + 1):
+                bots[player_num] = SimpleBot(game, player=player_num)
+                print(f"Bot created for Player {player_num} (loaded game - legacy)")
         
         # Game loop
         clock = pygame.time.Clock()
@@ -738,6 +761,7 @@ def load_saved_game():
 def watch_replay():
     """Watch a replay."""
     import pygame
+    import pandas as pd
     from pathlib import Path
     from reinforcetactics.ui.menus import ReplaySelectionMenu
     from reinforcetactics.utils.file_io import FileIO
@@ -761,14 +785,19 @@ def watch_replay():
             print("Failed to load replay")
             return
         
-        # Load or generate initial map
-        # Ideally, the replay should store the initial map configuration
+        # Load initial map from replay data
         game_info = replay_data.get('game_info', {})
         
-        # For now, generate a map based on saved info
-        # TODO: Store and load actual map used in replay
-        map_data = FileIO.generate_random_map(20, 20, 
-                                              num_players=game_info.get('num_players', 2))
+        # Try to load the actual map used in replay
+        if 'initial_map' in game_info:
+            # Use stored map data
+            map_data = pd.DataFrame(game_info['initial_map'])
+            print("✅ Using stored map from replay")
+        else:
+            # Fallback: generate random map for old replays without stored map
+            print("⚠️  Replay doesn't have stored map data. Generating random map...")
+            map_data = FileIO.generate_random_map(20, 20, 
+                                                  num_players=game_info.get('num_players', 2))
         
         # Create replay player
         player = ReplayPlayer(replay_data, map_data)
