@@ -8,7 +8,7 @@ from pathlib import Path
 
 class Settings:
     """Manages game settings with persistence."""
-    
+
     DEFAULT_SETTINGS = {
         'language': 'english',
         'paths': {
@@ -29,17 +29,17 @@ class Settings:
             'enabled': True
         }
     }
-    
+
     def __init__(self, settings_file='settings.json'):
         """Initialize settings manager."""
         self.settings_file = settings_file
         self.settings = self.load()
-    
+
     def load(self):
         """Load settings from file or create defaults."""
         if os.path.exists(self.settings_file):
             try:
-                with open(self.settings_file, 'r') as f:
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
                     # Merge with defaults to ensure all keys exist
                     return self._merge_with_defaults(loaded_settings)
@@ -52,25 +52,25 @@ class Settings:
             settings = self.DEFAULT_SETTINGS.copy()
             self.save(settings)
             return settings
-    
+
     def _merge_with_defaults(self, loaded):
         """Merge loaded settings with defaults to ensure all keys exist."""
         result = self.DEFAULT_SETTINGS.copy()
-        
+
         for key, value in loaded.items():
             if key in result and isinstance(result[key], dict):
                 # Merge nested dicts
                 result[key].update(value)
             else:
                 result[key] = value
-        
+
         return result
-    
+
     def save(self, settings=None):
         """Save settings to file."""
         if settings is not None:
             self.settings = settings
-        
+
         try:
             with open(self.settings_file, 'w') as f:
                 json.dump(self.settings, f, indent=2)
@@ -79,59 +79,59 @@ class Settings:
         except Exception as e:
             print(f"❌ Error saving settings: {e}")
             return False
-    
+
     def get(self, key, default=None):
         """Get a setting value."""
         keys = key.split('.')
         value = self.settings
-        
+
         for k in keys:
             if isinstance(value, dict) and k in value:
                 value = value[k]
             else:
                 return default
-        
+
         return value
-    
+
     def set(self, key, value):
         """Set a setting value."""
         keys = key.split('.')
         settings = self.settings
-        
+
         for k in keys[:-1]:
             if k not in settings:
                 settings[k] = {}
             settings = settings[k]
-        
+
         settings[keys[-1]] = value
         self.save()
-    
+
     def get_language(self):
         """Get current language."""
         return self.settings.get('language', 'english')
-    
+
     def set_language(self, language):
         """Set language."""
         self.settings['language'] = language.lower()
         self.save()
-    
+
     def get_path(self, path_type):
         """Get a configured path."""
         return self.settings['paths'].get(path_type, path_type)
-    
+
     def set_path(self, path_type, path):
         """Set a configured path."""
         if 'paths' not in self.settings:
             self.settings['paths'] = {}
         self.settings['paths'][path_type] = path
         self.save()
-    
+
     def ensure_directories(self):
         """Create all configured directories if they don't exist."""
-        for path_type, path in self.settings['paths'].items():
+        for _path_type, path in self.settings['paths'].items():
             Path(path).mkdir(parents=True, exist_ok=True)
         print("✅ All configured directories created")
-    
+
     def reset_to_defaults(self):
         """Reset all settings to defaults."""
         self.settings = self.DEFAULT_SETTINGS.copy()
@@ -140,7 +140,7 @@ class Settings:
 
 
 # Global settings instance
-_settings_instance = None
+_settings_instance = None  # pylint: disable=invalid-name
 
 def get_settings():
     """Get global settings instance."""

@@ -1,12 +1,14 @@
 """
 File I/O utilities for maps, saves, and replays.
 """
-import os
 import json
-import pandas as pd
-import numpy as np
-from pathlib import Path
+import os
 from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
 from reinforcetactics.constants import MIN_MAP_SIZE
 
 
@@ -82,24 +84,24 @@ class FileIO:
             Padded pandas DataFrame
         """
         current_height, current_width = map_data.shape
-        
+
         # Calculate padding needed
         pad_width = max(0, min_width - current_width)
         pad_height = max(0, min_height - current_height)
-        
+
         if pad_width > 0 or pad_height > 0:
             # Pad with grass tiles ('p')
             padded = pd.DataFrame(
                 np.full((min_height, min_width), 'o', dtype=object)
             )
-            
+
             # Copy original data into center
             start_y = pad_height // 2
             start_x = pad_width // 2
             padded.iloc[start_y:start_y+current_height, start_x:start_x+current_width] = map_data.values
-            
+
             return padded
-        
+
         return map_data
 
     @staticmethod
@@ -118,49 +120,49 @@ class FileIO:
         # Ensure minimum size
         width = max(width, MIN_MAP_SIZE)
         height = max(height, MIN_MAP_SIZE)
-        
+
         # Create base map with grass
         map_data = np.full((height, width), 'o', dtype=object)
-        
+
         # Add some variety - forests, mountains, water
         num_tiles = width * height
-        
+
         # Add forests (10% of tiles)
         for _ in range(num_tiles // 10):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
             map_data[y, x] = 'f'
-        
+
         # Add mountains (5% of tiles)
         for _ in range(num_tiles // 20):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
             map_data[y, x] = 'm'
-        
+
         # Add water (3% of tiles)
         for _ in range(num_tiles // 33):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
             map_data[y, x] = 'w'
-        
+
         # Place headquarters for each player in corners
         if num_players >= 1:
             map_data[1, 1] = 'h_1'  # Player 1 HQ (top-left)
             map_data[1, 2] = 'b_1'  # Player 1 Building
             map_data[2, 1] = 'b_1'  # Player 1 Building
-        
+
         if num_players >= 2:
             map_data[height-2, width-2] = 'h_2'  # Player 2 HQ (bottom-right)
             map_data[height-2, width-3] = 'b_2'  # Player 2 Building
             map_data[height-3, width-2] = 'b_2'  # Player 2 Building
-        
+
         if num_players >= 3:
             map_data[1, width-2] = 'h_3'  # Player 3 HQ (top-right)
             map_data[1, width-3] = 'b_3'
             map_data[2, width-2] = 'b_3'
-        
+
         if num_players >= 4:
             map_data[height-2, 1] = 'h_4'  # Player 4 HQ (bottom-left)
             map_data[height-2, 2] = 'b_4'
             map_data[height-3, 1] = 'b_4'
-        
+
         # Add some neutral towers in the center area
         center_x, center_y = width // 2, height // 2
         for dx, dy in [(0, 0), (3, 0), (0, 3), (3, 3)]:
@@ -168,7 +170,7 @@ class FileIO:
             if 0 <= x < width and 0 <= y < height:
                 if map_data[y, x] == 'p':  # Only place on grass
                     map_data[y, x] = 't'
-        
+
         return pd.DataFrame(map_data)
 
     @staticmethod
@@ -189,21 +191,21 @@ class FileIO:
             saves_dir.mkdir(exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filepath = saves_dir / f"save_{timestamp}.json"
-        
+
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             # Convert game state to dictionary
             save_data = game_state.to_dict()
-            
+
             # Save to JSON
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=2)
-            
+
             print(f"✅ Game saved: {filepath}")
             return str(filepath)
-        
+
         except Exception as e:
             print(f"❌ Error saving game: {e}")
             return None
@@ -220,12 +222,12 @@ class FileIO:
             Dictionary with game state data
         """
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 save_data = json.load(f)
-            
+
             print(f"✅ Game loaded: {filepath}")
             return save_data
-        
+
         except FileNotFoundError:
             print(f"❌ Save file not found: {filepath}")
             return None
@@ -244,7 +246,7 @@ class FileIO:
         saves_dir = Path("saves")
         if not saves_dir.exists():
             return []
-        
+
         saves = list(saves_dir.glob("*.json"))
         saves.sort(key=lambda x: x.stat().st_mtime, reverse=True)  # Most recent first
         return saves
@@ -268,23 +270,23 @@ class FileIO:
             replays_dir.mkdir(exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filepath = replays_dir / f"replay_{timestamp}.json"
-        
+
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             replay_data = {
                 'timestamp': datetime.now().isoformat(),
                 'game_info': game_info,
                 'actions': action_history
             }
-            
-            with open(filepath, 'w') as f:
+
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(replay_data, f, indent=2)
-            
+
             print(f"✅ Replay saved: {filepath}")
             return str(filepath)
-        
+
         except Exception as e:
             print(f"❌ Error saving replay: {e}")
             return None
@@ -301,12 +303,12 @@ class FileIO:
             Dictionary with replay data
         """
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 replay_data = json.load(f)
-            
+
             print(f"✅ Replay loaded: {filepath}")
             return replay_data
-        
+
         except FileNotFoundError:
             print(f"❌ Replay file not found: {filepath}")
             return None
@@ -325,7 +327,7 @@ class FileIO:
         replays_dir = Path("replays")
         if not replays_dir.exists():
             return []
-        
+
         replays = list(replays_dir.glob("*.json"))
         replays.sort(key=lambda x: x.stat().st_mtime, reverse=True)  # Most recent first
         return replays
@@ -344,7 +346,7 @@ class FileIO:
         maps_dir = Path(f"maps/{map_type}")
         if not maps_dir.exists():
             return []
-        
+
         maps = list(maps_dir.glob("*.csv"))
         maps.sort()
         return maps
@@ -363,44 +365,44 @@ class FileIO:
         """
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             map_data.to_csv(filepath, header=False, index=False)
             print(f"✅ Map saved: {filepath}")
             return str(filepath)
-        
+
         except Exception as e:
             print(f"❌ Error saving map: {e}")
             return None
 
     @staticmethod
-    def export_replay_video(replay_filepath, output_filepath=None, fps=10):
+    def export_replay_video(replay_filepath=None, output_filepath=None, fps=10):
         """
         Export a replay to a video file (requires opencv-python).
 
         Args:
-            replay_filepath: Path to the replay JSON file
+            replay_filepath: Path to the replay JSON file (currently unused)
             output_filepath: Path to save the video (auto-generated if None)
-            fps: Frames per second for the video
+            fps: Frames per second for the video (currently unused)
 
         Returns:
             Path to the saved video file
         """
         try:
-            import cv2
+            import cv2  # pylint: disable=unused-import,import-outside-toplevel
         except ImportError:
             print("❌ opencv-python not installed. Install with: pip install opencv-python")
             return None
-        
+
         if output_filepath is None:
             videos_dir = Path("videos")
             videos_dir.mkdir(exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_filepath = videos_dir / f"replay_{timestamp}.mp4"
-        
+
         # This would require more implementation to actually render frames
         # For now, just a placeholder
-        print(f"⚠️  Video export not yet fully implemented")
+        print("⚠️  Video export not yet fully implemented")
         print(f"   Would export to: {output_filepath}")
         return str(output_filepath)
 
@@ -420,10 +422,10 @@ class FileIO:
             "logs",
             "videos"
         ]
-        
+
         for directory in directories:
             Path(directory).mkdir(parents=True, exist_ok=True)
-        
+
         print("✅ All directories created")
 
     @staticmethod
@@ -440,14 +442,14 @@ class FileIO:
         try:
             map_data = pd.read_csv(filepath, header=None)
             height, width = map_data.shape
-            
+
             # Count different tile types
             tiles = map_data.values.flatten()
             unique_tiles = {}
             for tile in tiles:
-                tile_type = str(tile).split('_')[0]
+                tile_type = str(tile).split('_', maxsplit=1)[0]
                 unique_tiles[tile_type] = unique_tiles.get(tile_type, 0) + 1
-            
+
             # Count players
             num_players = 0
             for tile in tiles:
@@ -455,7 +457,7 @@ class FileIO:
                     parts = str(tile).split('_')
                     if len(parts) >= 2 and parts[1].isdigit():
                         num_players = max(num_players, int(parts[1]))
-            
+
             return {
                 'width': width,
                 'height': height,
@@ -463,7 +465,7 @@ class FileIO:
                 'tile_counts': unique_tiles,
                 'total_tiles': width * height
             }
-        
+
         except Exception as e:
             print(f"❌ Error reading map info: {e}")
             return None

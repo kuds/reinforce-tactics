@@ -190,8 +190,8 @@ class StrategyGameEnv(gym.Env):
             Binary array of shape (action_space_size,)
         """
         # Get legal actions from game state
-        legal_actions = self.game_state.get_legal_actions(player=1)
-        
+        # legal_actions = self.game_state.get_legal_actions(player=1)
+
         # Create mask (all zeros initially)
         mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
         

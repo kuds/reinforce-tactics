@@ -1,0 +1,32 @@
+[MASTER]
+# Add pygame to the extension package whitelist
+extension-pkg-whitelist=pygame
+
+[MESSAGES CONTROL]
+# Disable pygame no-member false positives (E1101)
+# Disable import-error for optional dependencies
+# Disable other low-value checks that are noisy
+disable=
+    import-error,
+    no-member,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-instance-attributes,
+    too-many-arguments,
+    too-many-positional-arguments,
+    duplicate-code,
+    fixme,
+    no-name-in-module,
+    import-outside-toplevel,
+    broad-exception-caught,
+    inconsistent-return-statements,
+    possibly-used-before-assignment
+
+[DESIGN]
+# Relax some design constraints
+max-args=7
+max-attributes=10
+max-locals=20
+max-branches=15
+max-statements=60
