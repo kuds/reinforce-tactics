@@ -57,6 +57,7 @@ class Menu:
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.option_font = pygame.font.Font(None, 36)
+        self.indicator_font = pygame.font.Font(None, 24)
 
         # Mouse tracking
         self.hover_index = -1
@@ -217,23 +218,21 @@ class Menu:
 
         # Draw scroll indicators if needed
         if total_options > self.max_visible_options:
-            indicator_font = pygame.font.Font(None, 24)
-            
             # Show up arrow if not at top
             if self.scroll_offset > 0:
-                up_text = indicator_font.render("▲ Scroll Up", True, self.hover_color)
+                up_text = self.indicator_font.render("▲ Scroll Up", True, self.hover_color)
                 up_rect = up_text.get_rect(centerx=screen_width // 2, y=start_y - 30)
                 self.screen.blit(up_text, up_rect)
             
             # Show down arrow if not at bottom
             if end_index < total_options:
-                down_text = indicator_font.render("▼ Scroll Down", True, self.hover_color)
+                down_text = self.indicator_font.render("▼ Scroll Down", True, self.hover_color)
                 down_y = start_y + self.max_visible_options * spacing + 10
                 down_rect = down_text.get_rect(centerx=screen_width // 2, y=down_y)
                 self.screen.blit(down_text, down_rect)
             
             # Show position indicator (e.g., "3 / 15")
-            pos_text = indicator_font.render(
+            pos_text = self.indicator_font.render(
                 f"{self.scroll_offset + 1}-{end_index} / {total_options}",
                 True, self.text_color
             )
