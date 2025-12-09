@@ -66,7 +66,7 @@ Respond with a JSON object containing your reasoning and a list of actions to ta
 Be strategic and consider the game state carefully before deciding."""
 
 
-class LLMBot(ABC):
+class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     """Abstract base class for LLM-powered bots."""
 
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
@@ -86,7 +86,7 @@ class LLMBot(ABC):
         self.api_key = api_key or self._get_api_key_from_env()
         self.model = model or self._get_default_model()
         self.max_retries = max_retries
-        
+
         if not self.api_key:
             raise ValueError(
                 f"API key not provided. Set {self._get_env_var_name()} environment variable "
@@ -111,11 +111,11 @@ class LLMBot(ABC):
 
     def take_turn(self):
         """Execute the bot's turn using LLM guidance."""
-        logger.info(f"LLM Bot (Player {self.bot_player}) is thinking...")
-        
+        logger.info("LLM Bot (Player %s) is thinking...", self.bot_player)
+
         # Serialize game state
         game_state_json = self._serialize_game_state()
-        
+
         # Get LLM response with retries
         response_text = None
         for attempt in range(self.max_retries):
@@ -127,38 +127,38 @@ class LLMBot(ABC):
                 response_text = self._call_llm(messages)
                 break
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1}/{self.max_retries} failed: {e}")
+                logger.error("Attempt %s/%s failed: %s", attempt + 1, self.max_retries, e)
                 if attempt < self.max_retries - 1:
                     # Exponential backoff
                     wait_time = 2 ** attempt
-                    logger.info(f"Retrying in {wait_time} seconds...")
+                    logger.info("Retrying in %s seconds...", wait_time)
                     time.sleep(wait_time)
                 else:
                     logger.error("Max retries reached. Ending turn.")
                     return
-        
+
         if not response_text:
             logger.error("No response from LLM. Ending turn.")
             return
-        
+
         # Parse and execute actions
         self._execute_actions(response_text)
 
     def _serialize_game_state(self) -> Dict[str, Any]:
         """
         Serialize the current game state to a dictionary.
-        
+
         Returns:
             Dictionary containing game state information
         """
         # Get legal actions first
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
-        
+
         # Serialize player's units with IDs
         player_units = []
         unit_id = 0
         unit_id_map = {}  # Map unit objects to IDs for later reference
-        
+
         for unit in self.game_state.units:
             if unit.player == self.bot_player:
                 unit_data = {
@@ -174,7 +174,7 @@ class LLMBot(ABC):
                 player_units.append(unit_data)
                 unit_id_map[unit] = unit_id
                 unit_id += 1
-        
+
         # Serialize enemy units (less detail)
         enemy_units = []
         for unit in self.game_state.units:
@@ -186,12 +186,12 @@ class LLMBot(ABC):
                     'max_hp': UNIT_DATA[unit.type]['health']
                 }
                 enemy_units.append(enemy_data)
-        
+
         # Serialize buildings
         player_buildings = []
         enemy_buildings = []
         neutral_buildings = []
-        
+
         for row in self.game_state.grid.tiles:
             for tile in row:
                 if tile.type in ['b', 'h', 't']:
@@ -200,17 +200,17 @@ class LLMBot(ABC):
                         'position': [tile.x, tile.y],
                         'income': 1000 if tile.type == 'h' else (200 if tile.type == 'b' else 100)
                     }
-                    
+
                     if tile.player == self.bot_player:
                         player_buildings.append(building_info)
                     elif tile.player is not None:
                         enemy_buildings.append(building_info)
                     else:
                         neutral_buildings.append(building_info)
-        
+
         # Format legal actions for the LLM
         formatted_legal_actions = self._format_legal_actions(legal_actions, unit_id_map)
-        
+
         return {
             'turn_number': self.game_state.turn_number,
             'player_gold': self.game_state.player_gold[self.bot_player],
@@ -237,7 +237,7 @@ class LLMBot(ABC):
             'cure': [],
             'seize': []
         }
-        
+
         # Create unit actions
         for action in legal_actions['create_unit']:
             formatted['create_unit'].append({
@@ -245,7 +245,7 @@ class LLMBot(ABC):
                 'position': [action['x'], action['y']],
                 'cost': UNIT_DATA[action['unit_type']]['cost']
             })
-        
+
         # Move actions
         for action in legal_actions['move']:
             if action['unit'] in unit_id_map:
@@ -254,7 +254,7 @@ class LLMBot(ABC):
                     'from': [action['from_x'], action['from_y']],
                     'to': [action['to_x'], action['to_y']]
                 })
-        
+
         # Attack actions
         for action in legal_actions['attack']:
             if action['attacker'] in unit_id_map:
@@ -262,7 +262,7 @@ class LLMBot(ABC):
                     'unit_id': unit_id_map[action['attacker']],
                     'target_position': [action['target'].x, action['target'].y]
                 })
-        
+
         # Paralyze actions
         for action in legal_actions['paralyze']:
             if action['paralyzer'] in unit_id_map:
@@ -270,7 +270,7 @@ class LLMBot(ABC):
                     'unit_id': unit_id_map[action['paralyzer']],
                     'target_position': [action['target'].x, action['target'].y]
                 })
-        
+
         # Heal actions
         for action in legal_actions['heal']:
             if action['healer'] in unit_id_map:
@@ -278,7 +278,7 @@ class LLMBot(ABC):
                     'unit_id': unit_id_map[action['healer']],
                     'target_position': [action['target'].x, action['target'].y]
                 })
-        
+
         # Cure actions
         for action in legal_actions['cure']:
             if action['curer'] in unit_id_map:
@@ -286,7 +286,7 @@ class LLMBot(ABC):
                     'unit_id': unit_id_map[action['curer']],
                     'target_position': [action['target'].x, action['target'].y]
                 })
-        
+
         # Seize actions
         for action in legal_actions['seize']:
             if action['unit'] in unit_id_map:
@@ -294,7 +294,7 @@ class LLMBot(ABC):
                     'unit_id': unit_id_map[action['unit']],
                     'position': [action['tile'].x, action['tile'].y]
                 })
-        
+
         return formatted
 
     def _format_prompt(self, game_state_json: Dict[str, Any]) -> str:
@@ -325,31 +325,31 @@ You can take multiple actions in one turn."""
         try:
             # Try to parse JSON from response
             response_json = self._extract_json(response_text)
-            
+
             if not response_json or 'actions' not in response_json:
                 logger.error("Invalid response format. No actions found.")
                 return
-            
+
             # Log reasoning if provided
             if 'reasoning' in response_json:
-                logger.info(f"Bot reasoning: {response_json['reasoning']}")
-            
+                logger.info("Bot reasoning: %s", response_json['reasoning'])
+
             # Build unit ID to unit object mapping
             unit_map = self._get_unit_by_id()
-            
+
             actions = response_json['actions']
             if not isinstance(actions, list):
                 logger.error("Actions must be a list")
                 return
-            
+
             # Execute each action
             for action in actions:
                 if not isinstance(action, dict) or 'type' not in action:
-                    logger.warning(f"Skipping invalid action: {action}")
+                    logger.warning("Skipping invalid action: %s", action)
                     continue
-                
+
                 action_type = action['type']
-                
+
                 try:
                     if action_type == 'CREATE_UNIT':
                         self._execute_create_unit(action)
@@ -369,13 +369,13 @@ You can take multiple actions in one turn."""
                         logger.info("Bot chose to end turn")
                         break
                     else:
-                        logger.warning(f"Unknown action type: {action_type}")
+                        logger.warning("Unknown action type: %s", action_type)
                 except Exception as e:
-                    logger.error(f"Error executing action {action}: {e}")
+                    logger.error("Error executing action %s: %s", action, e)
                     continue
-        
+
         except Exception as e:
-            logger.error(f"Error parsing/executing LLM response: {e}")
+            logger.error("Error parsing/executing LLM response: %s", e)
 
     def _extract_json(self, text: str) -> Optional[Dict]:
         """Extract JSON from response text, handling markdown code blocks."""
@@ -384,7 +384,7 @@ You can take multiple actions in one turn."""
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-        
+
         # Try to extract JSON from markdown code blocks
         import re
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
@@ -393,7 +393,7 @@ You can take multiple actions in one turn."""
                 return json.loads(json_match.group(1))
             except json.JSONDecodeError:
                 pass
-        
+
         # Try to find JSON object anywhere in the text
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
@@ -401,7 +401,7 @@ You can take multiple actions in one turn."""
                 return json.loads(json_match.group(0))
             except json.JSONDecodeError:
                 pass
-        
+
         return None
 
     def _get_unit_by_id(self) -> Dict[int, Any]:
@@ -418,157 +418,157 @@ You can take multiple actions in one turn."""
         """Execute a CREATE_UNIT action."""
         unit_type = action.get('unit_type')
         position = action.get('position')
-        
+
         if not unit_type or not position or len(position) != 2:
-            logger.warning(f"Invalid CREATE_UNIT action: {action}")
+            logger.warning("Invalid CREATE_UNIT action: %s", action)
             return
-        
+
         x, y = position
-        
+
         # Validate this is a legal action
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
         is_legal = any(
             a['unit_type'] == unit_type and a['x'] == x and a['y'] == y
             for a in legal_actions['create_unit']
         )
-        
+
         if not is_legal:
-            logger.warning(f"Illegal CREATE_UNIT action: {action}")
+            logger.warning("Illegal CREATE_UNIT action: %s", action)
             return
-        
+
         self.game_state.create_unit(unit_type, x, y, self.bot_player)
-        logger.info(f"Created {unit_type} at ({x}, {y})")
+        logger.info("Created %s at (%s, %s)", unit_type, x, y)
 
     def _execute_move(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a MOVE action."""
         unit_id = action.get('unit_id')
         to_pos = action.get('to')
-        
+
         if unit_id not in unit_map or not to_pos or len(to_pos) != 2:
-            logger.warning(f"Invalid MOVE action: {action}")
+            logger.warning("Invalid MOVE action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         to_x, to_y = to_pos
-        
+
         # Validate this is a legal move
         if not unit.can_move:
-            logger.warning(f"Unit {unit_id} cannot move")
+            logger.warning("Unit %s cannot move", unit_id)
             return
-        
+
         self.game_state.move_unit(unit, to_x, to_y)
-        logger.info(f"Moved unit {unit_id} to ({to_x}, {to_y})")
+        logger.info("Moved unit %s to (%s, %s)", unit_id, to_x, to_y)
 
     def _execute_attack(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute an ATTACK action."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
-        
+
         if unit_id not in unit_map or not target_pos or len(target_pos) != 2:
-            logger.warning(f"Invalid ATTACK action: {action}")
+            logger.warning("Invalid ATTACK action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         target_x, target_y = target_pos
-        
+
         # Find target unit
         target = self.game_state.get_unit_at_position(target_x, target_y)
         if not target:
-            logger.warning(f"No unit at target position ({target_x}, {target_y})")
+            logger.warning("No unit at target position (%s, %s)", target_x, target_y)
             return
-        
+
         self.game_state.attack(unit, target)
-        logger.info(f"Unit {unit_id} attacked enemy at ({target_x}, {target_y})")
+        logger.info("Unit %s attacked enemy at (%s, %s)", unit_id, target_x, target_y)
 
     def _execute_paralyze(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a PARALYZE action."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
-        
+
         if unit_id not in unit_map or not target_pos or len(target_pos) != 2:
-            logger.warning(f"Invalid PARALYZE action: {action}")
+            logger.warning("Invalid PARALYZE action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         target_x, target_y = target_pos
-        
+
         if unit.type != 'M':
-            logger.warning(f"Unit {unit_id} is not a Mage, cannot paralyze")
+            logger.warning("Unit %s is not a Mage, cannot paralyze", unit_id)
             return
-        
+
         # Find target unit
         target = self.game_state.get_unit_at_position(target_x, target_y)
         if not target:
-            logger.warning(f"No unit at target position ({target_x}, {target_y})")
+            logger.warning("No unit at target position (%s, %s)", target_x, target_y)
             return
-        
+
         self.game_state.paralyze(unit, target)
-        logger.info(f"Unit {unit_id} paralyzed enemy at ({target_x}, {target_y})")
+        logger.info("Unit %s paralyzed enemy at (%s, %s)", unit_id, target_x, target_y)
 
     def _execute_heal(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a HEAL action."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
-        
+
         if unit_id not in unit_map or not target_pos or len(target_pos) != 2:
-            logger.warning(f"Invalid HEAL action: {action}")
+            logger.warning("Invalid HEAL action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         target_x, target_y = target_pos
-        
+
         if unit.type != 'C':
-            logger.warning(f"Unit {unit_id} is not a Cleric, cannot heal")
+            logger.warning("Unit %s is not a Cleric, cannot heal", unit_id)
             return
-        
+
         # Find target unit
         target = self.game_state.get_unit_at_position(target_x, target_y)
         if not target:
-            logger.warning(f"No unit at target position ({target_x}, {target_y})")
+            logger.warning("No unit at target position (%s, %s)", target_x, target_y)
             return
-        
+
         self.game_state.heal(unit, target)
-        logger.info(f"Unit {unit_id} healed ally at ({target_x}, {target_y})")
+        logger.info("Unit %s healed ally at (%s, %s)", unit_id, target_x, target_y)
 
     def _execute_cure(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a CURE action."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
-        
+
         if unit_id not in unit_map or not target_pos or len(target_pos) != 2:
-            logger.warning(f"Invalid CURE action: {action}")
+            logger.warning("Invalid CURE action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         target_x, target_y = target_pos
-        
+
         if unit.type != 'C':
-            logger.warning(f"Unit {unit_id} is not a Cleric, cannot cure")
+            logger.warning("Unit %s is not a Cleric, cannot cure", unit_id)
             return
-        
+
         # Find target unit
         target = self.game_state.get_unit_at_position(target_x, target_y)
         if not target:
-            logger.warning(f"No unit at target position ({target_x}, {target_y})")
+            logger.warning("No unit at target position (%s, %s)", target_x, target_y)
             return
-        
+
         self.game_state.cure(unit, target)
-        logger.info(f"Unit {unit_id} cured ally at ({target_x}, {target_y})")
+        logger.info("Unit %s cured ally at (%s, %s)", unit_id, target_x, target_y)
 
     def _execute_seize(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a SEIZE action."""
         unit_id = action.get('unit_id')
-        
+
         if unit_id not in unit_map:
-            logger.warning(f"Invalid SEIZE action: {action}")
+            logger.warning("Invalid SEIZE action: %s", action)
             return
-        
+
         unit = unit_map[unit_id]
         self.game_state.seize(unit)
-        logger.info(f"Unit {unit_id} is seizing structure at ({unit.x}, {unit.y})")
+        logger.info("Unit %s is seizing structure at (%s, %s)", unit_id, unit.x, unit.y)
 
 
-class OpenAIBot(LLMBot):
+class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     """LLM bot using OpenAI's GPT models."""
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -584,13 +584,13 @@ class OpenAIBot(LLMBot):
         """Call OpenAI API."""
         try:
             import openai
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "openai package not installed. Install with: pip install openai>=1.0.0"
-            )
-        
+            ) from exc
+
         client = openai.OpenAI(api_key=self.api_key)
-        
+
         response = client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -598,11 +598,11 @@ class OpenAIBot(LLMBot):
             temperature=0.7,
             max_tokens=2000
         )
-        
+
         return response.choices[0].message.content
 
 
-class ClaudeBot(LLMBot):
+class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
     """LLM bot using Anthropic's Claude models."""
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -618,13 +618,13 @@ class ClaudeBot(LLMBot):
         """Call Anthropic API."""
         try:
             import anthropic
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "anthropic package not installed. Install with: pip install anthropic>=0.18.0"
-            )
-        
+            ) from exc
+
         client = anthropic.Anthropic(api_key=self.api_key)
-        
+
         # Extract system message and user messages
         system_message = ""
         user_messages = []
@@ -633,7 +633,7 @@ class ClaudeBot(LLMBot):
                 system_message = msg["content"]
             else:
                 user_messages.append(msg)
-        
+
         response = client.messages.create(
             model=self.model,
             max_tokens=2000,
@@ -641,11 +641,11 @@ class ClaudeBot(LLMBot):
             messages=user_messages,
             temperature=0.7
         )
-        
+
         return response.content[0].text
 
 
-class GeminiBot(LLMBot):
+class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     """LLM bot using Google's Gemini models."""
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -661,15 +661,15 @@ class GeminiBot(LLMBot):
         """Call Google Gemini API."""
         try:
             import google.generativeai as genai
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "google-generativeai package not installed. "
                 "Install with: pip install google-generativeai>=0.4.0"
-            )
-        
+            ) from exc
+
         genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel(self.model)
-        
+
         # Combine system and user messages for Gemini
         combined_prompt = ""
         for msg in messages:
@@ -677,7 +677,7 @@ class GeminiBot(LLMBot):
                 combined_prompt += f"{msg['content']}\n\n"
             elif msg["role"] == "user":
                 combined_prompt += msg['content']
-        
+
         response = model.generate_content(
             combined_prompt,
             generation_config=genai.types.GenerationConfig(
@@ -685,5 +685,5 @@ class GeminiBot(LLMBot):
                 max_output_tokens=2000
             )
         )
-        
+
         return response.text
