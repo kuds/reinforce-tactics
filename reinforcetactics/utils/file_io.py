@@ -376,14 +376,14 @@ class FileIO:
             return None
 
     @staticmethod
-    def export_replay_video(replay_filepath=None, output_filepath=None, fps=10):
+    def export_replay_video(output_filepath=None):
         """
         Export a replay to a video file (requires opencv-python).
+        
+        Note: This is a placeholder function for future implementation.
 
         Args:
-            replay_filepath: Path to the replay JSON file (currently unused)
             output_filepath: Path to save the video (auto-generated if None)
-            fps: Frames per second for the video (currently unused)
 
         Returns:
             Path to the saved video file
