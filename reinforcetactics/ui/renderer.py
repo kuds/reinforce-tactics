@@ -68,7 +68,7 @@ class Renderer:
         # Draw UI
         self._draw_ui()
         
-        pygame.display.flip()
+        # Note: pygame.display.flip() is called by the main game loop
 
     def _draw_grid(self):
         """Draw the tile grid."""

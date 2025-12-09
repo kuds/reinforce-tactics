@@ -343,7 +343,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import (
-        MapSelectionMenu, SaveGameMenu
+        MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu
     )
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
@@ -480,6 +480,10 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             if menu_result:
                                 if menu_result['type'] == 'close':
                                     active_menu = None
+                                elif menu_result['type'] == 'unit_created':
+                                    unit = menu_result['unit']
+                                    print(f"Created {unit.type} at ({unit.x}, {unit.y})")
+                                    active_menu = None  # Close menu after purchase
                             # Continue to prevent further processing
                             continue
 
@@ -525,6 +529,17 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
                             continue  # Stop processing more events this frame
 
+                        # Priority 1.5: Building clicked for unit purchase
+                        # Check if clicking on an owned building without a unit
+                        elif (not clicked_unit and 
+                              clicked_tile.player == game.current_player and
+                              clicked_tile.type in ['h', 'b']):  # HQ or Building
+                            # Open unit purchase menu
+                            active_menu = UnitPurchaseMenu(renderer.screen, game, (grid_x, grid_y))
+                            menu_opened_time = current_time
+                            print(f"Opened unit purchase menu at ({grid_x}, {grid_y})")
+                            continue  # Stop processing more events this frame
+
                         # Priority 2: Movement with selected unit
                         elif selected_unit and selected_unit.can_move:
                             if game.move_unit(selected_unit, grid_x, grid_y):
@@ -536,6 +551,11 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                         else:
                             selected_unit = None
                             continue  # Stop processing more events this frame
+
+                elif event.type == pygame.MOUSEMOTION:
+                    # Update hover state for active menu
+                    if active_menu and hasattr(active_menu, 'handle_mouse_motion'):
+                        active_menu.handle_mouse_motion(mouse_pos)
 
             # === RENDERING SECTION ===
             # Render game state (this clears and redraws everything)
