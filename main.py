@@ -163,7 +163,7 @@ def train_mode(args):
     # Train
     print(f"🎮 Training for {args.timesteps} timesteps...")
     print(f"Opponent: {args.opponent}")
-    print(f"Tensorboard: tensorboard --logdir ./tensorboard/\n")
+    print("Tensorboard: tensorboard --logdir ./tensorboard/\n")
     
     try:
         model.learn(
@@ -280,7 +280,7 @@ def evaluate_mode(args):
     avg_reward = np.mean(total_rewards)
     
     print(f"\n{'='*60}")
-    print(f"📊 Evaluation Results:")
+    print("📊 Evaluation Results:")
     print(f"Win Rate:     {win_rate*100:.1f}%")
     print(f"Wins:         {wins}/{args.episodes}")
     print(f"Avg Reward:   {avg_reward:.2f}")

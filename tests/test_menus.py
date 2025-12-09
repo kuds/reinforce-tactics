@@ -288,16 +288,16 @@ class TestPlayerConfigMenu:
     def test_player_config_menu_initialization_1v1(self, pygame_init):
         """Test that PlayerConfigMenu initializes correctly for 1v1 mode."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         assert menu.num_players == 2
         assert len(menu.player_configs) == 2
-        
+
         # Player 1 should be human by default
         assert menu.player_configs[0]['type'] == 'human'
         assert menu.player_configs[0]['bot_type'] is None
-        
+
         # Player 2 should be computer (SimpleBot) by default
         assert menu.player_configs[1]['type'] == 'computer'
         assert menu.player_configs[1]['bot_type'] == 'SimpleBot'
@@ -305,16 +305,16 @@ class TestPlayerConfigMenu:
     def test_player_config_menu_initialization_2v2(self, pygame_init):
         """Test that PlayerConfigMenu initializes correctly for 2v2 mode."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="2v2")
-        
+
         assert menu.num_players == 4
         assert len(menu.player_configs) == 4
-        
+
         # Player 1 should be human by default
         assert menu.player_configs[0]['type'] == 'human'
         assert menu.player_configs[0]['bot_type'] is None
-        
+
         # Players 2-4 should be computer (SimpleBot) by default
         for i in range(1, 4):
             assert menu.player_configs[i]['type'] == 'computer'
@@ -323,33 +323,33 @@ class TestPlayerConfigMenu:
     def test_player_config_toggle_type(self, pygame_init):
         """Test toggling player type between human and computer."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         # Draw menu to populate interactive elements
         menu.draw()
-        
+
         # Find the type toggle button for player 1
-        type_toggle_elements = [e for e in menu.interactive_elements 
+        type_toggle_elements = [e for e in menu.interactive_elements
                                 if e['type'] == 'type_toggle' and e['player_idx'] == 0]
-        
+
         assert len(type_toggle_elements) > 0, "Should have type toggle button for player 1"
-        
+
         # Simulate click on player 1's type toggle
         element = type_toggle_elements[0]
         event = pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
             {'button': 1, 'pos': element['rect'].center}
         )
-        
+
         # Player 1 starts as human
         assert menu.player_configs[0]['type'] == 'human'
-        
+
         # Toggle to computer
         menu.handle_input(event)
         assert menu.player_configs[0]['type'] == 'computer'
         assert menu.player_configs[0]['bot_type'] == 'SimpleBot'
-        
+
         # Toggle back to human
         menu.handle_input(event)
         assert menu.player_configs[0]['type'] == 'human'
@@ -358,14 +358,14 @@ class TestPlayerConfigMenu:
     def test_player_config_result_structure(self, pygame_init):
         """Test that the result has the correct structure."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
         result = menu._get_result()
-        
+
         assert 'players' in result
         assert isinstance(result['players'], list)
         assert len(result['players']) == 2
-        
+
         # Check each player config structure
         for config in result['players']:
             assert 'type' in config
@@ -379,27 +379,27 @@ class TestPlayerConfigMenu:
     def test_player_config_start_game_button(self, pygame_init):
         """Test that start game button returns configuration."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         # Draw menu to populate interactive elements
         menu.draw()
-        
+
         # Find the start button
-        start_button_elements = [e for e in menu.interactive_elements 
+        start_button_elements = [e for e in menu.interactive_elements
                                  if e['type'] == 'start_button']
-        
+
         assert len(start_button_elements) > 0, "Should have start game button"
-        
+
         # Simulate click on start button
         element = start_button_elements[0]
         event = pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
             {'button': 1, 'pos': element['rect'].center}
         )
-        
+
         result = menu.handle_input(event)
-        
+
         assert result is not None
         assert 'players' in result
         assert len(result['players']) == 2
@@ -407,51 +407,51 @@ class TestPlayerConfigMenu:
     def test_player_config_back_button(self, pygame_init):
         """Test that back button cancels and returns None."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         # Draw menu to populate interactive elements
         menu.draw()
-        
+
         # Find the back button
-        back_button_elements = [e for e in menu.interactive_elements 
+        back_button_elements = [e for e in menu.interactive_elements
                                 if e['type'] == 'back_button']
-        
+
         assert len(back_button_elements) > 0, "Should have back button"
-        
+
         # Simulate click on back button
         element = back_button_elements[0]
         event = pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
             {'button': 1, 'pos': element['rect'].center}
         )
-        
+
         result = menu.handle_input(event)
-        
+
         assert result is None
         assert not menu.running
 
     def test_player_config_keyboard_escape(self, pygame_init):
         """Test that ESC key cancels the menu."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         event = pygame.event.Event(pygame.KEYDOWN, {'key': pygame.K_ESCAPE})
         result = menu.handle_input(event)
-        
+
         assert result is None
         assert not menu.running
 
     def test_player_config_keyboard_enter(self, pygame_init):
         """Test that ENTER key starts the game with current configuration."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         event = pygame.event.Event(pygame.KEYDOWN, {'key': pygame.K_RETURN})
         result = menu.handle_input(event)
-        
+
         assert result is not None
         assert 'players' in result
         assert len(result['players']) == 2
@@ -459,17 +459,17 @@ class TestPlayerConfigMenu:
     def test_player_config_all_players_can_be_human(self, pygame_init):
         """Test that all players can be set to human."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         # Set both players to human
         menu.player_configs[0]['type'] = 'human'
         menu.player_configs[0]['bot_type'] = None
         menu.player_configs[1]['type'] = 'human'
         menu.player_configs[1]['bot_type'] = None
-        
+
         result = menu._get_result()
-        
+
         # Verify all players are human
         for config in result['players']:
             assert config['type'] == 'human'
@@ -478,17 +478,17 @@ class TestPlayerConfigMenu:
     def test_player_config_all_players_can_be_computer(self, pygame_init):
         """Test that all players can be set to computer."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         menu = PlayerConfigMenu(game_mode="1v1")
-        
+
         # Set both players to computer
         menu.player_configs[0]['type'] = 'computer'
         menu.player_configs[0]['bot_type'] = 'SimpleBot'
         menu.player_configs[1]['type'] = 'computer'
         menu.player_configs[1]['bot_type'] = 'SimpleBot'
-        
+
         result = menu._get_result()
-        
+
         # Verify all players are computer
         for config in result['players']:
             assert config['type'] == 'computer'
@@ -497,10 +497,10 @@ class TestPlayerConfigMenu:
     def test_player_config_invalid_game_mode(self, pygame_init):
         """Test that invalid game mode raises ValueError."""
         from reinforcetactics.ui.menus import PlayerConfigMenu
-        
+
         with pytest.raises(ValueError) as excinfo:
             PlayerConfigMenu(game_mode="3v3")
-        
+
         assert "Invalid game_mode" in str(excinfo.value)
         assert "Must be '1v1' or '2v2'" in str(excinfo.value)
 
@@ -515,7 +515,7 @@ class TestUnitPurchaseMenu:
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'h_1'  # HQ owned by player 1
         map_data[6][6] = 'b_1'  # Building owned by player 1
-        
+
         from reinforcetactics.core.game_state import GameState
         game = GameState(map_data, num_players=2)
         game.current_player = 1
@@ -528,7 +528,7 @@ class TestUnitPurchaseMenu:
         # Create a simple 10x10 map with an HQ at (5, 5)
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'h_1'  # HQ owned by player 1
-        
+
         from reinforcetactics.core.game_state import GameState
         game = GameState(map_data, num_players=2)
         game.current_player = 1
@@ -538,10 +538,10 @@ class TestUnitPurchaseMenu:
     def test_unit_purchase_menu_initialization(self, pygame_init, mock_game_state):
         """Test that UnitPurchaseMenu initializes correctly."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
-        
+
         assert menu.game_state == mock_game_state
         assert menu.building_pos == (5, 5)
         assert menu.unit_types == ['W', 'M', 'C']
@@ -551,34 +551,34 @@ class TestUnitPurchaseMenu:
     def test_unit_purchase_menu_affordability(self, pygame_init, poor_game_state):
         """Test that units are disabled when player cannot afford them."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, poor_game_state, (5, 5))
-        
+
         # Draw the menu to populate interactive elements
         menu.draw(screen)
-        
+
         # All unit buttons should be disabled
         unit_buttons = [el for el in menu.interactive_elements if el['type'] == 'unit_button']
         assert len(unit_buttons) == 3  # W, M, C
-        
+
         for button in unit_buttons:
             assert button['disabled'] is True
 
     def test_unit_purchase_menu_close_button(self, pygame_init, mock_game_state):
         """Test that close button is present and functional."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
-        
+
         # Draw the menu to populate interactive elements
         menu.draw(screen)
-        
+
         # Check for close button
         close_buttons = [el for el in menu.interactive_elements if el['type'] == 'close_button']
         assert len(close_buttons) == 1
-        
+
         # Simulate clicking the close button
         close_button = close_buttons[0]
         result = menu.handle_click(close_button['rect'].center)
@@ -588,10 +588,10 @@ class TestUnitPurchaseMenu:
     def test_unit_purchase_menu_click_outside_closes(self, pygame_init, mock_game_state):
         """Test that clicking outside menu closes it."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
-        
+
         # Click far outside the menu
         result = menu.handle_click((10, 10))
         assert result is not None
@@ -600,57 +600,57 @@ class TestUnitPurchaseMenu:
     def test_unit_purchase_creates_unit(self, pygame_init, mock_game_state):
         """Test that purchasing a unit creates it in the game state."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
-        
+
         # Draw the menu to populate interactive elements
         menu.draw(screen)
-        
+
         # Find an affordable unit button (Warrior)
-        unit_buttons = [el for el in menu.interactive_elements 
+        unit_buttons = [el for el in menu.interactive_elements
                        if el['type'] == 'unit_button' and not el['disabled']]
         assert len(unit_buttons) > 0
-        
+
         # Click the first affordable unit button
         warrior_button = unit_buttons[0]
         initial_gold = mock_game_state.player_gold[1]
         result = menu.handle_click(warrior_button['rect'].center)
-        
+
         assert result is not None
         assert result['type'] == 'unit_created'
         assert result['unit'] is not None
-        
+
         # Check that unit was created at the building position
         created_unit = mock_game_state.get_unit_at_position(5, 5)
         assert created_unit is not None
         assert created_unit.player == 1
-        
+
         # Check that gold was deducted
         assert mock_game_state.player_gold[1] < initial_gold
 
     def test_unit_purchase_menu_disabled_button_not_clickable(self, pygame_init, poor_game_state):
         """Test that disabled unit buttons don't create units."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, poor_game_state, (5, 5))
-        
+
         # Draw the menu to populate interactive elements
         menu.draw(screen)
-        
+
         # Find a disabled unit button
-        unit_buttons = [el for el in menu.interactive_elements 
+        unit_buttons = [el for el in menu.interactive_elements
                        if el['type'] == 'unit_button' and el['disabled']]
         assert len(unit_buttons) > 0
-        
+
         # Try to click a disabled button
         disabled_button = unit_buttons[0]
         result = menu.handle_click(disabled_button['rect'].center)
-        
+
         # Should return None (no action taken)
         assert result is None
-        
+
         # No unit should be created
         created_unit = poor_game_state.get_unit_at_position(5, 5)
         assert created_unit is None
@@ -658,18 +658,18 @@ class TestUnitPurchaseMenu:
     def test_unit_purchase_menu_hover_effects(self, pygame_init, mock_game_state):
         """Test that hovering updates hover state."""
         from reinforcetactics.ui.menus import UnitPurchaseMenu
-        
+
         screen = pygame.display.set_mode((640, 640))
         menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
-        
+
         # Draw the menu to populate interactive elements
         menu.draw(screen)
-        
+
         # Initially no hover
         assert menu.hover_element is None
-        
+
         # Hover over a button
-        unit_buttons = [el for el in menu.interactive_elements 
+        unit_buttons = [el for el in menu.interactive_elements
                        if el['type'] == 'unit_button']
         if unit_buttons:
             button = unit_buttons[0]
