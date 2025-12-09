@@ -13,7 +13,29 @@ from pathlib import Path
 import pygame
 
 from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
-from reinforcetactics.utils.language import get_language, reset_language
+from reinforcetactics.utils.language import get_language, reset_language, TRANSLATIONS
+
+
+# Cache all "Back" button translations from the language system
+_BACK_TRANSLATIONS_CACHE = None
+
+
+def _get_back_translations() -> List[str]:
+    """
+    Get all translations of the "Back" button text.
+    
+    Returns:
+        List of lowercase back button translations
+    """
+    global _BACK_TRANSLATIONS_CACHE
+    if _BACK_TRANSLATIONS_CACHE is None:
+        back_translations = []
+        for lang_dict in TRANSLATIONS.values():
+            back_text = lang_dict.get('common.back')
+            if back_text:
+                back_translations.append(back_text.lower())
+        _BACK_TRANSLATIONS_CACHE = back_translations
+    return _BACK_TRANSLATIONS_CACHE
 
 
 class Menu:
@@ -144,16 +166,8 @@ class Menu:
         Returns:
             True if the option is a Back button, False otherwise
         """
-        # Get all translations of "Back" from the language system
-        from reinforcetactics.utils.language import TRANSLATIONS
-        back_translations = []
-        for lang_dict in TRANSLATIONS.values():
-            back_text = lang_dict.get('common.back')
-            if back_text:
-                back_translations.append(back_text.lower())
-        
-        # Check if the text matches any Back translation
-        return text.lower().strip() in back_translations
+        # Check if the text matches any Back translation (using cached list)
+        return text.lower().strip() in _get_back_translations()
     
     def _ensure_selected_visible(self) -> None:
         """Ensure the selected option is visible by adjusting scroll offset."""
