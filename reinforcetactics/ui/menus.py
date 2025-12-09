@@ -144,9 +144,16 @@ class Menu:
         Returns:
             True if the option is a Back button, False otherwise
         """
-        # Check for common Back button text in various languages
-        back_keywords = ['back', 'retour', 'zurück', 'volver', 'voltar', 'indietro', '返回', '戻る']
-        return text.lower().strip() in back_keywords
+        # Get all translations of "Back" from the language system
+        from reinforcetactics.utils.language import TRANSLATIONS
+        back_translations = []
+        for lang_dict in TRANSLATIONS.values():
+            back_text = lang_dict.get('common.back')
+            if back_text:
+                back_translations.append(back_text.lower())
+        
+        # Check if the text matches any Back translation
+        return text.lower().strip() in back_translations
     
     def _ensure_selected_visible(self) -> None:
         """Ensure the selected option is visible by adjusting scroll offset."""
