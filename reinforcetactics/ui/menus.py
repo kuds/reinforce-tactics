@@ -20,20 +20,21 @@ from reinforcetactics.utils.language import get_language, reset_language, TRANSL
 _BACK_TRANSLATIONS_CACHE = None
 
 
-def _get_back_translations() -> List[str]:
+def _get_back_translations() -> set:
     """
     Get all translations of the "Back" button text.
     
     Returns:
-        List of lowercase back button translations
+        Set of lowercase, stripped back button translations
     """
     global _BACK_TRANSLATIONS_CACHE
     if _BACK_TRANSLATIONS_CACHE is None:
-        back_translations = []
+        back_translations = set()
         for lang_dict in TRANSLATIONS.values():
             back_text = lang_dict.get('common.back')
             if back_text:
-                back_translations.append(back_text.lower())
+                # Strip whitespace to match the checking logic
+                back_translations.add(back_text.lower().strip())
         _BACK_TRANSLATIONS_CACHE = back_translations
     return _BACK_TRANSLATIONS_CACHE
 
