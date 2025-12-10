@@ -35,6 +35,20 @@ class SaveGameMenu(Menu):
                 self.running = False
             elif event.key == pygame.K_BACKSPACE:
                 self.input_text = self.input_text[:-1]
+            elif event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
+                # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
+                try:
+                    clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
+                    if clipboard_text:
+                        # Decode bytes to string and strip null characters
+                        pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
+                        # Filter to only include printable characters and respect max length
+                        for char in pasted_text:
+                            if char.isprintable() and len(self.input_text) < 50:
+                                self.input_text += char
+                except (pygame.error, UnicodeDecodeError, AttributeError):
+                    # Clipboard operation failed or clipboard not available
+                    pass
             else:
                 # Add character if printable
                 if event.unicode.isprintable() and len(self.input_text) < 50:
