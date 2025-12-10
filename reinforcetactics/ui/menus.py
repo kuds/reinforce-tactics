@@ -752,6 +752,15 @@ class PlayerConfigMenu:
 
         # Get language instance
         self.lang = get_language()
+        
+        # Check which LLM providers have API keys configured
+        from reinforcetactics.utils.settings import get_settings
+        settings = get_settings()
+        self.available_llm_bots = {
+            'OpenAIBot': bool(settings.get_api_key('openai')),
+            'ClaudeBot': bool(settings.get_api_key('anthropic')),
+            'GeminiBot': bool(settings.get_api_key('google'))
+        }
 
     def handle_input(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
         """
@@ -788,12 +797,16 @@ class PlayerConfigMenu:
                                 config['bot_type'] = None
 
                         elif element['type'] == 'difficulty_select':
-                            # Cycle through available bot types
+                            # Cycle through available bot types (only those with API keys)
                             player_idx = element['player_idx']
                             config = self.player_configs[player_idx]
                             if config['type'] == 'computer':
-                                # Cycle through bot types: SimpleBot -> OpenAIBot -> ClaudeBot -> GeminiBot -> SimpleBot
-                                bot_types = ['SimpleBot', 'OpenAIBot', 'ClaudeBot', 'GeminiBot']
+                                # Build list of available bot types
+                                bot_types = ['SimpleBot']  # SimpleBot is always available
+                                for bot_name, is_available in self.available_llm_bots.items():
+                                    if is_available:
+                                        bot_types.append(bot_name)
+                                
                                 current_bot = config['bot_type']
                                 try:
                                     current_idx = bot_types.index(current_bot)
@@ -874,6 +887,11 @@ class PlayerConfigMenu:
                     'GeminiBot': 'Gemini'
                 }
                 diff_text = bot_display_names.get(bot_type, bot_type)
+                
+                # Add indicator if bot is unavailable (no API key)
+                if bot_type in self.available_llm_bots and not self.available_llm_bots[bot_type]:
+                    diff_text += ' (No API Key)'
+                
                 self._draw_button(diff_x, y_pos, diff_text, 'difficulty_select', i, disabled=False)
 
         # Draw Start Game button
@@ -1387,6 +1405,18 @@ class APIKeysMenu:
         self.input_rects = {}
         self.button_rects = {}
         self.hover_element = None
+        
+        # Test connection status
+        self.test_status = {
+            'openai': None,  # None, 'testing', 'success', 'failed'
+            'anthropic': None,
+            'google': None
+        }
+        self.test_messages = {
+            'openai': '',
+            'anthropic': '',
+            'google': ''
+        }
 
     def handle_input(self, event: pygame.event.Event) -> Optional[bool]:
         """
@@ -1431,6 +1461,13 @@ class APIKeysMenu:
                 if 'back' in self.button_rects and self.button_rects['back'].collidepoint(mouse_pos):
                     self.running = False
                     return False
+                
+                # Check test buttons
+                for provider in ['openai', 'anthropic', 'google']:
+                    test_button_key = f'test_{provider}'
+                    if test_button_key in self.button_rects and self.button_rects[test_button_key].collidepoint(mouse_pos):
+                        self._test_connection(provider)
+                        return None
                 
                 # Clicked outside any input
                 self.active_input = None
@@ -1531,8 +1568,38 @@ class APIKeysMenu:
                 cursor_y1 = input_rect.centery - 10
                 cursor_y2 = input_rect.centery + 10
                 pygame.draw.line(self.screen, self.text_color, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 2)
+            
+            # Draw Test Connection button
+            test_button_x = input_x + input_width - 100
+            test_button_y = input_y + input_height + 5
+            test_button_key = f'test_{provider_key}'
+            
+            # Determine button text and color based on test status
+            status = self.test_status[provider_key]
+            if status == 'testing':
+                test_text = 'Testing...'
+                test_color = (150, 150, 150)
+            elif status == 'success':
+                test_text = '✓ Test'
+                test_color = (50, 150, 50)
+            elif status == 'failed':
+                test_text = '✗ Test'
+                test_color = (150, 50, 50)
+            else:
+                test_text = 'Test'
+                test_color = self.button_color
+            
+            # Draw test button
+            test_rect = self._draw_test_button(test_button_x, test_button_y, test_text, test_button_key, test_color)
+            self.button_rects[test_button_key] = test_rect
+            
+            # Draw status message if available
+            if self.test_messages[provider_key]:
+                status_surface = self.input_font.render(self.test_messages[provider_key], True, self.text_color)
+                status_rect = status_surface.get_rect(x=input_x, y=test_button_y + 35)
+                self.screen.blit(status_surface, status_rect)
 
-            y_pos += 90
+            y_pos += 110
 
         # Draw buttons
         button_y = y_pos + 20
@@ -1570,6 +1637,119 @@ class APIKeysMenu:
         self.screen.blit(text_surface, text_rect)
 
         return button_rect
+    
+    def _draw_test_button(self, x: int, y: int, text: str, button_name: str, bg_color: tuple) -> pygame.Rect:
+        """Draw a test button with custom color and return its rect."""
+        padding_x = 15
+        padding_y = 8
+
+        text_surface = self.input_font.render(text, True, self.text_color)
+        text_rect = text_surface.get_rect()
+
+        button_width = text_rect.width + 2 * padding_x
+        button_height = text_rect.height + 2 * padding_y
+        button_rect = pygame.Rect(x, y, button_width, button_height)
+
+        # Use custom color or hover color
+        if self.hover_element == button_name:
+            final_color = tuple(min(c + 30, 255) for c in bg_color)
+        else:
+            final_color = bg_color
+        
+        pygame.draw.rect(self.screen, final_color, button_rect, border_radius=5)
+
+        # Draw text
+        text_rect.center = button_rect.center
+        self.screen.blit(text_surface, text_rect)
+
+        return button_rect
+
+    def _test_connection(self, provider: str) -> None:
+        """
+        Test connection to an LLM provider.
+        
+        Args:
+            provider: Provider name ('openai', 'anthropic', 'google')
+        """
+        api_key = self.api_keys[provider]
+        if not api_key:
+            self.test_status[provider] = 'failed'
+            self.test_messages[provider] = 'No API key provided'
+            return
+        
+        self.test_status[provider] = 'testing'
+        self.test_messages[provider] = 'Testing...'
+        self.draw()  # Redraw to show testing status
+        pygame.display.flip()
+        
+        try:
+            if provider == 'openai':
+                self._test_openai(api_key)
+            elif provider == 'anthropic':
+                self._test_anthropic(api_key)
+            elif provider == 'google':
+                self._test_google(api_key)
+            
+            self.test_status[provider] = 'success'
+            self.test_messages[provider] = 'Connection successful!'
+        except Exception as e:
+            self.test_status[provider] = 'failed'
+            error_msg = str(e)
+            # Truncate long error messages
+            if len(error_msg) > 50:
+                error_msg = error_msg[:47] + '...'
+            self.test_messages[provider] = f'Error: {error_msg}'
+    
+    def _test_openai(self, api_key: str) -> None:
+        """Test OpenAI API connection."""
+        try:
+            import openai
+        except ImportError as exc:
+            raise ImportError("openai package not installed") from exc
+        
+        client = openai.OpenAI(api_key=api_key)
+        # Make a minimal API call to test the connection
+        response = client.chat.completions.create(
+            model='gpt-4o-mini',
+            messages=[{'role': 'user', 'content': 'Hello'}],
+            max_tokens=5
+        )
+        if not response.choices:
+            raise ValueError("Invalid response from OpenAI")
+    
+    def _test_anthropic(self, api_key: str) -> None:
+        """Test Anthropic API connection."""
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise ImportError("anthropic package not installed") from exc
+        
+        client = anthropic.Anthropic(api_key=api_key)
+        # Make a minimal API call to test the connection
+        response = client.messages.create(
+            model='claude-3-haiku-20240307',
+            max_tokens=5,
+            messages=[{'role': 'user', 'content': 'Hello'}]
+        )
+        if not response.content:
+            raise ValueError("Invalid response from Anthropic")
+    
+    def _test_google(self, api_key: str) -> None:
+        """Test Google Gemini API connection."""
+        try:
+            import google.generativeai as genai
+        except ImportError as exc:
+            raise ImportError("google-generativeai package not installed") from exc
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Make a minimal API call to test the connection
+        response = model.generate_content(
+            'Hello',
+            generation_config=genai.types.GenerationConfig(max_output_tokens=5)
+        )
+        if not response.text:
+            raise ValueError("Invalid response from Google")
 
     def run(self) -> bool:
         """
