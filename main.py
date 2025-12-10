@@ -438,6 +438,66 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                 bots[2] = SimpleBot(game, player=2)
                 print("Bot created for Player 2")
 
+        def execute_unit_action(action, unit, selected_unit_ref):
+            """
+            Execute a unit action from the menu.
+            
+            Args:
+                action: The action dictionary from the menu
+                unit: The unit performing the action
+                selected_unit_ref: Reference list to clear selection [selected_unit]
+            
+            Returns:
+                Tuple of (target_selection_mode, target_selection_action, unit or None)
+            """
+            if action['type'] == 'wait':
+                unit.end_unit_turn()
+                print(f"{unit.type} ended turn")
+                selected_unit_ref[0] = None
+                return (False, None, None)
+            
+            if action['type'] == 'cancel_move':
+                unit.cancel_move()
+                print(f"Cancelled move for {unit.type}")
+                selected_unit_ref[0] = None
+                return (False, None, None)
+            
+            if action['type'] == 'capture':
+                result = game.seize(unit)
+                if result['captured']:
+                    print(f"{unit.type} captured structure!")
+                unit.end_unit_turn()
+                selected_unit_ref[0] = None
+                return (False, None, None)
+            
+            if action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
+                # Enter target selection mode
+                targets = action['targets']
+                if len(targets) == 1:
+                    # Only one target, execute immediately
+                    target = targets[0]
+                    if action['type'] == 'attack':
+                        game.attack(unit, target)
+                        print(f"{unit.type} attacked {target.type}")
+                    elif action['type'] == 'paralyze':
+                        game.paralyze(unit, target)
+                        print(f"{unit.type} paralyzed {target.type}")
+                    elif action['type'] == 'heal':
+                        game.heal(unit, target)
+                        print(f"{unit.type} healed {target.type}")
+                    elif action['type'] == 'cure':
+                        game.cure(unit, target)
+                        print(f"{unit.type} cured {target.type}")
+                    unit.end_unit_turn()
+                    selected_unit_ref[0] = None
+                    return (False, None, None)
+                
+                # Multiple targets, enter target selection mode
+                print(f"Select target for {action['type']}")
+                return (True, action, unit)
+            
+            return (False, None, unit)
+
         # Game loop variables
         clock = pygame.time.Clock()
         running = True
@@ -502,53 +562,14 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             elif menu_result['type'] == 'action_selected':
                                 # Process the selected action
                                 action = menu_result['action']
-                                # Process action (will be handled below)
                                 active_menu = None
-
-                                # Execute action based on type
-                                if action['type'] == 'wait':
-                                    target_selection_unit.end_unit_turn()
-                                    print(f"{target_selection_unit.type} ended turn")
-                                    target_selection_unit = None
-                                    selected_unit = None
-                                elif action['type'] == 'cancel_move':
-                                    target_selection_unit.cancel_move()
-                                    print(f"Cancelled move for {target_selection_unit.type}")
-                                    target_selection_unit = None
-                                    selected_unit = None
-                                elif action['type'] == 'capture':
-                                    result = game.seize(target_selection_unit)
-                                    if result['captured']:
-                                        print(f"{target_selection_unit.type} captured structure!")
-                                    target_selection_unit.end_unit_turn()
-                                    target_selection_unit = None
-                                    selected_unit = None
-                                elif action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
-                                    # Enter target selection mode
-                                    targets = action['targets']
-                                    if len(targets) == 1:
-                                        # Only one target, execute immediately
-                                        target = targets[0]
-                                        if action['type'] == 'attack':
-                                            result = game.attack(target_selection_unit, target)
-                                            print(f"{target_selection_unit.type} attacked {target.type}")
-                                        elif action['type'] == 'paralyze':
-                                            game.paralyze(target_selection_unit, target)
-                                            print(f"{target_selection_unit.type} paralyzed {target.type}")
-                                        elif action['type'] == 'heal':
-                                            game.heal(target_selection_unit, target)
-                                            print(f"{target_selection_unit.type} healed {target.type}")
-                                        elif action['type'] == 'cure':
-                                            game.cure(target_selection_unit, target)
-                                            print(f"{target_selection_unit.type} cured {target.type}")
-                                        target_selection_unit.end_unit_turn()
-                                        target_selection_unit = None
-                                        selected_unit = None
-                                    else:
-                                        # Multiple targets, enter target selection mode
-                                        target_selection_mode = True
-                                        target_selection_action = action
-                                        print(f"Select target for {action['type']}")
+                                
+                                # Execute action using helper function
+                                selected_unit_ref = [selected_unit]
+                                target_selection_mode, target_selection_action, target_selection_unit = execute_unit_action(
+                                    action, target_selection_unit, selected_unit_ref
+                                )
+                                selected_unit = selected_unit_ref[0]
 
                     elif event.key == pygame.K_s and not active_menu:
                         # Save game
@@ -645,50 +666,12 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                                     action = menu_result['action']
                                     active_menu = None
 
-                                    # Execute action based on type
-                                    if action['type'] == 'wait':
-                                        target_selection_unit.end_unit_turn()
-                                        print(f"{target_selection_unit.type} ended turn")
-                                        target_selection_unit = None
-                                        selected_unit = None
-                                    elif action['type'] == 'cancel_move':
-                                        target_selection_unit.cancel_move()
-                                        print(f"Cancelled move for {target_selection_unit.type}")
-                                        target_selection_unit = None
-                                        selected_unit = None
-                                    elif action['type'] == 'capture':
-                                        result = game.seize(target_selection_unit)
-                                        if result['captured']:
-                                            print(f"{target_selection_unit.type} captured structure!")
-                                        target_selection_unit.end_unit_turn()
-                                        target_selection_unit = None
-                                        selected_unit = None
-                                    elif action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
-                                        # Enter target selection mode
-                                        targets = action['targets']
-                                        if len(targets) == 1:
-                                            # Only one target, execute immediately
-                                            target = targets[0]
-                                            if action['type'] == 'attack':
-                                                result = game.attack(target_selection_unit, target)
-                                                print(f"{target_selection_unit.type} attacked {target.type}")
-                                            elif action['type'] == 'paralyze':
-                                                game.paralyze(target_selection_unit, target)
-                                                print(f"{target_selection_unit.type} paralyzed {target.type}")
-                                            elif action['type'] == 'heal':
-                                                game.heal(target_selection_unit, target)
-                                                print(f"{target_selection_unit.type} healed {target.type}")
-                                            elif action['type'] == 'cure':
-                                                game.cure(target_selection_unit, target)
-                                                print(f"{target_selection_unit.type} cured {target.type}")
-                                            target_selection_unit.end_unit_turn()
-                                            target_selection_unit = None
-                                            selected_unit = None
-                                        else:
-                                            # Multiple targets, enter target selection mode
-                                            target_selection_mode = True
-                                            target_selection_action = action
-                                            print(f"Select target for {action['type']}")
+                                    # Execute action using helper function
+                                    selected_unit_ref = [selected_unit]
+                                    target_selection_mode, target_selection_action, target_selection_unit = execute_unit_action(
+                                        action, target_selection_unit, selected_unit_ref
+                                    )
+                                    selected_unit = selected_unit_ref[0]
                             # Continue to prevent further processing
                             continue
 
