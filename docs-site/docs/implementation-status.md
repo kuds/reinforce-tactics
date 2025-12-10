@@ -22,6 +22,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 - [x] `game/__init__.py` - Game module initialization
 - [x] `game/mechanics.py` - Combat, healing, structures, income
 - [x] `game/bot.py` - SimpleBot AI for training
+- [x] `game/llm_bot.py` - LLM-powered bots (OpenAI, Claude, Gemini)
 
 ### UI Components
 - [x] `ui/__init__.py` - UI module initialization
@@ -36,72 +37,38 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ### Utilities
 - [x] `utils/__init__.py` - Utils module initialization
 - [x] `utils/file_io.py` - File I/O for maps, saves, replays
+- [x] `utils/settings.py` - Settings management with API keys
+- [x] `utils/language.py` - Multi-language support
+- [x] `utils/replay_player.py` - Replay playback system
 
 ### Training & Documentation
-- [x] `train_rl_agent.py` - Complete training script with CLI
+- [x] `main.py` - **Complete entry point with ~1000 lines** including:
+  - Training mode with PPO/A2C/DQN algorithms
+  - Evaluation mode for testing trained agents
+  - Interactive play mode with GUI
+  - Stats viewing mode
+  - Full CLI argument parsing
+  - Bot integration (SimpleBot, LLM bots)
+  - Save/load functionality
+  - Replay playback
 - [x] `README.md` - Comprehensive documentation
-- [x] `PROJECT_STRUCTURE.md` - Architecture overview
-- [x] `IMPLEMENTATION_STATUS.md` - This file
+- [x] `docs-site/` - Docusaurus documentation site deployed at reinforcetactics.com
 
 ## ⏳ TODO - Critical Files
 
-### 1. Main Entry Point
-**File**: `main.py`
-
-This needs to be created to tie everything together. Here's the structure:
-
-```python
-"""
-Main entry point for the GUI game.
-"""
-import pygame
-import sys
-from ui.menus import MainMenu
-from game.controller import GameController  # TODO: Create this
-from utils.file_io import FileIO
-
-def main():
-    pygame.init()
-    
-    while True:
-        # Show main menu
-        menu = MainMenu()
-        result = menu.run()
-        
-        if not result:
-            break
-            
-        # Handle menu choice
-        if result['type'] == 'new_game':
-            # Start new game
-            pass
-        elif result['type'] == 'load_game':
-            # Load saved game
-            pass
-        elif result['type'] == 'watch_replay':
-            # Watch replay
-            pass
-    
-    pygame.quit()
-    sys.exit(0)
-
-if __name__ == '__main__':
-    main()
-```
-
-### 2. Game Controller
+### 1. Game Controller
 **File**: `game/controller.py`
 
-This should wrap GameState and handle GUI interactions:
+This would help organize game loop logic (though main.py handles most of this now):
 
 ```python
 """
 Game controller that bridges GameState and UI.
 """
-from core.game_state import GameState
-from ui.renderer import Renderer
-from ui.menus import SaveGameMenu, PauseMenu
-from game.bot import SimpleBot
+from reinforcetactics.core.game_state import GameState
+from reinforcetactics.ui.renderer import Renderer
+from reinforcetactics.ui.menus import SaveGameMenu, PauseMenu
+from reinforcetactics.game.bot import SimpleBot
 import pygame
 
 class GameController:
@@ -119,33 +86,13 @@ class GameController:
         pass
 ```
 
-### 3. Replay System
-**File**: `replay/__init__.py` and `replay/replay_system.py`
+### 2. Advanced Bot AI
+**Status**: SimpleBot exists, but more sophisticated AI would improve training
 
-Replay recording and playback:
-
-```python
-"""
-Replay recording and playback system.
-"""
-class ReplayRecorder:
-    """Records game actions for replay."""
-    pass
-
-class ReplayPlayer:
-    """Plays back recorded games."""
-    pass
-```
-
-### 4. Package Init
-**File**: `__init__.py` (root level)
-
-```python
-"""
-2D Turn-Based Strategy Game
-"""
-__version__ = '1.0.0'
-```
+Future improvements:
+- Normal difficulty bot
+- Hard difficulty bot with strategic planning
+- Minimax or MCTS-based bot
 
 ## 📁 Required Directories
 
@@ -195,8 +142,8 @@ p,p,p,p,p,p,p,p,p,p,p,p,p,p,p,p,p,p,p,p
 
 ```python
 # test_headless.py
-from core.game_state import GameState
-from utils.file_io import FileIO
+from reinforcetactics.core.game_state import GameState
+from reinforcetactics.utils.file_io import FileIO
 
 map_data = FileIO.generate_random_map(20, 20, num_players=2)
 game = GameState(map_data)
@@ -218,7 +165,7 @@ print("Headless mode working! ✓")
 
 ```python
 # test_rl.py
-from rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 env = StrategyGameEnv(opponent='bot')
 obs, info = env.reset()
@@ -241,20 +188,33 @@ print("Episode completed successfully! ✓")
 ### Test Training (Quick)
 
 ```bash
-python train_rl_agent.py train --total-timesteps 1000 --check-env
+python main.py --mode train --algorithm ppo --timesteps 1000
+```
+
+### Test GUI Mode
+
+```bash
+python main.py --mode play
 ```
 
 ## 📝 Implementation Notes
 
 ### What Works Now
 
-1. **Headless mode** - Full game logic without rendering
-2. **RL training** - Can train agents using Stable-Baselines3
-3. **Bot opponent** - SimpleBot for training baseline
-4. **All game mechanics** - Combat, structures, economy, status effects
-5. **Action encoding** - Multi-discrete action space
-6. **File I/O** - Save/load, map loading, random generation
-7. **Menu system** - Self-contained menus with internal navigation
+1. **Full GUI gameplay** - Complete game with menus, rendering, and all features
+2. **Headless mode** - Full game logic without rendering for fast training
+3. **RL training** - Train agents using Stable-Baselines3 (PPO, A2C, DQN)
+4. **Bot opponents** - SimpleBot and LLM-powered bots (GPT, Claude, Gemini)
+5. **All game mechanics** - Combat, structures, economy, status effects
+6. **Action encoding** - Multi-discrete action space for RL
+7. **File I/O** - Save/load games, map loading, random generation
+8. **Menu system** - Comprehensive menu system with all game modes
+9. **Save/Load system** - Full game state serialization and persistence
+10. **Replay system** - Record and playback games with video export
+11. **Multi-language support** - Language selection and localization
+12. **Settings management** - API keys, preferences, and configuration
+13. **Docker support** - Containerized deployment
+14. **Documentation site** - Deployed at reinforcetactics.com
 
 ### Menu System API
 
@@ -300,37 +260,41 @@ The "New Game" menu now uses a three-step selection process:
 
 ### What's Missing
 
-1. **GUI game loop** - `main.py` exists but `game/controller.py` would help organize game loop logic
-2. **Interactive gameplay** - Event handling for human players (partially implemented in main.py)
-3. **Replay playback** - Video recording and replay viewing (replay selection menu exists, but playback needs implementation)
+1. **Advanced bot AI** - Normal and hard difficulty bots with strategic planning
+2. **Complete action masking** - Proper action filtering for more efficient RL training
+3. **Map editor GUI** - In-game map creation and editing tools
+4. **Multiplayer (3-4 players)** - Support for more than 2 players
+5. **Tournament/ladder system** - Competitive ranking and matchmaking
+6. **Better graphics/animations** - Enhanced visual effects and unit animations
+7. **Sound effects and music** - Audio feedback for actions and events
 
 ### Implementation Priority
 
-1. **High Priority** (for basic playability)
-   - `main.py` - Entry point
-   - `game/controller.py` - Game loop with UI
-   - Test with simple human vs human game
+1. **High Priority** (for enhanced gameplay)
+   - Advanced bot AI (Normal/Hard difficulty)
+   - Complete action masking for RL efficiency
+   - Better graphics and animations
 
-2. **Medium Priority** (for full features)
-   - `replay/replay_system.py` - Replay playback
-   - Complete action masking in RL
-   - More sophisticated bot AI
+2. **Medium Priority** (for additional features)
+   - Map editor GUI
+   - Multiplayer support (3-4 players)
+   - Sound effects and music
+   - Tournament/ladder system
 
-3. **Low Priority** (polish)
-   - Video recording for replays
-   - Map editor
-   - Better graphics/animations
-   - Sound effects
+3. **Low Priority** (nice to have)
+   - Additional unit types and abilities
+   - Advanced terrain effects
+   - Fog of war
+   - Campaign mode with story
 
 ## 🎯 Next Steps
 
-1. **Create the missing files** listed above
-2. **Set up directories** for maps, saves, etc.
-3. **Create at least one test map** in `maps/1v1/`
-4. **Test headless mode** to verify core logic
-5. **Test RL environment** to verify Gymnasium integration
-6. **Implement `main.py`** for GUI gameplay
-7. **Test full game loop** with human players
+1. **Enhance bot AI** - Implement Normal and Hard difficulty levels
+2. **Improve action masking** - Complete implementation for efficient RL training
+3. **Add graphics polish** - Better animations and visual effects
+4. **Create map editor** - GUI tool for creating custom maps
+5. **Test extensively** - Comprehensive testing of all game modes
+6. **Performance optimization** - Profile and optimize bottlenecks
 
 ## 💡 Tips for Implementation
 
@@ -355,5 +319,8 @@ The "New Game" menu now uses a three-step selection process:
 - ✅ **Extensible** - Easy to add new units, mechanics, rewards
 - ✅ **Well-documented** - Comprehensive README and docstrings
 - ✅ **Production-ready** - Proper package structure
+- ✅ **Full-featured** - Complete game with GUI, save/load, replays
+- ✅ **LLM integration** - Support for GPT, Claude, and Gemini bots
+- ✅ **Docker support** - Easy deployment and development
 
-You now have 85% of a complete game! The remaining 15% is primarily about connecting the GUI to the existing game logic.
+The project is feature-complete and ready for gameplay, training, and further enhancement!

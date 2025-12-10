@@ -20,8 +20,13 @@ Reinforce Tactics is a 2D turn-based strategy game featuring:
 - **Combat system** with attacks, counter-attacks, paralysis, and healing
 - **Economic system** with income from controlled structures
 - **Structure capture**: Towers, Buildings, and Headquarters
-- **AI opponents** for training and evaluation
+- **Save/Load system** for continuing games
+- **Replay system** for watching past games
+- **AI opponents**: SimpleBot and LLM-powered bots (GPT, Claude, Gemini)
 - **Full Gymnasium integration** for RL training
+- **Headless mode** for fast training without rendering
+- **Multiple training algorithms**: PPO, A2C, DQN via Stable-Baselines3
+- **Docker support** for easy deployment
 
 ## 🤖 Why Reinforce Tactics?
 
@@ -47,19 +52,19 @@ pip install pygame pandas numpy gymnasium stable-baselines3[extra]
 ### Play the Game
 
 ```bash
-python main.py
+python main.py --mode play
 ```
 
 ### Train an RL Agent
 
 ```bash
-python train_rl_agent.py train --opponent bot --total-timesteps 1000000
+python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent bot
 ```
 
 ### Use as Gymnasium Environment
 
 ```python
-from rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
 env = StrategyGameEnv(

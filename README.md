@@ -48,28 +48,24 @@ pip install opencv-python
 ## Project Structure
 
 ```
-strategy_game/
-├── constants.py              # Game constants
-├── main.py                   # GUI entry point
-├── train_rl_agent.py        # RL training script
-├── core/                     # Core game logic (no rendering)
-│   ├── tile.py
-│   ├── unit.py
-│   ├── grid.py
-│   └── game_state.py
-├── game/                     # Game mechanics
-│   ├── mechanics.py
-│   └── bot.py
-├── ui/                       # Pygame UI
-│   ├── renderer.py
-│   └── menus.py
-├── rl/                       # Reinforcement learning
-│   ├── gym_env.py
-│   └── action_space.py
-├── utils/                    # Utilities
-│   └── file_io.py
-└── maps/                     # Map files
-    └── 1v1/
+reinforce-tactics/
+├── main.py                    # Main entry point (train, evaluate, play, stats modes)
+├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Docker support
+├── reinforcetactics/          # Main package
+│   ├── core/                  # Core game logic
+│   ├── game/                  # Game mechanics & bots
+│   ├── ui/                    # Pygame UI components
+│   ├── rl/                    # Reinforcement learning
+│   └── utils/                 # Utilities (file_io, settings, language, replay)
+├── train/                     # Training scripts (including feudal RL)
+├── eval/                      # Evaluation scripts
+├── examples/                  # Example scripts (LLM bot demo)
+├── tests/                     # Test suite
+├── notebooks/                 # Jupyter notebooks
+├── maps/                      # Map files
+├── scripts/                   # Utility scripts
+└── docs-site/                 # Docusaurus documentation site
 ```
 
 ## Quick Start
@@ -84,25 +80,28 @@ python main.py
 
 ```bash
 # Train against bot opponent
-python train_rl_agent.py train --opponent bot --total-timesteps 1000000
+python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent bot
 
 # Train with self-play
-python train_rl_agent.py train --opponent self --total-timesteps 1000000
+python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent self
 
-# Custom rewards (dense rewards for faster learning)
-python train_rl_agent.py train --reward-income 0.01 --reward-units 10 --reward-structures 5
+# Train with A2C algorithm
+python main.py --mode train --algorithm a2c --timesteps 500000 --opponent bot
+
+# Train with DQN algorithm
+python main.py --mode train --algorithm dqn --timesteps 1000000 --opponent bot
 ```
 
 ### Test a Trained Agent
 
 ```bash
-python train_rl_agent.py test --model-path ./models/PPO_final.zip --n-episodes 5
+python main.py --mode evaluate --model models/ppo_model.zip --episodes 10
 ```
 
 ### Use as Gymnasium Environment
 
 ```python
-from rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
 env = StrategyGameEnv(
@@ -120,9 +119,9 @@ obs, reward, terminated, truncated, info = env.step(action)
 ### Headless Mode (Fast Training)
 
 ```python
-from core.game_state import GameState
-from game.bot import SimpleBot
-from utils.file_io import FileIO
+from reinforcetactics.core.game_state import GameState
+from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.utils.file_io import FileIO
 
 # Load map
 map_data = FileIO.load_map('maps/1v1/test_map.csv')
@@ -397,12 +396,12 @@ Start with sparse rewards (only win/loss), then add dense rewards if learning is
 
 ### Running Tests
 
-```python
-# Test environment
-python train_rl_agent.py train --check-env --total-timesteps 1000
+```bash
+# Run the full test suite
+python -m pytest tests/
 
 # Quick game test
-python -c "from rl import StrategyGameEnv; env = StrategyGameEnv(); env.reset(); print('OK')"
+python -c "from reinforcetactics.rl.gym_env import StrategyGameEnv; env = StrategyGameEnv(); env.reset(); print('OK')"
 ```
 
 ### Creating Custom Maps
@@ -503,12 +502,12 @@ Built with:
   - [ ] French
   - [ ] Chinese
 - [x] Implement Saving playback to video
-- [ ] Implement headless mode
+- [x] Implement headless mode
 - [ ] Implement game play stats
 - [ ] Unit Artwork
 - [ ] Terriority Artwork
-- [ ] Support Gymanisum framework
+- [x] Support Gymnasium framework
 - [ ] Support Ray rllib
 - [ ] Support PettingZoo
-- [ ] Support Docker
-- [ ] Website
+- [x] Support Docker
+- [x] Website
