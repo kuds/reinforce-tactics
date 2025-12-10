@@ -33,8 +33,6 @@ class SaveGameMenu(Menu):
                     return self._save_game()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
-            elif event.key == pygame.K_BACKSPACE:
-                self.input_text = self.input_text[:-1]
             elif event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
                 # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
                 try:
@@ -49,9 +47,13 @@ class SaveGameMenu(Menu):
                 except (pygame.error, UnicodeDecodeError, AttributeError):
                     # Clipboard operation failed or clipboard not available
                     pass
+            elif event.key == pygame.K_BACKSPACE:
+                self.input_text = self.input_text[:-1]
             else:
-                # Add character if printable
-                if event.unicode.isprintable() and len(self.input_text) < 50:
+                # Add character if printable and no modifier keys are pressed
+                # This prevents Cmd+V from adding 'v' on macOS
+                if (event.unicode.isprintable() and len(self.input_text) < 50 and
+                        not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT))):
                     self.input_text += event.unicode
 
         return None

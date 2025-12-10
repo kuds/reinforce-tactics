@@ -100,12 +100,8 @@ class APIKeysMenu:
                 return True
             elif self.active_input is not None:
                 # Typing in an input field
-                if event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
-                    # Move to next field or finish
-                    self.active_input = None
-                elif event.key == pygame.K_BACKSPACE:
-                    self.api_keys[self.active_input] = self.api_keys[self.active_input][:-1]
-                elif event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
+                # Check for paste first (before other key handlers)
+                if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
                     # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
                     try:
                         clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
@@ -118,8 +114,16 @@ class APIKeysMenu:
                     except (pygame.error, UnicodeDecodeError, AttributeError):
                         # Clipboard operation failed or clipboard not available
                         pass
+                elif event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
+                    # Move to next field or finish
+                    self.active_input = None
+                elif event.key == pygame.K_BACKSPACE:
+                    self.api_keys[self.active_input] = self.api_keys[self.active_input][:-1]
                 elif event.unicode and event.unicode.isprintable():
-                    self.api_keys[self.active_input] += event.unicode
+                    # Only add regular characters if no modifier keys are pressed
+                    # This prevents Cmd+V from adding 'v' on macOS
+                    if not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT)):
+                        self.api_keys[self.active_input] += event.unicode
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button
