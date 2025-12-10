@@ -67,7 +67,7 @@ class ExperimentTracker:
 
         # Save config
         config_path = self.log_dir / "config.json"
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, indent=2)
 
     def log_metrics(self, metrics: Dict[str, float], step: int):

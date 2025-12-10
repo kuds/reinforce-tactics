@@ -296,12 +296,8 @@ def play_mode(_args):
         import pygame  # noqa: F401
         sys.path.insert(0, str(Path(__file__).parent))
 
-        # Import game components (unused here but needed for validation)
-        from reinforcetactics.core.game_state import GameState  # noqa: F401
-        from reinforcetactics.ui.renderer import Renderer  # noqa: F401
+        # Import game components to validate they exist
         from reinforcetactics.ui.menus import MainMenu  # noqa: F401
-        from reinforcetactics.utils.file_io import FileIO  # noqa: F401
-        from reinforcetactics.game.bot import SimpleBot  # noqa: F401
     except ImportError as e:
         print(f"❌ Error importing game components: {e}")
         print("\nMake sure all required modules are in reinforcetactics/")
@@ -565,7 +561,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
                         # Priority 1.5: Building clicked for unit purchase
                         # Check if clicking on an owned building without a unit
-                        elif (not clicked_unit and 
+                        if (not clicked_unit and
                               clicked_tile.player == game.current_player and
                               clicked_tile.type in ['h', 'b']):  # HQ or Building
                             # Open unit purchase menu

@@ -36,7 +36,8 @@ class SimpleBot:
         create_actions.sort(key=lambda a: unit_costs[a['unit_type']], reverse=True)
 
         for action in create_actions:
-            if self.game_state.player_gold[self.bot_player] >= UNIT_DATA[action['unit_type']]['cost']:
+            unit_cost = UNIT_DATA[action['unit_type']]['cost']
+            if self.game_state.player_gold[self.bot_player] >= unit_cost:
                 self.game_state.create_unit(
                     action['unit_type'],
                     action['x'],
