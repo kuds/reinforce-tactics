@@ -438,6 +438,42 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                 bots[2] = SimpleBot(game, player=2)
                 print("Bot created for Player 2")
 
+        def handle_action_menu_result(menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref):
+            """
+            Handle result from UnitActionMenu interaction.
+            
+            Args:
+                menu_result: Result dictionary from menu interaction
+                active_menu_ref: Reference list for active_menu [active_menu]
+                target_selection_unit_ref: Reference list for target_selection_unit [target_selection_unit]
+                selected_unit_ref: Reference list for selected_unit [selected_unit]
+            
+            Returns:
+                Tuple of (target_selection_mode, target_selection_action) or None
+            """
+            if menu_result['type'] == 'cancel':
+                # Cancel move if unit has moved
+                if target_selection_unit_ref[0] and target_selection_unit_ref[0].has_moved:
+                    target_selection_unit_ref[0].cancel_move()
+                    print(f"Cancelled move for {target_selection_unit_ref[0].type}")
+                target_selection_unit_ref[0] = None
+                active_menu_ref[0] = None
+                return None
+            
+            if menu_result['type'] == 'action_selected':
+                # Process the selected action
+                action = menu_result['action']
+                active_menu_ref[0] = None
+                
+                # Execute action using helper function
+                result = execute_unit_action(
+                    action, target_selection_unit_ref[0], selected_unit_ref
+                )
+                target_selection_mode, target_selection_action, target_selection_unit_ref[0] = result
+                return (target_selection_mode, target_selection_action)
+            
+            return None
+
         def execute_unit_action(action, unit, selected_unit_ref):
             """
             Execute a unit action from the menu.
@@ -552,24 +588,20 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                     elif active_menu and isinstance(active_menu, UnitActionMenu):
                         menu_result = active_menu.handle_keydown(event)
                         if menu_result:
-                            if menu_result['type'] == 'cancel':
-                                # Cancel move if unit has moved
-                                if target_selection_unit and target_selection_unit.has_moved:
-                                    target_selection_unit.cancel_move()
-                                    print(f"Cancelled move for {target_selection_unit.type}")
-                                target_selection_unit = None
-                                active_menu = None
-                            elif menu_result['type'] == 'action_selected':
-                                # Process the selected action
-                                action = menu_result['action']
-                                active_menu = None
-                                
-                                # Execute action using helper function
-                                selected_unit_ref = [selected_unit]
-                                target_selection_mode, target_selection_action, target_selection_unit = execute_unit_action(
-                                    action, target_selection_unit, selected_unit_ref
-                                )
-                                selected_unit = selected_unit_ref[0]
+                            active_menu_ref = [active_menu]
+                            target_selection_unit_ref = [target_selection_unit]
+                            selected_unit_ref = [selected_unit]
+                            
+                            result = handle_action_menu_result(
+                                menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref
+                            )
+                            
+                            active_menu = active_menu_ref[0]
+                            target_selection_unit = target_selection_unit_ref[0]
+                            selected_unit = selected_unit_ref[0]
+                            
+                            if result:
+                                target_selection_mode, target_selection_action = result
 
                     elif event.key == pygame.K_s and not active_menu:
                         # Save game
@@ -649,29 +681,27 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             if menu_result:
                                 if menu_result['type'] == 'close':
                                     active_menu = None
-                                elif menu_result['type'] == 'cancel':
-                                    # Cancel action menu - cancel move if unit has moved
-                                    if isinstance(active_menu, UnitActionMenu):
-                                        if target_selection_unit and target_selection_unit.has_moved:
-                                            target_selection_unit.cancel_move()
-                                            print(f"Cancelled move for {target_selection_unit.type}")
-                                        target_selection_unit = None
-                                    active_menu = None
                                 elif menu_result['type'] == 'unit_created':
                                     unit = menu_result['unit']
                                     print(f"Created {unit.type} at ({unit.x}, {unit.y})")
                                     active_menu = None  # Close menu after purchase
-                                elif menu_result['type'] == 'action_selected':
-                                    # Process the selected action
-                                    action = menu_result['action']
-                                    active_menu = None
-
-                                    # Execute action using helper function
-                                    selected_unit_ref = [selected_unit]
-                                    target_selection_mode, target_selection_action, target_selection_unit = execute_unit_action(
-                                        action, target_selection_unit, selected_unit_ref
-                                    )
-                                    selected_unit = selected_unit_ref[0]
+                                elif menu_result['type'] in ['cancel', 'action_selected']:
+                                    # Handle UnitActionMenu results
+                                    if isinstance(active_menu, UnitActionMenu):
+                                        active_menu_ref = [active_menu]
+                                        target_selection_unit_ref = [target_selection_unit]
+                                        selected_unit_ref = [selected_unit]
+                                        
+                                        result = handle_action_menu_result(
+                                            menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref
+                                        )
+                                        
+                                        active_menu = active_menu_ref[0]
+                                        target_selection_unit = target_selection_unit_ref[0]
+                                        selected_unit = selected_unit_ref[0]
+                                        
+                                        if result:
+                                            target_selection_mode, target_selection_action = result
                             # Continue to prevent further processing
                             continue
 

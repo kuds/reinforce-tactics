@@ -78,8 +78,9 @@ class UnitActionMenu:
                 'targets': adjacent_enemies
             })
 
-        # Heal - only for Clerics with adjacent damaged allies
+        # Heal and Cure - only for Clerics
         if self.unit.type == 'C':
+            # Heal - only with adjacent damaged allies
             adjacent_allies = GameMechanics.get_adjacent_allies(self.unit, self.game_state.units)
             if adjacent_allies:
                 actions.append({
@@ -88,9 +89,8 @@ class UnitActionMenu:
                     'type': 'heal',
                     'targets': adjacent_allies
                 })
-
-        # Cure - only for Clerics with adjacent paralyzed allies
-        if self.unit.type == 'C':
+            
+            # Cure - only with adjacent paralyzed allies
             adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(
                 self.unit, self.game_state.units
             )
