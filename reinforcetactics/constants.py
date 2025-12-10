@@ -15,7 +15,7 @@ class TileType(Enum):
     HEADQUARTERS = 'h'
     TOWER = 't'
     OCEAN = 'o'
-    
+
     @classmethod
     def from_code(cls, code: str) -> 'TileType':
         """Get TileType from single-letter code."""
@@ -23,11 +23,11 @@ class TileType(Enum):
             if tile_type.value == code:
                 return tile_type
         raise ValueError(f"Unknown tile code: {code}")
-    
+
     def is_walkable(self) -> bool:
         """Check if this tile type can be walked on."""
         return self not in (TileType.WATER, TileType.OCEAN, TileType.MOUNTAIN)
-    
+
     def is_capturable(self) -> bool:
         """Check if this tile type can be captured."""
         return self in (TileType.TOWER, TileType.HEADQUARTERS, TileType.BUILDING)
@@ -46,8 +46,8 @@ TILE_COLORS = {
     TileType.MOUNTAIN.value: (150, 150, 150),   # Mountain - Light gray
     TileType.FOREST.value: (34, 139, 34),       # Forest - Forest green
     TileType.ROAD.value: (160, 130, 80),        # Road - Brown/tan
-    TileType.BUILDING.value: (180, 180, 180),   # Building - Light gray (will be colored by player)
-    TileType.HEADQUARTERS.value: (200, 200, 50),# Headquarters - Yellow base (will be colored by player)
+    TileType.BUILDING.value: (180, 180, 180),   # Building - Light gray (player-colored)
+    TileType.HEADQUARTERS.value: (200, 200, 50),  # Headquarters - Yellow (player-colored)
     TileType.TOWER.value: (220, 220, 220),      # Tower - Light gray
     TileType.OCEAN.value: (0, 39, 232),         # Ocean - Dark Blue
     # Keep string keys for backwards compatibility

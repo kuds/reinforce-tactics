@@ -20,7 +20,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -28,27 +27,27 @@ from pathlib import Path
 def check_dependencies():
     """Check if required dependencies are installed."""
     missing = []
-    
+
     try:
-        import pygame
+        import pygame  # noqa: F401
     except ImportError:
         missing.append("pygame")
-    
+
     try:
-        import numpy
+        import numpy  # noqa: F401
     except ImportError:
         missing.append("numpy")
-    
+
     try:
-        import pandas
+        import pandas  # noqa: F401
     except ImportError:
         missing.append("pandas")
-    
+
     if missing:
         print(f"❌ Missing required dependencies: {', '.join(missing)}")
         print(f"Install with: pip install {' '.join(missing)}")
         return False
-    
+
     return True
 
 def train_mode(args):
@@ -57,7 +56,6 @@ def train_mode(args):
         from stable_baselines3 import PPO, A2C, DQN
         from stable_baselines3.common.monitor import Monitor
         from stable_baselines3.common.callbacks import CheckpointCallback
-        import os
     except ImportError:
         print("❌ Stable-Baselines3 not installed.")
         print("Install with: pip install stable-baselines3[extra]")
@@ -290,20 +288,16 @@ def evaluate_mode(args):
     
     env.close()
 
-def play_mode(args):
+def play_mode(_args):
     """Interactive play mode with GUI."""
     print("\n🎮 Starting Interactive Play Mode...\n")
-    
+
     try:
-        import pygame
+        import pygame  # noqa: F401
         sys.path.insert(0, str(Path(__file__).parent))
-        
-        # Import game components
-        from reinforcetactics.core.game_state import GameState
-        from reinforcetactics.ui.renderer import Renderer
-        from reinforcetactics.ui.menus import MainMenu, MapSelectionMenu
-        from reinforcetactics.utils.file_io import FileIO
-        from reinforcetactics.game.bot import SimpleBot
+
+        # Import game components to validate they exist
+        from reinforcetactics.ui.menus import MainMenu  # noqa: F401
     except ImportError as e:
         print(f"❌ Error importing game components: {e}")
         print("\nMake sure all required modules are in reinforcetactics/")
@@ -339,7 +333,6 @@ def play_mode(args):
 def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=None):
     """Start a new game with the specified mode, map, and player configurations."""
     import pygame
-    from pathlib import Path
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import (
@@ -433,11 +426,11 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                         print(f"Bot created for Player {player_num} ({bot_type})")
                     except ValueError as e:
                         print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
-                        print(f"   Falling back to SimpleBot")
+                        print("   Falling back to SimpleBot")
                         bots[player_num] = SimpleBot(game, player=player_num)
                     except ImportError as e:
                         print(f"❌ Missing dependency for {bot_type}: {e}")
-                        print(f"   Falling back to SimpleBot")
+                        print("   Falling back to SimpleBot")
                         bots[player_num] = SimpleBot(game, player=player_num)
         else:
             # Legacy mode: Create bot for player 2 if mode is human_vs_computer
@@ -568,7 +561,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
                         # Priority 1.5: Building clicked for unit purchase
                         # Check if clicking on an owned building without a unit
-                        elif (not clicked_unit and 
+                        if (not clicked_unit and
                               clicked_tile.player == game.current_player and
                               clicked_tile.type in ['h', 'b']):  # HQ or Building
                             # Open unit purchase menu
@@ -629,7 +622,6 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 def load_saved_game():
     """Load a saved game."""
     import pygame
-    from pathlib import Path
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import LoadGameMenu, SaveGameMenu
@@ -697,11 +689,11 @@ def load_saved_game():
                         print(f"Bot created for Player {player_num} ({bot_type})")
                     except ValueError as e:
                         print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
-                        print(f"   Falling back to SimpleBot")
+                        print("   Falling back to SimpleBot")
                         bots[player_num] = SimpleBot(game, player=player_num)
                     except ImportError as e:
                         print(f"❌ Missing dependency for {bot_type}: {e}")
-                        print(f"   Falling back to SimpleBot")
+                        print("   Falling back to SimpleBot")
                         bots[player_num] = SimpleBot(game, player=player_num)
         else:
             # Fallback for old saves without player_configs
@@ -808,17 +800,16 @@ def load_saved_game():
 
 def watch_replay(replay_path=None):
     """Watch a replay.
-    
+
     Args:
         replay_path (str, optional): Path to replay file. If None, shows replay selection menu.
     """
     import pygame
     import pandas as pd
-    from pathlib import Path
     from reinforcetactics.ui.menus import ReplaySelectionMenu
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.utils.replay_player import ReplayPlayer
-    
+
     print("\n📼 Loading replay...\n")
     
     # Show replay selection menu only if replay_path not provided
@@ -865,7 +856,7 @@ def watch_replay(replay_path=None):
         import traceback
         traceback.print_exc()
 
-def stats_mode(args):
+def stats_mode(_args):
     """Display training statistics."""
     print("\n📊 Training Statistics\n")
     
@@ -908,10 +899,10 @@ def main():
     # Initialize settings first
     from reinforcetactics.utils.settings import get_settings
     from reinforcetactics.utils.language import get_language
-    
+
     settings = get_settings()
-    lang = get_language()
-    
+    _ = get_language()  # Initialize language system
+
     # Ensure all directories exist
     settings.ensure_directories()
     

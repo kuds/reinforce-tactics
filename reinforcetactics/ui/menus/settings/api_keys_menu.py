@@ -25,6 +25,12 @@ class APIKeysMenu:
         if self.owns_screen:
             self.screen = pygame.display.set_mode((800, 600))
             pygame.display.set_caption("Reinforce Tactics - API Keys")
+            # Initialize clipboard support when we own the screen
+            try:
+                pygame.scrap.init()
+            except pygame.error:
+                # Clipboard not available on this platform
+                pass
         else:
             self.screen = screen
 
@@ -94,13 +100,30 @@ class APIKeysMenu:
                 return True
             elif self.active_input is not None:
                 # Typing in an input field
-                if event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
+                # Check for paste first (before other key handlers)
+                if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
+                    # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
+                    try:
+                        clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
+                        if clipboard_text:
+                            # Decode bytes to string and strip null characters
+                            pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
+                            # Filter to only include printable characters
+                            filtered = ''.join(c for c in pasted_text if c.isprintable())
+                            self.api_keys[self.active_input] += filtered
+                    except (pygame.error, UnicodeDecodeError, AttributeError):
+                        # Clipboard operation failed or clipboard not available
+                        pass
+                elif event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
                     # Move to next field or finish
                     self.active_input = None
                 elif event.key == pygame.K_BACKSPACE:
                     self.api_keys[self.active_input] = self.api_keys[self.active_input][:-1]
                 elif event.unicode and event.unicode.isprintable():
-                    self.api_keys[self.active_input] += event.unicode
+                    # Only add regular characters if no modifier keys are pressed
+                    # This prevents Cmd+V from adding 'v' on macOS
+                    if not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT)):
+                        self.api_keys[self.active_input] += event.unicode
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button

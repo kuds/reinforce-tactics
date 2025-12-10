@@ -31,6 +31,13 @@ class Renderer:
         self.screen = pygame.display.set_mode((screen_width, screen_height))
         pygame.display.set_caption("2D Strategy Game")
 
+        # Initialize clipboard support
+        try:
+            pygame.scrap.init()
+        except pygame.error:
+            # Clipboard not available on this platform
+            pass
+
         # Load tile images
         self.tile_images = self._load_tile_images()
 

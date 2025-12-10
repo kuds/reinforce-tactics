@@ -54,6 +54,12 @@ class Menu:
         if self.owns_screen:
             self.screen = pygame.display.set_mode((800, 600))
             pygame.display.set_caption("Reinforce Tactics")
+            # Initialize clipboard support when we own the screen
+            try:
+                pygame.scrap.init()
+            except pygame.error:
+                # Clipboard not available on this platform
+                pass
         else:
             self.screen = screen
 

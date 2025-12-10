@@ -1,7 +1,6 @@
 """
 Simple AI bot for computer opponents.
 """
-import random
 from reinforcetactics.constants import UNIT_DATA
 
 
@@ -37,7 +36,8 @@ class SimpleBot:
         create_actions.sort(key=lambda a: unit_costs[a['unit_type']], reverse=True)
 
         for action in create_actions:
-            if self.game_state.player_gold[self.bot_player] >= UNIT_DATA[action['unit_type']]['cost']:
+            unit_cost = UNIT_DATA[action['unit_type']]['cost']
+            if self.game_state.player_gold[self.bot_player] >= unit_cost:
                 self.game_state.create_unit(
                     action['unit_type'],
                     action['x'],
@@ -49,8 +49,11 @@ class SimpleBot:
 
     def move_and_act_units(self):
         """Move and act with all bot units."""
-        bot_units = [u for u in self.game_state.units 
-                     if u.player == self.bot_player and (u.can_move or u.can_attack) and not u.is_paralyzed()]
+        bot_units = [
+            u for u in self.game_state.units
+            if u.player == self.bot_player and (u.can_move or u.can_attack)
+            and not u.is_paralyzed()
+        ]
 
         for unit in bot_units:
             self.act_with_unit(unit)
@@ -59,7 +62,8 @@ class SimpleBot:
         """Determine and execute best action for a single unit."""
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
-        if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+        if (tile.is_capturable() and tile.player != self.bot_player and
+                tile.health < tile.max_health):
             self.game_state.seize(unit)
             return
 
@@ -67,7 +71,7 @@ class SimpleBot:
         target = self.find_best_target(unit)
 
         if target:
-            target_type, target_obj, distance = target
+            target_type, target_obj, _ = target
 
             if target_type == 'enemy_unit':
                 self.attack_enemy(unit, target_obj)
@@ -117,8 +121,11 @@ class SimpleBot:
 
         # Sort by distance, prioritize buildings/towers
         def sort_key(target):
-            target_type, target_obj, distance = target
-            priority = 0 if target_type in ['enemy_building', 'enemy_tower', 'enemy_hq'] else 1
+            target_type, _target_obj, distance = target
+            priority = (
+                0 if target_type in ['enemy_building', 'enemy_tower', 'enemy_hq']
+                else 1
+            )
             return (distance, priority)
 
         all_targets.sort(key=sort_key)
@@ -166,7 +173,9 @@ class SimpleBot:
         reachable = unit.get_reachable_positions(
             self.game_state.grid.width,
             self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(x, y, self.game_state.grid, self.game_state.units)
+            lambda x, y: self.game_state.mechanics.can_move_to_position(
+                x, y, self.game_state.grid, self.game_state.units
+            )
         )
 
         if not reachable:

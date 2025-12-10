@@ -2,7 +2,6 @@
 File I/O utilities for maps, saves, and replays.
 """
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -52,12 +51,18 @@ class FileIO:
             # Ensure minimum size
             height, width = map_data.shape
             if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-                print(f"⚠️  Map size ({width}x{height}) is smaller than minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})")
-                print(f"   Padding map to minimum size...")
+                print(
+                    f"⚠️  Map size ({width}x{height}) is smaller than "
+                    f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
+                )
+                print("   Padding map to minimum size...")
                 map_data = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
 
             print(f"✅ Map loaded: {width}x{height}")
-            print(f"   First few tiles: {map_data.iloc[0, :5].tolist() if width >= 5 else map_data.iloc[0].tolist()}")
+            print(
+                f"   First few tiles: "
+                f"{map_data.iloc[0, :5].tolist() if width >= 5 else map_data.iloc[0].tolist()}"
+            )
 
             return map_data
 
@@ -98,7 +103,9 @@ class FileIO:
             # Copy original data into center
             start_y = pad_height // 2
             start_x = pad_width // 2
-            padded.iloc[start_y:start_y+current_height, start_x:start_x+current_width] = map_data.values
+            end_y = start_y + current_height
+            end_x = start_x + current_width
+            padded.iloc[start_y:end_y, start_x:end_x] = map_data.values
 
             return padded
 
