@@ -293,7 +293,7 @@ class ModelBot:
             if healer.player != self.bot_player or target.player != self.bot_player:
                 return False
             
-            if healer.unit_type != 'C':  # Only clerics can heal
+            if healer.type != 'C':  # Only clerics can heal
                 return False
             
             self.game_state.heal(healer, target)

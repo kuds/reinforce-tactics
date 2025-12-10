@@ -99,12 +99,13 @@ class TournamentRunner:
         self.replays_dir = self.output_dir / 'replays'
         self.replays_dir.mkdir(exist_ok=True)
 
-    def discover_bots(self, models_dir: Optional[str] = None) -> List[BotDescriptor]:
+    def discover_bots(self, models_dir: Optional[str] = None, include_test_bots: bool = False) -> List[BotDescriptor]:
         """
         Discover all available bots.
 
         Args:
             models_dir: Directory containing trained models (default: 'models/')
+            include_test_bots: If True, add duplicate SimpleBots for testing (default: False)
 
         Returns:
             List of BotDescriptor objects
@@ -114,6 +115,11 @@ class TournamentRunner:
         # Always include SimpleBot
         bots.append(BotDescriptor('SimpleBot', 'simple'))
         logger.info("Added SimpleBot")
+
+        # For testing: add duplicate SimpleBots if requested
+        if include_test_bots:
+            bots.append(BotDescriptor('SimpleBot2', 'simple'))
+            logger.info("Added SimpleBot2 (test bot)")
 
         # Try to add LLM bots if API keys are configured
         bots.extend(self._discover_llm_bots())
@@ -556,6 +562,11 @@ def main():
         default=2,
         help='Games per side in each matchup (default: 2, meaning 4 total per matchup)'
     )
+    parser.add_argument(
+        '--test',
+        action='store_true',
+        help='Test mode: add duplicate SimpleBots for testing the tournament system'
+    )
 
     args = parser.parse_args()
 
@@ -572,7 +583,7 @@ def main():
     )
 
     # Discover bots
-    bots = runner.discover_bots(models_dir=args.models_dir)
+    bots = runner.discover_bots(models_dir=args.models_dir, include_test_bots=args.test)
 
     if len(bots) < 2:
         logger.error("Need at least 2 bots for a tournament. "
