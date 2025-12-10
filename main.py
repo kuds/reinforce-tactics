@@ -346,6 +346,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu
     )
     from reinforcetactics.utils.file_io import FileIO
+    from reinforcetactics.utils.settings import get_settings
     from reinforcetactics.game.bot import SimpleBot
     from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
     from reinforcetactics.constants import TILE_SIZE
@@ -408,6 +409,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
         # Create bots based on player configurations
         bots = {}
+        settings = get_settings()
         if player_configs:
             for i, config in enumerate(player_configs):
                 player_num = i + 1
@@ -417,11 +419,14 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                         if bot_type == 'SimpleBot':
                             bots[player_num] = SimpleBot(game, player=player_num)
                         elif bot_type == 'OpenAIBot':
-                            bots[player_num] = OpenAIBot(game, player=player_num)
+                            api_key = settings.get_api_key('openai') or None
+                            bots[player_num] = OpenAIBot(game, player=player_num, api_key=api_key)
                         elif bot_type == 'ClaudeBot':
-                            bots[player_num] = ClaudeBot(game, player=player_num)
+                            api_key = settings.get_api_key('anthropic') or None
+                            bots[player_num] = ClaudeBot(game, player=player_num, api_key=api_key)
                         elif bot_type == 'GeminiBot':
-                            bots[player_num] = GeminiBot(game, player=player_num)
+                            api_key = settings.get_api_key('google') or None
+                            bots[player_num] = GeminiBot(game, player=player_num, api_key=api_key)
                         else:
                             print(f"⚠️  Unknown bot type '{bot_type}', using SimpleBot")
                             bots[player_num] = SimpleBot(game, player=player_num)
@@ -631,6 +636,7 @@ def load_saved_game():
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
     from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
+    from reinforcetactics.utils.settings import get_settings
     from reinforcetactics.constants import TILE_SIZE
     
     print("\n💾 Loading saved game...\n")
@@ -666,6 +672,7 @@ def load_saved_game():
         
         # Create bots based on saved player_configs
         bots = {}
+        settings = get_settings()
         if game.player_configs:
             # Use saved player configurations
             for i, config in enumerate(game.player_configs):
@@ -676,11 +683,14 @@ def load_saved_game():
                         if bot_type == 'SimpleBot':
                             bots[player_num] = SimpleBot(game, player=player_num)
                         elif bot_type == 'OpenAIBot':
-                            bots[player_num] = OpenAIBot(game, player=player_num)
+                            api_key = settings.get_api_key('openai') or None
+                            bots[player_num] = OpenAIBot(game, player=player_num, api_key=api_key)
                         elif bot_type == 'ClaudeBot':
-                            bots[player_num] = ClaudeBot(game, player=player_num)
+                            api_key = settings.get_api_key('anthropic') or None
+                            bots[player_num] = ClaudeBot(game, player=player_num, api_key=api_key)
                         elif bot_type == 'GeminiBot':
-                            bots[player_num] = GeminiBot(game, player=player_num)
+                            api_key = settings.get_api_key('google') or None
+                            bots[player_num] = GeminiBot(game, player=player_num, api_key=api_key)
                         else:
                             print(f"⚠️  Unknown bot type '{bot_type}', using SimpleBot")
                             bots[player_num] = SimpleBot(game, player=player_num)

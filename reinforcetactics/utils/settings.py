@@ -27,6 +27,11 @@ class Settings:
             'music_volume': 0.7,
             'sfx_volume': 0.8,
             'enabled': True
+        },
+        'llm_api_keys': {
+            'openai': '',
+            'anthropic': '',
+            'google': ''
         }
     }
 
@@ -137,6 +142,33 @@ class Settings:
         self.settings = self.DEFAULT_SETTINGS.copy()
         self.save()
         print("✅ Settings reset to defaults")
+
+    def get_api_key(self, provider):
+        """
+        Get API key for a specific LLM provider.
+        
+        Args:
+            provider: Provider name ('openai', 'anthropic', 'google')
+            
+        Returns:
+            API key string or empty string if not set
+        """
+        if 'llm_api_keys' not in self.settings:
+            self.settings['llm_api_keys'] = {}
+        return self.settings['llm_api_keys'].get(provider, '')
+
+    def set_api_key(self, provider, api_key):
+        """
+        Set API key for a specific LLM provider.
+        
+        Args:
+            provider: Provider name ('openai', 'anthropic', 'google')
+            api_key: API key string
+        """
+        if 'llm_api_keys' not in self.settings:
+            self.settings['llm_api_keys'] = {}
+        self.settings['llm_api_keys'][provider] = api_key
+        self.save()
 
 
 # Global settings instance

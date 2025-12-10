@@ -788,12 +788,20 @@ class PlayerConfigMenu:
                                 config['bot_type'] = None
 
                         elif element['type'] == 'difficulty_select':
-                            # Cycle through difficulty levels (only SimpleBot is enabled)
+                            # Cycle through available bot types
                             player_idx = element['player_idx']
                             config = self.player_configs[player_idx]
                             if config['type'] == 'computer':
-                                # Only SimpleBot is available; others are disabled
-                                config['bot_type'] = 'SimpleBot'
+                                # Cycle through bot types: SimpleBot -> OpenAIBot -> ClaudeBot -> GeminiBot -> SimpleBot
+                                bot_types = ['SimpleBot', 'OpenAIBot', 'ClaudeBot', 'GeminiBot']
+                                current_bot = config['bot_type']
+                                try:
+                                    current_idx = bot_types.index(current_bot)
+                                    next_idx = (current_idx + 1) % len(bot_types)
+                                    config['bot_type'] = bot_types[next_idx]
+                                except ValueError:
+                                    # If current bot type is not in list, default to SimpleBot
+                                    config['bot_type'] = 'SimpleBot'
 
                         elif element['type'] == 'start_button':
                             return self._get_result()
@@ -857,7 +865,15 @@ class PlayerConfigMenu:
             # Difficulty selection (only shown if computer)
             if config['type'] == 'computer':
                 diff_x = 400
-                diff_text = self.lang.get('player_config.difficulty_simple', 'SimpleBot')
+                bot_type = config.get('bot_type', 'SimpleBot')
+                # Get display text for bot type
+                bot_display_names = {
+                    'SimpleBot': 'SimpleBot',
+                    'OpenAIBot': 'OpenAI (GPT)',
+                    'ClaudeBot': 'Claude',
+                    'GeminiBot': 'Gemini'
+                }
+                diff_text = bot_display_names.get(bot_type, bot_type)
                 self._draw_button(diff_x, y_pos, diff_text, 'difficulty_select', i, disabled=False)
 
         # Draw Start Game button
@@ -1218,6 +1234,7 @@ class SettingsMenu(Menu):
         self.add_option(lang.get('settings.language', 'Language'), self._change_language)
         self.add_option(lang.get('settings.sound', 'Sound'), self._toggle_sound)
         self.add_option(lang.get('settings.fullscreen', 'Fullscreen'), self._toggle_fullscreen)
+        self.add_option(lang.get('settings.api_keys', 'LLM API Keys'), self._configure_api_keys)
         self.add_option(lang.get('common.back', 'Back'), lambda: None)
 
     def _change_language(self) -> str:
@@ -1231,6 +1248,54 @@ class SettingsMenu(Menu):
     def _toggle_fullscreen(self) -> None:
         """Toggle fullscreen mode."""
         pygame.display.toggle_fullscreen()
+
+    def _configure_api_keys(self) -> str:
+        """Open API keys configuration menu."""
+        return 'api_keys_menu'
+
+    def run(self) -> Optional[Any]:
+        """
+        Run the settings menu loop with submenu handling.
+
+        Returns:
+            Result from selected option, or None
+        """
+        result = None
+        clock = pygame.time.Clock()
+
+        # Populate option_rects before event loop for click detection
+        self._populate_option_rects()
+        
+        # Clear any residual events AFTER option_rects are populated
+        pygame.event.clear()
+
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+                result = self.handle_input(event)
+                if result is not None:
+                    # Handle submenu navigation
+                    if result == 'language_menu':
+                        language_menu = LanguageMenu(self.screen)
+                        language_menu.run()
+                        pygame.event.clear()
+                        # Continue in settings menu
+                    elif result == 'api_keys_menu':
+                        api_keys_menu = APIKeysMenu(self.screen)
+                        api_keys_menu.run()
+                        pygame.event.clear()
+                        # Continue in settings menu
+                    else:
+                        # For other results (like None from Back button), exit
+                        return result
+
+            self.draw()
+            clock.tick(30)
+
+        return result
 
 
 class LanguageMenu(Menu):
@@ -1264,6 +1329,281 @@ class LanguageMenu(Menu):
         reset_language(lang_code)
         self.lang = get_language()  # Refresh our reference
         return lang_code
+
+
+class APIKeysMenu:
+    """Menu for configuring LLM API keys."""
+
+    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+        """
+        Initialize API keys configuration menu.
+
+        Args:
+            screen: Optional pygame surface. If None, creates its own.
+        """
+        # Initialize pygame if not already done
+        if not pygame.get_init():
+            pygame.init()
+
+        # Create screen if not provided
+        self.owns_screen = screen is None
+        if self.owns_screen:
+            self.screen = pygame.display.set_mode((800, 600))
+            pygame.display.set_caption("Reinforce Tactics - API Keys")
+        else:
+            self.screen = screen
+
+        self.running = True
+
+        # Colors
+        self.bg_color = (30, 30, 40)
+        self.text_color = (255, 255, 255)
+        self.title_color = (100, 200, 255)
+        self.input_bg_color = (50, 50, 65)
+        self.input_active_color = (70, 70, 90)
+        self.button_color = (60, 60, 80)
+        self.button_hover_color = (80, 80, 100)
+
+        # Fonts
+        self.title_font = pygame.font.Font(None, 48)
+        self.label_font = pygame.font.Font(None, 28)
+        self.input_font = pygame.font.Font(None, 24)
+
+        # Get language instance
+        self.lang = get_language()
+
+        # Load current API keys from settings
+        from reinforcetactics.utils.settings import get_settings
+        self.settings = get_settings()
+        
+        self.api_keys = {
+            'openai': self.settings.get_api_key('openai'),
+            'anthropic': self.settings.get_api_key('anthropic'),
+            'google': self.settings.get_api_key('google')
+        }
+
+        # Input tracking
+        self.active_input = None
+        self.input_rects = {}
+        self.button_rects = {}
+        self.hover_element = None
+
+    def handle_input(self, event: pygame.event.Event) -> Optional[bool]:
+        """
+        Handle input events.
+
+        Args:
+            event: Pygame event
+
+        Returns:
+            True if settings were saved, False if cancelled, None to continue
+        """
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.running = False
+                return False
+            elif event.key == pygame.K_RETURN and self.active_input is None:
+                # Save and exit
+                return True
+            elif self.active_input is not None:
+                # Typing in an input field
+                if event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
+                    # Move to next field or finish
+                    self.active_input = None
+                elif event.key == pygame.K_BACKSPACE:
+                    self.api_keys[self.active_input] = self.api_keys[self.active_input][:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    self.api_keys[self.active_input] += event.unicode
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                mouse_pos = event.pos
+                
+                # Check input fields
+                for key, rect in self.input_rects.items():
+                    if rect.collidepoint(mouse_pos):
+                        self.active_input = key
+                        return None
+                
+                # Check buttons
+                if 'save' in self.button_rects and self.button_rects['save'].collidepoint(mouse_pos):
+                    return True
+                if 'back' in self.button_rects and self.button_rects['back'].collidepoint(mouse_pos):
+                    self.running = False
+                    return False
+                
+                # Clicked outside any input
+                self.active_input = None
+
+        elif event.type == pygame.MOUSEMOTION:
+            # Update hover state
+            mouse_pos = event.pos
+            self.hover_element = None
+            for name, rect in self.button_rects.items():
+                if rect.collidepoint(mouse_pos):
+                    self.hover_element = name
+                    break
+
+        return None
+
+    def draw(self) -> None:
+        """Draw the API keys configuration menu."""
+        self.screen.fill(self.bg_color)
+        self.input_rects = {}
+        self.button_rects = {}
+
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+
+        # Draw title
+        title = self.lang.get('api_keys.title', 'LLM API Keys Configuration')
+        title_surface = self.title_font.render(title, True, self.title_color)
+        title_rect = title_surface.get_rect(centerx=screen_width // 2, y=30)
+        self.screen.blit(title_surface, title_rect)
+
+        # Instructions
+        instructions = self.lang.get('api_keys.instructions', 
+                                     'Enter your API keys for LLM providers (leave blank to use environment variables)')
+        inst_surface = self.label_font.render(instructions, True, self.text_color)
+        inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=80)
+        # Ensure the instruction text doesn't overflow
+        if inst_rect.width > screen_width - 40:
+            # Split into two lines
+            line1 = 'Enter your API keys for LLM providers'
+            line2 = '(leave blank to use environment variables)'
+            inst1_surface = self.input_font.render(line1, True, self.text_color)
+            inst2_surface = self.input_font.render(line2, True, self.text_color)
+            inst1_rect = inst1_surface.get_rect(centerx=screen_width // 2, y=80)
+            inst2_rect = inst2_surface.get_rect(centerx=screen_width // 2, y=105)
+            self.screen.blit(inst1_surface, inst1_rect)
+            self.screen.blit(inst2_surface, inst2_rect)
+            start_y = 140
+        else:
+            self.screen.blit(inst_surface, inst_rect)
+            start_y = 120
+
+        # Draw input fields for each provider
+        providers = [
+            ('openai', 'OpenAI API Key (GPT)'),
+            ('anthropic', 'Anthropic API Key (Claude)'),
+            ('google', 'Google API Key (Gemini)')
+        ]
+
+        y_pos = start_y
+        for provider_key, provider_label in providers:
+            # Label
+            label_surface = self.label_font.render(provider_label, True, self.text_color)
+            label_rect = label_surface.get_rect(x=50, y=y_pos)
+            self.screen.blit(label_surface, label_rect)
+
+            # Input field
+            input_y = y_pos + 35
+            input_width = 700
+            input_height = 35
+            input_x = 50
+            input_rect = pygame.Rect(input_x, input_y, input_width, input_height)
+            self.input_rects[provider_key] = input_rect
+
+            # Background color based on active state
+            bg_color = self.input_active_color if self.active_input == provider_key else self.input_bg_color
+            pygame.draw.rect(self.screen, bg_color, input_rect, border_radius=5)
+            pygame.draw.rect(self.screen, self.button_color, input_rect, width=2, border_radius=5)
+
+            # Display masked key (show only last 4 chars)
+            display_text = self.api_keys[provider_key]
+            if len(display_text) > 8 and self.active_input != provider_key:
+                display_text = '*' * (len(display_text) - 4) + display_text[-4:]
+            
+            # Render text
+            if display_text or self.active_input == provider_key:
+                text_surface = self.input_font.render(display_text, True, self.text_color)
+                text_rect = text_surface.get_rect(x=input_x + 10, centery=input_rect.centery)
+                # Clip text if too long
+                if text_rect.width > input_width - 20:
+                    self.screen.set_clip(pygame.Rect(input_x + 10, input_rect.y, input_width - 20, input_height))
+                    text_rect.right = input_x + input_width - 10
+                self.screen.blit(text_surface, text_rect)
+                self.screen.set_clip(None)
+            
+            # Draw cursor if active
+            if self.active_input == provider_key:
+                cursor_x = input_x + 10 + self.input_font.size(display_text)[0] + 2
+                cursor_y1 = input_rect.centery - 10
+                cursor_y2 = input_rect.centery + 10
+                pygame.draw.line(self.screen, self.text_color, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 2)
+
+            y_pos += 90
+
+        # Draw buttons
+        button_y = y_pos + 20
+        
+        # Save button
+        save_text = self.lang.get('common.save', 'Save')
+        save_rect = self._draw_button(screen_width // 2 - 120, button_y, save_text, 'save')
+        self.button_rects['save'] = save_rect
+
+        # Back button
+        back_text = self.lang.get('common.back', 'Back')
+        back_rect = self._draw_button(screen_width // 2 + 20, button_y, back_text, 'back')
+        self.button_rects['back'] = back_rect
+
+        pygame.display.flip()
+
+    def _draw_button(self, x: int, y: int, text: str, button_name: str) -> pygame.Rect:
+        """Draw a button and return its rect."""
+        padding_x = 20
+        padding_y = 10
+
+        text_surface = self.label_font.render(text, True, self.text_color)
+        text_rect = text_surface.get_rect()
+
+        button_width = text_rect.width + 2 * padding_x
+        button_height = text_rect.height + 2 * padding_y
+        button_rect = pygame.Rect(x, y, button_width, button_height)
+
+        # Button color based on hover state
+        bg_color = self.button_hover_color if self.hover_element == button_name else self.button_color
+        pygame.draw.rect(self.screen, bg_color, button_rect, border_radius=8)
+
+        # Draw text
+        text_rect.center = button_rect.center
+        self.screen.blit(text_surface, text_rect)
+
+        return button_rect
+
+    def run(self) -> bool:
+        """
+        Run the API keys configuration menu.
+
+        Returns:
+            True if settings were saved, False if cancelled
+        """
+        clock = pygame.time.Clock()
+        
+        # Initial draw
+        self.draw()
+        pygame.event.clear()
+
+        while self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return False
+
+                result = self.handle_input(event)
+                if result is not None:
+                    if result:
+                        # Save the API keys
+                        for provider, key in self.api_keys.items():
+                            self.settings.set_api_key(provider, key)
+                        print("✅ API keys saved")
+                    self.running = False
+                    return result
+
+            self.draw()
+            clock.tick(60)
+
+        return False
 
 
 class PauseMenu(Menu):
@@ -1584,7 +1924,7 @@ class UnitPurchaseMenu:
                 centery=button_rect.centery
             )
             screen.blit(text_surface, text_rect)
-            
+
             # Register as interactive element
             self.interactive_elements.append({
                 'type': 'unit_button',
