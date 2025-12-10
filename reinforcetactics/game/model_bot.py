@@ -13,7 +13,7 @@ from reinforcetactics.constants import UNIT_DATA
 logger = logging.getLogger(__name__)
 
 
-class ModelBot:
+class ModelBot:  # pylint: disable=too-few-public-methods
     """Bot that uses a trained Stable-Baselines3 model for decision-making."""
 
     def __init__(self, game_state, player: int = 2, model_path: Optional[str] = None):
@@ -50,17 +50,15 @@ class ModelBot:
             if not model_path.exists():
                 raise FileNotFoundError(f"Model file not found: {model_path}")
 
-            # Try to determine algorithm from filename or try loading with each
-            model_name = model_path.stem.lower()
-            
             # Try to load with different algorithms
             for algorithm_class in [PPO, A2C, DQN]:
                 try:
                     self.model = algorithm_class.load(str(model_path))
-                    logger.info(f"Successfully loaded model as {algorithm_class.__name__}: {model_path}")
+                    logger.info("Successfully loaded model as %s: %s", 
+                               algorithm_class.__name__, model_path)
                     break
                 except Exception as e:
-                    logger.debug(f"Failed to load as {algorithm_class.__name__}: {e}")
+                    logger.debug("Failed to load as %s: %s", algorithm_class.__name__, e)
                     continue
 
             if self.model is None:
@@ -80,7 +78,7 @@ class ModelBot:
                 "Install it with: pip install stable-baselines3"
             ) from e
         except Exception as e:
-            logger.error(f"Error loading model: {e}")
+            logger.error("Error loading model: %s", e)
             raise
 
     def take_turn(self) -> None:
@@ -116,7 +114,7 @@ class ModelBot:
                 self.game_state.end_turn()
 
         except Exception as e:
-            logger.error(f"Error during model bot turn: {e}")
+            logger.error("Error during model bot turn: %s", e)
             # Fallback: just end turn
             if self.game_state.current_player == self.bot_player:
                 self.game_state.end_turn()
@@ -150,7 +148,7 @@ class ModelBot:
         
         return obs
 
-    def _execute_action(self, action) -> bool:
+    def _execute_action(self, action) -> bool:  # pylint: disable=too-many-return-statements
         """
         Execute a model action in the game.
 
@@ -166,7 +164,7 @@ class ModelBot:
                 action = action.tolist()
             
             if not isinstance(action, (list, tuple)) or len(action) < 6:
-                logger.warning(f"Invalid action format: {action}")
+                logger.warning("Invalid action format: %s", action)
                 return False
 
             action_type, unit_type, from_x, from_y, to_x, to_y = action[:6]
@@ -174,25 +172,25 @@ class ModelBot:
             # Map action types: 0=create, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn
             if action_type == 0:  # Create unit
                 return self._create_unit(unit_type, to_x, to_y)
-            elif action_type == 1:  # Move
+            if action_type == 1:  # Move
                 return self._move_unit(from_x, from_y, to_x, to_y)
-            elif action_type == 2:  # Attack
+            if action_type == 2:  # Attack
                 return self._attack(from_x, from_y, to_x, to_y)
-            elif action_type == 3:  # Seize
+            if action_type == 3:  # Seize
                 return self._seize(from_x, from_y)
-            elif action_type == 4:  # Heal
+            if action_type == 4:  # Heal
                 return self._heal(from_x, from_y, to_x, to_y)
-            elif action_type == 5:  # End turn
+            if action_type == 5:  # End turn
                 return True  # Will be handled by caller
-            else:
-                logger.warning(f"Unknown action type: {action_type}")
-                return False
-
-        except Exception as e:
-            logger.warning(f"Error executing action: {e}")
+            
+            logger.warning("Unknown action type: %s", action_type)
             return False
 
-    def _create_unit(self, unit_type: int, x: int, y: int) -> bool:
+        except Exception as e:
+            logger.warning("Error executing action: %s", e)
+            return False
+
+    def _create_unit(self, unit_type: int, x: int, y: int) -> bool:  # pylint: disable=too-many-return-statements
         """Create a unit at the specified location."""
         try:
             # Map unit_type index to unit code
@@ -224,7 +222,7 @@ class ModelBot:
             return True
             
         except Exception as e:
-            logger.debug(f"Failed to create unit: {e}")
+            logger.debug("Failed to create unit: %s", e)
             return False
 
     def _move_unit(self, from_x: int, from_y: int, to_x: int, to_y: int) -> bool:
@@ -238,7 +236,7 @@ class ModelBot:
             return True
             
         except Exception as e:
-            logger.debug(f"Failed to move unit: {e}")
+            logger.debug("Failed to move unit: %s", e)
             return False
 
     def _attack(self, from_x: int, from_y: int, to_x: int, to_y: int) -> bool:
@@ -260,7 +258,7 @@ class ModelBot:
             return True
             
         except Exception as e:
-            logger.debug(f"Failed to attack: {e}")
+            logger.debug("Failed to attack: %s", e)
             return False
 
     def _seize(self, x: int, y: int) -> bool:
@@ -278,7 +276,7 @@ class ModelBot:
             return True
             
         except Exception as e:
-            logger.debug(f"Failed to seize: {e}")
+            logger.debug("Failed to seize: %s", e)
             return False
 
     def _heal(self, from_x: int, from_y: int, to_x: int, to_y: int) -> bool:
@@ -300,7 +298,7 @@ class ModelBot:
             return True
             
         except Exception as e:
-            logger.debug(f"Failed to heal: {e}")
+            logger.debug("Failed to heal: %s", e)
             return False
 
     def _is_end_turn_action(self, action) -> bool:

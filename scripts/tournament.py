@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=logging-fstring-interpolation
 """
 Round-robin tournament script for Reinforce Tactics bots.
 
@@ -17,7 +18,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
