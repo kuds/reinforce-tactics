@@ -43,9 +43,9 @@ class SaveGameMenu(Menu):
                         # Decode bytes to string and strip null characters
                         pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
                         # Filter to only include printable characters and respect max length
-                        for char in pasted_text:
-                            if char.isprintable() and len(self.input_text) < 50:
-                                self.input_text += char
+                        remaining = 50 - len(self.input_text)
+                        filtered = ''.join(c for c in pasted_text[:remaining] if c.isprintable())
+                        self.input_text += filtered
                 except (pygame.error, UnicodeDecodeError, AttributeError):
                     # Clipboard operation failed or clipboard not available
                     pass

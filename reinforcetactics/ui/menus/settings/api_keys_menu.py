@@ -113,9 +113,8 @@ class APIKeysMenu:
                             # Decode bytes to string and strip null characters
                             pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
                             # Filter to only include printable characters
-                            for char in pasted_text:
-                                if char.isprintable():
-                                    self.api_keys[self.active_input] += char
+                            filtered = ''.join(c for c in pasted_text if c.isprintable())
+                            self.api_keys[self.active_input] += filtered
                     except (pygame.error, UnicodeDecodeError, AttributeError):
                         # Clipboard operation failed or clipboard not available
                         pass

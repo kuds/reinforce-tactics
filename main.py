@@ -56,7 +56,6 @@ def train_mode(args):
         from stable_baselines3 import PPO, A2C, DQN
         from stable_baselines3.common.monitor import Monitor
         from stable_baselines3.common.callbacks import CheckpointCallback
-        import os  # noqa: F401
     except ImportError:
         print("❌ Stable-Baselines3 not installed.")
         print("Install with: pip install stable-baselines3[extra]")
