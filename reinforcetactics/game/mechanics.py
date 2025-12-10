@@ -111,7 +111,9 @@ class GameMechanics:
 
         attacker_alive = True
         if target_alive and not target.is_paralyzed():
-            counter_damage = int(target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER)
+            counter_damage = int(
+                target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER
+            )
             if counter_damage > 0:
                 attacker_alive = attacker.take_damage(counter_damage)
 
@@ -119,7 +121,9 @@ class GameMechanics:
             'attacker_alive': attacker_alive,
             'target_alive': target_alive,
             'damage': attack_damage,
-            'counter_damage': int(target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER) if target_alive and not target.is_paralyzed() else 0
+            'counter_damage': int(
+                target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER
+            ) if target_alive and not target.is_paralyzed() else 0
         }
 
     @staticmethod
