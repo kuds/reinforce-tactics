@@ -1,6 +1,16 @@
+---
+sidebar_position: 5
+id: tournament-system
+title: Tournament System
+---
+
 # Tournament System
 
 This document describes the tournament system for Reinforce Tactics, which allows running round-robin tournaments between different bot types.
+
+:::tip
+Looking for tournament results? Check out the [Bot Tournaments](./tournaments.md) page!
+:::
 
 ## Overview
 
