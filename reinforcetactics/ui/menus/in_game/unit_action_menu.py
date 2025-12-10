@@ -184,7 +184,7 @@ class UnitActionMenu:
             if element['rect'].collidepoint(mouse_pos):
                 if element['type'] == 'close_button':
                     return {'type': 'cancel'}
-                elif element['type'] == 'action_button':
+                if element['type'] == 'action_button':
                     action = element['action']
                     return {'type': 'action_selected', 'action': action}
 

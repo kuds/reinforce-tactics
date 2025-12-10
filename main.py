@@ -578,14 +578,14 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
                         # Priority 0: Handle target selection mode
-                        if target_selection_mode:
+                        if target_selection_mode and target_selection_action:
                             # Convert mouse position to grid coordinates
                             grid_x = mouse_pos[0] // TILE_SIZE
                             grid_y = mouse_pos[1] // TILE_SIZE
                             
                             # Check if clicking on a valid target
                             clicked_unit = game.get_unit_at_position(grid_x, grid_y)
-                            if clicked_unit and clicked_unit in target_selection_action['targets']:
+                            if clicked_unit and target_selection_action and clicked_unit in target_selection_action['targets']:
                                 # Execute the action on the clicked target
                                 action_type = target_selection_action['type']
                                 if action_type == 'attack':
@@ -759,7 +759,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             continue  # Stop processing more events this frame
 
                         # Priority 2: Movement with selected unit
-                        elif selected_unit and selected_unit.can_move:
+                        if selected_unit and selected_unit.can_move:
                             if game.move_unit(selected_unit, grid_x, grid_y):
                                 print(f"Moved {selected_unit.type} to ({grid_x}, {grid_y})")
                                 # After movement, open unit action menu
