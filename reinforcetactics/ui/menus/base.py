@@ -18,7 +18,7 @@ _BACK_TRANSLATIONS_CACHE = None
 def _get_back_translations() -> set:
     """
     Get all translations of the "Back" button text.
-    
+
     Returns:
         Set of lowercase, stripped back button translations
     """
@@ -151,7 +151,7 @@ class Menu:
                     break
 
         return None
-    
+
     def _is_back_option(self, text: str) -> bool:
         """
         Check if an option text represents a Back button.
@@ -164,7 +164,7 @@ class Menu:
         """
         # Check if the text matches any Back translation (using cached list)
         return text.lower().strip() in _get_back_translations()
-    
+
     def _ensure_selected_visible(self) -> None:
         """Ensure the selected option is visible by adjusting scroll offset."""
         if self.selected_index < self.scroll_offset:
@@ -176,11 +176,11 @@ class Menu:
         """Populate option_rects for click detection without drawing to screen."""
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
-        
+
         start_y = screen_height // 3
         spacing = self.option_spacing
         self.option_rects = []
-        
+
         # Calculate maximum option width for uniform sizing
         padding_x = 40
         padding_y = 10
@@ -189,31 +189,31 @@ class Menu:
             display_text = f"> {text}"
             text_surface = self.option_font.render(display_text, True, self.text_color)
             max_text_width = max(max_text_width, text_surface.get_width())
-        
+
         uniform_width = max_text_width + 2 * padding_x
-        
+
         # Determine which options to display (with scrolling)
         total_options = len(self.options)
         start_index = self.scroll_offset
         end_index = min(total_options, start_index + self.max_visible_options)
-        
+
         # Calculate rects for visible options
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
             is_selected = option_i == self.selected_index
             display_text = f"> {text}" if is_selected else f"  {text}"
-            
+
             text_surface = self.option_font.render(display_text, True, self.text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, 
+            text_rect = text_surface.get_rect(centerx=screen_width // 2,
                                               y=start_y + display_i * spacing)
-            
+
             bg_rect = pygame.Rect(
                 (screen_width - uniform_width) // 2,
                 text_rect.y - padding_y,
                 uniform_width,
                 text_rect.height + 2 * padding_y
             )
-            
+
             self.option_rects.append(bg_rect)
 
     def draw(self) -> None:
@@ -253,7 +253,7 @@ class Menu:
         # Draw visible options
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
-            
+
             # Determine styling based on state
             is_selected = option_i == self.selected_index
             is_hovered = option_i == self.hover_index
@@ -274,7 +274,7 @@ class Menu:
 
             # Render text
             text_surface = self.option_font.render(display_text, True, text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, 
+            text_rect = text_surface.get_rect(centerx=screen_width // 2,
                                               y=start_y + display_i * spacing)
 
             # Create background rectangle with uniform width
@@ -306,14 +306,14 @@ class Menu:
                 up_text = self.indicator_font.render("▲ Scroll Up", True, self.hover_color)
                 up_rect = up_text.get_rect(centerx=screen_width // 2, y=start_y - 30)
                 self.screen.blit(up_text, up_rect)
-            
+
             # Show down arrow if not at bottom
             if end_index < total_options:
                 down_text = self.indicator_font.render("▼ Scroll Down", True, self.hover_color)
                 down_y = start_y + self.max_visible_options * spacing + 10
                 down_rect = down_text.get_rect(centerx=screen_width // 2, y=down_y)
                 self.screen.blit(down_text, down_rect)
-            
+
             # Show position indicator (e.g., "3 / 15")
             pos_text = self.indicator_font.render(
                 f"{self.scroll_offset + 1}-{end_index} / {total_options}",
@@ -337,7 +337,7 @@ class Menu:
         # Populate option_rects before event loop for click detection
         # Don't call draw() here to avoid double-display issue
         self._populate_option_rects()
-        
+
         # Clear any residual events AFTER option_rects are populated
         pygame.event.clear()
 

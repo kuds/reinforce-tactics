@@ -17,14 +17,14 @@ class PlayerConfigMenu:
         Args:
             screen: Optional pygame surface. If None, creates its own.
             game_mode: Game mode ("1v1" or "2v2")
-        
+
         Raises:
             ValueError: If game_mode is not "1v1" or "2v2"
         """
         # Validate game_mode
         if game_mode not in ["1v1", "2v2"]:
             raise ValueError(f"Invalid game_mode: {game_mode}. Must be '1v1' or '2v2'")
-        
+
         # Initialize pygame if not already done
         if not pygame.get_init():
             pygame.init()
@@ -73,7 +73,7 @@ class PlayerConfigMenu:
 
         # Get language instance
         self.lang = get_language()
-        
+
         # Check which LLM providers have API keys configured
         from reinforcetactics.utils.settings import get_settings
         settings = get_settings()
@@ -127,7 +127,7 @@ class PlayerConfigMenu:
                                 for bot_name, is_available in self.available_llm_bots.items():
                                     if is_available:
                                         bot_types.append(bot_name)
-                                
+
                                 current_bot = config['bot_type']
                                 try:
                                     current_idx = bot_types.index(current_bot)
@@ -167,7 +167,6 @@ class PlayerConfigMenu:
         self.interactive_elements = []
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
         # Draw title
         title = self.lang.get('player_config.title', 'Configure Players')
@@ -193,8 +192,11 @@ class PlayerConfigMenu:
 
             # Type toggle button (Human/Computer)
             type_x = 200
-            type_text = self.lang.get('player_config.type_human', 'Human') if config['type'] == 'human' else self.lang.get('player_config.type_computer', 'Computer')
-            type_rect = self._draw_button(type_x, y_pos, type_text, 'type_toggle', i)
+            if config['type'] == 'human':
+                type_text = self.lang.get('player_config.type_human', 'Human')
+            else:
+                type_text = self.lang.get('player_config.type_computer', 'Computer')
+            self._draw_button(type_x, y_pos, type_text, 'type_toggle', i)
 
             # Difficulty selection (only shown if computer)
             if config['type'] == 'computer':
@@ -208,11 +210,11 @@ class PlayerConfigMenu:
                     'GeminiBot': 'Gemini'
                 }
                 diff_text = bot_display_names.get(bot_type, bot_type)
-                
+
                 # Add indicator if bot is unavailable (no API key)
                 if bot_type in self.available_llm_bots and not self.available_llm_bots[bot_type]:
                     diff_text += ' (No API Key)'
-                
+
                 self._draw_button(diff_x, y_pos, diff_text, 'difficulty_select', i, disabled=False)
 
         # Draw Start Game button
@@ -226,7 +228,7 @@ class PlayerConfigMenu:
 
         pygame.display.flip()
 
-    def _draw_button(self, x: int, y: int, text: str, element_type: str, 
+    def _draw_button(self, x: int, y: int, text: str, element_type: str,
                      player_idx: int = -1, centered: bool = False, disabled: bool = False) -> pygame.Rect:
         """
         Draw a button and register it as an interactive element.
@@ -308,7 +310,7 @@ class PlayerConfigMenu:
 
         # Draw once before event loop to populate interactive_elements
         self.draw()
-        
+
         # Clear any residual events AFTER draw populates interactive_elements
         pygame.event.clear()
 

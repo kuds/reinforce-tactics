@@ -50,7 +50,7 @@ class APIKeysMenu:
         # Load current API keys from settings
         from reinforcetactics.utils.settings import get_settings
         self.settings = get_settings()
-        
+
         self.api_keys = {
             'openai': self.settings.get_api_key('openai'),
             'anthropic': self.settings.get_api_key('anthropic'),
@@ -62,7 +62,7 @@ class APIKeysMenu:
         self.input_rects = {}
         self.button_rects = {}
         self.hover_element = None
-        
+
         # Test connection status
         self.test_status = {
             'openai': None,  # None, 'testing', 'success', 'failed'
@@ -105,27 +105,27 @@ class APIKeysMenu:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button
                 mouse_pos = event.pos
-                
+
                 # Check input fields
                 for key, rect in self.input_rects.items():
                     if rect.collidepoint(mouse_pos):
                         self.active_input = key
                         return None
-                
+
                 # Check buttons
                 if 'save' in self.button_rects and self.button_rects['save'].collidepoint(mouse_pos):
                     return True
                 if 'back' in self.button_rects and self.button_rects['back'].collidepoint(mouse_pos):
                     self.running = False
                     return False
-                
+
                 # Check test buttons
                 for provider in ['openai', 'anthropic', 'google']:
                     test_button_key = f'test_{provider}'
                     if test_button_key in self.button_rects and self.button_rects[test_button_key].collidepoint(mouse_pos):
                         self._test_connection(provider)
                         return None
-                
+
                 # Clicked outside any input
                 self.active_input = None
 
@@ -147,7 +147,6 @@ class APIKeysMenu:
         self.button_rects = {}
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
         # Draw title
         title = self.lang.get('api_keys.title', 'LLM API Keys Configuration')
@@ -156,7 +155,7 @@ class APIKeysMenu:
         self.screen.blit(title_surface, title_rect)
 
         # Instructions
-        instructions = self.lang.get('api_keys.instructions', 
+        instructions = self.lang.get('api_keys.instructions',
                                      'Enter your API keys for LLM providers (leave blank to use environment variables)')
         inst_surface = self.label_font.render(instructions, True, self.text_color)
         inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=80)
@@ -207,7 +206,7 @@ class APIKeysMenu:
             display_text = self.api_keys[provider_key]
             if len(display_text) > 8 and self.active_input != provider_key:
                 display_text = '*' * (len(display_text) - 4) + display_text[-4:]
-            
+
             # Render text
             if display_text or self.active_input == provider_key:
                 text_surface = self.input_font.render(display_text, True, self.text_color)
@@ -218,19 +217,19 @@ class APIKeysMenu:
                     text_rect.right = input_x + input_width - 10
                 self.screen.blit(text_surface, text_rect)
                 self.screen.set_clip(None)
-            
+
             # Draw cursor if active
             if self.active_input == provider_key:
                 cursor_x = input_x + 10 + self.input_font.size(display_text)[0] + 2
                 cursor_y1 = input_rect.centery - 10
                 cursor_y2 = input_rect.centery + 10
                 pygame.draw.line(self.screen, self.text_color, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 2)
-            
+
             # Draw Test Connection button
             test_button_x = input_x + input_width - 100
             test_button_y = input_y + input_height + 5
             test_button_key = f'test_{provider_key}'
-            
+
             # Determine button text and color based on test status
             status = self.test_status[provider_key]
             if status == 'testing':
@@ -245,11 +244,11 @@ class APIKeysMenu:
             else:
                 test_text = 'Test'
                 test_color = self.button_color
-            
+
             # Draw test button
             test_rect = self._draw_test_button(test_button_x, test_button_y, test_text, test_button_key, test_color)
             self.button_rects[test_button_key] = test_rect
-            
+
             # Draw status message if available
             if self.test_messages[provider_key]:
                 status_surface = self.input_font.render(self.test_messages[provider_key], True, self.text_color)
@@ -260,7 +259,7 @@ class APIKeysMenu:
 
         # Draw buttons
         button_y = y_pos + 20
-        
+
         # Save button
         save_text = self.lang.get('common.save', 'Save')
         save_rect = self._draw_button(screen_width // 2 - 120, button_y, save_text, 'save')
@@ -294,7 +293,7 @@ class APIKeysMenu:
         self.screen.blit(text_surface, text_rect)
 
         return button_rect
-    
+
     def _draw_test_button(self, x: int, y: int, text: str, button_name: str, bg_color: tuple) -> pygame.Rect:
         """Draw a test button with custom color and return its rect."""
         padding_x = 15
@@ -312,7 +311,7 @@ class APIKeysMenu:
             final_color = tuple(min(c + 30, 255) for c in bg_color)
         else:
             final_color = bg_color
-        
+
         pygame.draw.rect(self.screen, final_color, button_rect, border_radius=5)
 
         # Draw text
@@ -324,7 +323,7 @@ class APIKeysMenu:
     def _test_connection(self, provider: str) -> None:
         """
         Test connection to an LLM provider.
-        
+
         Args:
             provider: Provider name ('openai', 'anthropic', 'google')
         """
@@ -333,12 +332,12 @@ class APIKeysMenu:
             self.test_status[provider] = 'failed'
             self.test_messages[provider] = 'No API key provided'
             return
-        
+
         self.test_status[provider] = 'testing'
         self.test_messages[provider] = 'Testing...'
         self.draw()  # Redraw to show testing status
         pygame.display.flip()
-        
+
         try:
             if provider == 'openai':
                 self._test_openai(api_key)
@@ -346,7 +345,7 @@ class APIKeysMenu:
                 self._test_anthropic(api_key)
             elif provider == 'google':
                 self._test_google(api_key)
-            
+
             self.test_status[provider] = 'success'
             self.test_messages[provider] = 'Connection successful!'
         except Exception as e:
@@ -356,14 +355,14 @@ class APIKeysMenu:
             if len(error_msg) > 50:
                 error_msg = error_msg[:47] + '...'
             self.test_messages[provider] = f'Error: {error_msg}'
-    
+
     def _test_openai(self, api_key: str) -> None:
         """Test OpenAI API connection."""
         try:
             import openai
         except ImportError as exc:
             raise ImportError("openai package not installed") from exc
-        
+
         client = openai.OpenAI(api_key=api_key)
         # Make a minimal API call to test the connection
         response = client.chat.completions.create(
@@ -373,14 +372,14 @@ class APIKeysMenu:
         )
         if not response.choices:
             raise ValueError("Invalid response from OpenAI")
-    
+
     def _test_anthropic(self, api_key: str) -> None:
         """Test Anthropic API connection."""
         try:
             import anthropic
         except ImportError as exc:
             raise ImportError("anthropic package not installed") from exc
-        
+
         client = anthropic.Anthropic(api_key=api_key)
         # Make a minimal API call to test the connection
         response = client.messages.create(
@@ -390,14 +389,14 @@ class APIKeysMenu:
         )
         if not response.content:
             raise ValueError("Invalid response from Anthropic")
-    
+
     def _test_google(self, api_key: str) -> None:
         """Test Google Gemini API connection."""
         try:
             import google.generativeai as genai
         except ImportError as exc:
             raise ImportError("google-generativeai package not installed") from exc
-        
+
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         # Make a minimal API call to test the connection
@@ -416,7 +415,7 @@ class APIKeysMenu:
             True if settings were saved, False if cancelled
         """
         clock = pygame.time.Clock()
-        
+
         # Initial draw
         self.draw()
         pygame.event.clear()

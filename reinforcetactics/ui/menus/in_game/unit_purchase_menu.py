@@ -53,31 +53,31 @@ class UnitPurchaseMenu:
         # Menu dimensions
         menu_width = 220
         menu_height = 180
-        
+
         # Convert building position to screen coordinates
         building_screen_x = self.building_pos[0] * TILE_SIZE
         building_screen_y = self.building_pos[1] * TILE_SIZE
-        
+
         # Position menu to the right of the building
         menu_x = building_screen_x + TILE_SIZE + 10
         menu_y = building_screen_y
-        
+
         # Ensure menu stays within screen bounds
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
-        
+
         if menu_x + menu_width > screen_width:
             # Position to the left instead
             menu_x = building_screen_x - menu_width - 10
-        
+
         if menu_y + menu_height > screen_height:
             # Position higher
             menu_y = screen_height - menu_height - 10
-        
+
         # Ensure minimum position
         menu_x = max(10, menu_x)
         menu_y = max(10, menu_y)
-        
+
         self.menu_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)
 
     def handle_click(self, mouse_pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
@@ -109,13 +109,12 @@ class UnitPurchaseMenu:
                     )
                     if unit:
                         return {'type': 'unit_created', 'unit': unit}
-                    else:
-                        # Failed to create - position occupied or insufficient gold
-                        # This shouldn't happen if UI logic is correct
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.warning(f"Failed to create unit {unit_type} at {self.building_pos}")
-                        return None
+                    # Failed to create - position occupied or insufficient gold
+                    # This shouldn't happen if UI logic is correct
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning("Failed to create unit %s at %s", unit_type, self.building_pos)
+                    return None
 
         return None
 
@@ -171,12 +170,12 @@ class UnitPurchaseMenu:
         )
 
         # Check if hovering over close button
-        is_close_hover = (self.hover_element and 
+        is_close_hover = (self.hover_element and
                          self.hover_element.get('type') == 'close_button')
         close_color = self.close_button_hover_color if is_close_hover else self.close_button_color
 
         pygame.draw.rect(screen, close_color, close_button_rect, border_radius=3)
-        
+
         # Draw X
         x_margin = 4
         pygame.draw.line(
@@ -209,23 +208,23 @@ class UnitPurchaseMenu:
             unit_data = UNIT_DATA[unit_type]
             unit_name = unit_data['name']
             unit_cost = unit_data['cost']
-            
+
             # Check if player can afford
             can_afford = player_gold >= unit_cost
-            
+
             y_pos = start_y + i * spacing
-            
+
             # Draw unit option
             button_width = 190
             button_height = 28
             button_x = self.menu_rect.x + 15
             button_rect = pygame.Rect(button_x, y_pos, button_width, button_height)
-            
+
             # Check if hovering
-            is_hovered = (self.hover_element and 
+            is_hovered = (self.hover_element and
                          self.hover_element.get('rect') == button_rect and
                          can_afford)
-            
+
             # Choose colors
             if not can_afford:
                 bg_color = self.disabled_bg_color
@@ -236,13 +235,13 @@ class UnitPurchaseMenu:
             else:
                 bg_color = (50, 50, 65)
                 text_color = self.text_color
-            
+
             # Draw button background
             pygame.draw.rect(screen, bg_color, button_rect, border_radius=5)
-            
+
             if is_hovered:
                 pygame.draw.rect(screen, self.hover_color, button_rect, width=2, border_radius=5)
-            
+
             # Draw text: "Unit Name - Cost"
             text = f"{unit_name} - {unit_cost}g"
             text_surface = self.option_font.render(text, True, text_color)

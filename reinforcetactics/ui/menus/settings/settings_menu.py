@@ -59,7 +59,7 @@ class SettingsMenu(Menu):
 
         # Populate option_rects before event loop for click detection
         self._populate_option_rects()
-        
+
         # Clear any residual events AFTER option_rects are populated
         pygame.event.clear()
 
