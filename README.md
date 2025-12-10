@@ -143,6 +143,149 @@ while not game.game_over:
     game.end_turn()
 ```
 
+## LLM Bots (AI Opponents)
+
+Reinforce Tactics supports LLM-powered bots that can play the game using GPT, Claude, or Gemini models. These bots understand game rules and make strategic decisions in natural language.
+
+### Supported Providers
+
+- **OpenAI (GPT)**: Uses `gpt-4o`, `gpt-4o-mini`, etc.
+- **Anthropic (Claude)**: Uses `claude-sonnet-4-20250514`, `claude-3-haiku-20240307`, etc.
+- **Google (Gemini)**: Uses `gemini-1.5-pro`, `gemini-1.5-flash`, etc.
+
+### Installation
+
+Install the LLM provider packages you need:
+
+```bash
+# For OpenAI GPT models
+pip install openai>=1.0.0
+
+# For Anthropic Claude models
+pip install anthropic>=0.18.0
+
+# For Google Gemini models
+pip install google-generativeai>=0.4.0
+```
+
+### Configuration
+
+Set your API key as an environment variable:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY='your-api-key-here'
+
+# Anthropic
+export ANTHROPIC_API_KEY='your-api-key-here'
+
+# Google
+export GOOGLE_API_KEY='your-api-key-here'
+```
+
+Or create a config file at `~/.reinforce-tactics/config.json`:
+
+```json
+{
+  "openai_api_key": "your-openai-key",
+  "anthropic_api_key": "your-anthropic-key",
+  "google_api_key": "your-google-key"
+}
+```
+
+### Usage Examples
+
+#### Play Against an LLM Bot
+
+```python
+from reinforcetactics.core.game_state import GameState
+from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
+from reinforcetactics.utils.file_io import FileIO
+
+# Load a map
+map_data = FileIO.load_map('maps/1v1/test_map.csv')
+game = GameState(map_data, num_players=2)
+
+# Create an LLM bot (automatically uses API key from environment)
+bot = OpenAIBot(game, player=2)  # Or ClaudeBot, GeminiBot
+
+# Game loop
+while not game.game_over:
+    # Human player makes moves
+    # ... your moves here ...
+    
+    game.end_turn()
+    
+    # Bot's turn
+    bot.take_turn()
+    game.end_turn()
+```
+
+#### Custom Model Selection
+
+```python
+# Use specific models
+bot = OpenAIBot(game, player=2, model='gpt-4o')
+bot = ClaudeBot(game, player=2, model='claude-sonnet-4-20250514')
+bot = GeminiBot(game, player=2, model='gemini-1.5-pro')
+```
+
+#### Manual API Key
+
+```python
+# Pass API key directly (not recommended for production)
+bot = OpenAIBot(game, player=2, api_key='sk-...')
+```
+
+#### Using LLM Bots in GUI Mode
+
+Configure player settings in the game menu to select an LLM bot type. The bot will automatically be instantiated with the appropriate API key from your environment.
+
+### Cost and Performance Considerations
+
+**API Costs:**
+- OpenAI GPT-4o-mini: ~$0.15 per 1M input tokens, ~$0.60 per 1M output tokens
+- Claude Haiku: ~$0.25 per 1M input tokens, ~$1.25 per 1M output tokens
+- Gemini Flash: Free tier available, then ~$0.075 per 1M input tokens
+
+**Performance:**
+- Average response time: 1-3 seconds per turn
+- Tokens per turn: ~1000-2000 input, ~200-500 output
+- Cost per game (20-30 turns): $0.01-0.05 depending on model
+
+**Recommendations:**
+- Start with `gpt-4o-mini` or `gemini-1.5-flash` for cost-effective gameplay
+- Use `claude-sonnet-4` or `gpt-4o` for stronger strategic play
+- Monitor API usage to avoid unexpected costs
+
+### How It Works
+
+1. **Game State Serialization**: The bot converts the current game state into a JSON format including units, buildings, gold, and legal actions.
+
+2. **Strategic Reasoning**: The LLM receives game rules and the current state, then decides on actions using strategic thinking.
+
+3. **Action Execution**: The bot's response is parsed and validated, then actions are executed sequentially.
+
+4. **Error Handling**: Invalid actions are skipped with warnings. API failures trigger exponential backoff retry logic.
+
+### Troubleshooting
+
+**"API key not provided" Error:**
+- Ensure your environment variable is set correctly
+- Check the variable name matches: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY`
+
+**Import Errors:**
+- Install the required package: `pip install openai` (or `anthropic`, `google-generativeai`)
+
+**Rate Limiting:**
+- The bot automatically retries with exponential backoff
+- Consider upgrading your API tier if you hit limits frequently
+
+**Bot Makes Invalid Moves:**
+- This is expected occasionally due to LLM unpredictability
+- Invalid moves are automatically skipped with no game impact
+- Check logs for details on which actions were rejected
+
 ## Game Rules
 
 ![](images/rt_demo.gif)
