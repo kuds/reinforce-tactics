@@ -336,7 +336,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import (
-        MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu
+        MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu, UnitActionMenu
     )
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.utils.settings import get_settings
@@ -444,6 +444,9 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         selected_unit = None
         active_menu = None
         menu_opened_time = 0  # Track when menu was opened (in milliseconds)
+        target_selection_mode = False  # Track if we're selecting a target
+        target_selection_action = None  # The action waiting for target selection
+        target_selection_unit = None  # The unit performing the action
 
         print("\n🎮 Game started!")
         print("Controls:")
@@ -466,11 +469,86 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if active_menu:
+                        if target_selection_mode:
+                            # Cancel target selection and return to menu
+                            target_selection_mode = False
+                            target_selection_action = None
+                            if target_selection_unit and isinstance(active_menu, UnitActionMenu):
+                                # Menu should still be open
+                                pass
+                        elif active_menu:
                             # Close menu with ESC
+                            if isinstance(active_menu, UnitActionMenu):
+                                # Cancel move if unit has moved
+                                if target_selection_unit and target_selection_unit.has_moved:
+                                    target_selection_unit.cancel_move()
+                                    print(f"Cancelled move for {target_selection_unit.type}")
+                                target_selection_unit = None
                             active_menu = None
                         else:
                             running = False
+
+                    # Handle keyboard shortcuts for UnitActionMenu
+                    elif active_menu and isinstance(active_menu, UnitActionMenu):
+                        menu_result = active_menu.handle_keydown(event)
+                        if menu_result:
+                            if menu_result['type'] == 'cancel':
+                                # Cancel move if unit has moved
+                                if target_selection_unit and target_selection_unit.has_moved:
+                                    target_selection_unit.cancel_move()
+                                    print(f"Cancelled move for {target_selection_unit.type}")
+                                target_selection_unit = None
+                                active_menu = None
+                            elif menu_result['type'] == 'action_selected':
+                                # Process the selected action
+                                action = menu_result['action']
+                                # Process action (will be handled below)
+                                active_menu = None
+
+                                # Execute action based on type
+                                if action['type'] == 'wait':
+                                    target_selection_unit.end_unit_turn()
+                                    print(f"{target_selection_unit.type} ended turn")
+                                    target_selection_unit = None
+                                    selected_unit = None
+                                elif action['type'] == 'cancel_move':
+                                    target_selection_unit.cancel_move()
+                                    print(f"Cancelled move for {target_selection_unit.type}")
+                                    target_selection_unit = None
+                                    selected_unit = None
+                                elif action['type'] == 'capture':
+                                    result = game.seize(target_selection_unit)
+                                    if result['captured']:
+                                        print(f"{target_selection_unit.type} captured structure!")
+                                    target_selection_unit.end_unit_turn()
+                                    target_selection_unit = None
+                                    selected_unit = None
+                                elif action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
+                                    # Enter target selection mode
+                                    targets = action['targets']
+                                    if len(targets) == 1:
+                                        # Only one target, execute immediately
+                                        target = targets[0]
+                                        if action['type'] == 'attack':
+                                            result = game.attack(target_selection_unit, target)
+                                            print(f"{target_selection_unit.type} attacked {target.type}")
+                                        elif action['type'] == 'paralyze':
+                                            game.paralyze(target_selection_unit, target)
+                                            print(f"{target_selection_unit.type} paralyzed {target.type}")
+                                        elif action['type'] == 'heal':
+                                            game.heal(target_selection_unit, target)
+                                            print(f"{target_selection_unit.type} healed {target.type}")
+                                        elif action['type'] == 'cure':
+                                            game.cure(target_selection_unit, target)
+                                            print(f"{target_selection_unit.type} cured {target.type}")
+                                        target_selection_unit.end_unit_turn()
+                                        target_selection_unit = None
+                                        selected_unit = None
+                                    else:
+                                        # Multiple targets, enter target selection mode
+                                        target_selection_mode = True
+                                        target_selection_action = action
+                                        print(f"Select target for {action['type']}")
 
                     elif event.key == pygame.K_s and not active_menu:
                         # Save game
@@ -499,6 +577,46 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
+                        # Priority 0: Handle target selection mode
+                        if target_selection_mode:
+                            # Convert mouse position to grid coordinates
+                            grid_x = mouse_pos[0] // TILE_SIZE
+                            grid_y = mouse_pos[1] // TILE_SIZE
+                            
+                            # Check if clicking on a valid target
+                            clicked_unit = game.get_unit_at_position(grid_x, grid_y)
+                            if clicked_unit and clicked_unit in target_selection_action['targets']:
+                                # Execute the action on the clicked target
+                                action_type = target_selection_action['type']
+                                if action_type == 'attack':
+                                    result = game.attack(target_selection_unit, clicked_unit)
+                                    print(f"{target_selection_unit.type} attacked {clicked_unit.type}")
+                                elif action_type == 'paralyze':
+                                    game.paralyze(target_selection_unit, clicked_unit)
+                                    print(f"{target_selection_unit.type} paralyzed {clicked_unit.type}")
+                                elif action_type == 'heal':
+                                    game.heal(target_selection_unit, clicked_unit)
+                                    print(f"{target_selection_unit.type} healed {clicked_unit.type}")
+                                elif action_type == 'cure':
+                                    game.cure(target_selection_unit, clicked_unit)
+                                    print(f"{target_selection_unit.type} cured {clicked_unit.type}")
+                                
+                                # End unit's turn and reset selection
+                                target_selection_unit.end_unit_turn()
+                                target_selection_unit = None
+                                target_selection_mode = False
+                                target_selection_action = None
+                                selected_unit = None
+                            else:
+                                # Clicked outside valid targets, cancel and return to menu
+                                target_selection_mode = False
+                                target_selection_action = None
+                                # Reopen the unit action menu
+                                active_menu = UnitActionMenu(renderer.screen, game, target_selection_unit)
+                                menu_opened_time = current_time
+                                print("Target selection cancelled, returning to menu")
+                            continue
+
                         # CRITICAL: Check if clicking on a menu FIRST
                         if active_menu:
                             # Ignore clicks for 200ms after menu opens
@@ -510,10 +628,67 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                             if menu_result:
                                 if menu_result['type'] == 'close':
                                     active_menu = None
+                                elif menu_result['type'] == 'cancel':
+                                    # Cancel action menu - cancel move if unit has moved
+                                    if isinstance(active_menu, UnitActionMenu):
+                                        if target_selection_unit and target_selection_unit.has_moved:
+                                            target_selection_unit.cancel_move()
+                                            print(f"Cancelled move for {target_selection_unit.type}")
+                                        target_selection_unit = None
+                                    active_menu = None
                                 elif menu_result['type'] == 'unit_created':
                                     unit = menu_result['unit']
                                     print(f"Created {unit.type} at ({unit.x}, {unit.y})")
                                     active_menu = None  # Close menu after purchase
+                                elif menu_result['type'] == 'action_selected':
+                                    # Process the selected action
+                                    action = menu_result['action']
+                                    active_menu = None
+
+                                    # Execute action based on type
+                                    if action['type'] == 'wait':
+                                        target_selection_unit.end_unit_turn()
+                                        print(f"{target_selection_unit.type} ended turn")
+                                        target_selection_unit = None
+                                        selected_unit = None
+                                    elif action['type'] == 'cancel_move':
+                                        target_selection_unit.cancel_move()
+                                        print(f"Cancelled move for {target_selection_unit.type}")
+                                        target_selection_unit = None
+                                        selected_unit = None
+                                    elif action['type'] == 'capture':
+                                        result = game.seize(target_selection_unit)
+                                        if result['captured']:
+                                            print(f"{target_selection_unit.type} captured structure!")
+                                        target_selection_unit.end_unit_turn()
+                                        target_selection_unit = None
+                                        selected_unit = None
+                                    elif action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
+                                        # Enter target selection mode
+                                        targets = action['targets']
+                                        if len(targets) == 1:
+                                            # Only one target, execute immediately
+                                            target = targets[0]
+                                            if action['type'] == 'attack':
+                                                result = game.attack(target_selection_unit, target)
+                                                print(f"{target_selection_unit.type} attacked {target.type}")
+                                            elif action['type'] == 'paralyze':
+                                                game.paralyze(target_selection_unit, target)
+                                                print(f"{target_selection_unit.type} paralyzed {target.type}")
+                                            elif action['type'] == 'heal':
+                                                game.heal(target_selection_unit, target)
+                                                print(f"{target_selection_unit.type} healed {target.type}")
+                                            elif action['type'] == 'cure':
+                                                game.cure(target_selection_unit, target)
+                                                print(f"{target_selection_unit.type} cured {target.type}")
+                                            target_selection_unit.end_unit_turn()
+                                            target_selection_unit = None
+                                            selected_unit = None
+                                        else:
+                                            # Multiple targets, enter target selection mode
+                                            target_selection_mode = True
+                                            target_selection_action = action
+                                            print(f"Select target for {action['type']}")
                             # Continue to prevent further processing
                             continue
 
@@ -555,8 +730,21 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
                         # Priority 1: Own unit clicked
                         if clicked_unit and clicked_unit.player == game.current_player:
-                            selected_unit = clicked_unit
-                            print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
+                            # Check if this is already the selected unit
+                            if selected_unit == clicked_unit:
+                                # Check if unit can perform actions (not paralyzed, has can_move or can_attack)
+                                if not clicked_unit.is_paralyzed() and (clicked_unit.can_move or clicked_unit.can_attack):
+                                    # Open unit action menu
+                                    active_menu = UnitActionMenu(renderer.screen, game, clicked_unit)
+                                    target_selection_unit = clicked_unit
+                                    menu_opened_time = current_time
+                                    print(f"Opened unit action menu for {clicked_unit.type}")
+                                else:
+                                    print(f"{clicked_unit.type} cannot perform actions (paralyzed or no actions left)")
+                            else:
+                                # Select new unit
+                                selected_unit = clicked_unit
+                                print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
                             continue  # Stop processing more events this frame
 
                         # Priority 1.5: Building clicked for unit purchase
@@ -574,6 +762,10 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
                         elif selected_unit and selected_unit.can_move:
                             if game.move_unit(selected_unit, grid_x, grid_y):
                                 print(f"Moved {selected_unit.type} to ({grid_x}, {grid_y})")
+                                # After movement, open unit action menu
+                                active_menu = UnitActionMenu(renderer.screen, game, selected_unit)
+                                target_selection_unit = selected_unit
+                                menu_opened_time = current_time
                                 selected_unit = None
                             continue  # Stop processing more events this frame
 
@@ -594,6 +786,10 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             # Draw movement overlay if unit selected
             if selected_unit:
                 renderer.draw_movement_overlay(selected_unit)
+
+            # Draw target overlay if in target selection mode
+            if target_selection_mode and target_selection_action:
+                renderer.draw_target_overlay(target_selection_action['targets'])
 
             # Draw active menu LAST (on top of everything)
             if active_menu:

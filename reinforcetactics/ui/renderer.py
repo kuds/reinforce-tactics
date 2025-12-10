@@ -307,6 +307,24 @@ class Renderer:
                 rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                 pygame.draw.rect(self.screen, (255, 255, 0), rect, 1)
 
+    def draw_target_overlay(self, valid_targets):
+        """
+        Draw target selection overlay highlighting valid target positions.
+
+        Args:
+            valid_targets: List of unit objects that are valid targets
+        """
+        for target in valid_targets:
+            # Draw semi-transparent overlay
+            overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
+            overlay.set_alpha(120)
+            overlay.fill((255, 100, 100))  # Red tint for targets
+            self.screen.blit(overlay, (target.x * TILE_SIZE, target.y * TILE_SIZE))
+
+            # Draw border around target
+            rect = pygame.Rect(target.x * TILE_SIZE, target.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            pygame.draw.rect(self.screen, (255, 0, 0), rect, 3)
+
     def get_rgb_array(self):
         """Get the current screen as RGB array."""
         # Convert pygame surface to numpy array
