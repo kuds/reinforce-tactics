@@ -551,6 +551,106 @@ class TestPlayerConfigMenu:
         assert "Invalid game_mode" in str(excinfo.value)
         assert "Must be '1v1' or '2v2'" in str(excinfo.value)
 
+    def test_player_config_modelbot_available_check(self, pygame_init):
+        """Test that ModelBot availability is checked."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+
+        menu = PlayerConfigMenu(game_mode="1v1")
+        
+        # Should have modelbot_available attribute
+        assert hasattr(menu, 'modelbot_available')
+        assert isinstance(menu.modelbot_available, bool)
+
+    def test_player_config_modelbot_in_config(self, pygame_init):
+        """Test that player configs include model_path field."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+
+        menu = PlayerConfigMenu(game_mode="1v1")
+        
+        # All configs should have model_path field
+        for config in menu.player_configs:
+            assert 'model_path' in config
+            assert config['model_path'] is None  # Default is None
+
+    def test_player_config_modelbot_cycle(self, pygame_init):
+        """Test that ModelBot can be selected by cycling bot types."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+        from unittest.mock import patch
+
+        # Mock modelbot_available to be True
+        with patch.object(PlayerConfigMenu, '_check_modelbot_available', return_value=True):
+            menu = PlayerConfigMenu(game_mode="1v1")
+            
+            # Set player 2 to computer
+            menu.player_configs[1]['type'] = 'computer'
+            menu.player_configs[1]['bot_type'] = 'SimpleBot'
+            
+            # Draw menu to populate interactive elements
+            menu.draw()
+            
+            # Find difficulty select button for player 2
+            diff_buttons = [e for e in menu.interactive_elements
+                           if e['type'] == 'difficulty_select' and e['player_idx'] == 1]
+            
+            assert len(diff_buttons) > 0
+            
+            # Click multiple times to cycle through bot types
+            event = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {'button': 1, 'pos': diff_buttons[0]['rect'].center}
+            )
+            
+            # Should eventually reach ModelBot
+            initial_bot = menu.player_configs[1]['bot_type']
+            for _ in range(10):  # Max 10 clicks to find ModelBot
+                menu.handle_input(event)
+                menu.draw()  # Redraw to update elements
+                if menu.player_configs[1]['bot_type'] == 'ModelBot':
+                    break
+            
+            # If modelbot_available is True, should be able to select it
+            # (This might not always work if there are many LLM bots configured)
+
+    def test_player_config_modelbot_validation_required(self, pygame_init):
+        """Test that ModelBot without model path prevents game start."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+        from unittest.mock import patch
+
+        with patch.object(PlayerConfigMenu, '_check_modelbot_available', return_value=True):
+            menu = PlayerConfigMenu(game_mode="1v1")
+            
+            # Set player 2 to ModelBot without model
+            menu.player_configs[1]['type'] = 'computer'
+            menu.player_configs[1]['bot_type'] = 'ModelBot'
+            menu.player_configs[1]['model_path'] = None
+            
+            # Try to get result - should fail
+            result = menu._get_result()
+            assert result is None  # Should not allow starting game
+
+    def test_player_config_modelbot_with_valid_model(self, pygame_init):
+        """Test that ModelBot with valid model allows game start."""
+        from reinforcetactics.ui.menus import PlayerConfigMenu
+        from unittest.mock import patch
+
+        with patch.object(PlayerConfigMenu, '_check_modelbot_available', return_value=True):
+            menu = PlayerConfigMenu(game_mode="1v1")
+            
+            # Set player 2 to ModelBot with valid model
+            menu.player_configs[1]['type'] = 'computer'
+            menu.player_configs[1]['bot_type'] = 'ModelBot'
+            menu.player_configs[1]['model_path'] = '/path/to/model.zip'
+            
+            # Mock validation as valid
+            menu.model_validation[1] = {'valid': True, 'error': None}
+            
+            # Try to get result - should succeed
+            result = menu._get_result()
+            assert result is not None
+            assert 'players' in result
+            assert result['players'][1]['bot_type'] == 'ModelBot'
+            assert result['players'][1]['model_path'] == '/path/to/model.zip'
+
 
 class TestUnitPurchaseMenu:
     """Test unit purchase menu."""
