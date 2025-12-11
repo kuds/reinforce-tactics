@@ -261,23 +261,6 @@ class MapSelectionMenu(Menu):
             diff_surface = label_font.render(diff_text, True, self.text_color)
             self.screen.blit(diff_surface, (info_x, info_y))
             info_y += 30
-        
-        # Terrain breakdown (top 3)
-        terrain = metadata.get('terrain_breakdown', {})
-        if terrain:
-            terrain_label = label_font.render("Terrain:", True, (180, 180, 200))
-            self.screen.blit(terrain_label, (info_x, info_y))
-            info_y += 25
-            
-            # Sort by count and show top 3
-            sorted_terrain = sorted(terrain.items(), key=lambda x: x[1]['count'], reverse=True)[:3]
-            terrain_font = pygame.font.Font(None, 22)
-            for terrain_name, terrain_data in sorted_terrain:
-                pct = terrain_data['percentage']
-                terrain_text = f"  {terrain_name}: {pct:.1f}%"
-                terrain_surface = terrain_font.render(terrain_text, True, (200, 200, 200))
-                self.screen.blit(terrain_surface, (info_x, info_y))
-                info_y += 22
 
     def run(self) -> Optional[str]:
         """
