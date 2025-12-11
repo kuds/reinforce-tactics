@@ -5,11 +5,12 @@ from typing import Optional, List
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
 from reinforcetactics.utils.language import get_language
 
 
 class MapSelectionMenu(Menu):
-    """Menu for selecting a map when starting a new game."""
+    """Menu for selecting a map when starting a new game with visual previews."""
 
     def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps",
                  game_mode: Optional[str] = None) -> None:
@@ -25,8 +26,12 @@ class MapSelectionMenu(Menu):
         self.maps_dir = maps_dir
         self.game_mode = game_mode
         self.available_maps: List[str] = []
+        self.preview_generator = MapPreviewGenerator()
         self._load_maps()
         self._setup_options()
+        
+        # Preload previews for better responsiveness
+        self._preload_previews()
 
     def _load_maps(self) -> None:
         """Load available map files."""
@@ -56,24 +61,28 @@ class MapSelectionMenu(Menu):
     def _setup_options(self) -> None:
         """Setup menu options for available maps."""
         for map_file in self.available_maps:
+            # Use MapPreviewGenerator to format display names
             if map_file == "random":
                 display_name = get_language().get('new_game.random_map', 'Random Map')
             else:
-                if self.game_mode:
-                    # Show just the filename when game mode is already selected
-                    display_name = os.path.splitext(os.path.basename(map_file))[0]
-                else:
-                    # Include the subdirectory in the display name to distinguish duplicates
-                    # e.g., "1v1/6x6_beginner" instead of just "6x6_beginner"
-                    relative_path = map_file.replace(self.maps_dir + os.sep, '')
-                    # Remove .csv extension
-                    display_name = os.path.splitext(relative_path)[0]
+                _, metadata = self.preview_generator.generate_preview(map_file, 50, 50)
+                display_name = metadata.get('name', os.path.basename(map_file))
+            
             self.add_option(display_name, lambda m=map_file: m)
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+    
+    def _preload_previews(self) -> None:
+        """Preload map previews for better responsiveness."""
+        for map_file in self.available_maps:
+            if map_file != "random":
+                # Generate small thumbnail (50x50) for list
+                self.preview_generator.generate_preview(map_file, 50, 50)
+                # Generate larger preview (300x300) for detail panel
+                self.preview_generator.generate_preview(map_file, 300, 300)
 
     def draw(self) -> None:
-        """Draw the map selection menu with reduced spacing."""
+        """Draw the map selection menu with split-panel layout."""
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
@@ -82,75 +91,190 @@ class MapSelectionMenu(Menu):
         # Draw title
         if self.title:
             title_surface = self.title_font.render(self.title, True, self.title_color)
-            title_rect = title_surface.get_rect(centerx=screen_width // 2, y=50)
+            title_rect = title_surface.get_rect(centerx=screen_width // 2, y=20)
             self.screen.blit(title_surface, title_rect)
 
-        # Draw options with reduced spacing (25% less gap from title)
-        # Original: start_y = screen_height // 3 (200 for 600px height)
-        # Gap from title at y=50: 150px
-        # 25% reduction: 150 * 0.75 = 112.5
-        # New start_y: 50 + 112.5 = 162.5
-        start_y = int(screen_height * 0.27)  # Approximately 162 for 600px height
-        spacing = 60
-        self.option_rects = []
+        # Define split panel layout
+        panel_top = 80
+        panel_height = screen_height - panel_top - 20
+        
+        # Left panel for map list (40% of width)
+        left_panel_width = int(screen_width * 0.4)
+        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
+        
+        # Right panel for preview and details (60% of width)
+        right_panel_x = left_panel_width
+        right_panel_width = screen_width - left_panel_width - 10
+        right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
 
-        # Calculate maximum option width for uniform sizing
-        padding_x = 40
-        padding_y = 10
-        max_text_width = 0
-        for text, _ in self.options:
-            display_text = f"> {text}"  # Use the selected format for consistent width
-            text_surface = self.option_font.render(display_text, True, self.text_color)
-            max_text_width = max(max_text_width, text_surface.get_width())
+        # Draw panel backgrounds
+        pygame.draw.rect(self.screen, (40, 40, 50), left_panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (40, 40, 50), right_panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (80, 80, 100), left_panel_rect, width=2, border_radius=8)
+        pygame.draw.rect(self.screen, (80, 80, 100), right_panel_rect, width=2, border_radius=8)
 
-        uniform_width = max_text_width + 2 * padding_x
+        # Draw map list in left panel
+        self._draw_map_list(left_panel_rect)
 
-        for i, (text, _) in enumerate(self.options):
-            # Determine styling based on state
-            is_selected = i == self.selected_index
-            is_hovered = i == self.hover_index
-
-            # Choose colors
-            if is_selected:
-                text_color = self.selected_color
-                bg_color = self.option_bg_selected_color
-            elif is_hovered:
-                text_color = self.hover_color
-                bg_color = self.option_bg_hover_color
-            else:
-                text_color = self.text_color
-                bg_color = self.option_bg_color
-
-            # Add selection indicator
-            display_text = f"> {text}" if is_selected else f"  {text}"
-
-            # Render text
-            text_surface = self.option_font.render(display_text, True, text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + i * spacing)
-
-            # Create background rectangle with uniform width
-            bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2,  # Center the uniform-width box
-                text_rect.y - padding_y,
-                uniform_width,
-                text_rect.height + 2 * padding_y
-            )
-
-            # Draw rounded background rectangle
-            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
-
-            # Draw border for selected/hovered
-            if is_selected or is_hovered:
-                border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, bg_rect, width=2, border_radius=8)
-
-            # Draw text
-            self.screen.blit(text_surface, text_rect)
-
-            # Store rect for click detection
-            self.option_rects.append(bg_rect)
+        # Draw preview and details in right panel
+        self._draw_preview_panel(right_panel_rect)
 
         pygame.display.flip()
+
+    def _draw_map_list(self, panel_rect: pygame.Rect) -> None:
+        """Draw the scrollable map list with thumbnails."""
+        self.option_rects = []
+        
+        # Calculate visible area for scrolling
+        list_padding = 10
+        item_height = 60
+        list_y = panel_rect.y + list_padding
+        max_visible = (panel_rect.height - 2 * list_padding) // item_height
+        
+        # Determine which items to show based on scroll
+        start_idx = self.scroll_offset
+        end_idx = min(start_idx + max_visible, len(self.options))
+        
+        for i in range(start_idx, end_idx):
+            display_idx = i - start_idx
+            text, _ = self.options[i]
+            map_file = self.available_maps[i] if i < len(self.available_maps) else None
+            
+            # Calculate item position
+            item_y = list_y + display_idx * item_height
+            item_rect = pygame.Rect(
+                panel_rect.x + list_padding,
+                item_y,
+                panel_rect.width - 2 * list_padding,
+                item_height - 5
+            )
+            
+            # Determine styling
+            is_selected = i == self.selected_index
+            is_hovered = i == self.hover_index
+            
+            # Choose colors
+            if is_selected:
+                bg_color = self.option_bg_selected_color
+                text_color = self.selected_color
+            elif is_hovered:
+                bg_color = self.option_bg_hover_color
+                text_color = self.hover_color
+            else:
+                bg_color = self.option_bg_color
+                text_color = self.text_color
+            
+            # Draw background
+            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=5)
+            if is_selected or is_hovered:
+                border_color = self.selected_color if is_selected else self.hover_color
+                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
+            
+            # Draw thumbnail if available
+            thumbnail_size = 45
+            if map_file and map_file != "random" and i < len(self.available_maps) - 1:
+                thumbnail, _ = self.preview_generator.generate_preview(map_file, thumbnail_size, thumbnail_size)
+                if thumbnail:
+                    thumb_x = item_rect.x + 5
+                    thumb_y = item_rect.y + (item_rect.height - thumbnail_size) // 2
+                    self.screen.blit(thumbnail, (thumb_x, thumb_y))
+                    
+                    # Draw border around thumbnail
+                    thumb_rect = pygame.Rect(thumb_x, thumb_y, thumbnail_size, thumbnail_size)
+                    pygame.draw.rect(self.screen, (100, 100, 120), thumb_rect, width=1)
+            
+            # Draw text with offset for thumbnail
+            text_x = item_rect.x + thumbnail_size + 15
+            text_font = pygame.font.Font(None, 28)
+            text_surface = text_font.render(text, True, text_color)
+            text_rect = text_surface.get_rect(
+                midleft=(text_x, item_rect.centery)
+            )
+            self.screen.blit(text_surface, text_rect)
+            
+            # Store rect for click detection (using actual index)
+            self.option_rects.append(item_rect)
+
+    def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
+        """Draw the preview and details panel."""
+        # Get currently selected/hovered map
+        active_index = self.hover_index if self.hover_index >= 0 else self.selected_index
+        
+        if active_index < 0 or active_index >= len(self.available_maps):
+            # Draw placeholder
+            font = pygame.font.Font(None, 32)
+            text = font.render("Select a map to preview", True, (150, 150, 150))
+            text_rect = text.get_rect(center=panel_rect.center)
+            self.screen.blit(text, text_rect)
+            return
+        
+        map_file = self.available_maps[active_index]
+        
+        # Generate preview and get metadata
+        preview_size = 300
+        preview, metadata = self.preview_generator.generate_preview(map_file, preview_size, preview_size)
+        
+        if not preview or not metadata:
+            return
+        
+        # Draw preview image
+        preview_x = panel_rect.x + (panel_rect.width - preview_size) // 2
+        preview_y = panel_rect.y + 20
+        self.screen.blit(preview, (preview_x, preview_y))
+        
+        # Draw border around preview
+        preview_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
+        pygame.draw.rect(self.screen, (100, 100, 120), preview_rect, width=2)
+        
+        # Draw metadata below preview
+        info_y = preview_y + preview_size + 20
+        info_x = panel_rect.x + 20
+        
+        info_font = pygame.font.Font(None, 28)
+        label_font = pygame.font.Font(None, 24)
+        
+        # Map name
+        name_surface = info_font.render(metadata['name'], True, self.title_color)
+        self.screen.blit(name_surface, (info_x, info_y))
+        info_y += 35
+        
+        # Dimensions
+        if metadata['width'] > 0:
+            dim_text = f"Size: {metadata['width']}×{metadata['height']}"
+            dim_surface = label_font.render(dim_text, True, self.text_color)
+            self.screen.blit(dim_surface, (info_x, info_y))
+            info_y += 28
+        
+        # Player count
+        if metadata['player_count'] > 0:
+            player_text = f"Players: {metadata['player_count']}"
+            player_surface = label_font.render(player_text, True, self.text_color)
+            self.screen.blit(player_surface, (info_x, info_y))
+            info_y += 28
+        
+        # Difficulty
+        if metadata.get('difficulty'):
+            diff_text = f"Difficulty: {metadata['difficulty']}"
+            diff_surface = label_font.render(diff_text, True, self.text_color)
+            self.screen.blit(diff_surface, (info_x, info_y))
+            info_y += 30
+        
+        # Terrain breakdown (top 3)
+        terrain = metadata.get('terrain_breakdown', {})
+        if terrain:
+            terrain_label = label_font.render("Terrain:", True, (180, 180, 200))
+            self.screen.blit(terrain_label, (info_x, info_y))
+            info_y += 25
+            
+            # Sort by count and show top 3
+            sorted_terrain = sorted(terrain.items(), key=lambda x: x[1]['count'], reverse=True)[:3]
+            terrain_font = pygame.font.Font(None, 22)
+            for terrain_name, terrain_data in sorted_terrain:
+                pct = terrain_data['percentage']
+                terrain_text = f"  {terrain_name}: {pct:.1f}%"
+                terrain_surface = terrain_font.render(terrain_text, True, (200, 200, 200))
+                self.screen.blit(terrain_surface, (info_x, info_y))
+                info_y += 22
 
     def run(self) -> Optional[str]:
         """
