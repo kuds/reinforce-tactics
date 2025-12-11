@@ -9,22 +9,26 @@ import pygame
 # Priority list of fonts supporting comprehensive Unicode
 # Includes Latin, CJK, and symbols
 CJK_FONT_CANDIDATES = [
-    # Comprehensive Unicode fonts with good Latin + CJK + symbol coverage
-    "Arial Unicode MS",   # Wide Unicode support - excellent coverage
+    # Comprehensive Unicode fonts with BOTH Latin accents AND CJK support
+    "Arial Unicode MS",   # Wide Unicode support - excellent coverage for both
+    # macOS fonts with both Latin and CJK support
+    "Apple SD Gothic Neo", # macOS - has both Latin extended and CJK support
+    "PingFang SC",        # macOS Chinese font - also has Latin support
+    "PingFang TC",        # macOS Traditional Chinese - also has Latin support
+    "Hiragino Sans",      # macOS Japanese - also has Latin support
+    # Comprehensive cross-platform fonts
     "DejaVu Sans",        # Good Unicode coverage - Latin + many symbols
-    # macOS standard fonts (must come before CJK-specific fonts for Latin support)
-    "Helvetica Neue",     # macOS default - excellent Latin support
-    "Helvetica",          # macOS fallback - excellent Latin support
-    # CJK-specific fonts with good overall Unicode support
     "Noto Sans CJK",
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",
     "Noto Sans CJK KR",
+    # Windows fonts with CJK support
     "Malgun Gothic",      # Windows Korean font
     "Microsoft YaHei",    # Windows Chinese font
-    "Apple SD Gothic Neo", # macOS Korean font - good Unicode coverage
+    # macOS fonts (Latin-focused, CJK-limited)
+    "Helvetica Neue",     # macOS default - excellent Latin, NO CJK
+    "Helvetica",          # macOS fallback - excellent Latin, NO CJK
     "AppleGothic",        # macOS Korean font (older)
-    "PingFang SC",        # macOS Chinese font
     "FreeSans",           # Linux
     # Specialized symbol fonts (lower priority to avoid issues with Latin characters)
     "Symbola",            # Cross-platform - excellent Unicode coverage
@@ -59,7 +63,7 @@ def get_font(size: int) -> pygame.font.Font:
     Get a font that supports comprehensive Unicode.
 
     Includes Latin accents, CJK characters, and symbols.
-    Uses font fallback list for pygame.font.SysFont to ensure proper rendering.
+    Selects a single font with the best comprehensive Unicode coverage.
 
     Args:
         size: Font size in points
@@ -83,29 +87,19 @@ def get_font(size: int) -> pygame.font.Font:
             # Font is invalid, remove from cache
             del _font_cache[size]
 
-    # Try to use SysFont with a fallback list
-    # This allows pygame to use multiple fonts for different character ranges
+    # Find the best available font with comprehensive Unicode support
     try:
-        # Build a font fallback list with both Latin and CJK support
-        font_fallback_list = []
-
         # Check which fonts are available (cached)
         available_fonts_lower = _get_available_fonts()
 
+        # Try each candidate in priority order
         for candidate in CJK_FONT_CANDIDATES:
             candidate_normalized = candidate.lower().replace(" ", "")
             if candidate_normalized in available_fonts_lower:
-                font_fallback_list.append(candidate)
-                # Stop after finding first 3 fonts for fallback
-                if len(font_fallback_list) >= 3:
-                    break
-
-        if font_fallback_list:
-            # Use comma-separated list for pygame SysFont fallback
-            font_names = ",".join(font_fallback_list)
-            font = pygame.font.SysFont(font_names, size)
-            _font_cache[size] = font
-            return font
+                # Found an available font - use it
+                font = pygame.font.SysFont(candidate, size)
+                _font_cache[size] = font
+                return font
     except Exception:
         pass
 
