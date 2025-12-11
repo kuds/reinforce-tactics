@@ -288,7 +288,7 @@ class TestBotFactory:
         settings = get_settings()
 
         # Mock ModelBot to avoid loading actual model
-        with patch('game.bot_factory.ModelBot') as mock_modelbot:
+        with patch('reinforcetactics.game.model_bot.ModelBot') as mock_modelbot:
             mock_instance = MagicMock()
             mock_modelbot.return_value = mock_instance
             
@@ -333,7 +333,7 @@ class TestBotFactory:
         ]
 
         # Mock ModelBot to avoid loading actual model
-        with patch('game.bot_factory.ModelBot') as mock_modelbot:
+        with patch('reinforcetactics.game.model_bot.ModelBot') as mock_modelbot:
             mock_instance = MagicMock()
             mock_modelbot.return_value = mock_instance
             
