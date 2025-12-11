@@ -7,6 +7,7 @@ import pandas as pd
 
 from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
 from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.utils.fonts import get_font
 
 
 # Mapping of terrain codes to display names
@@ -65,7 +66,7 @@ class MapPreviewGenerator:
             preview.fill((50, 50, 50))
 
             # Draw question mark pattern
-            font = pygame.font.Font(None, int(height * 0.6))
+            font = get_font(int(height * 0.6))
             text = font.render("?", True, (200, 200, 200))
             text_rect = text.get_rect(center=(width // 2, height // 2))
             preview.blit(text, text_rect)

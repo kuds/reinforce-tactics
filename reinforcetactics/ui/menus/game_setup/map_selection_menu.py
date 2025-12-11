@@ -7,6 +7,7 @@ import pygame
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
 from reinforcetactics.utils.language import get_language
+from reinforcetactics.utils.fonts import get_font
 
 
 class MapSelectionMenu(Menu):
@@ -186,7 +187,7 @@ class MapSelectionMenu(Menu):
 
             # Draw text with offset for thumbnail
             text_x = item_rect.x + thumbnail_size + 15
-            text_font = pygame.font.Font(None, 28)
+            text_font = get_font(28)
             text_surface = text_font.render(text, True, text_color)
             text_rect = text_surface.get_rect(
                 midleft=(text_x, item_rect.centery)
@@ -205,7 +206,7 @@ class MapSelectionMenu(Menu):
 
         if active_index < 0 or active_index >= len(self.available_maps):
             # Draw placeholder
-            font = pygame.font.Font(None, 32)
+            font = get_font(32)
             text = font.render("Select a map to preview", True, (150, 150, 150))
             text_rect = text.get_rect(center=panel_rect.center)
             self.screen.blit(text, text_rect)
@@ -233,8 +234,8 @@ class MapSelectionMenu(Menu):
         info_y = preview_y + preview_size + 20
         info_x = panel_rect.x + 20
 
-        info_font = pygame.font.Font(None, 28)
-        label_font = pygame.font.Font(None, 24)
+        info_font = get_font(28)
+        label_font = get_font(24)
 
         # Map name
         name_surface = info_font.render(metadata['name'], True, self.title_color)

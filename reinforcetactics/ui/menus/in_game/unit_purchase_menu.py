@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import pygame
 
 from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
+from reinforcetactics.utils.fonts import get_font
 
 
 class UnitPurchaseMenu:
@@ -34,8 +35,8 @@ class UnitPurchaseMenu:
         self.close_button_hover_color = (255, 80, 80)
 
         # Fonts
-        self.title_font = pygame.font.Font(None, 28)
-        self.option_font = pygame.font.Font(None, 24)
+        self.title_font = get_font(28)
+        self.option_font = get_font(24)
 
         # Unit types to display (basic units only: Warrior, Mage, Cleric)
         # Barbarian is excluded as it costs 400g vs 200-250g for basic units
