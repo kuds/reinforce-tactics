@@ -2,10 +2,10 @@
 Gymnasium environment for Reinforce Tactics
 Supports both flat and hierarchical RL training
 """
+from typing import Dict, Any, Tuple, Optional
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-from typing import Dict, Any, Tuple, Optional
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO

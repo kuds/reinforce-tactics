@@ -5,13 +5,13 @@ This test suite provides comprehensive coverage of the Gymnasium environment
 used for RL training, including observation spaces, action spaces, step/reset
 functions, reward calculations, and episode statistics.
 """
+import sys
+from unittest.mock import patch, MagicMock
 import pytest
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
-from unittest.mock import patch, MagicMock
-import sys
 
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.utils.file_io import FileIO

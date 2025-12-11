@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.utils.replay_player import ReplayPlayer
 
 
 @pytest.fixture
@@ -35,7 +34,7 @@ def game_with_actions(simple_map):
 
     # Create some units and perform actions
     unit1 = game.create_unit('W', 1, 1, player=1)
-    unit2 = game.create_unit('W', 3, 3, player=2)
+    _ = game.create_unit('W', 3, 3, player=2)  # Create unit but not used in test
 
     if unit1:
         game.move_unit(unit1, 2, 1)

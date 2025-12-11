@@ -1,10 +1,9 @@
 """
 Tests for the tournament system (ModelBot and tournament script).
 """
-import json
-import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
+import pytest
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
@@ -53,7 +52,6 @@ class TestModelBot:
         except ImportError:
             pytest.skip("stable-baselines3 not installed")
 
-        from unittest.mock import patch
         from reinforcetactics.game.model_bot import ModelBot
 
         with patch('stable_baselines3.PPO') as mock_ppo_class:
@@ -281,7 +279,6 @@ class TestBotFactory:
         """Test that create_bot handles ModelBot with model_path."""
         from game.bot_factory import create_bot
         from reinforcetactics.utils.settings import get_settings
-        from unittest.mock import patch, MagicMock
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
@@ -321,7 +318,6 @@ class TestBotFactory:
         """Test that create_bots_from_config handles ModelBot configs."""
         from game.bot_factory import create_bots_from_config
         from reinforcetactics.utils.settings import get_settings
-        from unittest.mock import patch, MagicMock
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)

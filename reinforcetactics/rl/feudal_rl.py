@@ -2,11 +2,11 @@
 Feudal Reinforcement Learning Architecture
 Manager-Worker hierarchy for strategy games
 """
+from typing import Tuple, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, Dict, Optional
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 

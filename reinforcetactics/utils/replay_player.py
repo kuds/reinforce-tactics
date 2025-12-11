@@ -1,9 +1,9 @@
 """
 Replay player for watching recorded games
 """
-import pygame
 import time
 from pathlib import Path
+import pygame
 
 
 class ReplayPlayer:
