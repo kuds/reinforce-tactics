@@ -63,13 +63,13 @@ class MapPreviewGenerator:
             # Create a simple preview for random map
             preview = pygame.Surface((width, height))
             preview.fill((50, 50, 50))
-            
+
             # Draw question mark pattern
             font = pygame.font.Font(None, int(height * 0.6))
             text = font.render("?", True, (200, 200, 200))
             text_rect = text.get_rect(center=(width // 2, height // 2))
             preview.blit(text, text_rect)
-            
+
             self._cache[cache_key] = (preview, metadata)
             return preview, metadata
 
@@ -117,7 +117,7 @@ class MapPreviewGenerator:
                     if len(parts) > 1 and parts[1].isdigit():
                         player_num = int(parts[1])
                         player_count = max(player_count, player_num)
-                        
+
                         # Count as the base type with player prefix
                         terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, 'Unknown')
                         terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
@@ -259,7 +259,7 @@ class MapPreviewGenerator:
         if '_' in tile:
             parts = tile.split('_')
             base_type = parts[0]
-            
+
             if len(parts) > 1 and parts[1].isdigit():
                 player_num = int(parts[1])
                 # Use player color for player structures

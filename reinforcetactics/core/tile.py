@@ -70,7 +70,7 @@ class Tile:
         # For structures (buildings, HQ, towers), emphasize player color more
         if self.player and self.player in PLAYER_COLORS:
             player_color = PLAYER_COLORS[self.player]
-            
+
             if self.type in ['h', 'b', 't']:
                 # Structures: 70% player color, 30% base color
                 return tuple(
@@ -110,11 +110,11 @@ class Tile:
         tile_str = data['type']
         if data.get('player'):
             tile_str += f"_{data['player']}"
-        
+
         tile = cls(tile_str, data['x'], data['y'])
         if data.get('health') is not None:
             tile.health = data['health']
         if data.get('regenerating') is not None:
             tile.regenerating = data['regenerating']
-        
+
         return tile

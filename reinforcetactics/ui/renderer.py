@@ -20,7 +20,7 @@ class Renderer:
             game_state: GameState instance to render
         """
         self.game_state = game_state
-        
+
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
             pygame.init()
@@ -58,23 +58,23 @@ class Renderer:
     def _setup_ui_elements(self):
         """Setup UI elements like buttons."""
         screen_width = self.game_state.grid.width * TILE_SIZE
-        
+
         self.end_turn_button = pygame.Rect(screen_width - 150, 10, 140, 40)
         self.resign_button = pygame.Rect(screen_width - 150, 60, 140, 40)
 
     def render(self):
         """Render the entire game state."""
         self.screen.fill((0, 0, 0))
-        
+
         # Draw grid
         self._draw_grid()
-        
+
         # Draw units
         self._draw_units()
-        
+
         # Draw UI
         self._draw_ui()
-        
+
         # Note: pygame.display.flip() is called by the main game loop
 
     def _draw_grid(self):
@@ -87,16 +87,16 @@ class Renderer:
     def _draw_tile(self, tile):
         """Draw a single tile with improved visuals."""
         rect = pygame.Rect(tile.x * TILE_SIZE, tile.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-        
+
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
-        
+
         # Draw tile image or color
         if self.tile_images.get(tile_type_name):
             self.screen.blit(self.tile_images[tile_type_name], rect)
         else:
             color = tile.get_color()
             pygame.draw.rect(self.screen, color, rect)
-            
+
             # Add visual variety to tiles
             if tile.type == 'p':  # Grass - checkerboard pattern
                 if (tile.x + tile.y) % 2 == 0:
@@ -107,17 +107,17 @@ class Renderer:
                 if (tile.x + tile.y) % 2 == 0:
                     lighter = tuple(min(c + 15, 255) for c in color)
                     pygame.draw.rect(self.screen, lighter, rect)
-            
+
             elif tile.type == 'w':  # Water - darker edges
                 darker = tuple(max(c - 30, 0) for c in color)
                 pygame.draw.line(self.screen, darker, rect.topleft, rect.topright, 2)
                 pygame.draw.line(self.screen, darker, rect.topleft, rect.bottomleft, 2)
-            
+
             elif tile.type == 'm':  # Mountain - lighter top
                 lighter = tuple(min(c + 40, 255) for c in color)
                 top_rect = pygame.Rect(rect.x, rect.y, rect.width, rect.height // 2)
                 pygame.draw.rect(self.screen, lighter, top_rect)
-            
+
             elif tile.type == 'f':  # Forest - random dots for texture
                 import random
                 random.seed(tile.x * 1000 + tile.y)  # Deterministic randomness
@@ -126,18 +126,18 @@ class Renderer:
                     y = rect.y + random.randint(5, rect.height - 5)
                     darker = tuple(max(c - 20, 0) for c in color)
                     pygame.draw.circle(self.screen, darker, (x, y), 2)
-            
+
             elif tile.type == 'r':  # Road - center stripe
                 stripe_color = tuple(min(c + 30, 255) for c in color)
                 center_y = rect.centery
-                pygame.draw.line(self.screen, stripe_color, 
+                pygame.draw.line(self.screen, stripe_color,
                             (rect.left, center_y), (rect.right, center_y), 2)
-            
+
             elif tile.type in ['h', 'b', 't']:  # Structures - border highlight
                 if tile.player:
                     player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
                     pygame.draw.rect(self.screen, player_color, rect, 3)
-            
+
             # Tile border
             pygame.draw.rect(self.screen, (0, 0, 0), rect, 1)
 
@@ -158,14 +158,14 @@ class Renderer:
         # Foreground
         health_percentage = tile.health / tile.max_health
         current_bar_width = int(bar_width * health_percentage)
-        
+
         if tile.type == 'h':
             health_color = (255, 200, 0)
         elif tile.type == 'b':
             health_color = (0, 200, 200)
         else:
             health_color = (200, 200, 200)
-        
+
         pygame.draw.rect(self.screen, health_color, (bar_x, bar_y, current_bar_width, bar_height))
         pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_width, bar_height), 1)
 
@@ -236,14 +236,14 @@ class Renderer:
         # Foreground
         health_percentage = unit.health / unit.max_health
         current_bar_width = int(bar_width * health_percentage)
-        
+
         if health_percentage > 0.5:
             health_color = (0, 200, 0)
         elif health_percentage > 0.25:
             health_color = (255, 165, 0)
         else:
             health_color = (255, 0, 0)
-        
+
         pygame.draw.rect(self.screen, health_color, (bar_x, bar_y, current_bar_width, bar_height))
         pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_width, bar_height), 1)
 

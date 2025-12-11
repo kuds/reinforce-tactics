@@ -89,7 +89,7 @@ class UnitActionMenu:
                     'type': 'heal',
                     'targets': adjacent_allies
                 })
-            
+
             # Cure - only with adjacent paralyzed allies
             adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(
                 self.unit, self.game_state.units

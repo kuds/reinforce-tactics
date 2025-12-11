@@ -22,11 +22,11 @@ def train_mode(args):
         print("❌ Stable-Baselines3 not installed.")
         print("Install with: pip install stable-baselines3[extra]")
         return
-    
+
     # Import from correct paths
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
-        
+
         try:
             from reinforcetactics.rl.rl_gym_env import StrategyGameEnv
         except ImportError:
@@ -45,11 +45,11 @@ def train_mode(args):
     except Exception as e:
         print(f"❌ Error importing modules: {e}")
         return
-    
+
     print(f"\n{'='*60}")
     print(f"🚀 Training {args.algorithm.upper()} Agent")
     print(f"{'='*60}\n")
-    
+
     # Create environment
     print("Creating environment...")
     try:
@@ -69,12 +69,12 @@ def train_mode(args):
     except Exception as e:
         print(f"❌ Error creating environment: {e}")
         return
-    
+
     env = Monitor(env)
-    
+
     # Create model
     print(f"Creating {args.algorithm.upper()} model...")
-    
+
     if args.algorithm.lower() == 'ppo':
         model = PPO(
             'MultiInputPolicy',
@@ -107,22 +107,22 @@ def train_mode(args):
     else:
         print(f"❌ Unknown algorithm: {args.algorithm}")
         return
-    
+
     # Setup callbacks
     checkpoint_dir = Path("checkpoints")
     checkpoint_dir.mkdir(exist_ok=True)
-    
+
     checkpoint_callback = CheckpointCallback(
         save_freq=10000,
         save_path=str(checkpoint_dir),
         name_prefix=f"{args.algorithm}_strategy"
     )
-    
+
     # Train
     print(f"🎮 Training for {args.timesteps} timesteps...")
     print(f"Opponent: {args.opponent}")
     print("Tensorboard: tensorboard --logdir ./tensorboard/\n")
-    
+
     try:
         model.learn(
             total_timesteps=args.timesteps,
@@ -131,17 +131,17 @@ def train_mode(args):
         )
     except KeyboardInterrupt:
         print("\n⚠️  Training interrupted by user")
-    
+
     # Save final model
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
-    
+
     model_name = args.model_name or f"{args.algorithm}_final"
     model_path = models_dir / model_name
-    
+
     model.save(str(model_path))
     print(f"\n✅ Model saved to {model_path}.zip")
-    
+
     env.close()
 
 
@@ -153,7 +153,7 @@ def evaluate_mode(args):
     except ImportError:
         print("❌ Stable-Baselines3 not installed.")
         return
-    
+
     # Import environment
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -164,20 +164,20 @@ def evaluate_mode(args):
     except ImportError:
         print("❌ Could not import StrategyGameEnv")
         return
-    
+
     if not args.model:
         print("❌ --model path required for evaluation")
         return
-    
+
     model_path = Path(args.model)
     if not model_path.exists():
         print(f"❌ Model not found: {model_path}")
         return
-    
+
     print(f"\n{'='*60}")
     print(f"📊 Evaluating Model: {model_path.name}")
     print(f"{'='*60}\n")
-    
+
     # Load model
     print("Loading model...")
     try:
@@ -193,7 +193,7 @@ def evaluate_mode(args):
     except Exception as e:
         print(f"❌ Error loading model: {e}")
         return
-    
+
     # Create environment
     try:
         env = StrategyGameEnv(
@@ -203,41 +203,41 @@ def evaluate_mode(args):
     except Exception as e:
         print(f"❌ Error creating environment: {e}")
         return
-    
+
     # Evaluate
     wins = 0
     total_rewards = []
-    
+
     print(f"Running {args.episodes} evaluation episodes...\n")
-    
+
     for ep in range(args.episodes):
         obs, info = env.reset()
         done = False
         episode_reward = 0
         steps = 0
-        
+
         while not done:
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
             done = terminated or truncated
             steps += 1
-            
+
             if args.render:
                 env.render()
-        
+
         total_rewards.append(episode_reward)
-        
+
         if info.get('game_over') and info.get('winner') == 1:
             wins += 1
             print(f"Episode {ep+1}: WIN  | Reward: {episode_reward:.1f} | Steps: {steps}")
         else:
             print(f"Episode {ep+1}: LOSS | Reward: {episode_reward:.1f} | Steps: {steps}")
-    
+
     # Print results
     win_rate = wins / args.episodes
     avg_reward = np.mean(total_rewards)
-    
+
     print(f"\n{'='*60}")
     print("📊 Evaluation Results:")
     print(f"Win Rate:     {win_rate*100:.1f}%")
@@ -246,7 +246,7 @@ def evaluate_mode(args):
     print(f"Best Reward:  {max(total_rewards):.2f}")
     print(f"Worst Reward: {min(total_rewards):.2f}")
     print(f"{'='*60}\n")
-    
+
     env.close()
 
 
@@ -264,22 +264,22 @@ def play_mode(_args):
         print(f"❌ Error importing game components: {e}")
         print("\nMake sure all required modules are in reinforcetactics/")
         return
-    
+
     # Initialize Pygame
     pygame.init()
-    
+
     # Show main menu
     main_menu = MainMenu()
     menu_result = main_menu.run()
-    
+
     if not menu_result or menu_result['type'] == 'exit':
         print("Exiting...")
         pygame.quit()
         return
-    
+
     # Import game loop functions
     from game.game_loop import start_new_game, load_saved_game, watch_replay
-    
+
     # Handle menu selection
     if menu_result['type'] == 'new_game':
         start_new_game(
@@ -299,7 +299,7 @@ def play_mode(_args):
 def stats_mode(_args):
     """Display training statistics."""
     print("\n📊 Training Statistics\n")
-    
+
     # Check for saved models
     models_dir = Path("models")
     if models_dir.exists():
@@ -311,9 +311,9 @@ def stats_mode(_args):
             print(f"  ... and {len(models) - 10} more")
     else:
         print("No saved models found")
-    
+
     print()
-    
+
     # Check for checkpoints
     checkpoint_dir = Path("checkpoints")
     if checkpoint_dir.exists():
@@ -321,9 +321,9 @@ def stats_mode(_args):
         print(f"Checkpoints: {len(checkpoints)}")
     else:
         print("No checkpoints found")
-    
+
     print()
-    
+
     # Check for tensorboard logs
     tb_dir = Path("tensorboard")
     if tb_dir.exists():
@@ -331,5 +331,5 @@ def stats_mode(_args):
         print("View with: tensorboard --logdir ./tensorboard/")
     else:
         print("No tensorboard logs found")
-    
+
     print()
