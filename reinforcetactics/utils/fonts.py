@@ -38,29 +38,20 @@ CJK_FONT_CANDIDATES = [
 ]
 
 _font_cache: Dict[int, pygame.font.Font] = {}
-_system_font_name: Optional[str] = None
+_available_fonts_cache: Optional[list] = None
 
 
-def _find_cjk_font() -> Optional[str]:
-    """Find a system font that supports comprehensive Unicode.
+def _get_available_fonts() -> list:
+    """Get list of available system fonts (cached).
 
-    Supports Latin, CJK, and symbols.
+    Returns:
+        List of available font names in lowercase without spaces
     """
-    global _system_font_name
-    if _system_font_name is not None:
-        return _system_font_name
-
-    available_fonts = pygame.font.get_fonts()
-    available_fonts_lower = [f.lower().replace(" ", "") for f in available_fonts]
-
-    for candidate in CJK_FONT_CANDIDATES:
-        candidate_normalized = candidate.lower().replace(" ", "")
-        if candidate_normalized in available_fonts_lower:
-            _system_font_name = candidate
-            return candidate
-
-    _system_font_name = ""  # Empty string means no CJK font found
-    return None
+    global _available_fonts_cache
+    if _available_fonts_cache is None:
+        available_fonts = pygame.font.get_fonts()
+        _available_fonts_cache = [f.lower().replace(" ", "") for f in available_fonts]
+    return _available_fonts_cache
 
 
 def get_font(size: int) -> pygame.font.Font:
@@ -98,9 +89,8 @@ def get_font(size: int) -> pygame.font.Font:
         # Build a font fallback list with both Latin and CJK support
         font_fallback_list = []
 
-        # Check which fonts are available
-        available_fonts = pygame.font.get_fonts()
-        available_fonts_lower = [f.lower().replace(" ", "") for f in available_fonts]
+        # Check which fonts are available (cached)
+        available_fonts_lower = _get_available_fonts()
 
         for candidate in CJK_FONT_CANDIDATES:
             candidate_normalized = candidate.lower().replace(" ", "")
