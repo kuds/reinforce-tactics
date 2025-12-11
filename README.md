@@ -20,7 +20,7 @@ A modular turn-based strategy game built with Pygame and Gymnasium for reinforce
 - **Economic system** with income from controlled structures
 - **Structure capture**: Towers, Buildings, and Headquarters
 - **Save/Load system** for continuing games
-- **Replay system** for watching past games
+- **Replay system** for watching past games with video export capability
 - **AI opponent** (SimpleBot) for single-player games
 - **Gymnasium integration** for reinforcement learning
 - **Headless mode** for fast training without rendering
@@ -140,6 +140,67 @@ while not game.game_over:
     # Bot plays
     bot.take_turn()
     game.end_turn()
+```
+
+## Replay System with Video Export
+
+The replay system allows you to watch and record past games. Replays are automatically saved after each game and can be exported to video files.
+
+### Watching Replays
+
+From the main menu, select "Watch Replay" to view saved replays. The replay player includes:
+
+- **Play/Pause** (▶/⏸): Control replay playback (Space key or click)
+- **Restart** (⟲): Restart from the beginning (R key or click)
+- **Speed Control** (+/-): Change playback speed (0.25x to 4x)
+- **Progress Bar**: Click to seek to any point in the replay
+- **Video Recording** (⏺ Rec/⏹ Save): Record and save replay as video (V key or click)
+
+### Recording Replay to Video
+
+To export a replay as a video file:
+
+1. Open a replay from the main menu
+2. Press **V** or click the **⏺ Rec** button to start recording
+3. The replay will capture frames as it plays
+4. Press **V** again or click **⏹ Save** to stop and save the video
+5. Video will be saved to the `videos/` directory as MP4
+
+**Requirements**: Install `opencv-python` for video export functionality:
+```bash
+pip install opencv-python
+```
+
+**Video Settings**:
+- Format: MP4 (H.264)
+- Frame Rate: 30 FPS
+- Resolution: Matches game window size
+
+### Programmatic Replay Control
+
+```python
+from reinforcetactics.utils.replay_player import ReplayPlayer
+from reinforcetactics.utils.file_io import FileIO
+import pandas as pd
+
+# Load replay
+replay_data = FileIO.load_replay('replays/game_20231201_120000.json')
+map_data = pd.DataFrame(replay_data['game_info']['initial_map'])
+
+# Create replay player
+player = ReplayPlayer(replay_data, map_data)
+
+# Start recording
+player.start_recording()
+
+# Run replay (captures frames automatically)
+player.run()
+
+# Or manually control:
+player.start_recording()
+# ... render frames with player.draw() ...
+player.stop_recording()
+video_path = player.save_video()  # Returns path to saved video
 ```
 
 ## LLM Bots (AI Opponents)

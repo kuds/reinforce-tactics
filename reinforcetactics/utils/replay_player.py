@@ -2,7 +2,6 @@
 Replay player for watching recorded games
 """
 import time
-from pathlib import Path
 import pygame
 
 from reinforcetactics.utils.fonts import get_font
@@ -264,7 +263,7 @@ class ReplayPlayer:
         clock = pygame.time.Clock()
         running = True
 
-        print(f"\n🎬 Starting replay playback")
+        print("\n🎬 Starting replay playback")
         print(f"Total actions: {len(self.actions)}")
         print(f"Game info: {self.game_info}")
         print("\nControls:")
