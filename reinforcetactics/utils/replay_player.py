@@ -3,9 +3,18 @@ Replay player for watching recorded games
 """
 import time
 from pathlib import Path
+from datetime import datetime
+import numpy as np
 import pygame
 
 from reinforcetactics.utils.fonts import get_font
+
+# Optional OpenCV import for video export
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
 
 class ReplayPlayer:
@@ -29,6 +38,10 @@ class ReplayPlayer:
         self.paused = True
         self.playback_speed = 1.0  # 1x speed
         self.last_action_time = time.time()
+
+        # Video recording state
+        self.recording = False
+        self.recorded_frames = []
 
         # Create initial game state
         from reinforcetactics.core.game_state import GameState
@@ -56,11 +69,12 @@ class ReplayPlayer:
         self.restart_button = pygame.Rect(100, self.control_y + 10, 80, 40)
         self.speed_up_button = pygame.Rect(190, self.control_y + 10, 40, 40)
         self.speed_down_button = pygame.Rect(240, self.control_y + 10, 40, 40)
+        self.save_video_button = pygame.Rect(290, self.control_y + 10, 100, 40)
         self.exit_button = pygame.Rect(screen_width - 90, self.control_y + 10, 80, 40)
 
         # Progress bar
-        self.progress_bar_rect = pygame.Rect(290, self.control_y + 20,
-                                             screen_width - 400, 20)
+        self.progress_bar_rect = pygame.Rect(400, self.control_y + 20,
+                                             max(screen_width - 510, 100), 20)
 
     def execute_action(self, action):
         """
@@ -190,17 +204,79 @@ class ReplayPlayer:
         except ValueError:
             self.playback_speed = 1.0
 
+    def start_recording(self):
+        """Start recording video frames."""
+        self.recording = True
+        self.recorded_frames = []
+        print("🔴 Started recording video...")
+
+    def stop_recording(self):
+        """Stop recording and prompt to save."""
+        if self.recording:
+            self.recording = False
+            print(f"⏹️  Stopped recording. Captured {len(self.recorded_frames)} frames.")
+
+    def save_video(self):
+        """Save recorded frames to video file."""
+        if not self.recorded_frames:
+            print("⚠️  No frames recorded. Start recording first.")
+            return None
+
+        if not CV2_AVAILABLE:
+            print("❌ opencv-python not installed. Install with: pip install opencv-python")
+            return None
+
+        try:
+            # Create videos directory
+            videos_dir = Path("videos")
+            videos_dir.mkdir(exist_ok=True)
+
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = videos_dir / f"replay_{timestamp}.mp4"
+
+            # Get frame dimensions from first frame
+            height, width, _ = self.recorded_frames[0].shape
+
+            # Create video writer
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fps = 30  # 30 FPS for smooth playback
+            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+            # Write frames
+            for frame in self.recorded_frames:
+                # Convert RGB to BGR for OpenCV
+                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                writer.write(bgr_frame)
+
+            writer.release()
+            print(f"✅ Video saved: {output_path}")
+            print(f"   Duration: {len(self.recorded_frames) / fps:.1f} seconds")
+            print(f"   Resolution: {width}x{height}")
+            print(f"   Frames: {len(self.recorded_frames)}")
+
+            # Clear recorded frames to free memory
+            self.recorded_frames = []
+            return str(output_path)
+
+        except Exception as e:
+            print(f"❌ Error saving video: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def run(self):
         """Run the replay player."""
         clock = pygame.time.Clock()
         running = True
 
-        print(f"\n🎬 Starting replay playback")
+        print("\n🎬 Starting replay playback")
         print(f"Total actions: {len(self.actions)}")
         print(f"Game info: {self.game_info}")
         print("\nControls:")
         print("  SPACE - Play/Pause")
         print("  R - Restart")
+        print("  V - Start/Stop video recording")
         print("  + - Speed up")
         print("  - - Slow down")
         print("  ESC - Exit\n")
@@ -219,6 +295,12 @@ class ReplayPlayer:
                         self.toggle_pause()
                     elif event.key == pygame.K_r:
                         self.restart()
+                    elif event.key == pygame.K_v:
+                        if not self.recording:
+                            self.start_recording()
+                        else:
+                            self.stop_recording()
+                            self.save_video()
                     elif event.key in [pygame.K_PLUS, pygame.K_EQUALS]:
                         self.change_speed(1)
                     elif event.key == pygame.K_MINUS:
@@ -234,6 +316,12 @@ class ReplayPlayer:
                             self.change_speed(1)
                         elif self.speed_down_button.collidepoint(mouse_pos):
                             self.change_speed(-1)
+                        elif self.save_video_button.collidepoint(mouse_pos):
+                            if not self.recording:
+                                self.start_recording()
+                            else:
+                                self.stop_recording()
+                                self.save_video()
                         elif self.exit_button.collidepoint(mouse_pos):
                             running = False
                         elif self.progress_bar_rect.collidepoint(mouse_pos):
@@ -288,10 +376,12 @@ class ReplayPlayer:
         self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), speed_font)
         self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), speed_font)
 
-        # Speed indicator
-        speed_text = f"{self.playback_speed}x"
-        speed_surface = font.render(speed_text, True, (255, 255, 255))
-        self.renderer.screen.blit(speed_surface, (250, self.control_y + 20))
+        # Save Video button
+        save_video_text = "⏺ Rec" if not self.recording else "⏹ Save"
+        save_video_color = (200, 50, 50) if self.recording else (70, 70, 150)
+        small_font = get_font(22)
+        self._draw_button(self.save_video_button, save_video_text, mouse_pos,
+                         save_video_color, small_font)
 
         # Progress bar
         pygame.draw.rect(self.renderer.screen, (60, 60, 70), self.progress_bar_rect)
@@ -313,6 +403,20 @@ class ReplayPlayer:
 
         # Exit button
         self._draw_button(self.exit_button, "Exit", mouse_pos, (150, 70, 70), font)
+
+        # Recording indicator
+        if self.recording:
+            rec_text = f"🔴 REC ({len(self.recorded_frames)} frames)"
+            rec_surface = get_font(20).render(rec_text, True, (255, 50, 50))
+            self.renderer.screen.blit(rec_surface, (10, 10))
+
+        # Capture frame if recording
+        if self.recording:
+            # Get the pygame surface as a numpy array
+            frame_data = pygame.surfarray.array3d(self.renderer.screen)
+            # Transpose from (width, height, channels) to (height, width, channels)
+            frame_data = np.transpose(frame_data, (1, 0, 2))
+            self.recorded_frames.append(frame_data.copy())
 
     def _draw_button(self, rect, text, mouse_pos, color, font):
         """Draw a button."""
