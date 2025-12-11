@@ -485,7 +485,7 @@ If you use Reinforce Tactics in your research, please cite it as follows:
 
 ```bibtex
 @software{reinforce_tactics,
-  author = {kuds},
+  author = {Michael Kudlaty},
   title = {Reinforce Tactics: A Turn-Based Strategy Game for Reinforcement Learning},
   year = {2025},
   url = {https://github.com/kuds/reinforce-tactics},
@@ -495,7 +495,7 @@ If you use Reinforce Tactics in your research, please cite it as follows:
 
 ### Plain Text
 
-kuds. (2025). Reinforce Tactics: A Turn-Based Strategy Game for Reinforcement Learning. GitHub. https://github.com/kuds/reinforce-tactics
+Michael Kudlaty. (2025). Reinforce Tactics: A Turn-Based Strategy Game for Reinforcement Learning. GitHub. https://github.com/kuds/reinforce-tactics
 
 ## Credits
 
