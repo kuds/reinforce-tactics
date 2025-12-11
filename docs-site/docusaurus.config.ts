@@ -109,10 +109,6 @@ const config: Config = {
               label: 'Implementation Status',
               to: '/docs/implementation-status',
             },
-            {
-              label: 'Project Timeline',
-              to: '/docs/timeline',
-            },
           ],
         },
         {

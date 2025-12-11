@@ -34,7 +34,6 @@ This command generates static content into the `build` directory and can be serv
 The documentation includes:
 - **Getting Started** (`intro.md`): Overview, features, and quick start guide
 - **Implementation Status** (`implementation-status.md`): Current state of features and development roadmap
-- **Project Timeline** (`timeline.md`): Research timeline and methodology
 - **Tournament System** (`tournament-system.md`): Bot tournament system documentation
 
 ## Deployment
