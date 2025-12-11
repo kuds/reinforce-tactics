@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 import pygame
 
 from reinforcetactics.utils.language import get_language
+from reinforcetactics.utils.fonts import get_font
 
 # Import tkinter optionally for file dialog
 try:
@@ -62,9 +63,9 @@ class PlayerConfigMenu:
         self.disabled_color = (100, 100, 120)
 
         # Fonts
-        self.title_font = pygame.font.Font(None, 48)
-        self.label_font = pygame.font.Font(None, 32)
-        self.option_font = pygame.font.Font(None, 28)
+        self.title_font = get_font(48)
+        self.label_font = get_font(32)
+        self.option_font = get_font(28)
 
         # Player configurations
         # Default: Player 1 is Human, others are Computer (SimpleBot)

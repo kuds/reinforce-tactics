@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 import pygame
 
+from reinforcetactics.utils.fonts import get_font
+
 
 class ReplayPlayer:
     """Plays back recorded game replays."""
@@ -272,7 +274,7 @@ class ReplayPlayer:
                         (self.renderer.screen.get_width(), self.control_y), 2)
 
         # Draw buttons
-        font = pygame.font.Font(None, 28)
+        font = get_font(28)
 
         # Play/Pause button
         play_text = "▶" if self.paused else "⏸"
@@ -282,7 +284,7 @@ class ReplayPlayer:
         self._draw_button(self.restart_button, "⟲", mouse_pos, (150, 100, 100), font)
 
         # Speed buttons
-        speed_font = pygame.font.Font(None, 32)
+        speed_font = get_font(32)
         self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), speed_font)
         self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), speed_font)
 
@@ -303,7 +305,7 @@ class ReplayPlayer:
 
         # Progress text
         progress_text = f"{self.current_action_index} / {len(self.actions)}"
-        progress_surface = pygame.font.Font(None, 20).render(progress_text, True, (255, 255, 255))
+        progress_surface = get_font(20).render(progress_text, True, (255, 255, 255))
         progress_text_rect = progress_surface.get_rect(
             midleft=(self.progress_bar_rect.right + 10, self.progress_bar_rect.centery)
         )

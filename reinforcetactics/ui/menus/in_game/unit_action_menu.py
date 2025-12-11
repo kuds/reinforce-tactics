@@ -5,6 +5,7 @@ import pygame
 
 from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.game.mechanics import GameMechanics
+from reinforcetactics.utils.fonts import get_font
 
 
 class UnitActionMenu:
@@ -35,8 +36,8 @@ class UnitActionMenu:
         self.close_button_hover_color = (255, 80, 80)
 
         # Fonts
-        self.title_font = pygame.font.Font(None, 28)
-        self.option_font = pygame.font.Font(None, 24)
+        self.title_font = get_font(28)
+        self.option_font = get_font(24)
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []

@@ -7,6 +7,7 @@ from reinforcetactics.constants import (
     TILE_SIZE, TILE_COLORS, TILE_TYPES, TILE_IMAGES,
     PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
 )
+from reinforcetactics.utils.fonts import get_font
 
 
 class Renderer:
@@ -176,7 +177,7 @@ class Renderer:
 
     def _draw_unit(self, unit):
         """Draw a single unit."""
-        font = pygame.font.Font(None, 40)
+        font = get_font(40)
         color = UNIT_COLORS[unit.type]
 
         # Gray out if can't act
@@ -209,7 +210,7 @@ class Renderer:
             tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
             pygame.draw.rect(self.screen, (148, 0, 211), tile_rect, 3)
 
-            indicator_font = pygame.font.Font(None, 24)
+            indicator_font = get_font(24)
             indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
             indicator_rect = indicator_text.get_rect(topright=(
                 unit.x * TILE_SIZE + TILE_SIZE - 2,
@@ -249,7 +250,7 @@ class Renderer:
 
     def _draw_ui(self):
         """Draw UI elements."""
-        font = pygame.font.Font(None, 28)
+        font = get_font(28)
         player_color = PLAYER_COLORS.get(self.game_state.current_player, (255, 255, 255))
 
         # Draw player info and gold
@@ -269,7 +270,7 @@ class Renderer:
         pygame.draw.rect(self.screen, button_color, self.end_turn_button)
         pygame.draw.rect(self.screen, (255, 255, 255), self.end_turn_button, 2)
 
-        button_font = pygame.font.Font(None, 32)
+        button_font = get_font(32)
         button_text = button_font.render("End Turn", True, (255, 255, 255))
         button_text_rect = button_text.get_rect(center=self.end_turn_button.center)
         self.screen.blit(button_text, button_text_rect)

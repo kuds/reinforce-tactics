@@ -4,6 +4,7 @@ from typing import Optional
 import pygame
 
 from reinforcetactics.utils.language import get_language
+from reinforcetactics.utils.fonts import get_font
 
 
 class APIKeysMenu:
@@ -46,9 +47,9 @@ class APIKeysMenu:
         self.button_hover_color = (80, 80, 100)
 
         # Fonts
-        self.title_font = pygame.font.Font(None, 48)
-        self.label_font = pygame.font.Font(None, 28)
-        self.input_font = pygame.font.Font(None, 24)
+        self.title_font = get_font(48)
+        self.label_font = get_font(28)
+        self.input_font = get_font(24)
 
         # Get language instance
         self.lang = get_language()

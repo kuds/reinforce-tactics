@@ -9,6 +9,7 @@ from typing import Optional, List, Tuple, Callable, Any
 import pygame
 
 from reinforcetactics.utils.language import get_language, TRANSLATIONS
+from reinforcetactics.utils.fonts import get_font
 
 
 # Cache all "Back" button translations from the language system
@@ -79,9 +80,9 @@ class Menu:
         self.option_bg_selected_color = (80, 80, 100)
 
         # Fonts
-        self.title_font = pygame.font.Font(None, 48)
-        self.option_font = pygame.font.Font(None, 36)
-        self.indicator_font = pygame.font.Font(None, 24)
+        self.title_font = get_font(48)
+        self.option_font = get_font(36)
+        self.indicator_font = get_font(24)
 
         # Mouse tracking
         self.hover_index = -1
