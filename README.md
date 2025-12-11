@@ -578,10 +578,10 @@ Built with:
 - [ ] Buildings Healing Units
 - [ ] Implement Terriority Defenese
 - [ ] Language Support
-  - [ ] Korean
-  - [ ] Spanish
-  - [ ] French
-  - [ ] Chinese
+  - [x] Korean
+  - [x] Spanish
+  - [x] French
+  - [x] Chinese
 - [x] Implement Saving playback to video
 - [x] Implement headless mode
 - [ ] Implement game play stats
