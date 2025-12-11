@@ -102,7 +102,8 @@ class PlayerConfigMenu:
     def _check_modelbot_available(self) -> bool:
         """Check if ModelBot dependencies are available."""
         try:
-            import stable_baselines3  # pylint: disable=unused-import,import-outside-toplevel
+            # pylint: disable=unused-import,import-outside-toplevel
+            import stable_baselines3  # noqa: F401
             return True
         except ImportError:
             return False
@@ -128,22 +129,21 @@ class PlayerConfigMenu:
             # Try to load the model with ModelBot
             from reinforcetactics.game.model_bot import ModelBot
             from reinforcetactics.core.game_state import GameState
-            from reinforcetactics.utils.file_io import FileIO
 
             # Create a dummy game state for testing
             # Use a simple 6x6 map for validation
             dummy_map = [['p' for _ in range(6)] for _ in range(6)]
             dummy_map[0][0] = 'h_1'  # HQ for player 1
             dummy_map[5][5] = 'h_2'  # HQ for player 2
-            
+
             dummy_state = GameState(dummy_map, num_players=2)
-            
+
             # Try to create the bot - this will load the model
             bot = ModelBot(dummy_state, player=2, model_path=str(model_path))
-            
+
             if bot.model is None:
                 return {'valid': False, 'error': 'Failed to load model'}
-            
+
             return {'valid': True, 'error': None}
 
         except ImportError as e:
@@ -161,25 +161,25 @@ class PlayerConfigMenu:
         if not TKINTER_AVAILABLE:
             print("⚠️  tkinter not available - cannot open file dialog")
             return None
-            
+
         try:
             # Create a hidden tkinter root window
             root = tk.Tk()
             root.withdraw()
-            
+
             # Open file dialog
             file_path = filedialog.askopenfilename(
                 title="Select Model File",
                 filetypes=[("Model files", "*.zip"), ("All files", "*.*")],
                 initialdir="."
             )
-            
+
             # Clean up
             root.destroy()
-            
+
             # Return the path or None if cancelled
             return file_path if file_path else None
-            
+
         except Exception as e:
             print(f"Error opening file dialog: {e}")
             return None
@@ -255,7 +255,7 @@ class PlayerConfigMenu:
                             # Open file dialog to select model
                             player_idx = element['player_idx']
                             config = self.player_configs[player_idx]
-                            
+
                             file_path = self._open_file_dialog()
                             if file_path:
                                 config['model_path'] = file_path
@@ -284,7 +284,7 @@ class PlayerConfigMenu:
     def _get_result(self) -> Optional[Dict[str, Any]]:
         """
         Get the configured player settings as a result dict.
-        
+
         Returns:
             Dict with player configurations, or None if validation fails
         """
@@ -295,14 +295,14 @@ class PlayerConfigMenu:
                     # Show error message
                     print(f"⚠️  Player {i+1}: ModelBot requires a model file")
                     return None
-                
+
                 # Check validation status
                 validation = self.model_validation.get(i, {})
                 if not validation.get('valid', False):
                     error = validation.get('error', 'Unknown error')
                     print(f"⚠️  Player {i+1}: Model validation failed - {error}")
                     return None
-        
+
         return {
             'players': self.player_configs
         }
@@ -331,7 +331,10 @@ class PlayerConfigMenu:
             y_pos = start_y + i * spacing_y
 
             # Player label
-            player_label = self.lang.get('player_config.player', 'Player {number}').format(number=i + 1)
+            player_label = self.lang.get(
+                'player_config.player',
+                'Player {number}'
+            ).format(number=i + 1)
             label_surface = self.label_font.render(player_label, True, self.text_color)
             label_rect = label_surface.get_rect(x=50, y=y_pos)
             self.screen.blit(label_surface, label_rect)
@@ -362,14 +365,20 @@ class PlayerConfigMenu:
                 if bot_type in self.available_llm_bots and not self.available_llm_bots[bot_type]:
                     diff_text += ' (No API Key)'
 
-                self._draw_button(diff_x, y_pos, diff_text, 'difficulty_select', i, disabled=False)
+                self._draw_button(
+                    diff_x, y_pos, diff_text,
+                    'difficulty_select', i, disabled=False
+                )
 
                 # If ModelBot is selected, show browse button and model status
                 if bot_type == 'ModelBot':
                     # Browse button
                     browse_x = 590
-                    self._draw_button(browse_x, y_pos, 'Browse...', 'browse_model', i, disabled=False)
-                    
+                    self._draw_button(
+                        browse_x, y_pos, 'Browse...',
+                        'browse_model', i, disabled=False
+                    )
+
                     # Show model status below
                     model_path = config.get('model_path')
                     if model_path:
@@ -378,7 +387,7 @@ class PlayerConfigMenu:
                         # Truncate if too long
                         if len(filename) > 30:
                             filename = filename[:27] + '...'
-                        
+
                         # Check validation status
                         validation = self.model_validation.get(i, {})
                         if validation.get('valid'):
@@ -391,7 +400,7 @@ class PlayerConfigMenu:
                     else:
                         status_text = "No model selected"
                         status_color = (255, 200, 100)  # Yellow
-                    
+
                     # Draw status text
                     status_surface = self.option_font.render(status_text, True, status_color)
                     status_rect = status_surface.get_rect(x=browse_x, y=y_pos + 30)
@@ -399,10 +408,12 @@ class PlayerConfigMenu:
 
         # Draw Start Game button
         # Add extra spacing if any player uses ModelBot (for status text)
-        extra_spacing = 30 if any(c['bot_type'] == 'ModelBot' for c in self.player_configs) else 0
+        extra_spacing = 30 if any(
+            c['bot_type'] == 'ModelBot' for c in self.player_configs
+        ) else 0
         start_y_pos = start_y + self.num_players * spacing_y + 20 + extra_spacing
         start_text = self.lang.get('player_config.start_game', 'Start Game')
-        
+
         # Disable start button if any ModelBot has invalid/missing model
         start_disabled = False
         for i, config in enumerate(self.player_configs):
@@ -414,18 +425,25 @@ class PlayerConfigMenu:
                 if not validation.get('valid', False):
                     start_disabled = True
                     break
-        
-        self._draw_button(screen_width // 2 - 100, start_y_pos, start_text, 'start_button', 
-                         centered=True, disabled=start_disabled)
+
+        self._draw_button(
+            screen_width // 2 - 100, start_y_pos, start_text,
+            'start_button', centered=True, disabled=start_disabled
+        )
 
         # Draw Back button
         back_text = self.lang.get('common.back', 'Back')
-        self._draw_button(screen_width // 2 - 100, start_y_pos + 60, back_text, 'back_button', centered=True)
+        self._draw_button(
+            screen_width // 2 - 100, start_y_pos + 60,
+            back_text, 'back_button', centered=True
+        )
 
         pygame.display.flip()
 
-    def _draw_button(self, x: int, y: int, text: str, element_type: str,
-                     player_idx: int = -1, centered: bool = False, disabled: bool = False) -> pygame.Rect:
+    def _draw_button(
+            self, x: int, y: int, text: str, element_type: str,
+            player_idx: int = -1, centered: bool = False,
+            disabled: bool = False) -> pygame.Rect:
         """
         Draw a button and register it as an interactive element.
 
@@ -433,8 +451,8 @@ class PlayerConfigMenu:
             x: X position
             y: Y position
             text: Button text
-            element_type: Type of element ('type_toggle', 'difficulty_select', 'browse_model', 
-                         'start_button', 'back_button')
+            element_type: Type of element ('type_toggle', 'difficulty_select',
+                         'browse_model', 'start_button', 'back_button')
             player_idx: Player index for player-specific buttons
             centered: Whether to center the button at x position
             disabled: Whether the button is disabled
@@ -465,7 +483,11 @@ class PlayerConfigMenu:
         button_rect = pygame.Rect(button_x, y, button_width, button_height)
 
         # Determine styling
-        is_hovered = self.hover_element and self.hover_element.get('rect') == button_rect and not disabled
+        is_hovered = (
+            self.hover_element
+            and self.hover_element.get('rect') == button_rect
+            and not disabled
+        )
 
         if is_hovered:
             bg_color = self.option_bg_hover_color
