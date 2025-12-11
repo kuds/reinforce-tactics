@@ -10,17 +10,17 @@ def check_dependencies():
     missing = []
 
     try:
-        import pygame  # noqa: F401
+        import pygame  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
     except ImportError:
         missing.append("pygame")
 
     try:
-        import numpy  # noqa: F401
+        import numpy  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
     except ImportError:
         missing.append("numpy")
 
     try:
-        import pandas  # noqa: F401
+        import pandas  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
     except ImportError:
         missing.append("pandas")
 
