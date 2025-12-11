@@ -146,10 +146,10 @@ class Settings:
     def get_api_key(self, provider):
         """
         Get API key for a specific LLM provider.
-        
+
         Args:
             provider: Provider name ('openai', 'anthropic', 'google')
-            
+
         Returns:
             API key string or empty string if not set
         """
@@ -160,7 +160,7 @@ class Settings:
     def set_api_key(self, provider, api_key):
         """
         Set API key for a specific LLM provider.
-        
+
         Args:
             provider: Provider name ('openai', 'anthropic', 'google')
             api_key: API key string

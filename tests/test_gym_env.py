@@ -5,13 +5,13 @@ This test suite provides comprehensive coverage of the Gymnasium environment
 used for RL training, including observation spaces, action spaces, step/reset
 functions, reward calculations, and episode statistics.
 """
+import sys
+from unittest.mock import patch, MagicMock
 import pytest
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
-from unittest.mock import patch, MagicMock
-import sys
 
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.utils.file_io import FileIO
@@ -24,7 +24,7 @@ from reinforcetactics.utils.file_io import FileIO
 @pytest.fixture
 def simple_map_data():
     """Generate a deterministic map for testing.
-    
+
     Using a fixed seed for reproducibility to avoid test flakiness.
     """
     np.random.seed(42)
@@ -75,7 +75,7 @@ class TestEnvironmentCreation:
     def test_initialization_default_params(self):
         """Test initialization with default parameters (no map file, random map generation)."""
         env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
-        
+
         assert env is not None
         assert env.game_state is not None
         assert env.grid_width > 0
@@ -92,9 +92,9 @@ class TestEnvironmentCreation:
         # Save map to temporary file
         map_file = tmp_path / "test_map.csv"
         pd.DataFrame(simple_map_data).to_csv(map_file, index=False, header=False)
-        
+
         env = StrategyGameEnv(map_file=str(map_file), opponent='bot', render_mode=None)
-        
+
         assert env is not None
         assert env.game_state is not None
         env.close()
@@ -102,28 +102,28 @@ class TestEnvironmentCreation:
     def test_initialization_opponent_bot(self):
         """Test initialization with opponent='bot'."""
         env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
-        
+
         assert env.opponent_type == 'bot'
         env.close()
 
     def test_initialization_opponent_random(self):
         """Test initialization with opponent='random'."""
         env = StrategyGameEnv(map_file=None, opponent='random', render_mode=None)
-        
+
         assert env.opponent_type == 'random'
         env.close()
 
     def test_initialization_opponent_self(self):
         """Test initialization with opponent='self' (self-play)."""
         env = StrategyGameEnv(map_file=None, opponent='self', render_mode=None)
-        
+
         assert env.opponent_type == 'self'
         env.close()
 
     def test_initialization_opponent_none(self):
         """Test initialization with opponent=None."""
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
-        
+
         assert env.opponent_type is None
         assert env.opponent is None
         env.close()
@@ -136,7 +136,7 @@ class TestEnvironmentCreation:
             render_mode=None,
             reward_config=custom_reward_config
         )
-        
+
         assert env.reward_config['win'] == 500.0
         assert env.reward_config['loss'] == -500.0
         assert env.reward_config['invalid_action'] == -5.0
@@ -154,7 +154,7 @@ class TestEnvironmentCreation:
         """Test that render_mode=None does not import pygame (headless mode verification)."""
         # Create environment without rendering
         env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
-        
+
         # Check that renderer is not initialized
         assert env.renderer is None
         assert env.render_mode is None
@@ -176,7 +176,7 @@ class TestObservationSpace:
     def test_grid_shape_and_dtype(self, env_default):
         """Verify 'grid' shape is (grid_height, grid_width, 3) with dtype float32."""
         grid_space = env_default.observation_space['grid']
-        
+
         expected_shape = (env_default.grid_height, env_default.grid_width, 3)
         assert grid_space.shape == expected_shape
         assert grid_space.dtype == np.float32
@@ -185,7 +185,7 @@ class TestObservationSpace:
     def test_units_shape_and_dtype(self, env_default):
         """Verify 'units' shape is (grid_height, grid_width, 3) with dtype float32."""
         units_space = env_default.observation_space['units']
-        
+
         expected_shape = (env_default.grid_height, env_default.grid_width, 3)
         assert units_space.shape == expected_shape
         assert units_space.dtype == np.float32
@@ -194,7 +194,7 @@ class TestObservationSpace:
     def test_global_features_shape_and_dtype(self, env_default):
         """Verify 'global_features' shape is (6,) with dtype float32."""
         global_space = env_default.observation_space['global_features']
-        
+
         assert global_space.shape == (6,)
         assert global_space.dtype == np.float32
         env_default.close()
@@ -202,7 +202,7 @@ class TestObservationSpace:
     def test_action_mask_shape(self, env_default):
         """Verify 'action_mask' shape matches _get_action_space_size()."""
         action_mask_space = env_default.observation_space['action_mask']
-        
+
         expected_size = env_default._get_action_space_size()
         assert action_mask_space.shape == (expected_size,)
         assert action_mask_space.dtype == np.float32
@@ -211,47 +211,47 @@ class TestObservationSpace:
     def test_observations_from_reset_match_space(self, env_default):
         """Test that observations returned by reset() match the observation space."""
         obs, info = env_default.reset()
-        
+
         # Check that observation is in the observation space
         assert 'grid' in obs
         assert 'units' in obs
         assert 'global_features' in obs
         assert 'action_mask' in obs
-        
+
         # Verify shapes
         assert obs['grid'].shape == env_default.observation_space['grid'].shape
         assert obs['units'].shape == env_default.observation_space['units'].shape
         assert obs['global_features'].shape == env_default.observation_space['global_features'].shape
         assert obs['action_mask'].shape == env_default.observation_space['action_mask'].shape
-        
+
         # Verify dtypes
         assert obs['grid'].dtype == np.float32
         assert obs['units'].dtype == np.float32
         assert obs['global_features'].dtype == np.float32
         assert obs['action_mask'].dtype == np.float32
-        
+
         env_default.close()
 
     def test_observations_from_step_match_space(self, env_default):
         """Test that observations returned by step() match the observation space."""
         env_default.reset()
-        
+
         # Take a step with end_turn action
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Check that observation is in the observation space
         assert 'grid' in obs
         assert 'units' in obs
         assert 'global_features' in obs
         assert 'action_mask' in obs
-        
+
         # Verify shapes match
         assert obs['grid'].shape == env_default.observation_space['grid'].shape
         assert obs['units'].shape == env_default.observation_space['units'].shape
         assert obs['global_features'].shape == env_default.observation_space['global_features'].shape
         assert obs['action_mask'].shape == env_default.observation_space['action_mask'].shape
-        
+
         env_default.close()
 
 
@@ -273,84 +273,84 @@ class TestActionSpace:
         assert isinstance(env_hierarchical.action_space, spaces.Dict)
         assert 'goal' in env_hierarchical.action_space.spaces
         assert 'primitive' in env_hierarchical.action_space.spaces
-        
+
         # Check goal space
         assert isinstance(env_hierarchical.action_space.spaces['goal'], spaces.Discrete)
-        
+
         # Check primitive space
         assert isinstance(env_hierarchical.action_space.spaces['primitive'], spaces.MultiDiscrete)
-        
+
         env_hierarchical.close()
 
     def test_encode_action_create_unit(self, env_default):
         """Test _encode_action() for create_unit action (type 0)."""
         action = np.array([0, 0, 5, 5, 8, 8])  # create_unit, warrior, at (8,8)
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 0
         assert action_dict['unit_type'] == 'W'
         assert action_dict['from_pos'] == (5, 5)
         assert action_dict['to_pos'] == (8, 8)
-        
+
         env_default.close()
 
     def test_encode_action_move(self, env_default):
         """Test _encode_action() for move action (type 1)."""
         action = np.array([1, 0, 2, 3, 4, 5])  # move from (2,3) to (4,5)
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 1
         assert action_dict['from_pos'] == (2, 3)
         assert action_dict['to_pos'] == (4, 5)
-        
+
         env_default.close()
 
     def test_encode_action_attack(self, env_default):
         """Test _encode_action() for attack action (type 2)."""
         action = np.array([2, 0, 1, 1, 2, 1])  # attack from (1,1) to (2,1)
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 2
         assert action_dict['from_pos'] == (1, 1)
         assert action_dict['to_pos'] == (2, 1)
-        
+
         env_default.close()
 
     def test_encode_action_seize(self, env_default):
         """Test _encode_action() for seize action (type 3)."""
         action = np.array([3, 0, 5, 5, 0, 0])  # seize at (5,5)
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 3
         assert action_dict['from_pos'] == (5, 5)
-        
+
         env_default.close()
 
     def test_encode_action_heal(self, env_default):
         """Test _encode_action() for heal action (type 4)."""
         action = np.array([4, 2, 3, 3, 4, 3])  # heal from (3,3) to (4,3)
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 4
         assert action_dict['unit_type'] == 'C'  # Cleric
         assert action_dict['from_pos'] == (3, 3)
         assert action_dict['to_pos'] == (4, 3)
-        
+
         env_default.close()
 
     def test_encode_action_end_turn(self, env_default):
         """Test _encode_action() for end_turn action (type 5)."""
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
-        
+
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['action_type'] == 5
-        
+
         env_default.close()
 
     def test_encode_action_all_unit_types(self, env_default):
@@ -358,29 +358,29 @@ class TestActionSpace:
         # Test Warrior (0)
         action_w = np.array([0, 0, 0, 0, 1, 1])
         assert env_default._encode_action(action_w)['unit_type'] == 'W'
-        
+
         # Test Mage (1)
         action_m = np.array([0, 1, 0, 0, 1, 1])
         assert env_default._encode_action(action_m)['unit_type'] == 'M'
-        
+
         # Test Cleric (2)
         action_c = np.array([0, 2, 0, 0, 1, 1])
         assert env_default._encode_action(action_c)['unit_type'] == 'C'
-        
+
         env_default.close()
 
     def test_encode_action_boundary_coordinates(self, env_default):
         """Test action encoding with boundary coordinates."""
         max_x = env_default.grid_width - 1
         max_y = env_default.grid_height - 1
-        
+
         # Test boundary positions
         action = np.array([1, 0, 0, 0, max_x, max_y])
         action_dict = env_default._encode_action(action)
-        
+
         assert action_dict['from_pos'] == (0, 0)
         assert action_dict['to_pos'] == (max_x, max_y)
-        
+
         env_default.close()
 
 
@@ -395,94 +395,94 @@ class TestStepFunction:
         """Test that step() returns tuple of (obs, reward, terminated, truncated, info)."""
         env_default.reset()
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
-        
+
         result = env_default.step(action)
-        
+
         assert isinstance(result, tuple)
         assert len(result) == 5
-        
+
         obs, reward, terminated, truncated, info = result
         assert isinstance(obs, dict)
         assert isinstance(reward, (int, float, np.number))
         assert isinstance(terminated, bool)
         assert isinstance(truncated, bool)
         assert isinstance(info, dict)
-        
+
         env_default.close()
 
     def test_valid_action_end_turn(self, env_default):
         """Test valid action execution (end_turn)."""
         env_default.reset()
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
-        
+
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # end_turn should be valid and apply turn penalty
         assert info['valid_action'] is True
         assert reward <= 0  # Turn penalty applied
-        
+
         env_default.close()
 
     def test_invalid_action_negative_reward(self, env_default):
         """Test invalid action execution and negative rewards (invalid_action penalty)."""
         env_default.reset()
-        
+
         # Try to move a non-existent unit
         action = np.array([1, 0, 0, 0, 1, 1])  # move from (0,0) to (1,1)
-        
+
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Should be marked as invalid
         assert info['valid_action'] is False
         # Should receive invalid action penalty
         assert reward < 0
-        
+
         env_default.close()
 
     def test_termination_condition(self, env_default):
         """Test termination conditions (game_over flag)."""
         env_default.reset()
-        
+
         # Manually set game_over to test termination
         env_default.game_state.game_over = True
         env_default.game_state.winner = 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         assert terminated is True
         assert info['game_over'] is True
-        
+
         env_default.close()
 
     def test_truncation_max_steps(self, env_default):
         """Test truncation when current_step >= max_steps."""
         env_default.reset()
-        
+
         # Set current_step close to max_steps
         env_default.current_step = env_default.max_steps - 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         assert truncated is True
-        
+
         env_default.close()
 
     def test_info_dict_contains_expected_keys(self, env_default):
         """Test that info dict contains expected keys."""
         env_default.reset()
         action = np.array([5, 0, 0, 0, 0, 0])
-        
+
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Check required keys
         assert 'episode_stats' in info
         assert 'game_over' in info
         assert 'winner' in info
         assert 'turn' in info
         assert 'valid_action' in info
-        
+
         env_default.close()
 
 
@@ -496,14 +496,14 @@ class TestResetFunction:
     def test_reset_returns_correct_tuple(self, env_default):
         """Verify reset() returns (observation, info) tuple."""
         result = env_default.reset()
-        
+
         assert isinstance(result, tuple)
         assert len(result) == 2
-        
+
         obs, info = result
         assert isinstance(obs, dict)
         assert isinstance(info, dict)
-        
+
         env_default.close()
 
     def test_game_state_properly_reset(self, env_default):
@@ -511,15 +511,15 @@ class TestResetFunction:
         # First do some actions
         env_default.reset()
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))  # end_turn
-        
+
         # Now reset
         obs, info = env_default.reset()
-        
+
         # Check that game state is reset
         assert env_default.game_state.turn_number == 0
         assert env_default.game_state.current_player == 1
         assert env_default.game_state.game_over is False
-        
+
         env_default.close()
 
     def test_current_step_reset_to_zero(self, env_default):
@@ -527,31 +527,31 @@ class TestResetFunction:
         env_default.reset()
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))
-        
+
         assert env_default.current_step > 0
-        
+
         env_default.reset()
         assert env_default.current_step == 0
-        
+
         env_default.close()
 
     def test_episode_stats_reset(self, env_default):
         """Verify episode_stats are reset."""
         env_default.reset()
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))
-        
+
         # Modify stats
         env_default.episode_stats['reward'] = 100.0
         env_default.episode_stats['invalid_actions'] = 5
-        
+
         # Reset
         env_default.reset()
-        
+
         # Check stats are reset
         assert env_default.episode_stats['reward'] == 0.0
         assert env_default.episode_stats['invalid_actions'] == 0
         assert env_default.episode_stats['winner'] is None
-        
+
         env_default.close()
 
     def test_reset_with_seed(self, env_default):
@@ -559,30 +559,30 @@ class TestResetFunction:
         # Reset with seed
         obs1, _ = env_default.reset(seed=42)
         obs2, _ = env_default.reset(seed=42)
-        
+
         # Observations should be identical with same seed
         assert np.array_equal(obs1['grid'], obs2['grid'])
         assert np.array_equal(obs1['units'], obs2['units'])
-        
+
         env_default.close()
 
     def test_opponent_reinitialized_on_reset(self):
         """Test that opponent is re-initialized on reset (functional behavior)."""
         env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
-        
+
         env.reset()
         # Opponent should be initialized after reset
         assert env.opponent is not None
-        
+
         # Take a step that modifies opponent state
         env.step(np.array([5, 0, 0, 0, 0, 0]))  # end_turn
-        
+
         env.reset()
         # After reset, opponent should still be functional
         assert env.opponent is not None
         # Game state should be reset to turn 0
         assert env.game_state.turn_number == 0
-        
+
         env.close()
 
 
@@ -597,81 +597,81 @@ class TestRewardCalculation:
         """Test win reward."""
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
         env.reset()
-        
+
         # Set game to won state
         env.game_state.game_over = True
         env.game_state.winner = 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         # Should receive win reward
         assert reward > 0
         assert terminated is True
-        
+
         env.close()
 
     def test_loss_reward(self):
         """Test loss reward."""
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
         env.reset()
-        
+
         # Set game to lost state
         env.game_state.game_over = True
         env.game_state.winner = 2
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         # Should receive loss penalty
         assert reward < 0
         assert terminated is True
-        
+
         env.close()
 
     def test_turn_penalty_on_end_turn(self, env_default):
         """Test turn_penalty on end_turn action."""
         env_default.reset()
-        
+
         initial_reward = env_default.episode_stats['reward']
-        
+
         # End turn action should apply turn penalty
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Reward should include turn penalty (negative)
         assert reward <= 0
-        
+
         env_default.close()
 
     def test_invalid_action_penalty(self, env_default):
         """Test invalid_action penalty."""
         env_default.reset()
-        
+
         # Try invalid action (move non-existent unit)
         action = np.array([1, 0, 0, 0, 1, 1])
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Should apply invalid action penalty
         assert info['valid_action'] is False
         assert reward < 0
-        
+
         env_default.close()
 
     def test_cumulative_episode_reward_tracking(self, env_default):
         """Test cumulative episode_stats['reward'] tracking."""
         env_default.reset()
-        
+
         assert env_default.episode_stats['reward'] == 0.0
-        
+
         # Take multiple steps
         for _ in range(3):
             action = np.array([5, 0, 0, 0, 0, 0])
             obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         # Cumulative reward should be tracked
         assert env_default.episode_stats['reward'] != 0.0
-        
+
         env_default.close()
 
     def test_custom_reward_config(self, custom_reward_config):
@@ -683,17 +683,17 @@ class TestRewardCalculation:
             reward_config=custom_reward_config
         )
         env.reset()
-        
+
         # Set game to won state
         env.game_state.game_over = True
         env.game_state.winner = 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         # Should use custom win reward
         assert reward > 0  # Custom win reward of 500.0
-        
+
         env.close()
 
 
@@ -707,15 +707,15 @@ class TestRenderAndClose:
     def test_render_returns_none_when_no_render_mode(self, env_default):
         """Test render() returns None when render_mode=None."""
         result = env_default.render()
-        
+
         assert result is None
-        
+
         env_default.close()
 
     def test_close_does_not_raise_exceptions(self, env_default):
         """Test close() does not raise exceptions."""
         env_default.reset()
-        
+
         # Should not raise any exceptions
         try:
             env_default.close()
@@ -726,15 +726,15 @@ class TestRenderAndClose:
         """Test that headless mode works without any rendering dependencies."""
         # Create environment in headless mode
         env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
-        
+
         # Should be able to reset and step without rendering
         obs, info = env.reset()
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         # Render should return None
         assert env.render() is None
-        
+
         env.close()
 
 
@@ -748,65 +748,65 @@ class TestEpisodeStatistics:
     def test_invalid_actions_increment(self, env_default):
         """Verify episode_stats['invalid_actions'] increments on invalid actions."""
         env_default.reset()
-        
+
         initial_count = env_default.episode_stats['invalid_actions']
-        
+
         # Perform invalid action
         action = np.array([1, 0, 0, 0, 1, 1])  # move non-existent unit
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         assert env_default.episode_stats['invalid_actions'] > initial_count
-        
+
         env_default.close()
 
     def test_winner_set_correctly_on_game_over(self):
         """Verify episode_stats['winner'] is set correctly on game over."""
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
         env.reset()
-        
+
         # Set game to won state
         env.game_state.game_over = True
         env.game_state.winner = 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         assert env.episode_stats['winner'] == 1
-        
+
         env.close()
 
     def test_episode_stats_in_info_on_termination(self):
         """Verify episode_stats is included in info on termination."""
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
         env.reset()
-        
+
         # Set game to won state
         env.game_state.game_over = True
         env.game_state.winner = 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
-        
+
         assert terminated is True
         assert 'episode_stats' in info
         assert len(info['episode_stats']) > 0
-        
+
         env.close()
 
     def test_episode_stats_in_info_on_truncation(self, env_default):
         """Verify episode_stats is included in info on truncation."""
         env_default.reset()
-        
+
         # Set to trigger truncation
         env_default.current_step = env_default.max_steps - 1
-        
+
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env_default.step(action)
-        
+
         assert truncated is True
         assert 'episode_stats' in info
         assert len(info['episode_stats']) > 0
-        
+
         env_default.close()
 
 
@@ -821,99 +821,99 @@ class TestIntegration:
         """Test a complete episode loop (reset → multiple steps → termination)."""
         # Reset environment
         obs, info = env_default.reset()
-        
+
         assert isinstance(obs, dict)
         assert env_default.current_step == 0
-        
+
         # Take multiple steps
         terminated = False
         truncated = False
         step_count = 0
         max_test_steps = 10
-        
+
         while not (terminated or truncated) and step_count < max_test_steps:
             # Take end_turn action
             action = np.array([5, 0, 0, 0, 0, 0])
             obs, reward, terminated, truncated, info = env_default.step(action)
-            
+
             assert isinstance(obs, dict)
             assert isinstance(reward, (int, float, np.number))
-            
+
             step_count += 1
-        
+
         # Should have taken some steps
         assert step_count > 0
-        
+
         env_default.close()
 
     def test_random_actions_can_be_sampled(self, env_default):
         """Test that random actions can be sampled and executed without errors."""
         env_default.reset()
-        
+
         # Sample random actions and execute them
         for _ in range(10):
             action = env_default.action_space.sample()
-            
+
             try:
                 obs, reward, terminated, truncated, info = env_default.step(action)
-                
+
                 # Should return valid results
                 assert obs is not None
                 assert isinstance(reward, (int, float, np.number))
-                
+
                 if terminated or truncated:
                     env_default.reset()
-                    
+
             except Exception as e:
                 pytest.fail(f"Random action execution failed: {e}")
-        
+
         env_default.close()
 
     def test_multiple_episodes(self, env_default):
         """Test running multiple episodes sequentially."""
         for episode in range(3):
             obs, info = env_default.reset()
-            
+
             # Run episode for a few steps
             for step in range(5):
                 action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
                 obs, reward, terminated, truncated, info = env_default.step(action)
-                
+
                 if terminated or truncated:
                     break
-            
+
             # Stats should be reset on next reset
             if episode < 2:
                 next_obs, next_info = env_default.reset()
                 assert env_default.current_step == 0
-        
+
         env_default.close()
 
     def test_environment_with_various_opponents(self):
         """Test environment works with different opponent types."""
         opponent_types = ['bot', 'random', 'self', None]
-        
+
         for opp_type in opponent_types:
             env = StrategyGameEnv(map_file=None, opponent=opp_type, render_mode=None)
-            
+
             obs, info = env.reset()
             action = np.array([5, 0, 0, 0, 0, 0])
             obs, reward, terminated, truncated, info = env.step(action)
-            
+
             assert obs is not None
-            
+
             env.close()
 
     def test_action_space_size_calculation(self, env_default):
         """Test _get_action_space_size() returns consistent value."""
         size = env_default._get_action_space_size()
-        
+
         # Should be positive integer
         assert size > 0
         assert isinstance(size, int)
-        
+
         # Should match action_mask shape
         obs, _ = env_default.reset()
         assert obs['action_mask'].shape[0] == size
-        
+
         env_default.close()

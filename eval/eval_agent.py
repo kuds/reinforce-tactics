@@ -2,14 +2,13 @@
 Evaluation script for trained agents.
 """
 import argparse
-import numpy as np
 from pathlib import Path
+import numpy as np
 from tqdm import tqdm
 import pandas as pd
 
 from stable_baselines3 import PPO
 from reinforcetactics.rl.gym_env import StrategyGameEnv
-from reinforcetactics.game.bot import SimpleBot
 
 
 def evaluate_agent(

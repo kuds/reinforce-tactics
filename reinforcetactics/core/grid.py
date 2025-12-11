@@ -46,7 +46,7 @@ class TileGrid:
     def to_numpy(self):
         """
         Convert grid to numpy representation for RL.
-        
+
         Returns:
             numpy array of shape (height, width, channels) where channels are:
             0: tile_type (encoded as int)
@@ -54,22 +54,22 @@ class TileGrid:
             2: structure_hp_percentage (0-100)
         """
         result = np.zeros((self.height, self.width, 3), dtype=np.float32)
-        
+
         tile_type_encoding = {
             'p': 0, 'w': 1, 'm': 2, 'f': 3, 'r': 4, 'b': 5, 'h': 6, 't': 7
         }
-        
+
         for y in range(self.height):
             for x in range(self.width):
                 tile = self.tiles[y][x]
                 result[y, x, 0] = tile_type_encoding.get(tile.type, 0)
                 result[y, x, 1] = tile.player if tile.player else 0
-                
+
                 if tile.health is not None and tile.max_health is not None:
                     result[y, x, 2] = (tile.health / tile.max_health) * 100
                 else:
                     result[y, x, 2] = 0
-        
+
         return result
 
     def to_dict(self):
@@ -84,7 +84,7 @@ class TileGrid:
     def from_dict(cls, data, map_data):
         """Restore grid from dictionary."""
         grid = cls(map_data)
-        
+
         # Restore tile states
         for tile_data in data.get('tiles', []):
             x, y = tile_data['x'], tile_data['y']
@@ -96,5 +96,5 @@ class TileGrid:
                     tile.health = tile_data['health']
                 if tile_data.get('regenerating') is not None:
                     tile.regenerating = tile_data['regenerating']
-        
+
         return grid

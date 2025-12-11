@@ -42,7 +42,7 @@ def main():
 
     # Ensure all directories exist
     settings.ensure_directories()
-    
+
     parser = argparse.ArgumentParser(
         description="Reinforce Tactics - Turn-Based Strategy with RL",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -50,18 +50,18 @@ def main():
 Examples:
   # Train PPO agent
   python main.py --mode train --algorithm ppo --timesteps 100000
-  
+
   # Evaluate trained model
   python main.py --mode evaluate --model models/ppo_final.zip --episodes 20
-  
+
   # Play manually
   python main.py --mode play
-  
+
   # View stats
   python main.py --mode stats
         """
     )
-    
+
     parser.add_argument(
         "--mode",
         type=str,
@@ -69,7 +69,7 @@ Examples:
         choices=["train", "evaluate", "play", "stats"],
         help="Mode: train, evaluate, play, or stats"
     )
-    
+
     # Training arguments
     parser.add_argument(
         "--algorithm",
@@ -103,7 +103,7 @@ Examples:
         default=None,
         help="Name for saved model"
     )
-    
+
     # Reward shaping
     parser.add_argument(
         "--reward-income",
@@ -123,7 +123,7 @@ Examples:
         default=0.0,
         help="Reward coefficient for structure control"
     )
-    
+
     # Evaluation arguments
     parser.add_argument(
         "--model",
@@ -142,13 +142,13 @@ Examples:
         action="store_true",
         help="Render during evaluation"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Check dependencies
     if not check_dependencies():
         sys.exit(1)
-    
+
     # Route to appropriate mode
     if args.mode == "train":
         train_mode(args)
@@ -158,7 +158,7 @@ Examples:
         play_mode(args)
     elif args.mode == "stats":
         stats_mode(args)
-    
+
     print("\n✅ Done!\n")
 
 

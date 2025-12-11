@@ -5,18 +5,18 @@ This module handles unit action execution from the unit action menu.
 """
 
 
-def handle_action_menu_result(game, menu_result, active_menu_ref, target_selection_unit_ref, 
+def handle_action_menu_result(game, menu_result, active_menu_ref, target_selection_unit_ref,
                                selected_unit_ref):
     """
     Handle result from UnitActionMenu interaction.
-    
+
     Args:
         game: The GameState instance
         menu_result: Result dictionary from menu interaction
         active_menu_ref: Reference list for active_menu [active_menu]
         target_selection_unit_ref: Reference list for target_selection_unit [target_selection_unit]
         selected_unit_ref: Reference list for selected_unit [selected_unit]
-    
+
     Returns:
         Tuple of (target_selection_mode, target_selection_action) or None
     """
@@ -28,32 +28,32 @@ def handle_action_menu_result(game, menu_result, active_menu_ref, target_selecti
         target_selection_unit_ref[0] = None
         active_menu_ref[0] = None
         return None
-    
+
     if menu_result['type'] == 'action_selected':
         # Process the selected action
         action = menu_result['action']
         active_menu_ref[0] = None
-        
+
         # Execute action using helper function
         result = execute_unit_action(
             game, action, target_selection_unit_ref[0], selected_unit_ref
         )
         target_selection_mode, target_selection_action, target_selection_unit_ref[0] = result
         return (target_selection_mode, target_selection_action)
-    
+
     return None
 
 
 def execute_unit_action(game, action, unit, selected_unit_ref):
     """
     Execute a unit action from the menu.
-    
+
     Args:
         game: The GameState instance
         action: The action dictionary from the menu
         unit: The unit performing the action
         selected_unit_ref: Reference list to clear selection [selected_unit]
-    
+
     Returns:
         Tuple of (target_selection_mode, target_selection_action, unit or None)
     """
@@ -62,13 +62,13 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         print(f"{unit.type} ended turn")
         selected_unit_ref[0] = None
         return (False, None, None)
-    
+
     if action['type'] == 'cancel_move':
         unit.cancel_move()
         print(f"Cancelled move for {unit.type}")
         selected_unit_ref[0] = None
         return (False, None, None)
-    
+
     if action['type'] == 'capture':
         result = game.seize(unit)
         if result['captured']:
@@ -76,7 +76,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         unit.end_unit_turn()
         selected_unit_ref[0] = None
         return (False, None, None)
-    
+
     if action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
         # Enter target selection mode
         targets = action['targets']
@@ -98,9 +98,9 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             unit.end_unit_turn()
             selected_unit_ref[0] = None
             return (False, None, None)
-        
+
         # Multiple targets, enter target selection mode
         print(f"Select target for {action['type']}")
         return (True, action, unit)
-    
+
     return (False, None, unit)

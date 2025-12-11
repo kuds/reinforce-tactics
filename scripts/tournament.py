@@ -347,11 +347,11 @@ class TournamentRunner:
         for game_num in range(self.games_per_side):
             logger.info(f"  Game {game_num + self.games_per_side + 1}/{self.games_per_side * 2}: "
                        f"{bot2_desc.name} (P1) vs {bot1_desc.name} (P2)")
-            result = self._run_game(bot2_desc, bot1_desc, 1, 2, matchup_idx, 
+            result = self._run_game(bot2_desc, bot1_desc, 1, 2, matchup_idx,
                                    game_num + self.games_per_side + 1)
             matchup_results['games'].append(result)
             # Swap perspective for results
-            self._update_results(bot1_desc.name, bot2_desc.name, 
+            self._update_results(bot1_desc.name, bot2_desc.name,
                                2 if result['winner'] == 1 else (1 if result['winner'] == 2 else 0))
 
         self.matchup_results.append(matchup_results)

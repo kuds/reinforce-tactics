@@ -54,7 +54,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             for algorithm_class in [PPO, A2C, DQN]:
                 try:
                     self.model = algorithm_class.load(str(model_path))
-                    logger.info("Successfully loaded model as %s: %s", 
+                    logger.info("Successfully loaded model as %s: %s",
                                algorithm_class.__name__, model_path)
                     break
                 except Exception as e:
@@ -92,21 +92,21 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             # Keep taking actions until we decide to end turn or hit invalid actions
             max_actions_per_turn = 50  # Safety limit
             actions_taken = 0
-            
+
             while actions_taken < max_actions_per_turn:
                 # Get observation from current game state
                 obs = self._get_observation()
-                
+
                 # Predict action using the model
                 action, _states = self.model.predict(obs, deterministic=True)
-                
+
                 # Execute the action
                 action_valid = self._execute_action(action)
-                
+
                 # If action was end_turn or invalid, stop
                 if not action_valid or self._is_end_turn_action(action):
                     break
-                
+
                 actions_taken += 1
 
             # Make sure turn is ended
@@ -128,7 +128,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         """
         # Convert game state to observation format
         state_arrays = self.game_state.to_numpy()
-        
+
         obs = {
             'grid': state_arrays['grid'].astype(np.float32),
             'units': state_arrays['units'].astype(np.float32),
@@ -145,7 +145,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 dtype=np.float32
             )
         }
-        
+
         return obs
 
     def _execute_action(self, action) -> bool:  # pylint: disable=too-many-return-statements
@@ -162,13 +162,13 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             # Action format: [action_type, unit_type, from_x, from_y, to_x, to_y]
             if isinstance(action, np.ndarray):
                 action = action.tolist()
-            
+
             if not isinstance(action, (list, tuple)) or len(action) < 6:
                 logger.warning("Invalid action format: %s", action)
                 return False
 
             action_type, unit_type, from_x, from_y, to_x, to_y = action[:6]
-            
+
             # Map action types: 0=create, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn
             if action_type == 0:  # Create unit
                 return self._create_unit(unit_type, to_x, to_y)
@@ -182,7 +182,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 return self._heal(from_x, from_y, to_x, to_y)
             if action_type == 5:  # End turn
                 return True  # Will be handled by caller
-            
+
             logger.warning("Unknown action type: %s", action_type)
             return False
 
@@ -197,30 +197,30 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             unit_codes = ['W', 'M', 'C']
             if unit_type < 0 or unit_type >= len(unit_codes):
                 return False
-            
+
             unit_code = unit_codes[unit_type]
-            
+
             # Check if we have enough gold
             cost = UNIT_DATA[unit_code]['cost']
             if self.game_state.player_gold.get(self.bot_player, 0) < cost:
                 return False
-            
+
             # Check if location is valid for creation
             if not (0 <= x < self.game_state.grid.width and 0 <= y < self.game_state.grid.height):
                 return False
-            
+
             tile = self.game_state.grid.get_tile(x, y)
             if tile.player != self.bot_player or tile.type not in ['b', 'h']:
                 return False
-            
+
             # Check if location is occupied
             if self.game_state.get_unit_at_position(x, y):
                 return False
-            
+
             # Create the unit
             self.game_state.create_unit(unit_code, x, y, self.bot_player)
             return True
-            
+
         except Exception as e:
             logger.debug("Failed to create unit: %s", e)
             return False
@@ -231,10 +231,10 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             unit = self.game_state.get_unit_at_position(from_x, from_y)
             if not unit or unit.player != self.bot_player or not unit.can_move:
                 return False
-            
+
             self.game_state.move_unit(unit, to_x, to_y)
             return True
-            
+
         except Exception as e:
             logger.debug("Failed to move unit: %s", e)
             return False
@@ -244,19 +244,19 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         try:
             attacker = self.game_state.get_unit_at_position(from_x, from_y)
             target = self.game_state.get_unit_at_position(to_x, to_y)
-            
+
             if not attacker or not target:
                 return False
-            
+
             if attacker.player != self.bot_player or target.player == self.bot_player:
                 return False
-            
+
             if not attacker.can_attack:
                 return False
-            
+
             self.game_state.attack(attacker, target)
             return True
-            
+
         except Exception as e:
             logger.debug("Failed to attack: %s", e)
             return False
@@ -267,14 +267,14 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             unit = self.game_state.get_unit_at_position(x, y)
             if not unit or unit.player != self.bot_player:
                 return False
-            
+
             tile = self.game_state.grid.get_tile(x, y)
             if not tile.is_capturable() or tile.player == self.bot_player:
                 return False
-            
+
             self.game_state.seize(unit)
             return True
-            
+
         except Exception as e:
             logger.debug("Failed to seize: %s", e)
             return False
@@ -284,19 +284,19 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         try:
             healer = self.game_state.get_unit_at_position(from_x, from_y)
             target = self.game_state.get_unit_at_position(to_x, to_y)
-            
+
             if not healer or not target:
                 return False
-            
+
             if healer.player != self.bot_player or target.player != self.bot_player:
                 return False
-            
+
             if healer.type != 'C':  # Only clerics can heal
                 return False
-            
+
             self.game_state.heal(healer, target)
             return True
-            
+
         except Exception as e:
             logger.debug("Failed to heal: %s", e)
             return False
