@@ -85,7 +85,6 @@ This documentation is organized into several sections:
 
 - **Getting Started** (this page): Overview and quick start guide
 - **Implementation Status**: Current state of the project and completed features
-- **Project Timeline**: Research timeline and development roadmap
 
 ## 🔗 Useful Links
 
