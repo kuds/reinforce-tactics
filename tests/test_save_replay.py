@@ -373,7 +373,8 @@ class TestReplayVideoExport:
         import pandas as pd
 
         try:
-            import cv2  # pylint: disable=unused-import,import-outside-toplevel
+            import cv2  # pylint: disable=import-outside-toplevel
+            _ = cv2  # Mark as used
         except ImportError:
             pytest.skip("opencv-python not installed")
 

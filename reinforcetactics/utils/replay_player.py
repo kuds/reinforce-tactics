@@ -2,9 +2,19 @@
 Replay player for watching recorded games
 """
 import time
+from pathlib import Path
+from datetime import datetime
+import numpy as np
 import pygame
 
 from reinforcetactics.utils.fonts import get_font
+
+# Optional OpenCV import for video export
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
 
 class ReplayPlayer:
@@ -212,11 +222,11 @@ class ReplayPlayer:
             print("⚠️  No frames recorded. Start recording first.")
             return None
 
-        try:
-            import cv2
-            from pathlib import Path
-            from datetime import datetime
+        if not CV2_AVAILABLE:
+            print("❌ opencv-python not installed. Install with: pip install opencv-python")
+            return None
 
+        try:
             # Create videos directory
             videos_dir = Path("videos")
             videos_dir.mkdir(exist_ok=True)
@@ -249,9 +259,6 @@ class ReplayPlayer:
             self.recorded_frames = []
             return str(output_path)
 
-        except ImportError:
-            print("❌ opencv-python not installed. Install with: pip install opencv-python")
-            return None
         except Exception as e:
             print(f"❌ Error saving video: {e}")
             import traceback
@@ -405,7 +412,6 @@ class ReplayPlayer:
 
         # Capture frame if recording
         if self.recording:
-            import numpy as np
             # Get the pygame surface as a numpy array
             frame_data = pygame.surfarray.array3d(self.renderer.screen)
             # Transpose from (width, height, channels) to (height, width, channels)
