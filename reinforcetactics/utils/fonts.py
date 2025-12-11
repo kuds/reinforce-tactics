@@ -100,7 +100,8 @@ def get_font(size: int) -> pygame.font.Font:
                 font = pygame.font.SysFont(candidate, size)
                 _font_cache[size] = font
                 return font
-    except Exception:
+    except (pygame.error, OSError):
+        # Font loading failed, will fallback to default
         pass
 
     # Fallback to default
