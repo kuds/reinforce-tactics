@@ -38,4 +38,14 @@ class LanguageMenu(Menu):
         """Set the game language."""
         reset_language(lang_code)
         self.lang = get_language()  # Refresh our reference
+
+        # Clear existing options
+        self.options.clear()
+
+        # Update menu title to use the new language
+        self.title = self.lang.get('language.title', 'Select Language')
+
+        # Rebuild menu options with new language
+        self._setup_options()
+
         return lang_code
