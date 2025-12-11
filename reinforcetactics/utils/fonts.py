@@ -52,11 +52,20 @@ def get_font(size: int) -> pygame.font.Font:
         pygame.font.Font instance with Unicode/CJK support if available,
         otherwise falls back to default pygame font
     """
-    if size in _font_cache:
-        return _font_cache[size]
-
+    # Check if pygame.font is initialized; if not, initialize it
     if not pygame.font.get_init():
         pygame.font.init()
+
+    # Check if we have a cached font for this size
+    # But verify it's still valid by checking if pygame.font is initialized
+    if size in _font_cache:
+        try:
+            # Test if the cached font is still valid
+            _font_cache[size].get_height()
+            return _font_cache[size]
+        except pygame.error:
+            # Font is invalid, remove from cache
+            del _font_cache[size]
 
     cjk_font = _find_cjk_font()
     if cjk_font:
@@ -71,3 +80,4 @@ def get_font(size: int) -> pygame.font.Font:
     font = pygame.font.Font(None, size)
     _font_cache[size] = font
     return font
+
