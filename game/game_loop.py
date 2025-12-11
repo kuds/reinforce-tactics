@@ -235,7 +235,9 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             start_new_game(mode=mode, player_configs=player_configs)
         elif result == 'main_menu':
             pygame.quit()
-            # Import here to avoid circular dependency
+            # Import here to avoid circular dependency at module load time.
+            # This is intentional: cli.commands needs game.game_loop for starting games,
+            # and game.game_loop needs cli.commands for returning to main menu.
             from cli.commands import play_mode
             play_mode(None)
         else:
@@ -306,6 +308,7 @@ def load_saved_game():
             start_new_game()
         elif result == 'main_menu':
             pygame.quit()
+            # Import here to avoid circular dependency (see start_new_game)
             from cli.commands import play_mode
             play_mode(None)
         else:
