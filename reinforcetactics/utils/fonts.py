@@ -2,8 +2,18 @@
 import pygame
 from typing import Dict, Optional
 
-# Priority list of fonts that support Korean/CJK characters
+# Priority list of fonts that support Korean/CJK characters and Unicode symbols
 CJK_FONT_CANDIDATES = [
+    # Symbol fonts (high priority for Unicode symbols like ▶, ⏸, ⟲, ⏺, ⏹, 🔴)
+    "Segoe UI Symbol",    # Windows - good symbol coverage
+    "Segoe UI Emoji",     # Windows - emoji support
+    "Apple Symbols",      # macOS - symbol support
+    "Apple Color Emoji",  # macOS - emoji support
+    "Symbola",            # Cross-platform - excellent Unicode coverage
+    "Noto Sans Symbols",  # Cross-platform - Google's symbol font
+    "Noto Sans Symbols2", # Additional symbols
+    "Noto Color Emoji",   # Emoji support
+    # CJK fonts with good Unicode coverage
     "Noto Sans CJK",
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",
@@ -23,7 +33,7 @@ _system_font_name: Optional[str] = None
 
 
 def _find_cjk_font() -> Optional[str]:
-    """Find a system font that supports CJK characters."""
+    """Find a system font that supports CJK characters and Unicode symbols."""
     global _system_font_name
     if _system_font_name is not None:
         return _system_font_name
@@ -43,13 +53,13 @@ def _find_cjk_font() -> Optional[str]:
 
 def get_font(size: int) -> pygame.font.Font:
     """
-    Get a font that supports Korean/CJK characters.
+    Get a font that supports Korean/CJK characters and Unicode symbols.
 
     Args:
         size: Font size in points
 
     Returns:
-        pygame.font.Font instance with Unicode/CJK support if available,
+        pygame.font.Font instance with Unicode/CJK/symbol support if available,
         otherwise falls back to default pygame font
     """
     # Check if pygame.font is initialized; if not, initialize it
@@ -80,4 +90,3 @@ def get_font(size: int) -> pygame.font.Font:
     font = pygame.font.Font(None, size)
     _font_cache[size] = font
     return font
-
