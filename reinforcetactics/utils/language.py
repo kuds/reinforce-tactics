@@ -514,6 +514,134 @@ TRANSLATIONS = {
         'success': 'Éxito',
         'confirm': 'Confirmar',
         'cancel': 'Cancelar',
+    },
+
+    'chinese': {
+        # Main Menu
+        'main_title': 'REINFORCE TACTICS',
+        'main_subtitle': '回合制策略游戏 with RL',
+        'menu_1v1_human': '1v1 (人类 vs 人类)',
+        'menu_1v1_computer': '1v1 (人类 vs 电脑)',
+        'menu_replay': '观看回放',
+        'menu_load': '加载游戏',
+        'menu_settings': '设置',
+        'menu_exit': '退出',
+        'press_esc': '按ESC退出',
+
+        # Main Menu (alternative keys)
+        'main_menu.title': 'Reinforce Tactics',
+        'main_menu.new_game': '新游戏',
+        'main_menu.load_game': '加载游戏',
+        'main_menu.settings': '设置',
+        'main_menu.quit': '退出',
+
+        # Settings Menu
+        'settings_title': '设置',
+        'settings_language': '语言',
+        'settings_paths': '文件路径',
+        'settings_video': '视频设置',
+        'settings_maps_path': '地图目录',
+        'settings_videos_path': '视频目录',
+        'settings_replays_path': '回放目录',
+        'settings_saves_path': '存档目录',
+        'settings_reset': '恢复默认',
+        'settings_back': '返回',
+        'settings_save': '保存',
+        'settings_saved': '设置已保存！',
+        'settings_reset_confirm': '确定要恢复默认设置吗？',
+
+        # Settings Menu (alternative keys)
+        'settings.title': '设置',
+        'settings.language': '语言',
+        'settings.sound': '声音',
+        'settings.fullscreen': '全屏',
+
+        # Map Selection
+        'map_select_title': '选择地图',
+        'map_select': '选择',
+        'map_random': '随机地图',
+        'map_back': '返回',
+
+        # New Game Menu
+        'new_game.title': '选择地图',
+        'new_game.select_mode': '选择游戏模式',
+
+        # Player Configuration Menu
+        'player_config.title': '配置玩家',
+        'player_config.player': '玩家 {number}',
+        'player_config.type_human': '人类',
+        'player_config.type_computer': '电脑',
+        'player_config.difficulty': '难度',
+        'player_config.difficulty_simple': 'SimpleBot',
+        'player_config.difficulty_normal': 'NormalBot (即将推出)',
+        'player_config.difficulty_hard': 'HardBot (即将推出)',
+        'player_config.start_game': '开始游戏',
+
+        # Save/Load Game
+        'save_game.title': '保存游戏',
+        'save_game.enter_name': '输入存档名称：',
+        'save_game.instructions': '按回车保存，按ESC取消',
+        'load_game.title': '加载游戏',
+
+        # Language Menu
+        'language.title': '选择语言',
+
+        # Pause Menu
+        'pause.title': '暂停',
+        'pause.resume': '继续',
+        'pause.save': '保存',
+        'pause.load': '加载',
+        'pause.settings': '设置',
+        'pause.main_menu': '主菜单',
+        'pause.quit': '退出',
+
+        # Game Over
+        'game_over.title': '游戏结束',
+        'game_over.winner': '玩家 {player} 获胜！',
+        'game_over.save_replay': '保存回放',
+        'game_over.new_game': '新游戏',
+        'game_over.main_menu': '主菜单',
+        'game_over.quit': '退出',
+
+        # Common
+        'common.back': '返回',
+        'common.confirm': '确认',
+        'common.cancel': '取消',
+
+        # Game
+        'player': '玩家',
+        'gold': '金币',
+        'turn': '回合',
+        'end_turn': '结束回合',
+        'resign': '投降',
+        'game_over': '游戏结束！',
+        'winner': '获胜！',
+        'controls_title': '操作说明',
+        'controls_select': '点击选择单位',
+        'controls_move': '点击移动',
+        'controls_end_turn': '空格键结束回合',
+        'controls_quit': 'ESC退出',
+
+        # Units
+        'warrior': '战士',
+        'mage': '法师',
+        'cleric': '牧师',
+        'barbarian': '野蛮人',
+        'health': '生命值',
+        'attack': '攻击力',
+        'movement': '移动力',
+        'cost': '费用',
+        'status': '状态',
+        'abilities': '技能',
+
+        # Messages
+        'loading': '加载中...',
+        'saving': '保存中...',
+        'not_implemented': '尚未实现',
+        'error': '错误',
+        'success': '成功',
+        'confirm': '确认',
+        'cancel': '取消',
     }
 }
 
@@ -521,7 +649,8 @@ LANGUAGE_NAMES = {
     'english': 'English',
     'french': 'Français',
     'korean': '한국어',
-    'spanish': 'Español'
+    'spanish': 'Español',
+    'chinese': '中文'
 }
 
 # Language code mappings (for flexibility)
@@ -530,10 +659,12 @@ LANGUAGE_CODES = {
     'fr': 'french',
     'ko': 'korean',
     'es': 'spanish',
+    'zh': 'chinese',
     'english': 'english',
     'french': 'french',
     'korean': 'korean',
     'spanish': 'spanish',
+    'chinese': 'chinese',
 }
 
 

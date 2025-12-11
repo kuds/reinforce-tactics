@@ -6,6 +6,8 @@ title: Project Timeline
 
 # ReinforceTactics RL Research - Task List
 
+**Note**: This timeline was created as a research roadmap with an original goal to submit a paper to ICML by January 23, 2026. While the specific dates may be historical, this document serves as a reference for the project's research methodology and development approach.
+
 **Goal**: Submit paper to ICML by January 23, 2026
 
 This document outlines the complete research and development timeline for the ReinforceTactics project, organized into weekly sprints with specific deliverables.

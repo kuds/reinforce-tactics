@@ -211,7 +211,7 @@ python main.py --mode play
 8. **Menu system** - Comprehensive menu system with all game modes
 9. **Save/Load system** - Full game state serialization and persistence
 10. **Replay system** - Record and playback games with video export
-11. **Multi-language support** - Language selection and localization
+11. **Multi-language support** - Language selection and localization (English, French, Korean, Spanish, Chinese)
 12. **Settings management** - API keys, preferences, and configuration
 13. **Docker support** - Containerized deployment
 14. **Documentation site** - Deployed at reinforcetactics.com

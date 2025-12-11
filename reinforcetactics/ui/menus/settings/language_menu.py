@@ -14,7 +14,8 @@ class LanguageMenu(Menu):
         'en': 'English',
         'fr': 'Français',
         'ko': '한국어',
-        'es': 'Español'
+        'es': 'Español',
+        'zh': '中文'
     }
 
     def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
