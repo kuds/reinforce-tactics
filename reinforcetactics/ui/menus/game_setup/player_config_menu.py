@@ -1,13 +1,19 @@
 """Menu for configuring players."""
 import sys
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 from typing import Optional, List, Dict, Any
 
 import pygame
 
 from reinforcetactics.utils.language import get_language
+
+# Import tkinter optionally for file dialog
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+    TKINTER_AVAILABLE = True
+except ImportError:
+    TKINTER_AVAILABLE = False
 
 
 class PlayerConfigMenu:
@@ -152,6 +158,10 @@ class PlayerConfigMenu:
         Returns:
             Selected file path or None if cancelled
         """
+        if not TKINTER_AVAILABLE:
+            print("⚠️  tkinter not available - cannot open file dialog")
+            return None
+            
         try:
             # Create a hidden tkinter root window
             root = tk.Tk()
