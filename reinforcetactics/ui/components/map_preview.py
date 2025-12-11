@@ -1,9 +1,11 @@
 """Map preview generator for creating thumbnails of maps."""
+import os
+import re
 from typing import Dict, Tuple, Optional
 import pygame
 import pandas as pd
 
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS, TileType
+from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
 from reinforcetactics.utils.file_io import FileIO
 
 
@@ -138,7 +140,6 @@ class MapPreviewGenerator:
         difficulty = self._calculate_difficulty(map_width, map_height, terrain_breakdown)
 
         # Format friendly name from filename
-        import os
         filename = os.path.basename(map_path)
         friendly_name = self._format_display_name(filename)
 
@@ -188,7 +189,6 @@ class MapPreviewGenerator:
         Returns:
             Formatted name (e.g., "6×6 Beginner")
         """
-        import os
         # Remove .csv extension
         name = os.path.splitext(filename)[0]
 
@@ -197,7 +197,6 @@ class MapPreviewGenerator:
 
         # Replace lowercase x with multiplication symbol in dimensions
         # Match patterns like "6x6" or "10x10"
-        import re
         name = re.sub(r'(\d+)x(\d+)', r'\1×\2', name)
 
         # Capitalize each word
