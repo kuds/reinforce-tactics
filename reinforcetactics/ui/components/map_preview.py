@@ -3,8 +3,22 @@ from typing import Dict, Tuple, Optional
 import pygame
 import pandas as pd
 
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
+from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS, TileType
 from reinforcetactics.utils.file_io import FileIO
+
+
+# Mapping of terrain codes to display names
+TERRAIN_DISPLAY_NAMES = {
+    'p': 'Plains',
+    'o': 'Ocean',
+    'w': 'Water',
+    'm': 'Mountain',
+    'f': 'Forest',
+    'r': 'Road',
+    't': 'Tower',
+    'h': 'HQ',
+    'b': 'Building',
+}
 
 
 class MapPreviewGenerator:
@@ -103,22 +117,11 @@ class MapPreviewGenerator:
                         player_count = max(player_count, player_num)
                         
                         # Count as the base type with player prefix
-                        if base_type == 'h':
-                            terrain_counts['HQ'] = terrain_counts.get('HQ', 0) + 1
-                        elif base_type == 'b':
-                            terrain_counts['Building'] = terrain_counts.get('Building', 0) + 1
+                        terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, 'Unknown')
+                        terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
                 else:
                     # Map terrain codes to readable names
-                    terrain_map = {
-                        'p': 'Plains',
-                        'o': 'Ocean',
-                        'w': 'Water',
-                        'm': 'Mountain',
-                        'f': 'Forest',
-                        'r': 'Road',
-                        't': 'Tower',
-                    }
-                    terrain_name = terrain_map.get(tile, 'Unknown')
+                    terrain_name = TERRAIN_DISPLAY_NAMES.get(tile, 'Unknown')
                     terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
 
         # Calculate percentages

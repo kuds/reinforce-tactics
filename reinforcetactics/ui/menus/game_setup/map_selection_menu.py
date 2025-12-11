@@ -138,6 +138,7 @@ class MapSelectionMenu(Menu):
         for i in range(start_idx, end_idx):
             display_idx = i - start_idx
             text, _ = self.options[i]
+            # Get map file safely - the Back option is at the end and has no corresponding map
             map_file = self.available_maps[i] if i < len(self.available_maps) else None
             
             # Calculate item position
@@ -170,9 +171,9 @@ class MapSelectionMenu(Menu):
                 border_color = self.selected_color if is_selected else self.hover_color
                 pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
             
-            # Draw thumbnail if available
+            # Draw thumbnail if this is a map (not Back button) and not random
             thumbnail_size = 45
-            if map_file and map_file != "random" and i < len(self.available_maps) - 1:
+            if map_file and map_file != "random":
                 thumbnail, _ = self.preview_generator.generate_preview(map_file, thumbnail_size, thumbnail_size)
                 if thumbnail:
                     thumb_x = item_rect.x + 5
@@ -192,7 +193,9 @@ class MapSelectionMenu(Menu):
             )
             self.screen.blit(text_surface, text_rect)
             
-            # Store rect for click detection (using actual index)
+            # Store rect for click detection
+            # Note: These rects are stored in display order (0 to visible items)
+            # The base Menu class handles mapping these to actual option indices
             self.option_rects.append(item_rect)
 
     def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
