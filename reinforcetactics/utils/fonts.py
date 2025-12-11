@@ -12,6 +12,9 @@ CJK_FONT_CANDIDATES = [
     # Comprehensive Unicode fonts with good Latin + CJK + symbol coverage
     "Arial Unicode MS",   # Wide Unicode support - excellent coverage
     "DejaVu Sans",        # Good Unicode coverage - Latin + many symbols
+    # macOS standard fonts (must come before CJK-specific fonts for Latin support)
+    "Helvetica Neue",     # macOS default - excellent Latin support
+    "Helvetica",          # macOS fallback - excellent Latin support
     # CJK-specific fonts with good overall Unicode support
     "Noto Sans CJK",
     "Noto Sans CJK SC",
@@ -22,8 +25,6 @@ CJK_FONT_CANDIDATES = [
     "Apple SD Gothic Neo", # macOS Korean font - good Unicode coverage
     "AppleGothic",        # macOS Korean font (older)
     "PingFang SC",        # macOS Chinese font
-    "Helvetica Neue",     # macOS default - good Latin support
-    "Helvetica",          # macOS fallback - good Latin support
     "FreeSans",           # Linux
     # Specialized symbol fonts (lower priority to avoid issues with Latin characters)
     "Symbola",            # Cross-platform - excellent Unicode coverage
@@ -67,6 +68,7 @@ def get_font(size: int) -> pygame.font.Font:
     Get a font that supports comprehensive Unicode.
 
     Includes Latin accents, CJK characters, and symbols.
+    Uses font fallback list for pygame.font.SysFont to ensure proper rendering.
 
     Args:
         size: Font size in points
@@ -90,14 +92,32 @@ def get_font(size: int) -> pygame.font.Font:
             # Font is invalid, remove from cache
             del _font_cache[size]
 
-    cjk_font = _find_cjk_font()
-    if cjk_font:
-        try:
-            font = pygame.font.SysFont(cjk_font, size)
+    # Try to use SysFont with a fallback list
+    # This allows pygame to use multiple fonts for different character ranges
+    try:
+        # Build a font fallback list with both Latin and CJK support
+        font_fallback_list = []
+
+        # Check which fonts are available
+        available_fonts = pygame.font.get_fonts()
+        available_fonts_lower = [f.lower().replace(" ", "") for f in available_fonts]
+
+        for candidate in CJK_FONT_CANDIDATES:
+            candidate_normalized = candidate.lower().replace(" ", "")
+            if candidate_normalized in available_fonts_lower:
+                font_fallback_list.append(candidate)
+                # Stop after finding first 3 fonts for fallback
+                if len(font_fallback_list) >= 3:
+                    break
+
+        if font_fallback_list:
+            # Use comma-separated list for pygame SysFont fallback
+            font_names = ",".join(font_fallback_list)
+            font = pygame.font.SysFont(font_names, size)
             _font_cache[size] = font
             return font
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     # Fallback to default
     font = pygame.font.Font(None, size)
