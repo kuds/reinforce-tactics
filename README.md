@@ -477,6 +477,26 @@ Contributions welcome! Areas for improvement:
 - Map editor GUI
 - Tournament/ladder system
 
+## Citing This Project
+
+If you use Reinforce Tactics in your research, please cite it as follows:
+
+### BibTeX
+
+```bibtex
+@software{reinforce_tactics,
+  author = {kuds},
+  title = {Reinforce Tactics: A Turn-Based Strategy Game for Reinforcement Learning},
+  year = {2025},
+  url = {https://github.com/kuds/reinforce-tactics},
+  note = {A modular turn-based strategy game built with Pygame and Gymnasium for reinforcement learning research}
+}
+```
+
+### Plain Text
+
+kuds. (2025). Reinforce Tactics: A Turn-Based Strategy Game for Reinforcement Learning. GitHub. https://github.com/kuds/reinforce-tactics
+
 ## Credits
 
 Built with:
