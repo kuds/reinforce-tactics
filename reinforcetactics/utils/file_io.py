@@ -35,7 +35,7 @@ class FileIO:
             )
 
             # Strip whitespace from all cells and drop empty rows/columns
-            map_data = map_data.applymap(lambda x: str(x).strip() if pd.notna(x) else 'p')
+            map_data = map_data.map(lambda x: str(x).strip() if pd.notna(x) else 'p')
 
             # Drop rows that are all 'p' (likely empty rows)
             # But keep at least some content
