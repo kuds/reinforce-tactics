@@ -1,7 +1,7 @@
 """Tests for font utility module."""
 import pytest
 import pygame
-from reinforcetactics.utils.fonts import get_font, _find_cjk_font, _font_cache
+from reinforcetactics.utils.fonts import get_font, _get_available_fonts, _font_cache
 
 
 @pytest.fixture
@@ -45,10 +45,12 @@ def test_get_font_various_sizes(pygame_init):
         assert isinstance(font, pygame.font.Font)
 
 
-def test_find_cjk_font_returns_string_or_none(pygame_init):
-    """Test that _find_cjk_font returns a string or None."""
-    result = _find_cjk_font()
-    assert result is None or isinstance(result, str)
+def test_get_available_fonts_returns_list(pygame_init):
+    """Test that _get_available_fonts returns a list."""
+    result = _get_available_fonts()
+    assert isinstance(result, list)
+    # Should have at least one font available
+    assert len(result) > 0
 
 
 def test_font_renders_text(pygame_init):

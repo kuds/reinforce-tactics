@@ -1,65 +1,75 @@
-"""Font utility for cross-platform Unicode support including Korean/CJK characters."""
-import pygame
+"""Font utility for cross-platform Unicode support.
+
+Includes support for Latin accents, CJK characters, and symbols.
+"""
 from typing import Dict, Optional
 
-# Priority list of fonts that support Korean/CJK characters and Unicode symbols
+import pygame
+
+# Priority list of fonts supporting comprehensive Unicode
+# Includes Latin, CJK, and symbols
 CJK_FONT_CANDIDATES = [
-    # Symbol fonts (high priority for Unicode symbols like ▶, ⏸, ⟲, ⏺, ⏹, 🔴)
-    "Segoe UI Symbol",    # Windows - good symbol coverage
-    "Segoe UI Emoji",     # Windows - emoji support
-    "Apple Symbols",      # macOS - symbol support
-    "Apple Color Emoji",  # macOS - emoji support
-    "Symbola",            # Cross-platform - excellent Unicode coverage
-    "Noto Sans Symbols",  # Cross-platform - Google's symbol font
-    "Noto Sans Symbols2", # Additional symbols
-    "Noto Color Emoji",   # Emoji support
-    # CJK fonts with good Unicode coverage
+    # Comprehensive Unicode fonts with BOTH Latin accents AND CJK support
+    "Arial Unicode MS",   # Wide Unicode support - excellent coverage for both
+    # macOS fonts with both Latin and CJK support
+    "Apple SD Gothic Neo", # macOS - has both Latin extended and CJK support
+    "PingFang SC",        # macOS Chinese font - also has Latin support
+    "PingFang TC",        # macOS Traditional Chinese - also has Latin support
+    "Hiragino Sans",      # macOS Japanese - also has Latin support
+    # Comprehensive cross-platform fonts
+    "DejaVu Sans",        # Good Unicode coverage - Latin + many symbols
     "Noto Sans CJK",
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",
     "Noto Sans CJK KR",
+    # Windows fonts with CJK support
     "Malgun Gothic",      # Windows Korean font
     "Microsoft YaHei",    # Windows Chinese font
-    "Apple SD Gothic Neo", # macOS Korean font
+    # macOS fonts (Latin-focused, CJK-limited)
+    "Helvetica Neue",     # macOS default - excellent Latin, NO CJK
+    "Helvetica",          # macOS fallback - excellent Latin, NO CJK
     "AppleGothic",        # macOS Korean font (older)
-    "PingFang SC",        # macOS Chinese font
-    "DejaVu Sans",        # Good Unicode coverage
-    "Arial Unicode MS",   # Wide Unicode support
     "FreeSans",           # Linux
+    # Specialized symbol fonts (lower priority to avoid issues with Latin characters)
+    "Symbola",            # Cross-platform - excellent Unicode coverage
+    "Noto Sans Symbols",  # Cross-platform - Google's symbol font
+    "Noto Sans Symbols2", # Additional symbols
+    "Segoe UI Symbol",    # Windows - good symbol coverage
+    "Segoe UI Emoji",     # Windows - emoji support
+    "Apple Symbols",      # macOS - symbol support
+    "Apple Color Emoji",  # macOS - emoji support
+    "Noto Color Emoji",   # Emoji support
 ]
 
 _font_cache: Dict[int, pygame.font.Font] = {}
-_system_font_name: Optional[str] = None
+_available_fonts_cache: Optional[list] = None
 
 
-def _find_cjk_font() -> Optional[str]:
-    """Find a system font that supports CJK characters and Unicode symbols."""
-    global _system_font_name
-    if _system_font_name is not None:
-        return _system_font_name
+def _get_available_fonts() -> list:
+    """Get list of available system fonts (cached).
 
-    available_fonts = pygame.font.get_fonts()
-    available_fonts_lower = [f.lower().replace(" ", "") for f in available_fonts]
-
-    for candidate in CJK_FONT_CANDIDATES:
-        candidate_normalized = candidate.lower().replace(" ", "")
-        if candidate_normalized in available_fonts_lower:
-            _system_font_name = candidate
-            return candidate
-
-    _system_font_name = ""  # Empty string means no CJK font found
-    return None
+    Returns:
+        List of available font names in lowercase without spaces
+    """
+    global _available_fonts_cache
+    if _available_fonts_cache is None:
+        available_fonts = pygame.font.get_fonts()
+        _available_fonts_cache = [f.lower().replace(" ", "") for f in available_fonts]
+    return _available_fonts_cache
 
 
 def get_font(size: int) -> pygame.font.Font:
     """
-    Get a font that supports Korean/CJK characters and Unicode symbols.
+    Get a font that supports comprehensive Unicode.
+
+    Includes Latin accents, CJK characters, and symbols.
+    Selects a single font with the best comprehensive Unicode coverage.
 
     Args:
         size: Font size in points
 
     Returns:
-        pygame.font.Font instance with Unicode/CJK/symbol support if available,
+        pygame.font.Font instance with comprehensive Unicode support if available,
         otherwise falls back to default pygame font
     """
     # Check if pygame.font is initialized; if not, initialize it
@@ -77,14 +87,22 @@ def get_font(size: int) -> pygame.font.Font:
             # Font is invalid, remove from cache
             del _font_cache[size]
 
-    cjk_font = _find_cjk_font()
-    if cjk_font:
-        try:
-            font = pygame.font.SysFont(cjk_font, size)
-            _font_cache[size] = font
-            return font
-        except Exception:
-            pass
+    # Find the best available font with comprehensive Unicode support
+    try:
+        # Check which fonts are available (cached)
+        available_fonts_lower = _get_available_fonts()
+
+        # Try each candidate in priority order
+        for candidate in CJK_FONT_CANDIDATES:
+            candidate_normalized = candidate.lower().replace(" ", "")
+            if candidate_normalized in available_fonts_lower:
+                # Found an available font - use it
+                font = pygame.font.SysFont(candidate, size)
+                _font_cache[size] = font
+                return font
+    except (pygame.error, OSError):
+        # Font loading failed, will fallback to default
+        pass
 
     # Fallback to default
     font = pygame.font.Font(None, size)
