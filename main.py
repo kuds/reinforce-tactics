@@ -336,7 +336,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
     from reinforcetactics.ui.menus import (
-        MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu, UnitActionMenu
+        MapSelectionMenu, SaveGameMenu, UnitPurchaseMenu, UnitActionMenu, GameOverMenu
     )
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.utils.settings import get_settings
@@ -820,6 +820,23 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             replay_path = game.save_replay_to_file()
             if replay_path:
                 print(f"📼 Replay saved to {replay_path}")
+            
+            # Show game over screen
+            game_over_menu = GameOverMenu(game.winner, game, renderer.screen)
+            result = game_over_menu.run()
+            
+            # Handle game over menu result
+            if result == 'new_game':
+                pygame.quit()
+                start_new_game(mode=mode, player_configs=player_configs)
+                return
+            elif result == 'main_menu':
+                pygame.quit()
+                play_mode(None)  # Return to main menu
+                return
+            elif result == 'quit':
+                pygame.quit()
+                return
 
         pygame.quit()
 
@@ -833,7 +850,7 @@ def load_saved_game():
     import pygame
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
-    from reinforcetactics.ui.menus import LoadGameMenu, SaveGameMenu
+    from reinforcetactics.ui.menus import LoadGameMenu, SaveGameMenu, GameOverMenu
     from reinforcetactics.utils.file_io import FileIO
     from reinforcetactics.game.bot import SimpleBot
     from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
@@ -999,6 +1016,23 @@ def load_saved_game():
             replay_path = game.save_replay_to_file()
             if replay_path:
                 print(f"📼 Replay saved to {replay_path}")
+            
+            # Show game over screen
+            game_over_menu = GameOverMenu(game.winner, game, renderer.screen)
+            result = game_over_menu.run()
+            
+            # Handle game over menu result
+            if result == 'new_game':
+                pygame.quit()
+                start_new_game()
+                return
+            elif result == 'main_menu':
+                pygame.quit()
+                play_mode(None)  # Return to main menu
+                return
+            elif result == 'quit':
+                pygame.quit()
+                return
         
         pygame.quit()
         
