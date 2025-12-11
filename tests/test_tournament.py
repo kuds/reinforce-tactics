@@ -61,6 +61,7 @@ class TestModelBot:
             mock_model = Mock()
             mock_model.predict.return_value = ([5, 0, 0, 0, 0, 0], None)  # End turn action
             mock_ppo_class.load.return_value = mock_model
+            mock_ppo_class.__name__ = 'PPO'  # Add this line to fix the AttributeError
             
             map_data = FileIO.generate_random_map(10, 10, num_players=2)
             game_state = GameState(map_data, num_players=2)
