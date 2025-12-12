@@ -15,6 +15,71 @@ from reinforcetactics.constants import UNIT_DATA
 logger = logging.getLogger(__name__)
 
 
+# Supported models for each provider
+OPENAI_MODELS = [
+    # GPT-4o family (latest, most capable)
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4o-2024-11-20',
+    'gpt-4o-2024-08-06',
+    'gpt-4o-2024-05-13',
+    'gpt-4o-mini-2024-07-18',
+    # GPT-4 Turbo (high performance)
+    'gpt-4-turbo',
+    'gpt-4-turbo-2024-04-09',
+    'gpt-4-turbo-preview',
+    'gpt-4-0125-preview',
+    'gpt-4-1106-preview',
+    # GPT-4 (stable, proven)
+    'gpt-4',
+    'gpt-4-0613',
+    # GPT-3.5 Turbo (fast and economical)
+    'gpt-3.5-turbo',
+    'gpt-3.5-turbo-0125',
+    'gpt-3.5-turbo-1106',
+    # O1 Reasoning models (advanced reasoning)
+    'o1',
+    'o1-2024-12-17',
+    'o1-mini',
+    'o1-mini-2024-09-12',
+    'o1-preview',
+    'o1-preview-2024-09-12',
+    # O3 models (if available)
+    'o3-mini',
+    'o3-mini-2025-01-31',
+]
+
+ANTHROPIC_MODELS = [
+    # Claude 4 (latest generation)
+    'claude-sonnet-4-20250514',
+    # Claude 3.5 (high performance)
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-sonnet-20240620',
+    'claude-3-5-haiku-20241022',
+    # Claude 3 (proven models)
+    'claude-3-opus-20240229',
+    'claude-3-sonnet-20240229',
+    'claude-3-haiku-20240307',
+]
+
+GEMINI_MODELS = [
+    # Gemini 2.0 (latest generation)
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-exp',
+    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash-thinking-exp',
+    # Gemini 1.5 (stable and capable)
+    'gemini-1.5-pro',
+    'gemini-1.5-pro-latest',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash-8b',
+    # Gemini 1.0 (legacy)
+    'gemini-1.0-pro',
+    'gemini-pro',
+]
+
+
 # System prompt explaining the game rules
 SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
 
@@ -68,7 +133,16 @@ Be strategic and consider the game state carefully before deciding."""
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods
-    """Abstract base class for LLM-powered bots."""
+    """
+    Abstract base class for LLM-powered bots.
+
+    This class provides the foundation for bots that use Large Language Models
+    to play Reinforce Tactics. It handles game state serialization, API communication,
+    and action execution.
+
+    Subclasses must implement provider-specific methods for API key handling
+    and model invocation.
+    """
 
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
                  model: Optional[str] = None, max_retries: int = 3):
@@ -94,6 +168,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 f"or pass api_key parameter."
             )
 
+        # Validate model (warning only, to support newly released models)
+        self._validate_model()
+
     @abstractmethod
     def _get_api_key_from_env(self) -> Optional[str]:
         """Get API key from environment variable."""
@@ -109,6 +186,27 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     @abstractmethod
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call the LLM API and return the response text."""
+
+    @abstractmethod
+    def _get_supported_models(self) -> List[str]:
+        """Get the list of supported models for this provider."""
+
+    def _validate_model(self) -> None:
+        """
+        Validate that the requested model is in the supported list.
+
+        Logs a warning if the model is not in the known supported list,
+        but does not raise an error to allow for newly released models.
+        """
+        supported_models = self._get_supported_models()
+        if self.model not in supported_models:
+            logger.warning(
+                "Model '%s' not in known supported models. "
+                "It may still work if newly released. "
+                "Supported models: %s",
+                self.model,
+                ', '.join(supported_models[:5]) + '...'
+            )
 
     def take_turn(self):
         """
@@ -580,7 +678,23 @@ You can take multiple actions in one turn."""
 
 
 class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
-    """LLM bot using OpenAI's GPT models."""
+    """
+    LLM bot using OpenAI's GPT models.
+
+    Supports the full range of OpenAI models including:
+    - GPT-4o family: Latest generation with best performance (gpt-4o, gpt-4o-mini)
+    - GPT-4 Turbo: High performance models (gpt-4-turbo)
+    - GPT-4: Stable and proven models (gpt-4)
+    - GPT-3.5 Turbo: Fast and economical (gpt-3.5-turbo)
+    - O1 models: Advanced reasoning capabilities (o1, o1-mini)
+
+    Default model: gpt-4o-mini (excellent balance of cost and performance)
+
+    Cost tiers:
+    - Budget: gpt-4o-mini, gpt-3.5-turbo (~$0.15-0.50/1M input tokens)
+    - Standard: gpt-4o, gpt-4-turbo (~$2.50-10/1M input tokens)
+    - Premium: o1 series (~$15/1M input tokens)
+    """
 
     def _get_api_key_from_env(self) -> Optional[str]:
         return os.getenv('OPENAI_API_KEY')
@@ -590,6 +704,9 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
 
     def _get_default_model(self) -> str:
         return 'gpt-4o-mini'
+
+    def _get_supported_models(self) -> List[str]:
+        return OPENAI_MODELS
 
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call OpenAI API."""
@@ -614,7 +731,25 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
 
 
 class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
-    """LLM bot using Anthropic's Claude models."""
+    """
+    LLM bot using Anthropic's Claude models.
+
+    Supports Claude models across multiple generations:
+    - Claude 4: Latest generation (claude-sonnet-4-20250514)
+    - Claude 3.5: High performance (claude-3-5-sonnet, claude-3-5-haiku)
+    - Claude 3: Proven models (claude-3-opus, claude-3-sonnet, claude-3-haiku)
+
+    Default model: claude-3-5-haiku-20241022 (latest Haiku, fast and economical)
+
+    Cost tiers:
+    - Budget: claude-3-haiku, claude-3-5-haiku (~$0.25/1M input tokens)
+    - Standard: claude-3-sonnet, claude-3-5-sonnet (~$3/1M input tokens)
+    - Premium: claude-3-opus, claude-sonnet-4 (~$15/1M input tokens)
+
+    Token limits:
+    - Claude 3.5/4: 200K context window
+    - Claude 3: 200K context window (Opus), 200K (Sonnet/Haiku)
+    """
 
     def _get_api_key_from_env(self) -> Optional[str]:
         return os.getenv('ANTHROPIC_API_KEY')
@@ -623,7 +758,10 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'ANTHROPIC_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'claude-3-haiku-20240307'
+        return 'claude-3-5-haiku-20241022'
+
+    def _get_supported_models(self) -> List[str]:
+        return ANTHROPIC_MODELS
 
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call Anthropic API."""
@@ -657,7 +795,31 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
-    """LLM bot using Google's Gemini models."""
+    """
+    LLM bot using Google's Gemini models.
+
+    Supports Gemini models across multiple generations:
+    - Gemini 2.0: Latest generation (gemini-2.0-flash, including thinking modes)
+    - Gemini 1.5: Stable and capable (gemini-1.5-pro, gemini-1.5-flash)
+    - Gemini 1.0: Legacy models (gemini-1.0-pro)
+
+    Default model: gemini-2.0-flash (latest Flash, excellent speed and quality)
+
+    Cost tiers:
+    - Budget: gemini-1.5-flash, gemini-2.0-flash (free tier available, ~$0.075/1M)
+    - Standard: gemini-1.5-pro (~$1.25/1M input tokens)
+    - Experimental: gemini-2.0-flash-thinking-exp (enhanced reasoning)
+
+    Token limits:
+    - Gemini 2.0: Up to 1M token context window
+    - Gemini 1.5: Up to 2M token context window (Pro)
+    - Gemini 1.0: 32K token context window
+
+    Best use cases:
+    - gemini-2.0-flash: Fast responses with good quality
+    - gemini-1.5-pro: Complex reasoning and long context
+    - gemini-2.0-flash-thinking-exp: Enhanced strategic thinking
+    """
 
     def _get_api_key_from_env(self) -> Optional[str]:
         return os.getenv('GOOGLE_API_KEY')
@@ -666,7 +828,10 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'GOOGLE_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'gemini-1.5-flash'
+        return 'gemini-2.0-flash'
+
+    def _get_supported_models(self) -> List[str]:
+        return GEMINI_MODELS
 
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call Google Gemini API."""

@@ -207,11 +207,75 @@ video_path = player.save_video()  # Returns path to saved video
 
 Reinforce Tactics supports LLM-powered bots that can play the game using GPT, Claude, or Gemini models. These bots understand game rules and make strategic decisions in natural language.
 
-### Supported Providers
+### Supported Providers and Models
 
-- **OpenAI (GPT)**: Uses `gpt-4o`, `gpt-4o-mini`, etc.
-- **Anthropic (Claude)**: Uses `claude-sonnet-4-20250514`, `claude-3-haiku-20240307`, etc.
-- **Google (Gemini)**: Uses `gemini-1.5-pro`, `gemini-1.5-flash`, etc.
+#### OpenAI (GPT)
+Default model: `gpt-4o-mini`
+
+**GPT-4o Family** (latest, most capable):
+- `gpt-4o` - Latest flagship model
+- `gpt-4o-mini` - Excellent cost/performance balance (default)
+- `gpt-4o-2024-11-20`, `gpt-4o-2024-08-06`, `gpt-4o-2024-05-13` - Dated snapshots
+- `gpt-4o-mini-2024-07-18` - Mini model snapshot
+
+**GPT-4 Turbo** (high performance):
+- `gpt-4-turbo` - Latest turbo model
+- `gpt-4-turbo-2024-04-09`, `gpt-4-turbo-preview` - Turbo variants
+- `gpt-4-0125-preview`, `gpt-4-1106-preview` - Preview releases
+
+**GPT-4** (stable, proven):
+- `gpt-4` - Original GPT-4
+- `gpt-4-0613` - Stable snapshot
+
+**GPT-3.5 Turbo** (fast and economical):
+- `gpt-3.5-turbo` - Latest 3.5 model
+- `gpt-3.5-turbo-0125`, `gpt-3.5-turbo-1106` - Dated snapshots
+
+**O1 Reasoning Models** (advanced reasoning):
+- `o1` - Latest reasoning model
+- `o1-2024-12-17` - Dated snapshot
+- `o1-mini` - Smaller reasoning model
+- `o1-mini-2024-09-12` - Mini snapshot
+- `o1-preview`, `o1-preview-2024-09-12` - Preview versions
+
+**O3 Models** (if available):
+- `o3-mini`, `o3-mini-2025-01-31`
+
+#### Anthropic (Claude)
+Default model: `claude-3-5-haiku-20241022`
+
+**Claude 4** (latest generation):
+- `claude-sonnet-4-20250514` - Latest Claude 4 Sonnet
+
+**Claude 3.5** (high performance):
+- `claude-3-5-sonnet-20241022` - Latest 3.5 Sonnet
+- `claude-3-5-sonnet-20240620` - Earlier 3.5 Sonnet
+- `claude-3-5-haiku-20241022` - Latest 3.5 Haiku (default, fast and economical)
+
+**Claude 3** (proven models):
+- `claude-3-opus-20240229` - Most capable Claude 3
+- `claude-3-sonnet-20240229` - Balanced Claude 3
+- `claude-3-haiku-20240307` - Fast Claude 3
+
+#### Google (Gemini)
+Default model: `gemini-2.0-flash`
+
+**Gemini 2.0** (latest generation):
+- `gemini-2.0-flash` - Latest Flash model (default, fast and high-quality)
+- `gemini-2.0-flash-exp` - Experimental Flash variant
+- `gemini-2.0-flash-lite` - Lightweight Flash variant
+- `gemini-2.0-flash-thinking-exp` - Enhanced reasoning variant
+
+**Gemini 1.5** (stable and capable):
+- `gemini-1.5-pro` - High-capability model with 2M token context
+- `gemini-1.5-pro-latest` - Latest Pro snapshot
+- `gemini-1.5-flash` - Fast and efficient
+- `gemini-1.5-flash-latest` - Latest Flash snapshot
+- `gemini-1.5-flash-8b` - 8B parameter Flash variant
+
+**Gemini 1.0** (legacy):
+- `gemini-1.0-pro` - Original Gemini Pro
+- `gemini-pro` - Alias for 1.0 Pro
 
 ### Installation
 
@@ -284,10 +348,23 @@ while not game.game_over:
 #### Custom Model Selection
 
 ```python
-# Use specific models
-bot = OpenAIBot(game, player=2, model='gpt-4o')
-bot = ClaudeBot(game, player=2, model='claude-sonnet-4-20250514')
-bot = GeminiBot(game, player=2, model='gemini-1.5-pro')
+# OpenAI models
+bot = OpenAIBot(game, player=2, model='gpt-4o')          # Latest flagship
+bot = OpenAIBot(game, player=2, model='gpt-4o-mini')     # Default, cost-effective
+bot = OpenAIBot(game, player=2, model='gpt-4-turbo')     # High performance
+bot = OpenAIBot(game, player=2, model='o1-mini')         # Reasoning model
+
+# Claude models
+bot = ClaudeBot(game, player=2, model='claude-sonnet-4-20250514')        # Latest Claude 4
+bot = ClaudeBot(game, player=2, model='claude-3-5-haiku-20241022')       # Default, fast
+bot = ClaudeBot(game, player=2, model='claude-3-5-sonnet-20241022')      # High performance
+bot = ClaudeBot(game, player=2, model='claude-3-opus-20240229')          # Most capable
+
+# Gemini models
+bot = GeminiBot(game, player=2, model='gemini-2.0-flash')                # Default, latest
+bot = GeminiBot(game, player=2, model='gemini-2.0-flash-thinking-exp')  # Enhanced reasoning
+bot = GeminiBot(game, player=2, model='gemini-1.5-pro')                  # Long context
+bot = GeminiBot(game, player=2, model='gemini-1.5-flash')                # Fast and efficient
 ```
 
 #### Manual API Key
@@ -303,20 +380,38 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 
 ### Cost and Performance Considerations
 
-**API Costs:**
-- OpenAI GPT-4o-mini: ~$0.15 per 1M input tokens, ~$0.60 per 1M output tokens
-- Claude Haiku: ~$0.25 per 1M input tokens, ~$1.25 per 1M output tokens
-- Gemini Flash: Free tier available, then ~$0.075 per 1M input tokens
+**API Costs by Model Tier:**
+
+*Budget Tier (Best for frequent gameplay):*
+- OpenAI GPT-4o-mini: ~$0.15/1M input tokens, ~$0.60/1M output tokens
+- OpenAI GPT-3.5-turbo: ~$0.50/1M input tokens, ~$1.50/1M output tokens
+- Claude 3 Haiku / 3.5 Haiku: ~$0.25/1M input tokens, ~$1.25/1M output tokens
+- Gemini Flash models: Free tier available, then ~$0.075/1M input tokens
+
+*Standard Tier (Balanced performance):*
+- OpenAI GPT-4o: ~$2.50/1M input tokens, ~$10/1M output tokens
+- OpenAI GPT-4 Turbo: ~$10/1M input tokens, ~$30/1M output tokens
+- Claude 3 Sonnet / 3.5 Sonnet: ~$3/1M input tokens, ~$15/1M output tokens
+- Gemini 1.5 Pro: ~$1.25/1M input tokens, ~$5/1M output tokens
+
+*Premium Tier (Best strategic play):*
+- OpenAI O1 series: ~$15/1M input tokens, ~$60/1M output tokens
+- Claude 3 Opus / Sonnet 4: ~$15/1M input tokens, ~$75/1M output tokens
 
 **Performance:**
 - Average response time: 1-3 seconds per turn
 - Tokens per turn: ~1000-2000 input, ~200-500 output
-- Cost per game (20-30 turns): $0.01-0.05 depending on model
+- Cost per game (20-30 turns):
+  - Budget: $0.001-0.01
+  - Standard: $0.01-0.05
+  - Premium: $0.05-0.20
 
 **Recommendations:**
-- Start with `gpt-4o-mini` or `gemini-1.5-flash` for cost-effective gameplay
-- Use `claude-sonnet-4` or `gpt-4o` for stronger strategic play
-- Monitor API usage to avoid unexpected costs
+- **For practice/testing**: `gpt-4o-mini`, `claude-3-5-haiku-20241022`, or `gemini-2.0-flash`
+- **For competitive play**: `gpt-4o`, `claude-3-5-sonnet-20241022`, or `gemini-1.5-pro`
+- **For maximum performance**: `o1`, `claude-sonnet-4-20250514`, or `gemini-2.0-flash-thinking-exp`
+- Always monitor API usage to avoid unexpected costs
+- Consider using budget models first to understand game mechanics
 
 ### How It Works
 
