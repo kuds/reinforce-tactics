@@ -237,9 +237,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             log_dir = Path(self.conversation_log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate timestamped filename
+            # Generate timestamped filename with microseconds to avoid collisions
             timestamp = datetime.now()
-            timestamp_str = timestamp.strftime("%Y-%m-%d_%H%M%S")
+            timestamp_str = timestamp.strftime("%Y-%m-%d_%H%M%S_%f")
             turn = self.game_state.turn_number
             filename = f"conversation_{timestamp_str}_turn{turn}.json"
             filepath = log_dir / filename

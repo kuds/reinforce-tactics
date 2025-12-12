@@ -439,24 +439,27 @@ class TestConversationLogging:
 
     def test_logging_error_handling(self, simple_game, test_bot_class):
         """Test that logging errors don't break the bot."""
-        bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                            log_conversations=True,
-                            conversation_log_dir="/invalid/readonly/path")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bot = test_bot_class(simple_game, player=2, api_key="test-key",
+                                log_conversations=True,
+                                conversation_log_dir=tmpdir)
 
-        # Set logging level to DEBUG
-        logger = logging.getLogger('reinforcetactics.game.llm_bot')
-        original_level = logger.level
-        logger.setLevel(logging.DEBUG)
+            # Set logging level to DEBUG
+            logger = logging.getLogger('reinforcetactics.game.llm_bot')
+            original_level = logger.level
+            logger.setLevel(logging.DEBUG)
 
-        try:
-            # Mock _call_llm to avoid actual API calls
-            # This should not raise an exception even if logging fails
-            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
-                bot.take_turn()  # Should complete without exception
+            try:
+                # Mock Path.mkdir to raise an exception
+                with patch('reinforcetactics.game.llm_bot.Path.mkdir', side_effect=OSError("Permission denied")):
+                    # Mock _call_llm to avoid actual API calls
+                    # This should not raise an exception even if logging fails
+                    response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                    with patch.object(bot, '_call_llm', return_value=response):
+                        bot.take_turn()  # Should complete without exception
 
-        finally:
-            logger.setLevel(original_level)
+            finally:
+                logger.setLevel(original_level)
 
     def test_multiple_turns_create_separate_files(self, simple_game, test_bot_class):
         """Test that multiple turns create separate log files."""
