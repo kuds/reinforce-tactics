@@ -8,6 +8,8 @@ import time
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
+from datetime import datetime
+from pathlib import Path
 
 from reinforcetactics.constants import UNIT_DATA
 
@@ -145,7 +147,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     """
 
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
-                 model: Optional[str] = None, max_retries: int = 3):
+                 model: Optional[str] = None, max_retries: int = 3,
+                 log_conversations: bool = False,
+                 conversation_log_dir: Optional[str] = None):
         """
         Initialize the LLM bot.
 
@@ -155,12 +159,16 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             api_key: API key for the LLM provider (optional, uses env var if not provided)
             model: Model name to use (optional, uses default if not provided)
             max_retries: Maximum number of retries for API calls
+            log_conversations: Enable conversation logging to JSON files (default False)
+            conversation_log_dir: Directory for conversation logs (default: logs/llm_conversations/)
         """
         self.game_state = game_state
         self.bot_player = player
         self.api_key = api_key or self._get_api_key_from_env()
         self.model = model or self._get_default_model()
         self.max_retries = max_retries
+        self.log_conversations = log_conversations
+        self.conversation_log_dir = conversation_log_dir or 'logs/llm_conversations/'
 
         if not self.api_key:
             raise ValueError(
@@ -208,6 +216,61 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 ', '.join(supported_models[:5]) + '...'
             )
 
+    def _log_conversation_to_json(self, system_prompt: str, user_prompt: str,
+                                   assistant_response: str) -> None:
+        """
+        Log the conversation to a JSON file.
+
+        Only logs if log_conversations is True AND logging level is DEBUG.
+
+        Args:
+            system_prompt: The system prompt sent to the LLM
+            user_prompt: The user prompt (formatted game state)
+            assistant_response: The LLM's response
+        """
+        # Only log if enabled and at DEBUG level
+        if not self.log_conversations or not logger.isEnabledFor(logging.DEBUG):
+            return
+
+        try:
+            # Create log directory if it doesn't exist
+            log_dir = Path(self.conversation_log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate timestamped filename
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime("%Y-%m-%d_%H%M%S")
+            turn = self.game_state.turn_number
+            filename = f"conversation_{timestamp_str}_turn{turn}.json"
+            filepath = log_dir / filename
+
+            # Get provider name from class name
+            provider = self.__class__.__name__.replace('Bot', '')
+
+            # Create conversation log data
+            log_data = {
+                "timestamp": timestamp.isoformat(),
+                "model": self.model,
+                "provider": provider,
+                "player": self.bot_player,
+                "turn_number": turn,
+                "conversation": {
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                    "assistant_response": assistant_response
+                }
+            }
+
+            # Write to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+
+            logger.debug("Logged conversation to %s", filepath)
+
+        except Exception as e:
+            # Don't let logging errors break the bot
+            logger.error("Failed to log conversation: %s", e)
+
     def take_turn(self):
         """
         Execute the bot's turn using LLM guidance.
@@ -226,13 +289,16 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Serialize game state
         game_state_json = self._serialize_game_state()
 
+        # Format the user prompt
+        user_prompt = self._format_prompt(game_state_json)
+
         # Get LLM response with retries
         response_text = None
         for attempt in range(self.max_retries):
             try:
                 messages = [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": self._format_prompt(game_state_json)}
+                    {"role": "user", "content": user_prompt}
                 ]
                 response_text = self._call_llm(messages)
                 break
@@ -250,6 +316,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         if not response_text:
             logger.error("No response from LLM. Ending turn.")
             return
+
+        # Log the conversation if enabled
+        self._log_conversation_to_json(SYSTEM_PROMPT, user_prompt, response_text)
 
         # Parse and execute actions
         self._execute_actions(response_text)
