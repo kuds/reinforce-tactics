@@ -135,6 +135,93 @@ class TestTournamentSystem:
         assert runner.games_per_side == 2
         assert runner.output_dir.exists()
 
+    def test_tournament_runner_with_logging_parameters(self):
+        """Test TournamentRunner initialization with logging parameters."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from tournament import TournamentRunner
+
+        # Test with log_conversations=True and default log dir
+        runner1 = TournamentRunner(
+            map_file='maps/1v1/6x6_beginner.csv',
+            output_dir='/tmp/test_tournament',
+            games_per_side=2,
+            log_conversations=True
+        )
+
+        assert runner1.log_conversations is True
+        assert runner1.conversation_log_dir == '/tmp/test_tournament/llm_conversations'
+
+        # Test with custom log dir
+        runner2 = TournamentRunner(
+            map_file='maps/1v1/6x6_beginner.csv',
+            output_dir='/tmp/test_tournament',
+            games_per_side=2,
+            log_conversations=True,
+            conversation_log_dir='/tmp/custom_logs'
+        )
+
+        assert runner2.log_conversations is True
+        assert runner2.conversation_log_dir == '/tmp/custom_logs'
+
+        # Test with logging disabled
+        runner3 = TournamentRunner(
+            map_file='maps/1v1/6x6_beginner.csv',
+            output_dir='/tmp/test_tournament',
+            games_per_side=2,
+            log_conversations=False
+        )
+
+        assert runner3.log_conversations is False
+        assert runner3.conversation_log_dir is None
+
+    def test_bot_descriptor_llm_with_logging_params(self):
+        """Test BotDescriptor passes logging parameters to LLM bots."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from tournament import BotDescriptor
+
+        # Mock LLM bot class
+        class MockLLMBot:
+            def __init__(self, game_state, player, api_key=None,
+                        log_conversations=False, conversation_log_dir=None):
+                self.game_state = game_state
+                self.bot_player = player
+                self.api_key = api_key
+                self.log_conversations = log_conversations
+                self.conversation_log_dir = conversation_log_dir
+
+        map_data = FileIO.generate_random_map(10, 10, num_players=2)
+        game_state = GameState(map_data, num_players=2)
+
+        # Test with logging enabled
+        desc = BotDescriptor(
+            'TestLLM',
+            'llm',
+            bot_class=MockLLMBot,
+            api_key='test-key',
+            log_conversations=True,
+            conversation_log_dir='/tmp/logs'
+        )
+
+        bot = desc.create_bot(game_state, 2)
+        assert isinstance(bot, MockLLMBot)
+        assert bot.log_conversations is True
+        assert bot.conversation_log_dir == '/tmp/logs'
+
+        # Test with logging disabled
+        desc2 = BotDescriptor(
+            'TestLLM2',
+            'llm',
+            bot_class=MockLLMBot,
+            api_key='test-key',
+            log_conversations=False
+        )
+
+        bot2 = desc2.create_bot(game_state, 2)
+        assert bot2.log_conversations is False
+        assert bot2.conversation_log_dir is None
+
     def test_tournament_runner_discover_simple_bot(self):
         """Test that TournamentRunner discovers SimpleBot."""
         import sys

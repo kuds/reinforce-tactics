@@ -65,7 +65,13 @@ class BotDescriptor:
         elif self.bot_type == 'llm':
             bot_class = self.kwargs['bot_class']
             api_key = self.kwargs.get('api_key')
-            return bot_class(game_state, player, api_key=api_key)
+            log_conversations = self.kwargs.get('log_conversations', False)
+            conversation_log_dir = self.kwargs.get('conversation_log_dir')
+            return bot_class(
+                game_state, player, api_key=api_key,
+                log_conversations=log_conversations,
+                conversation_log_dir=conversation_log_dir
+            )
         elif self.bot_type == 'model':
             from reinforcetactics.game.model_bot import ModelBot
             model_path = self.kwargs['model_path']
@@ -80,7 +86,8 @@ class BotDescriptor:
 class TournamentRunner:
     """Runs a round-robin tournament between bots."""
 
-    def __init__(self, map_file: str, output_dir: str, games_per_side: int = 2):
+    def __init__(self, map_file: str, output_dir: str, games_per_side: int = 2,
+                 log_conversations: bool = False, conversation_log_dir: Optional[str] = None):
         """
         Initialize tournament runner.
 
@@ -88,10 +95,18 @@ class TournamentRunner:
             map_file: Path to map file
             output_dir: Directory for results and replays
             games_per_side: Number of games per side (total games = 2 * games_per_side)
+            log_conversations: Enable conversation logging for LLM bots (default: False)
+            conversation_log_dir: Directory for conversation logs (default: output_dir/llm_conversations/)
         """
         self.map_file = map_file
         self.output_dir = Path(output_dir)
         self.games_per_side = games_per_side
+        self.log_conversations = log_conversations
+        # Default conversation log dir to output_dir/llm_conversations/ if logging is enabled
+        if log_conversations and conversation_log_dir is None:
+            self.conversation_log_dir = str(self.output_dir / 'llm_conversations')
+        else:
+            self.conversation_log_dir = conversation_log_dir
         self.results = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0})
         self.matchup_results = []
 
@@ -151,7 +166,9 @@ class TournamentRunner:
                     'OpenAIBot',
                     'llm',
                     bot_class=OpenAIBot,
-                    api_key=openai_key
+                    api_key=openai_key,
+                    log_conversations=self.log_conversations,
+                    conversation_log_dir=self.conversation_log_dir
                 ))
                 logger.info("Added OpenAIBot")
             except ImportError:
@@ -166,7 +183,9 @@ class TournamentRunner:
                     'ClaudeBot',
                     'llm',
                     bot_class=ClaudeBot,
-                    api_key=anthropic_key
+                    api_key=anthropic_key,
+                    log_conversations=self.log_conversations,
+                    conversation_log_dir=self.conversation_log_dir
                 ))
                 logger.info("Added ClaudeBot")
             except ImportError:
@@ -181,7 +200,9 @@ class TournamentRunner:
                     'GeminiBot',
                     'llm',
                     bot_class=GeminiBot,
-                    api_key=google_key
+                    api_key=google_key,
+                    log_conversations=self.log_conversations,
+                    conversation_log_dir=self.conversation_log_dir
                 ))
                 logger.info("Added GeminiBot")
             except ImportError:
@@ -298,6 +319,9 @@ class TournamentRunner:
         logger.info(f"Starting Tournament with {len(bots)} bots")
         logger.info(f"Map: {self.map_file}")
         logger.info(f"Games per matchup: {self.games_per_side * 2}")
+        if self.log_conversations:
+            logger.info(f"LLM Conversation Logging: ENABLED")
+            logger.info(f"Conversation Log Directory: {self.conversation_log_dir}")
         logger.info(f"{'='*60}\n")
 
         # Generate all matchups (round-robin)
@@ -568,6 +592,15 @@ def main():
         action='store_true',
         help='Test mode: add duplicate SimpleBots for testing the tournament system'
     )
+    parser.add_argument(
+        '--log-conversations',
+        action='store_true',
+        help='Enable LLM conversation logging to JSON files'
+    )
+    parser.add_argument(
+        '--conversation-log-dir',
+        help='Directory for conversation logs (default: output_dir/llm_conversations/)'
+    )
 
     args = parser.parse_args()
 
@@ -580,7 +613,9 @@ def main():
     runner = TournamentRunner(
         map_file=args.map,
         output_dir=args.output_dir,
-        games_per_side=args.games_per_side
+        games_per_side=args.games_per_side,
+        log_conversations=args.log_conversations,
+        conversation_log_dir=args.conversation_log_dir
     )
 
     # Discover bots
