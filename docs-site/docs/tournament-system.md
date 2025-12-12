@@ -80,6 +80,26 @@ Automatically included if:
 2. Required package is installed (`openai`, `anthropic`, or `google-generativeai`)
 3. API connection test passes
 
+#### Supported Models
+
+**OpenAI (Default: gpt-4o-mini)**
+- GPT-4o family: `gpt-4o`, `gpt-4o-mini` (recommended for cost-effectiveness)
+- GPT-4 Turbo: `gpt-4-turbo`, `gpt-4-turbo-2024-04-09`
+- GPT-4: `gpt-4`, `gpt-4-0613`
+- GPT-3.5 Turbo: `gpt-3.5-turbo`, `gpt-3.5-turbo-0125`
+- O1 Reasoning: `o1`, `o1-mini`, `o1-preview`
+- O3: `o3-mini` (if available)
+
+**Anthropic Claude (Default: claude-3-5-haiku-20241022)**
+- Claude 4: `claude-sonnet-4-20250514`
+- Claude 3.5: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022` (recommended)
+- Claude 3: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
+
+**Google Gemini (Default: gemini-2.0-flash)**
+- Gemini 2.0: `gemini-2.0-flash` (recommended), `gemini-2.0-flash-thinking-exp`
+- Gemini 1.5: `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`
+- Gemini 1.0: `gemini-1.0-pro`, `gemini-pro`
+
 Configure API keys in `settings.json`:
 ```json
 {
@@ -90,6 +110,8 @@ Configure API keys in `settings.json`:
   }
 }
 ```
+
+You can also specify custom models by setting environment variables or modifying bot initialization code.
 
 ### Model Bots
 Automatically discovered from the `models/` directory:

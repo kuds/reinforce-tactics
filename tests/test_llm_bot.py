@@ -39,6 +39,9 @@ class TestLLMBotBase:
                 def _get_default_model(self):
                     return 'test-model'
 
+                def _get_supported_models(self):
+                    return ['test-model']
+
                 def _call_llm(self, messages):
                     return '{"reasoning": "test", "actions": []}'
 
@@ -56,6 +59,9 @@ class TestLLMBotBase:
 
             def _get_default_model(self):
                 return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
@@ -85,6 +91,9 @@ class TestLLMBotBase:
             def _get_default_model(self):
                 return 'test-model'
 
+            def _get_supported_models(self):
+                return ['test-model']
+
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
 
@@ -107,6 +116,9 @@ class TestLLMBotBase:
 
             def _get_default_model(self):
                 return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
@@ -136,7 +148,18 @@ class TestOpenAIBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert 'gpt' in TestBot._get_default_model(Mock()).lower()  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'gpt-4o-mini'  # pylint: disable=protected-access
+
+    def test_supported_models(self):
+        """Test that supported models list is returned."""
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot, OPENAI_MODELS  # pylint: disable=import-outside-toplevel
+            assert TestBot._get_supported_models(Mock()) == OPENAI_MODELS  # pylint: disable=protected-access
+            # Verify some expected models are present
+            assert 'gpt-4o' in OPENAI_MODELS
+            assert 'gpt-4o-mini' in OPENAI_MODELS
+            assert 'gpt-4-turbo' in OPENAI_MODELS
+            assert 'o1' in OPENAI_MODELS
 
 
 class TestClaudeBot:
@@ -152,7 +175,18 @@ class TestClaudeBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert 'claude' in TestBot._get_default_model(Mock()).lower()  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'claude-3-5-haiku-20241022'  # pylint: disable=protected-access
+
+    def test_supported_models(self):
+        """Test that supported models list is returned."""
+        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
+            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot, ANTHROPIC_MODELS  # pylint: disable=import-outside-toplevel
+            assert TestBot._get_supported_models(Mock()) == ANTHROPIC_MODELS  # pylint: disable=protected-access
+            # Verify some expected models are present
+            assert 'claude-sonnet-4-20250514' in ANTHROPIC_MODELS
+            assert 'claude-3-5-sonnet-20241022' in ANTHROPIC_MODELS
+            assert 'claude-3-5-haiku-20241022' in ANTHROPIC_MODELS
+            assert 'claude-3-opus-20240229' in ANTHROPIC_MODELS
 
 
 class TestGeminiBot:
@@ -168,4 +202,15 @@ class TestGeminiBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert 'gemini' in TestBot._get_default_model(Mock()).lower()  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'gemini-2.0-flash'  # pylint: disable=protected-access
+
+    def test_supported_models(self):
+        """Test that supported models list is returned."""
+        with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
+            from reinforcetactics.game.llm_bot import GeminiBot as TestBot, GEMINI_MODELS  # pylint: disable=import-outside-toplevel
+            assert TestBot._get_supported_models(Mock()) == GEMINI_MODELS  # pylint: disable=protected-access
+            # Verify some expected models are present
+            assert 'gemini-2.0-flash' in GEMINI_MODELS
+            assert 'gemini-1.5-pro' in GEMINI_MODELS
+            assert 'gemini-1.5-flash' in GEMINI_MODELS
+            assert 'gemini-2.0-flash-thinking-exp' in GEMINI_MODELS
