@@ -215,15 +215,31 @@ class GameState:
             target_tile = self.grid.get_tile(target.x, target.y)
             if target_tile.is_capturable() and target_tile.health < target_tile.max_health:
                 target_tile.regenerating = True
+            defeated_player = target.player
             self.units.remove(target)
             self._invalidate_cache()
+            
+            # Check if defeated player has any remaining units
+            remaining_units = [u for u in self.units if u.player == defeated_player]
+            if len(remaining_units) == 0:
+                self.game_over = True
+                # In a 2-player game, the other player wins
+                self.winner = 2 if defeated_player == 1 else 1
 
         if not result['attacker_alive']:
             attacker_tile = self.grid.get_tile(attacker.x, attacker.y)
             if attacker_tile.is_capturable() and attacker_tile.health < attacker_tile.max_health:
                 attacker_tile.regenerating = True
+            defeated_player = attacker.player
             self.units.remove(attacker)
             self._invalidate_cache()
+            
+            # Check if defeated player has any remaining units
+            remaining_units = [u for u in self.units if u.player == defeated_player]
+            if len(remaining_units) == 0:
+                self.game_over = True
+                # In a 2-player game, the other player wins
+                self.winner = 2 if defeated_player == 1 else 1
 
         attacker.can_move = False
         attacker.can_attack = False
