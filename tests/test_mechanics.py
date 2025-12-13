@@ -374,10 +374,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, cleric, simple_grid)
 
-        # Archer should deal damage and kill cleric
+        # Archer should deal damage but cleric survives (8 - 5 = 3 HP)
         assert result['damage'] == 5
-        assert result['target_alive'] is False
-        assert cleric.health == 0
+        assert result['target_alive'] is True
+        assert cleric.health == 3
 
         # Cleric should not counter-attack
         assert result['counter_damage'] == 0

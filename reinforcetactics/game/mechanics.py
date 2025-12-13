@@ -111,7 +111,7 @@ class GameMechanics:
         attacker_on_mountain = False
         if grid:
             attacker_tile = grid.get_tile(attacker.x, attacker.y)
-            attacker_on_mountain = (attacker_tile.type == 'm')
+            attacker_on_mountain = attacker_tile.type == 'm'
 
         attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
         target_alive = target.take_damage(attack_damage)
@@ -132,10 +132,12 @@ class GameMechanics:
                 target_on_mountain = False
                 if grid:
                     target_tile = grid.get_tile(target.x, target.y)
-                    target_on_mountain = (target_tile.type == 'm')
+                    target_on_mountain = target_tile.type == 'm'
 
                 counter_damage = int(
-                    target.get_attack_damage(attacker.x, attacker.y, target_on_mountain) * COUNTER_ATTACK_MULTIPLIER
+                    target.get_attack_damage(
+                        attacker.x, attacker.y, target_on_mountain
+                    ) * COUNTER_ATTACK_MULTIPLIER
                 )
                 if counter_damage > 0:
                     attacker_alive = attacker.take_damage(counter_damage)
@@ -149,18 +151,24 @@ class GameMechanics:
             target_on_mountain = False
             if grid:
                 target_tile = grid.get_tile(target.x, target.y)
-                target_on_mountain = (target_tile.type == 'm')
+                target_on_mountain = target_tile.type == 'm'
             counter_damage_calc = int(
-                target.get_attack_damage(attacker.x, attacker.y, target_on_mountain) * COUNTER_ATTACK_MULTIPLIER
+                target.get_attack_damage(
+                    attacker.x, attacker.y, target_on_mountain
+                ) * COUNTER_ATTACK_MULTIPLIER
             )
         else:
+            counter_damage_calc = 0
+
+        # Adjust counter_damage_calc if Archer attacked melee unit
+        if attacker.type == 'A' and target.type not in ['A', 'M']:
             counter_damage_calc = 0
 
         return {
             'attacker_alive': attacker_alive,
             'target_alive': target_alive,
             'damage': attack_damage,
-            'counter_damage': counter_damage_calc if not (attacker.type == 'A' and target.type not in ['A', 'M']) else 0
+            'counter_damage': counter_damage_calc
         }
 
     @staticmethod
