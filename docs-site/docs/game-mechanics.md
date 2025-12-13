@@ -88,6 +88,10 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Once the structure's HP reaches 0, it is captured and becomes owned by the capturing player
 - Capturing the enemy's HQ wins the game immediately
 
+#### Win Conditions
+- **Capture Enemy HQ**: Capturing the enemy's headquarters wins the game immediately
+- **Eliminate All Units**: If a player loses all their units, they lose the game regardless of how many structures they own
+
 #### Structure Regeneration
 - Abandoned structures (not owned by any player) regenerate **50% of their max HP per turn**
 - This regeneration rate is defined by `STRUCTURE_REGEN_RATE = 0.5`

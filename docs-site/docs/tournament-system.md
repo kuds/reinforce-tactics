@@ -143,7 +143,7 @@ Example with `--games-per-side 2`:
 - All games run in **headless mode** (no rendering) for speed
 - Maximum 500 turns per game (prevents infinite games)
 - Games end when:
-  - One player wins (captures enemy HQ or eliminates all units/buildings)
+  - One player wins (captures enemy HQ or eliminates all enemy units)
   - Turn limit reached (counts as draw)
 
 ## Output Files
