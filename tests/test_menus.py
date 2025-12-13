@@ -691,7 +691,7 @@ class TestUnitPurchaseMenu:
 
         assert menu.game_state == mock_game_state
         assert menu.building_pos == (5, 5)
-        assert menu.unit_types == ['W', 'M', 'C']
+        assert menu.unit_types == ['W', 'M', 'C', 'A']
         assert hasattr(menu, 'menu_rect')
         assert isinstance(menu.interactive_elements, list)
 
@@ -707,7 +707,7 @@ class TestUnitPurchaseMenu:
 
         # All unit buttons should be disabled
         unit_buttons = [el for el in menu.interactive_elements if el['type'] == 'unit_button']
-        assert len(unit_buttons) == 3  # W, M, C
+        assert len(unit_buttons) == 4  # W, M, C, A
 
         for button in unit_buttons:
             assert button['disabled'] is True
