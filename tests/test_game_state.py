@@ -89,14 +89,12 @@ class TestUnitEliminationWinCondition:
 
     def test_both_players_die_simultaneously_attacker_wins(self, simple_game):
         """Test when both units die (mutual kill), check the remaining player wins."""
-        # Create two units - a weak attacker and strong defender to ensure counter-kill
-        attacker = Unit('C', 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
-        defender = Unit('W', 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
+        # Give player 1 enough gold for attacker
+        simple_game.player_gold[1] = 300
         
-        # Manually add them to game (bypass gold check)
-        simple_game.units.append(attacker)
-        simple_game.units.append(defender)
-        simple_game._invalidate_cache()
+        # Create two units - a weak attacker and strong defender to ensure counter-kill
+        attacker = simple_game.create_unit('C', 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
+        defender = simple_game.create_unit('W', 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
         
         # Damage attacker so counter-attack will kill it
         # Warrior counter: 10 attack - 3 defense = 7 damage * 0.9 = 6.3 -> 6 damage

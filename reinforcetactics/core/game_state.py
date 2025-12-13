@@ -223,8 +223,11 @@ class GameState:
             remaining_units = [u for u in self.units if u.player == defeated_player]
             if len(remaining_units) == 0:
                 self.game_over = True
-                # In a 2-player game, the other player wins
-                self.winner = 2 if defeated_player == 1 else 1
+                # Determine winner using same logic as resign method
+                if self.num_players == 2:
+                    self.winner = 2 if defeated_player == 1 else 1
+                else:
+                    self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
 
         if not result['attacker_alive']:
             attacker_tile = self.grid.get_tile(attacker.x, attacker.y)
@@ -238,8 +241,11 @@ class GameState:
             remaining_units = [u for u in self.units if u.player == defeated_player]
             if len(remaining_units) == 0:
                 self.game_over = True
-                # In a 2-player game, the other player wins
-                self.winner = 2 if defeated_player == 1 else 1
+                # Determine winner using same logic as resign method
+                if self.num_players == 2:
+                    self.winner = 2 if defeated_player == 1 else 1
+                else:
+                    self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
 
         attacker.can_move = False
         attacker.can_attack = False
