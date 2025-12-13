@@ -475,6 +475,7 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 
 - **Headquarters (HQ)**: 50 HP, generates $150 income/turn
   - Capturing enemy HQ wins the game!
+  - Eliminating all enemy units also wins the game!
   
 - **Buildings**: 40 HP, generates $100 income/turn
   - Used to create new units

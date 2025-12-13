@@ -86,7 +86,7 @@ GEMINI_MODELS = [
 SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
 
 GAME OBJECTIVE:
-- Win by capturing the enemy HQ or eliminating all enemy units and buildings
+- Win by capturing the enemy HQ or eliminating all enemy units
 - Build units, move strategically, attack enemies, and capture structures
 
 UNIT TYPES:
