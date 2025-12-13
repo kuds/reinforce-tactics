@@ -243,19 +243,10 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         session = GameSession(game, renderer, bots, num_players)
         result = session.run()
 
-        # Handle result
-        if result == 'new_game':
-            pygame.quit()
-            start_new_game(mode=mode, player_configs=player_configs)
-        elif result == 'main_menu':
-            pygame.quit()
-            # Import here to avoid circular dependency at module load time.
-            # This is intentional: cli.commands needs game.game_loop for starting games,
-            # and game.game_loop needs cli.commands for returning to main menu.
-            from cli.commands import play_mode
-            play_mode(None)
-        else:
-            pygame.quit()
+        pygame.quit()
+
+        # Return result to let caller handle navigation
+        return result
 
     except Exception as e:
         print(f"❌ Error during gameplay: {e}")
@@ -317,17 +308,10 @@ def load_saved_game():
         session = GameSession(game, renderer, bots, game.num_players)
         result = session.run()
 
-        # Handle result
-        if result == 'new_game':
-            pygame.quit()
-            start_new_game()
-        elif result == 'main_menu':
-            pygame.quit()
-            # Import here to avoid circular dependency (see start_new_game)
-            from cli.commands import play_mode
-            play_mode(None)
-        else:
-            pygame.quit()
+        pygame.quit()
+
+        # Return result to let caller handle navigation
+        return result
 
     except Exception as e:
         print(f"❌ Error loading game: {e}")
@@ -378,6 +362,7 @@ def watch_replay(replay_path=None):
         player.run()
 
         pygame.quit()
+        return 'main_menu'  # Return to main menu after watching replay
 
     except Exception as e:
         print(f"❌ Error playing replay: {e}")

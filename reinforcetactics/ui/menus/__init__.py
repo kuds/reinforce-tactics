@@ -25,6 +25,7 @@ from reinforcetactics.ui.menus.save_load.replay_selection_menu import ReplaySele
 from reinforcetactics.ui.menus.settings.settings_menu import SettingsMenu
 from reinforcetactics.ui.menus.settings.language_menu import LanguageMenu
 from reinforcetactics.ui.menus.settings.api_keys_menu import APIKeysMenu
+from reinforcetactics.ui.menus.credits_menu import CreditsMenu
 
 # In-game menus
 from reinforcetactics.ui.menus.in_game.pause_menu import PauseMenu
@@ -50,6 +51,7 @@ __all__ = [
     'SettingsMenu',
     'LanguageMenu',
     'APIKeysMenu',
+    'CreditsMenu',
     # In-game
     'PauseMenu',
     'GameOverMenu',

@@ -255,45 +255,52 @@ def play_mode(_args):
     print("\n🎮 Starting Interactive Play Mode...\n")
 
     try:
-        import pygame  # noqa: F401
         sys.path.insert(0, str(Path(__file__).parent.parent))
 
         # Import game components to validate they exist
-        from reinforcetactics.ui.menus import MainMenu  # noqa: F401
+        import pygame
+        from reinforcetactics.ui.menus import MainMenu
+        from game.game_loop import start_new_game, load_saved_game, watch_replay
     except ImportError as e:
         print(f"❌ Error importing game components: {e}")
         print("\nMake sure all required modules are in reinforcetactics/")
         return
 
-    # Initialize Pygame
-    pygame.init()
+    # Main game loop - keep showing menu until user quits
+    while True:
+        # Initialize/reinitialize Pygame (needed after game sessions quit pygame)
+        pygame.init()
 
-    # Show main menu
-    main_menu = MainMenu()
-    menu_result = main_menu.run()
+        # Show main menu
+        main_menu = MainMenu()
+        menu_result = main_menu.run()
 
-    if not menu_result or menu_result['type'] == 'exit':
-        print("Exiting...")
-        pygame.quit()
-        return
+        if not menu_result or menu_result['type'] == 'exit':
+            print("Exiting...")
+            pygame.quit()
+            return
 
-    # Import game loop functions
-    from game.game_loop import start_new_game, load_saved_game, watch_replay
+        # Handle menu selection
+        game_result = None
+        if menu_result['type'] == 'new_game':
+            game_result = start_new_game(
+                mode=menu_result.get('mode', 'human_vs_computer'),
+                selected_map=menu_result.get('map'),
+                player_configs=menu_result.get('players')
+            )
+        elif menu_result['type'] == 'load_game':
+            game_result = load_saved_game()
+        elif menu_result['type'] == 'watch_replay':
+            game_result = watch_replay(menu_result.get('replay_path'))
 
-    # Handle menu selection
-    if menu_result['type'] == 'new_game':
-        start_new_game(
-            mode=menu_result.get('mode', 'human_vs_computer'),
-            selected_map=menu_result.get('map'),
-            player_configs=menu_result.get('players')
-        )
-    elif menu_result['type'] == 'load_game':
-        load_saved_game()
-    elif menu_result['type'] == 'watch_replay':
-        watch_replay(menu_result.get('replay_path'))
-    elif menu_result['type'] == 'settings':
-        print("Settings menu not yet implemented")
-        pygame.quit()
+        # Handle game result
+        # - 'main_menu': Continue loop to show menu again
+        # - 'new_game': Continue loop to show menu again (user can start new game from menu)
+        # - 'quit' or None: Exit completely
+        if game_result == 'quit':
+            print("Exiting...")
+            return
+        # For 'main_menu' or 'new_game', continue to next iteration
 
 
 def stats_mode(_args):
