@@ -326,6 +326,24 @@ class Renderer:
             rect = pygame.Rect(target.x * TILE_SIZE, target.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
             pygame.draw.rect(self.screen, (255, 0, 0), rect, 3)
 
+    def draw_attack_range_overlay(self, positions):
+        """
+        Draw attack range preview overlay highlighting attackable positions.
+
+        Args:
+            positions: List of (x, y) tuples for positions that can be attacked
+        """
+        for x, y in positions:
+            # Draw semi-transparent overlay
+            overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
+            overlay.set_alpha(100)
+            overlay.fill((255, 150, 50))  # Orange tint for attack range
+            self.screen.blit(overlay, (x * TILE_SIZE, y * TILE_SIZE))
+
+            # Draw border around position
+            rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            pygame.draw.rect(self.screen, (255, 100, 0), rect, 2)
+
     def get_rgb_array(self):
         """Get the current screen as RGB array."""
         # Convert pygame surface to numpy array

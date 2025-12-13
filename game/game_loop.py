@@ -61,6 +61,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
         print("  - Click units to select")
         print("  - Click buildings to create units")
         print("  - Click tiles to move")
+        print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
         print("  - Press ESC to quit")
@@ -86,6 +87,12 @@ class GameSession:  # pylint: disable=too-few-public-methods
                         result = self.input_handler.handle_mouse_click(mouse_pos)
                         if result == 'continue':
                             continue
+                    elif event.button == 3:  # Right click
+                        self.input_handler.handle_right_click_press(mouse_pos)
+
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 3:  # Right click release
+                        self.input_handler.handle_right_click_release()
 
                 elif event.type == pygame.MOUSEMOTION:
                     self.input_handler.handle_mouse_motion(mouse_pos)
@@ -116,6 +123,13 @@ class GameSession:  # pylint: disable=too-few-public-methods
         # Draw movement overlay if unit selected
         if self.input_handler.selected_unit:
             self.renderer.draw_movement_overlay(self.input_handler.selected_unit)
+
+        # Draw attack range preview if right-clicking on a unit
+        if (self.input_handler.right_click_preview_active and
+            self.input_handler.preview_positions):
+            self.renderer.draw_attack_range_overlay(
+                self.input_handler.preview_positions
+            )
 
         # Draw target overlay if in target selection mode
         if (self.input_handler.target_selection_mode and
@@ -293,6 +307,7 @@ def load_saved_game():
         print("\nControls:")
         print("  - Click units to select")
         print("  - Click tiles to move")
+        print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
         print("  - Press ESC to quit")

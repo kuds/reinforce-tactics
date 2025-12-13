@@ -49,6 +49,11 @@ class InputHandler:
         self.target_selection_mode = False
         self.target_selection_action = None
         self.target_selection_unit = None
+        
+        # Right-click preview state
+        self.right_click_preview_active = False
+        self.preview_unit = None
+        self.preview_positions = []
 
     def handle_keyboard_event(self, event):
         """
@@ -169,6 +174,45 @@ class InputHandler:
         """
         if self.active_menu and hasattr(self.active_menu, 'handle_mouse_motion'):
             self.active_menu.handle_mouse_motion(mouse_pos)
+
+    def handle_right_click_press(self, mouse_pos):
+        """
+        Handle right mouse button press - start attack range preview.
+
+        Args:
+            mouse_pos: Tuple of (x, y) mouse position
+        """
+        grid_x = mouse_pos[0] // TILE_SIZE
+        grid_y = mouse_pos[1] // TILE_SIZE
+
+        # Check bounds
+        if not (0 <= grid_x < self.game.grid.width and 0 <= grid_y < self.game.grid.height):
+            return
+
+        # Find unit at clicked position
+        clicked_unit = self.game.get_unit_at_position(grid_x, grid_y)
+        
+        if clicked_unit:
+            # Activate preview for this unit
+            self.right_click_preview_active = True
+            self.preview_unit = clicked_unit
+            
+            # Get all attackable positions (enemy unit positions)
+            from reinforcetactics.game.mechanics import GameMechanics
+            attackable_enemies = GameMechanics.get_attackable_enemies(
+                clicked_unit, self.game.units, self.game.grid
+            )
+            
+            # Convert to positions list
+            self.preview_positions = [(enemy.x, enemy.y) for enemy in attackable_enemies]
+
+    def handle_right_click_release(self):
+        """
+        Handle right mouse button release - end attack range preview.
+        """
+        self.right_click_preview_active = False
+        self.preview_unit = None
+        self.preview_positions = []
 
     def _handle_target_selection_click(self, mouse_pos, current_time):
         """Handle clicks during target selection mode."""
