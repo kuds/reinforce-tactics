@@ -674,11 +674,11 @@ Built with:
   - [x] Easy
   - [ ] Normal
   - [ ] Hard
-- [ ] Implement Range Units
-- [ ] Implement Routing Functionality for Units
-- [ ] Buildings Healing Units
+- [X] Implement Range Units
+- [X] Implement Routing Functionality for Units
+- [X] Buildings Healing Units
 - [ ] Implement Terriority Defenese
-- [ ] Language Support
+- [X] Language Support
   - [x] Korean
   - [x] Spanish
   - [x] French
