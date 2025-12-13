@@ -58,26 +58,30 @@ class UnitActionMenu:
         """
         actions = []
 
-        # Check for adjacent enemies for Attack and Paralyze
-        adjacent_enemies = GameMechanics.get_adjacent_enemies(self.unit, self.game_state.units)
+        # Check for attackable enemies (using range-aware method)
+        attackable_enemies = GameMechanics.get_attackable_enemies(
+            self.unit, self.game_state.units, self.game_state.grid
+        )
 
-        # Attack - available if adjacent enemies exist
-        if adjacent_enemies:
+        # Attack - available if attackable enemies exist
+        if attackable_enemies:
             actions.append({
                 'name': 'Attack (A)',
                 'key': 'a',
                 'type': 'attack',
-                'targets': adjacent_enemies
+                'targets': attackable_enemies
             })
 
         # Paralyze - only for Mages with adjacent enemies
-        if self.unit.type == 'M' and adjacent_enemies:
-            actions.append({
-                'name': 'Paralyze (P)',
-                'key': 'p',
-                'type': 'paralyze',
-                'targets': adjacent_enemies
-            })
+        if self.unit.type == 'M':
+            adjacent_enemies = GameMechanics.get_adjacent_enemies(self.unit, self.game_state.units)
+            if adjacent_enemies:
+                actions.append({
+                    'name': 'Paralyze (P)',
+                    'key': 'p',
+                    'type': 'paralyze',
+                    'targets': adjacent_enemies
+                })
 
         # Heal and Cure - only for Clerics
         if self.unit.type == 'C':

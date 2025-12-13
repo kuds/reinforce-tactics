@@ -111,6 +111,102 @@ class TestAdjacentUnits:
         assert ally2 not in adjacent_paralyzed
 
 
+class TestAttackableEnemies:
+    """Test finding enemies within attack range."""
+
+    def test_warrior_attackable_enemies(self, simple_grid):
+        """Test warrior can only attack adjacent enemies."""
+        warrior = Unit('W', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1)
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2
+        units = [warrior, enemy1, enemy2]
+
+        attackable = GameMechanics.get_attackable_enemies(warrior, units, simple_grid)
+
+        assert len(attackable) == 1
+        assert enemy1 in attackable
+        assert enemy2 not in attackable
+
+    def test_mage_attackable_enemies(self, simple_grid):
+        """Test mage can attack at distance 1-2."""
+        mage = Unit('M', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1)
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3
+        units = [mage, enemy1, enemy2, enemy3]
+
+        attackable = GameMechanics.get_attackable_enemies(mage, units, simple_grid)
+
+        assert len(attackable) == 2
+        assert enemy1 in attackable
+        assert enemy2 in attackable
+        assert enemy3 not in attackable
+
+    def test_archer_attackable_enemies_no_mountain(self, simple_grid):
+        """Test archer can attack at distance 2-3 (not 1)."""
+        archer = Unit('A', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable (no mountain needed)
+        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should NOT be attackable (no mountain)
+        units = [archer, enemy1, enemy2, enemy3, enemy4]
+
+        attackable = GameMechanics.get_attackable_enemies(archer, units, simple_grid)
+
+        assert len(attackable) == 2
+        assert enemy1 not in attackable  # Can't attack at distance 1
+        assert enemy2 in attackable
+        assert enemy3 in attackable  # Can attack at distance 3
+        assert enemy4 not in attackable
+
+    def test_archer_attackable_enemies_on_mountain(self):
+        """Test archer can attack at distance 2-4 on mountain."""
+        # Create grid with mountain at archer position
+        map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+        map_data[5][5] = 'm'  # Mountain at (5, 5)
+        grid = TileGrid(map_data)
+
+        archer = Unit('A', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable
+        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should be attackable (on mountain)
+        enemy5 = Unit('W', 0, 5, 2)  # Distance 5 - should NOT be attackable
+        units = [archer, enemy1, enemy2, enemy3, enemy4, enemy5]
+
+        attackable = GameMechanics.get_attackable_enemies(archer, units, grid)
+
+        assert len(attackable) == 3
+        assert enemy1 not in attackable  # Can't attack at distance 1
+        assert enemy2 in attackable
+        assert enemy3 in attackable
+        assert enemy4 in attackable  # Can attack at distance 4 on mountain
+        assert enemy5 not in attackable
+
+    def test_no_attackable_enemies_when_none_in_range(self, simple_grid):
+        """Test returns empty list when no enemies in range."""
+        warrior = Unit('W', 5, 5, 1)
+        enemy = Unit('W', 8, 8, 2)  # Far away
+        units = [warrior, enemy]
+
+        attackable = GameMechanics.get_attackable_enemies(warrior, units, simple_grid)
+
+        assert len(attackable) == 0
+
+    def test_ignores_allies_and_self(self, simple_grid):
+        """Test only returns enemies, not allies or self."""
+        unit = Unit('W', 5, 5, 1)
+        ally = Unit('W', 6, 5, 1)  # Same player
+        enemy = Unit('W', 4, 5, 2)  # Different player
+        units = [unit, ally, enemy]
+
+        attackable = GameMechanics.get_attackable_enemies(unit, units, simple_grid)
+
+        assert len(attackable) == 1
+        assert enemy in attackable
+        assert ally not in attackable
+
+
 class TestCombat:
     """Test combat mechanics."""
 
@@ -354,7 +450,7 @@ class TestArcherCounterAttack:
     def test_archer_attacks_warrior_no_counter(self, simple_grid):
         """Test archer attacking warrior gets no counter-attack."""
         archer = Unit('A', 5, 5, 1)
-        warrior = Unit('W', 6, 5, 2)
+        warrior = Unit('W', 7, 5, 2)  # Distance 2 from archer
 
         result = GameMechanics.attack_unit(archer, warrior, simple_grid)
 
@@ -363,14 +459,14 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert warrior.health == 10  # 15 - 5 damage
 
-        # Warrior should not counter-attack
+        # Warrior should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
         assert archer.health == 15  # No damage taken
 
     def test_archer_attacks_cleric_no_counter(self, simple_grid):
         """Test archer attacking cleric gets no counter-attack."""
         archer = Unit('A', 5, 5, 1)
-        cleric = Unit('C', 6, 5, 2)
+        cleric = Unit('C', 7, 5, 2)  # Distance 2 from archer
 
         result = GameMechanics.attack_unit(archer, cleric, simple_grid)
 
@@ -379,14 +475,14 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert cleric.health == 3
 
-        # Cleric should not counter-attack
+        # Cleric should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
         assert archer.health == 15
 
     def test_archer_attacks_barbarian_no_counter(self, simple_grid):
         """Test archer attacking barbarian gets no counter-attack."""
         archer = Unit('A', 5, 5, 1)
-        barbarian = Unit('B', 6, 5, 2)
+        barbarian = Unit('B', 7, 5, 2)  # Distance 2 from archer
 
         result = GameMechanics.attack_unit(archer, barbarian, simple_grid)
 
@@ -395,14 +491,14 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert barbarian.health == 15  # 20 - 5 damage
 
-        # Barbarian should not counter-attack
+        # Barbarian should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
         assert archer.health == 15
 
     def test_archer_attacks_archer_gets_counter(self, simple_grid):
         """Test archer attacking another archer gets counter-attack."""
         archer1 = Unit('A', 5, 5, 1)
-        archer2 = Unit('A', 6, 5, 2)
+        archer2 = Unit('A', 7, 5, 2)  # Distance 2 from archer1
 
         result = GameMechanics.attack_unit(archer1, archer2, simple_grid)
 
@@ -411,14 +507,14 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert archer2.health == 10  # 15 - 5 damage
 
-        # Archer2 should counter-attack (5 * 0.9 = 4.5, int = 4)
+        # Archer2 should counter-attack at distance 2 (5 * 0.9 = 4.5, int = 4)
         assert result['counter_damage'] == 4
         assert archer1.health == 11  # 15 - 4 damage
 
     def test_archer_attacks_mage_gets_counter(self, simple_grid):
         """Test archer attacking mage gets counter-attack if in range."""
         archer = Unit('A', 5, 5, 1)
-        mage = Unit('M', 6, 5, 2)
+        mage = Unit('M', 7, 5, 2)  # Distance 2 from archer
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
@@ -427,9 +523,9 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert mage.health == 5  # 10 - 5 damage
 
-        # Mage should counter-attack at distance 1 (8 * 0.9 = 7.2, int = 7)
-        assert result['counter_damage'] == 7
-        assert archer.health == 8  # 15 - 7 damage
+        # Mage should counter-attack at distance 2 (12 * 0.9 = 10.8, int = 10)
+        assert result['counter_damage'] == 10
+        assert archer.health == 5  # 15 - 10 damage
 
     def test_archer_attacks_mage_at_distance_2_gets_counter(self, simple_grid):
         """Test archer attacking mage at distance 2 gets counter-attack."""
