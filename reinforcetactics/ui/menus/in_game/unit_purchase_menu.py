@@ -38,9 +38,9 @@ class UnitPurchaseMenu:
         self.title_font = get_font(28)
         self.option_font = get_font(24)
 
-        # Unit types to display (basic units only: Warrior, Mage, Cleric)
+        # Unit types to display (basic units only: Warrior, Mage, Cleric, Archer)
         # Barbarian is excluded as it costs 400g vs 200-250g for basic units
-        self.unit_types = ['W', 'M', 'C']
+        self.unit_types = ['W', 'M', 'C', 'A']
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []

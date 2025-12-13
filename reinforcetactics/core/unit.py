@@ -13,7 +13,7 @@ class Unit:
         Initialize a unit.
 
         Args:
-            unit_type: 'W', 'M', or 'C'
+            unit_type: 'W', 'M', 'C', 'B', or 'A'
             x: X coordinate on grid
             y: Y coordinate on grid
             player: Player number who owns this unit
@@ -34,13 +34,14 @@ class Unit:
         self.attack_data = UNIT_DATA[unit_type]['attack']
         self.paralyzed_turns = 0
 
-    def get_attack_damage(self, target_x, target_y):
+    def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
         Calculate attack damage based on distance to target.
 
         Args:
             target_x: Target X coordinate
             target_y: Target Y coordinate
+            on_mountain: Whether the unit is on a mountain tile (for Archer range bonus)
 
         Returns:
             Attack damage value
@@ -52,6 +53,13 @@ class Unit:
                 return self.attack_data['adjacent']
             elif distance == 2:
                 return self.attack_data['range']
+            else:
+                return 0
+        elif self.type == 'A':
+            # Archer has range 1-2 normally, 1-3 on mountain
+            max_range = 3 if on_mountain else 2
+            if 1 <= distance <= max_range:
+                return self.attack_data
             else:
                 return 0
         else:

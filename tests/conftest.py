@@ -25,6 +25,12 @@ def cleric():
 
 
 @pytest.fixture
+def archer():
+    """Create a test archer unit."""
+    return Unit('A', 5, 5, 1)
+
+
+@pytest.fixture
 def enemy_warrior():
     """Create an enemy warrior unit."""
     return Unit('W', 6, 5, 2)

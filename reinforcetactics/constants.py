@@ -75,7 +75,8 @@ UNIT_COLORS = {
     'W': (139, 69, 19),      # Brown (Warrior)
     'M': (138, 43, 226),     # Purple (Mage)
     'C': (255, 215, 0),      # Gold (Cleric)
-    'B': (0, 215, 0)         # Barbarian (Green)
+    'B': (0, 215, 0),        # Barbarian (Green)
+    'A': (34, 139, 34)       # Archer (Forest Green)
 }
 
 # Unit costs and properties
@@ -123,6 +124,17 @@ UNIT_DATA = {
         'health': 20,
         'attack': 10,
         'defence': 2
+    },
+    'A': {
+        'static_path': 'archer.png',
+        'animation_path': 'archer',
+        'name': 'Archer',
+        'cost': 250,
+        'color': (34, 139, 34),
+        'movement': 3,
+        'health': 15,
+        'attack': 5,
+        'defence': 1
     }
 }
 
