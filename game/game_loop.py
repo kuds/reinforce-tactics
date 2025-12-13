@@ -244,7 +244,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         result = session.run()
 
         pygame.quit()
-        
+
         # Return result to let caller handle navigation
         return result
 
@@ -309,7 +309,7 @@ def load_saved_game():
         result = session.run()
 
         pygame.quit()
-        
+
         # Return result to let caller handle navigation
         return result
 
@@ -362,6 +362,7 @@ def watch_replay(replay_path=None):
         player.run()
 
         pygame.quit()
+        return 'main_menu'  # Return to main menu after watching replay
 
     except Exception as e:
         print(f"❌ Error playing replay: {e}")

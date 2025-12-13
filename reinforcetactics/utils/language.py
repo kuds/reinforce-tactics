@@ -102,7 +102,7 @@ TRANSLATIONS = {
         'credits.title': 'Credits',
         'credits.game_title': 'REINFORCE TACTICS',
         'credits.developer': 'Developer:',
-        'credits.developer_name': 'kuds',
+        'credits.developer_name': 'Michael Kudlaty',
         'credits.description': 'Turn-Based Strategy Game with Reinforcement Learning',
 
         # Game
@@ -239,7 +239,7 @@ TRANSLATIONS = {
         'credits.title': 'Crédits',
         'credits.game_title': 'REINFORCE TACTICS',
         'credits.developer': 'Développeur:',
-        'credits.developer_name': 'kuds',
+        'credits.developer_name': 'Michael Kudlaty',
         'credits.description': 'Jeu de Stratégie au Tour par Tour avec Apprentissage par Renforcement',
 
         # Game
@@ -376,7 +376,7 @@ TRANSLATIONS = {
         'credits.title': '크레딧',
         'credits.game_title': 'REINFORCE TACTICS',
         'credits.developer': '개발자:',
-        'credits.developer_name': 'kuds',
+        'credits.developer_name': 'Michael Kudlaty',
         'credits.description': '강화 학습 기반 턴제 전략 게임',
 
         # Game
@@ -513,7 +513,7 @@ TRANSLATIONS = {
         'credits.title': 'Créditos',
         'credits.game_title': 'REINFORCE TACTICS',
         'credits.developer': 'Desarrollador:',
-        'credits.developer_name': 'kuds',
+        'credits.developer_name': 'Michael Kudlaty',
         'credits.description': 'Juego de Estrategia por Turnos con Aprendizaje por Refuerzo',
 
         # Game
@@ -650,7 +650,7 @@ TRANSLATIONS = {
         'credits.title': '制作人员',
         'credits.game_title': 'REINFORCE TACTICS',
         'credits.developer': '开发者:',
-        'credits.developer_name': 'kuds',
+        'credits.developer_name': 'Michael Kudlaty',
         'credits.description': '基于强化学习的回合制策略游戏',
 
         # Game

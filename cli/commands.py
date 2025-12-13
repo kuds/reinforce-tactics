@@ -270,7 +270,7 @@ def play_mode(_args):
     while True:
         # Initialize/reinitialize Pygame (needed after game sessions quit pygame)
         pygame.init()
-        
+
         # Show main menu
         main_menu = MainMenu()
         menu_result = main_menu.run()

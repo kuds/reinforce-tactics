@@ -44,8 +44,8 @@ class CreditsMenu(Menu):
 
         # Draw developer info
         developer_label = lang.get('credits.developer', 'Developer:')
-        developer_name = lang.get('credits.developer_name', 'kuds')
-        
+        developer_name = lang.get('credits.developer_name', 'Michael Kudlaty')
+
         developer_label_surface = self.option_font.render(developer_label, True, self.text_color)
         developer_label_rect = developer_label_surface.get_rect(
             centerx=self.screen.get_width() // 2,
@@ -61,7 +61,8 @@ class CreditsMenu(Menu):
         self.screen.blit(developer_name_surface, developer_name_rect)
 
         # Draw description
-        description = lang.get('credits.description', 'Turn-Based Strategy Game with Reinforcement Learning')
+        description = lang.get('credits.description',
+                               'Turn-Based Strategy Game with Reinforcement Learning')
         description_surface = self.option_font.render(description, True, self.text_color)
         description_rect = description_surface.get_rect(
             centerx=self.screen.get_width() // 2,
