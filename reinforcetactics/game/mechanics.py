@@ -57,6 +57,39 @@ class GameMechanics:
         return adjacent_enemies
 
     @staticmethod
+    def get_attackable_enemies(unit, units, grid):
+        """
+        Get list of enemy units within the given unit's attack range.
+
+        Args:
+            unit: The unit to check attack range for
+            units: List of all units
+            grid: TileGrid instance (for checking mountain tiles)
+
+        Returns:
+            List of enemy units within attack range
+        """
+        attackable_enemies = []
+        
+        # Check if unit is on a mountain (for Archer range bonus)
+        on_mountain = False
+        if grid:
+            tile = grid.get_tile(unit.x, unit.y)
+            on_mountain = tile.type == 'm'
+        
+        # Get the unit's attack range
+        min_range, max_range = unit.get_attack_range(on_mountain)
+        
+        # Check all enemies
+        for enemy in units:
+            if enemy.player != unit.player and enemy.health > 0:
+                distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
+                if min_range <= distance <= max_range:
+                    attackable_enemies.append(enemy)
+        
+        return attackable_enemies
+
+    @staticmethod
     def get_adjacent_allies(unit, units):
         """Get list of damaged friendly units adjacent to the given unit."""
         adjacent_allies = []

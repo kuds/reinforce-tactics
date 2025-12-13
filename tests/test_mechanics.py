@@ -111,6 +111,98 @@ class TestAdjacentUnits:
         assert ally2 not in adjacent_paralyzed
 
 
+class TestAttackableEnemies:
+    """Test finding enemies within attack range."""
+
+    def test_warrior_attackable_enemies(self, simple_grid):
+        """Test warrior can only attack adjacent enemies."""
+        warrior = Unit('W', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1)
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2
+        units = [warrior, enemy1, enemy2]
+
+        attackable = GameMechanics.get_attackable_enemies(warrior, units, simple_grid)
+
+        assert len(attackable) == 1
+        assert enemy1 in attackable
+        assert enemy2 not in attackable
+
+    def test_mage_attackable_enemies(self, simple_grid):
+        """Test mage can attack at distance 1-2."""
+        mage = Unit('M', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1)
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3
+        units = [mage, enemy1, enemy2, enemy3]
+
+        attackable = GameMechanics.get_attackable_enemies(mage, units, simple_grid)
+
+        assert len(attackable) == 2
+        assert enemy1 in attackable
+        assert enemy2 in attackable
+        assert enemy3 not in attackable
+
+    def test_archer_attackable_enemies_no_mountain(self, simple_grid):
+        """Test archer can only attack at distance 2 (not 1)."""
+        archer = Unit('A', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should NOT be attackable (no mountain)
+        units = [archer, enemy1, enemy2, enemy3]
+
+        attackable = GameMechanics.get_attackable_enemies(archer, units, simple_grid)
+
+        assert len(attackable) == 1
+        assert enemy1 not in attackable  # Can't attack at distance 1
+        assert enemy2 in attackable
+        assert enemy3 not in attackable
+
+    def test_archer_attackable_enemies_on_mountain(self):
+        """Test archer can attack at distance 2-3 on mountain."""
+        # Create grid with mountain at archer position
+        map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+        map_data[5][5] = 'm'  # Mountain at (5, 5)
+        grid = TileGrid(map_data)
+
+        archer = Unit('A', 5, 5, 1)
+        enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
+        enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable (on mountain)
+        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should NOT be attackable
+        units = [archer, enemy1, enemy2, enemy3, enemy4]
+
+        attackable = GameMechanics.get_attackable_enemies(archer, units, grid)
+
+        assert len(attackable) == 2
+        assert enemy1 not in attackable  # Can't attack at distance 1
+        assert enemy2 in attackable
+        assert enemy3 in attackable  # Can attack at distance 3 on mountain
+        assert enemy4 not in attackable
+
+    def test_no_attackable_enemies_when_none_in_range(self, simple_grid):
+        """Test returns empty list when no enemies in range."""
+        warrior = Unit('W', 5, 5, 1)
+        enemy = Unit('W', 8, 8, 2)  # Far away
+        units = [warrior, enemy]
+
+        attackable = GameMechanics.get_attackable_enemies(warrior, units, simple_grid)
+
+        assert len(attackable) == 0
+
+    def test_ignores_allies_and_self(self, simple_grid):
+        """Test only returns enemies, not allies or self."""
+        unit = Unit('W', 5, 5, 1)
+        ally = Unit('W', 6, 5, 1)  # Same player
+        enemy = Unit('W', 4, 5, 2)  # Different player
+        units = [unit, ally, enemy]
+
+        attackable = GameMechanics.get_attackable_enemies(unit, units, simple_grid)
+
+        assert len(attackable) == 1
+        assert enemy in attackable
+        assert ally not in attackable
+
+
 class TestCombat:
     """Test combat mechanics."""
 
