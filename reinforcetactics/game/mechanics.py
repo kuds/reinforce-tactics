@@ -95,35 +95,86 @@ class GameMechanics:
         return adjacent_paralyzed
 
     @staticmethod
-    def attack_unit(attacker, target):
+    def _calculate_counter_damage(unit, target_x, target_y, grid):
+        """
+        Calculate counter-attack damage for a unit.
+
+        Args:
+            unit: The unit that would counter-attack
+            target_x: X coordinate of the target
+            target_y: Y coordinate of the target
+            grid: TileGrid instance (optional, for checking mountain tiles)
+
+        Returns:
+            Counter-attack damage as integer
+        """
+        on_mountain = False
+        if grid:
+            tile = grid.get_tile(unit.x, unit.y)
+            on_mountain = tile.type == 'm'
+
+        return int(
+            unit.get_attack_damage(target_x, target_y, on_mountain) * COUNTER_ATTACK_MULTIPLIER
+        )
+
+    @staticmethod
+    def attack_unit(attacker, target, grid=None):
         """
         Execute an attack from attacker to target.
 
         Args:
             attacker: The attacking unit
             target: The target unit
+            grid: TileGrid instance (optional, for checking mountain tiles)
 
         Returns:
             dict with 'attacker_alive' and 'target_alive' booleans
         """
-        attack_damage = attacker.get_attack_damage(target.x, target.y)
+        # Check if attacker is on mountain for range calculation
+        attacker_on_mountain = False
+        if grid:
+            attacker_tile = grid.get_tile(attacker.x, attacker.y)
+            attacker_on_mountain = attacker_tile.type == 'm'
+
+        attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
         target_alive = target.take_damage(attack_damage)
 
         attacker_alive = True
+        counter_damage = 0
+
+        # Counter-attack logic with Archer restrictions
         if target_alive and not target.is_paralyzed():
-            counter_damage = int(
-                target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER
-            )
-            if counter_damage > 0:
-                attacker_alive = attacker.take_damage(counter_damage)
+            # Determine if counter-attack is allowed
+            can_counter = True
+
+            # If attacker is an Archer, only Archers and Mages can counter
+            if attacker.type == 'A':
+                if target.type not in ['A', 'M']:
+                    can_counter = False
+
+            if can_counter:
+                counter_damage = GameMechanics._calculate_counter_damage(
+                    target, attacker.x, attacker.y, grid
+                )
+                if counter_damage > 0:
+                    attacker_alive = attacker.take_damage(counter_damage)
+
+        # Calculate counter damage for response (even if 0)
+        counter_damage_for_response = 0
+        if target_alive and not target.is_paralyzed():
+            # Adjust counter_damage if Archer attacked melee unit
+            if attacker.type == 'A' and target.type not in ['A', 'M']:
+                counter_damage_for_response = 0
+            else:
+                counter_damage_for_response = GameMechanics._calculate_counter_damage(
+                    target, attacker.x, attacker.y, grid
+                )
 
         return {
             'attacker_alive': attacker_alive,
             'target_alive': target_alive,
             'damage': attack_damage,
-            'counter_damage': int(
-                target.get_attack_damage(attacker.x, attacker.y) * COUNTER_ATTACK_MULTIPLIER
-            ) if target_alive and not target.is_paralyzed() else 0
+            'counter_damage': counter_damage_for_response
         }
 
     @staticmethod

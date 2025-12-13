@@ -32,8 +32,8 @@ class SimpleBot:
         create_actions = legal_actions['create_unit']
 
         # Sort by cost (most expensive first)
-        unit_costs = {'M': 250, 'W': 200, 'C': 200}
-        create_actions.sort(key=lambda a: unit_costs[a['unit_type']], reverse=True)
+        unit_costs = {'B': 400, 'M': 250, 'A': 250, 'W': 200, 'C': 200}
+        create_actions.sort(key=lambda a: unit_costs.get(a['unit_type'], 0), reverse=True)
 
         for action in create_actions:
             unit_cost = UNIT_DATA[action['unit_type']]['cost']

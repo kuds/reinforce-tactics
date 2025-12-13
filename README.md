@@ -15,7 +15,7 @@ A modular turn-based strategy game built with Pygame and Gymnasium for reinforce
 ## Features
 
 - **Turn-based tactical gameplay** with multiple unit types
-- **3 unit types**: Warrior, Mage, Cleric (each with unique abilities)
+- **4 unit types**: Warrior, Mage, Cleric, Archer (each with unique abilities)
 - **Combat system** with attacks, counter-attacks, paralysis, and healing
 - **Economic system** with income from controlled structures
 - **Structure capture**: Towers, Buildings, and Headquarters
@@ -449,14 +449,20 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 
 - **Warrior (W)**: 200 gold, 3 movement, 15 HP, 10 ATK
   - Melee attacker with high health
-  
+
 - **Mage (M)**: 250 gold, 2 movement, 10 HP, 8/12 ATK
   - Ranged attacker (stronger at distance)
   - Can paralyze enemies for 3 turns
-  
+
 - **Cleric (C)**: 200 gold, 2 movement, 8 HP, 2 ATK
   - Support unit that can heal allies (+5 HP)
   - Can cure paralyzed allies
+
+- **Archer (A)**: 250 gold, 3 movement, 15 HP, 5 ATK
+  - Indirect ranged unit (1-2 spaces, or 1-3 on mountains)
+  - Cannot attack at distance 0 (adjacent)
+  - Melee units cannot counter-attack Archers
+  - Other Archers and Mages can counter if in range
 
 ### Combat
 

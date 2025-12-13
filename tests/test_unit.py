@@ -39,6 +39,18 @@ class TestUnitInitialization:
         assert cleric.max_health == 8
         assert cleric.movement_range == 2
 
+    def test_archer_initialization(self):
+        """Test archer unit initialization."""
+        archer = Unit('A', 5, 5, 1)
+        assert archer.type == 'A'
+        assert archer.x == 5
+        assert archer.y == 5
+        assert archer.player == 1
+        assert archer.health == 15
+        assert archer.max_health == 15
+        assert archer.movement_range == 3
+        assert archer.attack_data == 5
+
 
 class TestAttackDamage:
     """Test attack damage calculations."""
@@ -78,6 +90,42 @@ class TestAttackDamage:
 
         # Non-adjacent target (distance = 2)
         damage = cleric.get_attack_damage(6, 4)
+        assert damage == 0
+
+    def test_archer_no_damage_at_distance_0(self, archer):
+        """Test archer cannot attack at distance 0 (adjacent on same position)."""
+        # Same position (should not happen but test for completeness)
+        damage = archer.get_attack_damage(5, 5, False)
+        assert damage == 0
+
+    def test_archer_damage_at_distance_1(self, archer):
+        """Test archer deals damage at distance 1."""
+        # Distance 1 (orthogonally adjacent)
+        damage = archer.get_attack_damage(6, 5, False)
+        assert damage == 5
+
+    def test_archer_damage_at_distance_2(self, archer):
+        """Test archer deals damage at distance 2."""
+        # Distance 2
+        damage = archer.get_attack_damage(7, 5, False)
+        assert damage == 5
+
+    def test_archer_no_damage_at_distance_3_no_mountain(self, archer):
+        """Test archer deals no damage at distance 3 without mountain."""
+        # Distance 3, not on mountain
+        damage = archer.get_attack_damage(8, 5, False)
+        assert damage == 0
+
+    def test_archer_damage_at_distance_3_on_mountain(self, archer):
+        """Test archer deals damage at distance 3 when on mountain."""
+        # Distance 3, on mountain
+        damage = archer.get_attack_damage(8, 5, True)
+        assert damage == 5
+
+    def test_archer_no_damage_at_distance_4_even_on_mountain(self, archer):
+        """Test archer deals no damage at distance 4 even on mountain."""
+        # Distance 4, even on mountain
+        damage = archer.get_attack_damage(9, 5, True)
         assert damage == 0
 
 

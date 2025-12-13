@@ -110,7 +110,7 @@ class GameState:
         Create a unit at the specified position.
 
         Args:
-            unit_type: 'W', 'M', 'C', or 'B'
+            unit_type: 'W', 'M', 'C', 'B', or 'A'
             x: Grid x coordinate
             y: Grid y coordinate
             player: Player number (defaults to current player)
@@ -198,7 +198,7 @@ class GameState:
         Returns:
             dict: Attack results
         """
-        result = self.mechanics.attack_unit(attacker, target)
+        result = self.mechanics.attack_unit(attacker, target, self.grid)
 
         # Record action
         self.record_action('attack',
@@ -496,7 +496,7 @@ class GameState:
         # Building units
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in ['W', 'M', 'C']:
+                for unit_type in ['W', 'M', 'C', 'A']:
                     if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
                         legal_actions['create_unit'].append({
                             'unit_type': unit_type,
@@ -525,16 +525,35 @@ class GameState:
 
                 # Combat actions
                 if unit.can_attack:
-                    adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
-                    for enemy in adjacent_enemies:
-                        legal_actions['attack'].append({
-                            'attacker': unit,
-                            'target': enemy
-                        })
+                    # For Archers and Mages, find enemies within range (not just adjacent)
+                    if unit.type in ['M', 'A']:
+                        # Check if unit is on mountain (for Archer range bonus)
+                        unit_tile = self.grid.get_tile(unit.x, unit.y)
+                        on_mountain = (unit_tile.type == 'm')
 
-                        if unit.type == 'M':
-                            legal_actions['paralyze'].append({
-                                'paralyzer': unit,
+                        for enemy in self.units:
+                            if enemy.player != player:
+                                damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
+                                if damage > 0:
+                                    legal_actions['attack'].append({
+                                        'attacker': unit,
+                                        'target': enemy
+                                    })
+
+                                    if unit.type == 'M':
+                                        # Mages can also paralyze at range
+                                        distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
+                                        if distance <= 2:
+                                            legal_actions['paralyze'].append({
+                                                'paralyzer': unit,
+                                                'target': enemy
+                                            })
+                    else:
+                        # For other units, only adjacent enemies
+                        adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
+                        for enemy in adjacent_enemies:
+                            legal_actions['attack'].append({
+                                'attacker': unit,
                                 'target': enemy
                             })
 
@@ -593,7 +612,7 @@ class GameState:
         # Unit representation (height x width x 3)
         unit_state = np.zeros((self.grid.height, self.grid.width, 3), dtype=np.float32)
 
-        unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'B': 4}
+        unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'B': 4, 'A': 5}
 
         for unit in self.units:
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)

@@ -194,7 +194,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         """Create a unit at the specified location."""
         try:
             # Map unit_type index to unit code
-            unit_codes = ['W', 'M', 'C']
+            unit_codes = ['W', 'M', 'C', 'A']
             if unit_type < 0 or unit_type >= len(unit_codes):
                 return False
 
