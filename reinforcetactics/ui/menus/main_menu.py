@@ -10,6 +10,7 @@ from reinforcetactics.ui.menus.game_setup.player_config_menu import PlayerConfig
 from reinforcetactics.ui.menus.save_load.load_game_menu import LoadGameMenu
 from reinforcetactics.ui.menus.save_load.replay_selection_menu import ReplaySelectionMenu
 from reinforcetactics.ui.menus.settings.settings_menu import SettingsMenu
+from reinforcetactics.ui.menus.credits_menu import CreditsMenu
 from reinforcetactics.utils.language import get_language
 
 
@@ -29,6 +30,7 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.new_game', 'New Game'), self._new_game)
         self.add_option(lang.get('main_menu.load_game', 'Load Game'), self._load_game)
         self.add_option(lang.get('main_menu.watch_replay', 'Watch Replay'), self._watch_replay)
+        self.add_option(lang.get('main_menu.credits', 'Credits'), self._credits)
         self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
 
@@ -96,6 +98,13 @@ class MainMenu(Menu):
         settings_menu.run()
         pygame.event.clear()
         # Return to main menu after settings
+
+    def _credits(self) -> None:
+        """Handle credits - show credits menu."""
+        credits_menu = CreditsMenu(self.screen)
+        credits_menu.run()
+        pygame.event.clear()
+        # Return to main menu after credits
 
     def _quit(self) -> Dict[str, Any]:
         """Handle quit."""

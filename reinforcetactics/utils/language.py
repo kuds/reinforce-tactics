@@ -20,6 +20,8 @@ TRANSLATIONS = {
         'main_menu.title': 'Reinforce Tactics',
         'main_menu.new_game': 'New Game',
         'main_menu.load_game': 'Load Game',
+        'main_menu.watch_replay': 'Watch Replay',
+        'main_menu.credits': 'Credits',
         'main_menu.settings': 'Settings',
         'main_menu.quit': 'Quit',
 
@@ -96,6 +98,13 @@ TRANSLATIONS = {
         'common.confirm': 'Confirm',
         'common.cancel': 'Cancel',
 
+        # Credits
+        'credits.title': 'Credits',
+        'credits.game_title': 'REINFORCE TACTICS',
+        'credits.developer': 'Developer:',
+        'credits.developer_name': 'kuds',
+        'credits.description': 'Turn-Based Strategy Game with Reinforcement Learning',
+
         # Game
         'player': 'Player',
         'gold': 'Gold',
@@ -148,6 +157,8 @@ TRANSLATIONS = {
         'main_menu.title': 'Reinforce Tactics',
         'main_menu.new_game': 'Nouvelle Partie',
         'main_menu.load_game': 'Charger Partie',
+        'main_menu.watch_replay': 'Regarder Replay',
+        'main_menu.credits': 'Crédits',
         'main_menu.settings': 'Paramètres',
         'main_menu.quit': 'Quitter',
 
@@ -224,6 +235,13 @@ TRANSLATIONS = {
         'common.confirm': 'Confirmer',
         'common.cancel': 'Annuler',
 
+        # Credits
+        'credits.title': 'Crédits',
+        'credits.game_title': 'REINFORCE TACTICS',
+        'credits.developer': 'Développeur:',
+        'credits.developer_name': 'kuds',
+        'credits.description': 'Jeu de Stratégie au Tour par Tour avec Apprentissage par Renforcement',
+
         # Game
         'player': 'Joueur',
         'gold': 'Or',
@@ -276,6 +294,8 @@ TRANSLATIONS = {
         'main_menu.title': 'Reinforce Tactics',
         'main_menu.new_game': '새 게임',
         'main_menu.load_game': '불러오기',
+        'main_menu.watch_replay': '리플레이 보기',
+        'main_menu.credits': '크레딧',
         'main_menu.settings': '설정',
         'main_menu.quit': '종료',
 
@@ -352,6 +372,13 @@ TRANSLATIONS = {
         'common.confirm': '확인',
         'common.cancel': '취소',
 
+        # Credits
+        'credits.title': '크레딧',
+        'credits.game_title': 'REINFORCE TACTICS',
+        'credits.developer': '개발자:',
+        'credits.developer_name': 'kuds',
+        'credits.description': '강화 학습 기반 턴제 전략 게임',
+
         # Game
         'player': '플레이어',
         'gold': '골드',
@@ -404,6 +431,8 @@ TRANSLATIONS = {
         'main_menu.title': 'Reinforce Tactics',
         'main_menu.new_game': 'Nuevo Juego',
         'main_menu.load_game': 'Cargar Juego',
+        'main_menu.watch_replay': 'Ver Repetición',
+        'main_menu.credits': 'Créditos',
         'main_menu.settings': 'Configuración',
         'main_menu.quit': 'Salir',
 
@@ -480,6 +509,13 @@ TRANSLATIONS = {
         'common.confirm': 'Confirmar',
         'common.cancel': 'Cancelar',
 
+        # Credits
+        'credits.title': 'Créditos',
+        'credits.game_title': 'REINFORCE TACTICS',
+        'credits.developer': 'Desarrollador:',
+        'credits.developer_name': 'kuds',
+        'credits.description': 'Juego de Estrategia por Turnos con Aprendizaje por Refuerzo',
+
         # Game
         'player': 'Jugador',
         'gold': 'Oro',
@@ -532,6 +568,8 @@ TRANSLATIONS = {
         'main_menu.title': 'Reinforce Tactics',
         'main_menu.new_game': '新游戏',
         'main_menu.load_game': '加载游戏',
+        'main_menu.watch_replay': '观看回放',
+        'main_menu.credits': '制作人员',
         'main_menu.settings': '设置',
         'main_menu.quit': '退出',
 
@@ -607,6 +645,13 @@ TRANSLATIONS = {
         'common.back': '返回',
         'common.confirm': '确认',
         'common.cancel': '取消',
+
+        # Credits
+        'credits.title': '制作人员',
+        'credits.game_title': 'REINFORCE TACTICS',
+        'credits.developer': '开发者:',
+        'credits.developer_name': 'kuds',
+        'credits.description': '基于强化学习的回合制策略游戏',
 
         # Game
         'player': '玩家',
