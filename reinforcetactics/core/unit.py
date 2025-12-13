@@ -56,8 +56,8 @@ class Unit:
             else:
                 return 0
         elif self.type == 'A':
-            # Archer has range 2 only normally, 2-3 on mountain (cannot attack at distance 1)
-            max_range = 3 if on_mountain else 2
+            # Archer has range 2-3 normally, 2-4 on mountain (cannot attack at distance 1)
+            max_range = 4 if on_mountain else 3
             if 2 <= distance <= max_range:
                 return self.attack_data
             else:
@@ -82,8 +82,8 @@ class Unit:
             # Mage: distance 1-2
             return (1, 2)
         elif self.type == 'A':
-            # Archer: distance 2 only, or 2-3 on mountain
-            max_range = 3 if on_mountain else 2
+            # Archer: distance 2-3, or 2-4 on mountain
+            max_range = 4 if on_mountain else 3
             return (2, max_range)
         else:
             # Warrior, Cleric, Berserker: distance 1 only

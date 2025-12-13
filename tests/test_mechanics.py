@@ -143,22 +143,24 @@ class TestAttackableEnemies:
         assert enemy3 not in attackable
 
     def test_archer_attackable_enemies_no_mountain(self, simple_grid):
-        """Test archer can only attack at distance 2 (not 1)."""
+        """Test archer can attack at distance 2-3 (not 1)."""
         archer = Unit('A', 5, 5, 1)
         enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
         enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
-        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should NOT be attackable (no mountain)
-        units = [archer, enemy1, enemy2, enemy3]
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable (no mountain needed)
+        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should NOT be attackable (no mountain)
+        units = [archer, enemy1, enemy2, enemy3, enemy4]
 
         attackable = GameMechanics.get_attackable_enemies(archer, units, simple_grid)
 
-        assert len(attackable) == 1
+        assert len(attackable) == 2
         assert enemy1 not in attackable  # Can't attack at distance 1
         assert enemy2 in attackable
-        assert enemy3 not in attackable
+        assert enemy3 in attackable  # Can attack at distance 3
+        assert enemy4 not in attackable
 
     def test_archer_attackable_enemies_on_mountain(self):
-        """Test archer can attack at distance 2-3 on mountain."""
+        """Test archer can attack at distance 2-4 on mountain."""
         # Create grid with mountain at archer position
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'm'  # Mountain at (5, 5)
@@ -167,17 +169,19 @@ class TestAttackableEnemies:
         archer = Unit('A', 5, 5, 1)
         enemy1 = Unit('W', 6, 5, 2)  # Adjacent (distance 1) - should NOT be attackable
         enemy2 = Unit('W', 7, 5, 2)  # Distance 2 - should be attackable
-        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable (on mountain)
-        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should NOT be attackable
-        units = [archer, enemy1, enemy2, enemy3, enemy4]
+        enemy3 = Unit('W', 8, 5, 2)  # Distance 3 - should be attackable
+        enemy4 = Unit('W', 9, 5, 2)  # Distance 4 - should be attackable (on mountain)
+        enemy5 = Unit('W', 0, 5, 2)  # Distance 5 - should NOT be attackable
+        units = [archer, enemy1, enemy2, enemy3, enemy4, enemy5]
 
         attackable = GameMechanics.get_attackable_enemies(archer, units, grid)
 
-        assert len(attackable) == 2
+        assert len(attackable) == 3
         assert enemy1 not in attackable  # Can't attack at distance 1
         assert enemy2 in attackable
-        assert enemy3 in attackable  # Can attack at distance 3 on mountain
-        assert enemy4 not in attackable
+        assert enemy3 in attackable
+        assert enemy4 in attackable  # Can attack at distance 4 on mountain
+        assert enemy5 not in attackable
 
     def test_no_attackable_enemies_when_none_in_range(self, simple_grid):
         """Test returns empty list when no enemies in range."""
