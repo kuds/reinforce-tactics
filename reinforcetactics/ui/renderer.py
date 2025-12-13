@@ -177,7 +177,7 @@ class Renderer:
 
     def _draw_unit(self, unit):
         """Draw a single unit."""
-        font = get_font(40)
+        font = get_font(28)
         color = UNIT_COLORS[unit.type]
 
         # Gray out if can't act
