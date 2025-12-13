@@ -16,7 +16,7 @@ slug: /
 Reinforce Tactics is a 2D turn-based strategy game featuring:
 
 - **Turn-based tactical gameplay** with multiple unit types
-- **3 unit types**: Warrior, Mage, Cleric (each with unique abilities)
+- **5 unit types**: Warrior, Mage, Cleric, Barbarian, and Archer (each with unique abilities)
 - **Combat system** with attacks, counter-attacks, paralysis, and healing
 - **Economic system** with income from controlled structures
 - **Structure capture**: Towers, Buildings, and Headquarters

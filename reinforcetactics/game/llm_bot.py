@@ -104,9 +104,9 @@ UNIT TYPES:
    - Other Archers and Mages CAN counter-attack if Archer is within their range
 
 BUILDING TYPES:
-- HQ (h): Generates 1000 gold/turn, losing it means defeat
-- Building (b): Generates 200 gold/turn, can recruit units
-- Tower (t): Generates 100 gold/turn, defensive structure
+- HQ (h): Generates 150 gold/turn, losing it means defeat
+- Building (b): Generates 100 gold/turn, can recruit units
+- Tower (t): Generates 50 gold/turn, defensive structure
 
 AVAILABLE ACTIONS:
 1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
