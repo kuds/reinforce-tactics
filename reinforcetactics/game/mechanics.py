@@ -11,7 +11,7 @@ class GameMechanics:
     """Handles core game mechanics and rules."""
 
     @staticmethod
-    def can_move_to_position(x, y, grid, units):
+    def can_move_to_position(x, y, grid, units, moving_unit=None, is_destination=False):
         """
         Check if a position is valid for unit movement.
 
@@ -20,6 +20,9 @@ class GameMechanics:
             y: Grid y coordinate
             grid: TileGrid instance
             units: List of Unit instances
+            moving_unit: The unit that is moving (optional, for team checking)
+            is_destination: If True, blocks all units. If False (pathfinding),
+                           only blocks enemy units (default: False)
 
         Returns:
             True if position is valid for movement
@@ -34,7 +37,18 @@ class GameMechanics:
         # Check if another unit is already there
         for unit in units:
             if unit.x == x and unit.y == y:
-                return False
+                # If this is the final destination, block all units
+                if is_destination:
+                    return False
+                
+                # For pathfinding, check team affiliation
+                if moving_unit is not None:
+                    # Block enemy units, allow passing through friendly units
+                    if unit.player != moving_unit.player:
+                        return False
+                else:
+                    # Legacy behavior: block all units if no moving_unit specified
+                    return False
 
         return True
 

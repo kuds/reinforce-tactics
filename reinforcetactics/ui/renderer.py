@@ -294,7 +294,8 @@ class Renderer:
             self.game_state.grid.width,
             self.game_state.grid.height,
             lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units
+                x, y, self.game_state.grid, self.game_state.units,
+                moving_unit=unit, is_destination=False
             )
         )
 
