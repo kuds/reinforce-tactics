@@ -166,14 +166,18 @@ class GameState:
         reachable = unit.get_reachable_positions(
             self.grid.width,
             self.grid.height,
-            lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, self.units)
+            lambda x, y: self.mechanics.can_move_to_position(
+                x, y, self.grid, self.units, moving_unit=unit, is_destination=False
+            )
         )
 
         if (to_x, to_y) not in reachable:
             logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable")
             return False
 
-        if not self.mechanics.can_move_to_position(to_x, to_y, self.grid, self.units):
+        if not self.mechanics.can_move_to_position(
+            to_x, to_y, self.grid, self.units, moving_unit=unit, is_destination=True
+        ):
             logger.debug(f"Cannot move to ({to_x}, {to_y}): position blocked")
             return False
 
