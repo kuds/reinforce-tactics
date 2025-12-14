@@ -41,14 +41,12 @@ class GameMechanics:
                 if is_destination:
                     return False
                 
-                # For pathfinding, check team affiliation
-                if moving_unit is not None:
-                    # Block enemy units, allow passing through friendly units
-                    if unit.player != moving_unit.player:
-                        return False
-                else:
-                    # Legacy behavior: block all units if no moving_unit specified
-                    return False
+                # For pathfinding, allow passing through friendly units
+                if moving_unit is not None and unit.player == moving_unit.player:
+                    continue  # Allow passing through friendly units
+                
+                # Block enemy units or if no moving_unit specified (legacy behavior)
+                return False
 
         return True
 
