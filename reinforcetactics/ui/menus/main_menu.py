@@ -11,6 +11,7 @@ from reinforcetactics.ui.menus.save_load.load_game_menu import LoadGameMenu
 from reinforcetactics.ui.menus.save_load.replay_selection_menu import ReplaySelectionMenu
 from reinforcetactics.ui.menus.settings.settings_menu import SettingsMenu
 from reinforcetactics.ui.menus.credits_menu import CreditsMenu
+from reinforcetactics.ui.menus.map_editor.map_editor_menu import MapEditorMenu
 from reinforcetactics.utils.language import get_language
 
 
@@ -30,6 +31,7 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.new_game', 'New Game'), self._new_game)
         self.add_option(lang.get('main_menu.load_game', 'Load Game'), self._load_game)
         self.add_option(lang.get('main_menu.watch_replay', 'Watch Replay'), self._watch_replay)
+        self.add_option(lang.get('map_editor.title', 'Map Editor'), self._map_editor)
         self.add_option(lang.get('main_menu.credits', 'Credits'), self._credits)
         self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
@@ -91,6 +93,13 @@ class MainMenu(Menu):
                 'replay_path': replay_path
             }
         return None  # Cancelled
+
+    def _map_editor(self) -> None:
+        """Handle map editor - show map editor menu."""
+        map_editor_menu = MapEditorMenu(self.screen)
+        map_editor_menu.run()
+        pygame.event.clear()
+        # Return to main menu after map editor
 
     def _settings(self) -> None:
         """Handle settings - show settings menu."""
