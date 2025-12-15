@@ -45,7 +45,7 @@ class TestAdvancedBotBasics:
         assert isinstance(bot, MediumBot)
 
     def test_advancedbot_manhattan_distance(self, simple_game):
-        """Test manhattan distance calculation."""
+        """Test manhattan distance calculation (inherited from MediumBot)."""
         bot = AdvancedBot(simple_game, player=2)
         assert bot.manhattan_distance(0, 0, 0, 0) == 0
         assert bot.manhattan_distance(0, 0, 3, 4) == 7
@@ -67,100 +67,20 @@ class TestAdvancedBotMapAnalysis:
         assert bot.hq_positions[1] == (0, 0)
         assert bot.hq_positions[2] == (9, 9)
 
-    def test_analyze_map_identifies_chokepoints(self, simple_game):
-        """Test that map analysis identifies chokepoints."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        # Should have identified some chokepoints (corners, edges)
-        assert len(bot.chokepoints) > 0
-
-    def test_analyze_map_creates_distance_maps(self, simple_game):
-        """Test that map analysis creates distance maps."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        assert 1 in bot.distance_maps
-        assert 2 in bot.distance_maps
-        
-        # Check a specific distance
-        assert bot.distance_maps[1][(0, 0)] == 0
-        assert bot.distance_maps[2][(9, 9)] == 0
-
     def test_analyze_map_identifies_defensive_positions(self, simple_game):
-        """Test that map analysis identifies defensive positions."""
+        """Test that map analysis identifies defensive positions (mountains)."""
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
         
-        # Should include the mountain and forest we added
-        assert (5, 5) in bot.defensive_positions  # Mountain
-        assert (4, 4) in bot.defensive_positions  # Forest
-
-    def test_identify_factory_clusters(self, simple_game):
-        """Test factory cluster identification."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        # Should have identified some clusters
-        assert isinstance(bot.factory_clusters, list)
+        # Should include the mountain we added
+        assert (5, 5) in bot.defensive_positions
 
 
-class TestAdvancedBotStrategicAssessment:
-    """Test AdvancedBot strategic assessment methods."""
+class TestAdvancedBotUnitPurchasing:
+    """Test AdvancedBot unit purchasing."""
 
-    def test_calculate_income_differential(self, simple_game):
-        """Test income differential calculation."""
-        bot = AdvancedBot(simple_game, player=2)
-        income_diff = bot.calculate_income_differential()
-        
-        # Player 1 has HQ (150) + building (100) + tower (50) = 300
-        # Player 2 has HQ (150) + building (100) + tower (50) = 300
-        assert income_diff == 0
-
-    def test_assess_threat_level(self, simple_game):
-        """Test threat level assessment."""
-        bot = AdvancedBot(simple_game, player=2)
-        threat_level = bot.assess_threat_level()
-        
-        # Should return a number (initially 0 with no enemy units)
-        assert isinstance(threat_level, int)
-        assert threat_level >= 0
-
-
-class TestAdvancedBotUnitComposition:
-    """Test AdvancedBot unit composition strategies."""
-
-    def test_get_desired_composition_ahead(self, simple_game):
-        """Test composition when ahead in income."""
-        bot = AdvancedBot(simple_game, player=2)
-        comp = bot.get_desired_composition(income_diff=300, unit_count=5)
-        
-        # Should be aggressive when ahead
-        assert 'W' in comp
-        assert 'A' in comp
-        assert 'M' in comp
-
-    def test_get_desired_composition_behind(self, simple_game):
-        """Test composition when behind in income."""
-        bot = AdvancedBot(simple_game, player=2)
-        comp = bot.get_desired_composition(income_diff=-300, unit_count=5)
-        
-        # Should be defensive when behind
-        assert 'W' in comp
-        assert 'C' in comp
-
-    def test_get_desired_composition_balanced(self, simple_game):
-        """Test composition when balanced."""
-        bot = AdvancedBot(simple_game, player=2)
-        comp = bot.get_desired_composition(income_diff=0, unit_count=5)
-        
-        # Should have balanced composition
-        assert 'W' in comp
-        assert 'A' in comp
-        assert 'M' in comp
-
-    def test_purchase_units_advanced(self, simple_game):
-        """Test advanced unit purchasing."""
+    def test_purchase_units_enhanced(self, simple_game):
+        """Test enhanced unit purchasing."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
         
@@ -168,7 +88,7 @@ class TestAdvancedBotUnitComposition:
         initial_gold = simple_game.player_gold[2]
         initial_units = len([u for u in simple_game.units if u.player == 2])
         
-        bot.purchase_units_advanced(income_diff=0)
+        bot.purchase_units_enhanced()
         
         # Should have purchased multiple units
         final_gold = simple_game.player_gold[2]
@@ -176,125 +96,6 @@ class TestAdvancedBotUnitComposition:
         
         assert final_gold < initial_gold
         assert final_units > initial_units
-
-
-class TestAdvancedBotUnitPriority:
-    """Test AdvancedBot unit action priority."""
-
-    def test_get_unit_action_priority_cleric(self, simple_game):
-        """Test that Clerics have highest priority."""
-        bot = AdvancedBot(simple_game, player=2)
-        
-        # Set current player and give gold
-        simple_game.current_player = 2
-        simple_game.player_gold[2] = 1000
-        
-        # Create units at non-adjacent positions
-        simple_game.create_unit('C', 5, 5, 2)
-        simple_game.create_unit('W', 7, 7, 2)
-        
-        cleric = [u for u in simple_game.units if u.type == 'C' and u.player == 2][0]
-        warrior = [u for u in simple_game.units if u.type == 'W' and u.player == 2][0]
-        
-        assert bot.get_unit_action_priority(cleric) > bot.get_unit_action_priority(warrior)
-
-    def test_get_unit_action_priority_mage(self, simple_game):
-        """Test that Mages have high priority."""
-        bot = AdvancedBot(simple_game, player=2)
-        
-        # Set current player and give gold
-        simple_game.current_player = 2
-        simple_game.player_gold[2] = 1000
-        
-        simple_game.create_unit('M', 5, 5, 2)
-        simple_game.create_unit('A', 7, 7, 2)
-        
-        mage = [u for u in simple_game.units if u.type == 'M' and u.player == 2][0]
-        archer = [u for u in simple_game.units if u.type == 'A' and u.player == 2][0]
-        
-        assert bot.get_unit_action_priority(mage) > bot.get_unit_action_priority(archer)
-
-
-class TestAdvancedBotCapturePriority:
-    """Test AdvancedBot capture priority scoring."""
-
-    def test_calculate_capture_priority_income_value(self, simple_game):
-        """Test that capture priority considers income value."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        hq_tile = simple_game.grid.get_tile(0, 0)
-        tower_tile = simple_game.grid.get_tile(3, 3)
-        
-        hq_priority = bot.calculate_capture_priority(hq_tile)
-        tower_priority = bot.calculate_capture_priority(tower_tile)
-        
-        # HQ should have higher base priority due to income
-        assert hq_priority > tower_priority
-
-    def test_calculate_capture_priority_distance(self, simple_game):
-        """Test that capture priority considers distance from HQ."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        # Get two structures at different distances
-        close_tile = simple_game.grid.get_tile(9, 8)  # Building close to player 2 HQ
-        
-        priority = bot.calculate_capture_priority(close_tile)
-        
-        # Should have some priority value
-        assert isinstance(priority, (int, float))
-
-
-class TestAdvancedBotMCTS:
-    """Test AdvancedBot MCTS implementation."""
-
-    def test_evaluate_position(self, simple_game):
-        """Test position evaluation."""
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        # Mountain should have higher score than grass
-        mountain_score = bot.evaluate_position(None, (5, 5))  # Mountain position
-        grass_score = bot.evaluate_position(None, (7, 7))  # Grass position
-        
-        # Note: Mountain bonus is +10, but distance factors affect total score
-        assert isinstance(mountain_score, (int, float))
-        assert isinstance(grass_score, (int, float))
-
-    def test_generate_possible_actions(self, simple_game):
-        """Test action generation for MCTS."""
-        simple_game.create_unit('W', 5, 5, 2)
-        unit = [u for u in simple_game.units if u.type == 'W'][0]
-        
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        actions = bot.generate_possible_actions(unit)
-        
-        # Should generate some actions
-        assert isinstance(actions, list)
-        assert len(actions) > 0
-        
-        # Actions should have expected structure
-        for action in actions:
-            assert 'type' in action
-            assert action['type'] == 'move'
-            assert 'position' in action
-
-    def test_simulate_action(self, simple_game):
-        """Test action simulation."""
-        simple_game.create_unit('W', 5, 5, 2)
-        unit = [u for u in simple_game.units if u.type == 'W'][0]
-        
-        bot = AdvancedBot(simple_game, player=2)
-        bot.analyze_map()
-        
-        action = {'type': 'move', 'position': (5, 6), 'then_attack': None}
-        score = bot.simulate_action(unit, action)
-        
-        # Should return a score
-        assert isinstance(score, (int, float))
 
 
 class TestAdvancedBotSpecialAbilities:
@@ -311,7 +112,7 @@ class TestAdvancedBotSpecialAbilities:
         cleric = [u for u in simple_game.units if u.type == 'C' and u.player == 2][0]
         warrior = [u for u in simple_game.units if u.type == 'W' and u.player == 2]
         
-        # Only test if warrior was created (might fail if position is blocked)
+        # Only test if warrior was created
         if warrior:
             warrior = warrior[0]
             # Damage the warrior
@@ -335,6 +136,9 @@ class TestAdvancedBotRangedCombat:
 
     def test_try_ranged_attack_archer(self, simple_game):
         """Test Archer ranged attack."""
+        simple_game.current_player = 2
+        simple_game.player_gold[2] = 1000
+        
         simple_game.create_unit('A', 5, 5, 2)
         simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
         
@@ -351,6 +155,9 @@ class TestAdvancedBotRangedCombat:
 
     def test_try_ranged_attack_mage(self, simple_game):
         """Test Mage ranged attack."""
+        simple_game.current_player = 2
+        simple_game.player_gold[2] = 1000
+        
         simple_game.create_unit('M', 5, 5, 2)
         simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
         
@@ -469,3 +276,4 @@ class TestAdvancedBotFullTurn:
         
         # Should have completed turns successfully
         assert bot.map_analyzed is True
+

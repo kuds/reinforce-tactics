@@ -827,7 +827,7 @@ class AdvancedBot(MediumBot):
         if unit.type in ['W', 'B', 'A', 'M'] and not tile.type == 'm':
             nearby_mountains = [
                 pos for pos in self.defensive_positions
-                if self.manhattan_distance(unit.x, unit.y, pos[0], pos[1]) <= unit.movement
+                if self.manhattan_distance(unit.x, unit.y, pos[0], pos[1]) <= unit.movement_range
             ]
             if nearby_mountains:
                 # Check if an enemy is nearby

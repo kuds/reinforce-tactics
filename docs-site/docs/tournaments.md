@@ -38,16 +38,14 @@ An improved rule-based AI with more sophisticated strategies:
 - Included in tournaments by default alongside SimpleBot
 
 ### AdvancedBot
-A highly sophisticated AI using Monte Carlo Tree Search and advanced strategic analysis:
-- **Monte Carlo Tree Search (MCTS)**: Simulates multiple future game states before making decisions
-- **Map analysis**: Pre-computes chokepoints, distance maps, factory clusters, and defensive positions on first turn
-- **Unit formation management**: Maintains proper positioning with ranged units behind frontline units
-- **Smart ranged combat**: Prioritizes ranged attacks to minimize counter-attack damage
+A highly sophisticated AI extending MediumBot with enhanced strategic capabilities:
+- **Inherits from MediumBot**: Builds upon MediumBot's proven coordinated attack and capture strategies
+- **Enhanced unit composition**: Optimized purchasing (35% Warriors, 30% Archers, 25% Mages, 10% Clerics)
+- **Mountain positioning**: Positions units on mountains before attacking for bonus damage
+- **Smart ranged combat**: Prioritizes ranged attacks with Archers and Mages to minimize counter-attack damage
 - **Special ability usage**: Effectively uses Mage Paralyze on high-value targets and Cleric Heal on damaged frontline units
-- **Advanced capture priority**: Scores structures based on income value, distance, defensibility, and enemy proximity
-- **Economy and tempo management**: Adjusts aggression based on income differential
-- **Threat assessment**: Identifies enemy attack vectors and defends structures under threat
-- **Adaptive unit composition**: Adjusts unit purchases based on game state (aggressive when ahead, defensive when behind)
+- **Map awareness**: Analyzes HQ locations and defensive mountain positions on first turn
+- **Aggressive tactics**: More aggressive attack prioritization and pursuit of enemies
 - Included in tournaments by default alongside SimpleBot and MediumBot
 
 ### LLM Bots
@@ -183,7 +181,7 @@ As tournaments are completed, we'll analyze:
 Each bot type has different characteristics:
 - **SimpleBot**: Predictable but consistent; makes basic strategic errors
 - **MediumBot**: More strategic than SimpleBot; uses coordinated tactics and better unit purchasing
-- **AdvancedBot**: Most sophisticated bot; uses MCTS for planning, advanced map analysis, and adaptive strategies
+- **AdvancedBot**: Extends MediumBot with enhanced unit composition, mountain positioning, ranged combat prioritization, and special ability usage
 - **LLM Bots**: Creative but sometimes unpredictable
 - **Model Bots**: Optimized but may overfit to training conditions
 
