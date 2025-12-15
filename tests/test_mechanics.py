@@ -621,9 +621,9 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert mage.health == 5  # 10 - 5 damage
 
-        # Mage should counter-attack at distance 2 (12 * 0.9 = 10.8, int = 10)
-        assert result['counter_damage'] == 10
-        assert archer.health == 5  # 15 - 10 damage
+        # Mage should counter-attack at distance 2 (12 * 0.8 = 9.6, int = 9)
+        assert result['counter_damage'] == 9
+        assert archer.health == 6  # 15 - 9 damage
 
     def test_archer_attacks_mage_at_distance_2_gets_counter(self, simple_grid):
         """Test archer attacking mage at distance 2 gets counter-attack."""
@@ -637,9 +637,9 @@ class TestArcherCounterAttack:
         assert result['target_alive'] is True
         assert mage.health == 5  # 10 - 5 damage
 
-        # Mage should counter-attack at distance 2 (12 * 0.9 = 10.8, int = 10)
-        assert result['counter_damage'] == 10
-        assert archer.health == 5  # 15 - 10 damage
+        # Mage should counter-attack at distance 2 (12 * 0.8 = 9.6, int = 9)
+        assert result['counter_damage'] == 9
+        assert archer.health == 6  # 15 - 9 damage
 
     def test_archer_on_mountain_attacks_at_distance_3(self):
         """Test archer on mountain can attack at distance 3."""
