@@ -11,3 +11,9 @@
 /tests/__pycache__
 *.pyc
 **/__pycache__/
+
+# Map editor temporary test scripts (not in tests/ directory)
+/test_map_editor.py
+/test_map_editor_components.py
+/test_map_editor_save.py
+/map_editor_demo.py
