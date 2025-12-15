@@ -15,7 +15,8 @@ Looking for tournament results? Check out the [Bot Tournaments](./tournaments.md
 ## Overview
 
 The tournament system automatically discovers and runs competitions between:
-- **SimpleBot**: Built-in rule-based bot (always included)
+- **SimpleBot**: Built-in basic rule-based bot (always included)
+- **MediumBot**: Built-in improved rule-based bot with advanced strategies (always included)
 - **LLM Bots**: OpenAI, Claude, and Gemini bots (if API keys configured)
 - **Model Bots**: Trained Stable-Baselines3 models (from `models/` directory)
 
@@ -71,8 +72,11 @@ python3 scripts/tournament.py --test --games-per-side 1
 
 ## Bot Discovery
 
-### SimpleBot
-Always included. No configuration needed.
+### SimpleBot & MediumBot
+Both built-in bots are always included. No configuration needed.
+
+- **SimpleBot**: Basic strategy with single-unit purchases and simple targeting
+- **MediumBot**: Advanced strategy with coordinated attacks and maximized unit production
 
 ### LLM Bots
 Automatically included if:

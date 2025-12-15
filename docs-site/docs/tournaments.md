@@ -23,10 +23,19 @@ Tournaments in Reinforce Tactics pit different bot types against each other in a
 
 ### SimpleBot
 A rule-based AI that follows a simple strategy:
-- Purchases the most expensive units first
+- Purchases the most expensive units first (one per turn)
 - Prioritizes capturing buildings and towers
 - Attacks nearby enemy units
 - Always included in tournaments
+
+### MediumBot
+An improved rule-based AI with more sophisticated strategies:
+- **Maximizes unit purchases**: Buys multiple units per turn instead of just one
+- **Coordinated attacks**: Plans focus-fire to kill enemies in one turn
+- **Smart prioritization**: Captures structures closest to its own HQ first
+- **Interrupts captures**: Attacks enemies that are capturing structures
+- **Efficient combat**: Evaluates damage-per-cost to make better attack decisions
+- Included in tournaments by default alongside SimpleBot
 
 ### LLM Bots
 AI-powered by Large Language Models:
@@ -127,6 +136,7 @@ _Tournament analysis will be added after completion._
 | Bot Type    | Total Wins | Total Losses | Total Draws | Overall Win Rate |
 |-------------|------------|--------------|-------------|------------------|
 | SimpleBot   | TBD        | TBD          | TBD         | TBD              |
+| MediumBot   | TBD        | TBD          | TBD         | TBD              |
 | OpenAIBot   | TBD        | TBD          | TBD         | TBD              |
 | ClaudeBot   | TBD        | TBD          | TBD         | TBD              |
 | GeminiBot   | TBD        | TBD          | TBD         | TBD              |
@@ -158,7 +168,8 @@ As tournaments are completed, we'll analyze:
 ### Bot Strengths and Weaknesses
 
 Each bot type has different characteristics:
-- **SimpleBot**: Predictable but consistent
+- **SimpleBot**: Predictable but consistent; makes basic strategic errors
+- **MediumBot**: More strategic than SimpleBot; uses coordinated tactics and better unit purchasing
 - **LLM Bots**: Creative but sometimes unpredictable
 - **Model Bots**: Optimized but may overfit to training conditions
 
