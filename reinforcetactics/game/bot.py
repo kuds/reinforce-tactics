@@ -1,7 +1,7 @@
 """
 Simple AI bot for computer opponents.
 """
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.constants import UNIT_DATA, COUNTER_ATTACK_MULTIPLIER
 
 
 class SimpleBot:
@@ -34,9 +34,8 @@ class SimpleBot:
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
         create_actions = legal_actions['create_unit']
 
-        # Sort by cost (most expensive first)
-        unit_costs = {'B': 400, 'M': 250, 'A': 250, 'W': 200, 'C': 200}
-        create_actions.sort(key=lambda a: unit_costs.get(a['unit_type'], 0), reverse=True)
+        # Sort by cost (most expensive first) using UNIT_DATA
+        create_actions.sort(key=lambda a: UNIT_DATA[a['unit_type']]['cost'], reverse=True)
 
         for action in create_actions:
             unit_cost = UNIT_DATA[action['unit_type']]['cost']
@@ -530,8 +529,8 @@ class MediumBot:
             # Target can't counter-attack ranged attacker
             counter_damage = 0
         elif target_damage > 0:
-            # Counter-attack at 90% damage
-            counter_damage = int(target_damage * 0.9)
+            # Counter-attacks deal reduced damage (COUNTER_ATTACK_MULTIPLIER = 0.9)
+            counter_damage = int(target_damage * COUNTER_ATTACK_MULTIPLIER)
 
         # Value = damage dealt - damage received
         # Also consider unit costs
