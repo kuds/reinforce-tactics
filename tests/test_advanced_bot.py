@@ -37,15 +37,12 @@ class TestAdvancedBotBasics:
         bot = AdvancedBot(simple_game, player=2)
         assert bot.bot_player == 2
         assert bot.game_state == simple_game
-        assert bot.mcts_iterations == 20
-        assert bot.mcts_depth == 2
         assert bot.map_analyzed is False
 
-    def test_advancedbot_custom_mcts_params(self, simple_game):
-        """Test AdvancedBot with custom MCTS parameters."""
-        bot = AdvancedBot(simple_game, player=2, mcts_iterations=10, mcts_depth=3)
-        assert bot.mcts_iterations == 10
-        assert bot.mcts_depth == 3
+    def test_advancedbot_inherits_mediumbot(self, simple_game):
+        """Test AdvancedBot inherits from MediumBot."""
+        bot = AdvancedBot(simple_game, player=2)
+        assert isinstance(bot, MediumBot)
 
     def test_advancedbot_manhattan_distance(self, simple_game):
         """Test manhattan distance calculation."""
