@@ -24,13 +24,15 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         ValueError: If bot creation fails due to configuration issues
         ImportError: If required dependencies for bot type are missing
     """
-    from reinforcetactics.game.bot import SimpleBot, MediumBot
+    from reinforcetactics.game.bot import SimpleBot, MediumBot, AdvancedBot
     from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
 
     if bot_type == 'SimpleBot':
         return SimpleBot(game, player=player_num)
     if bot_type == 'MediumBot':
         return MediumBot(game, player=player_num)
+    if bot_type == 'AdvancedBot':
+        return AdvancedBot(game, player=player_num)
     if bot_type == 'OpenAIBot':
         api_key = settings.get_api_key('openai') or None
         return OpenAIBot(game, player=player_num, api_key=api_key)

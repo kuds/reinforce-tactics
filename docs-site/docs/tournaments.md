@@ -37,6 +37,17 @@ An improved rule-based AI with more sophisticated strategies:
 - **Efficient combat**: Evaluates damage-per-cost to make better attack decisions
 - Included in tournaments by default alongside SimpleBot
 
+### AdvancedBot
+A highly sophisticated AI extending MediumBot with enhanced strategic capabilities:
+- **Inherits from MediumBot**: Builds upon MediumBot's proven coordinated attack and capture strategies
+- **Enhanced unit composition**: Optimized purchasing (35% Warriors, 30% Archers, 25% Mages, 10% Clerics)
+- **Mountain positioning**: Positions units on mountains before attacking for bonus damage
+- **Smart ranged combat**: Prioritizes ranged attacks with Archers and Mages to minimize counter-attack damage
+- **Special ability usage**: Effectively uses Mage Paralyze on high-value targets and Cleric Heal on damaged frontline units
+- **Map awareness**: Analyzes HQ locations and defensive mountain positions on first turn
+- **Aggressive tactics**: More aggressive attack prioritization and pursuit of enemies
+- Included in tournaments by default alongside SimpleBot and MediumBot
+
 ### LLM Bots
 AI-powered by Large Language Models:
 - **OpenAIBot**: Powered by GPT models
@@ -170,6 +181,7 @@ As tournaments are completed, we'll analyze:
 Each bot type has different characteristics:
 - **SimpleBot**: Predictable but consistent; makes basic strategic errors
 - **MediumBot**: More strategic than SimpleBot; uses coordinated tactics and better unit purchasing
+- **AdvancedBot**: Extends MediumBot with enhanced unit composition, mountain positioning, ranged combat prioritization, and special ability usage
 - **LLM Bots**: Creative but sometimes unpredictable
 - **Model Bots**: Optimized but may overfit to training conditions
 

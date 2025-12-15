@@ -1,7 +1,11 @@
 """
 Simple AI bot for computer opponents.
 """
-from reinforcetactics.constants import UNIT_DATA, COUNTER_ATTACK_MULTIPLIER
+import random
+import copy
+from reinforcetactics.constants import (
+    UNIT_DATA, COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT
+)
 
 
 class SimpleBot:
@@ -665,3 +669,342 @@ class MediumBot:
                 best_pos = pos
 
         return best_pos
+
+
+class AdvancedBot(MediumBot):
+    """Advanced AI bot extending MediumBot with map analysis and enhanced tactics."""
+
+    def __init__(self, game_state, player=2):
+        """
+        Initialize the AdvancedBot.
+
+        Args:
+            game_state: GameState instance
+            player: Player number for this bot
+        """
+        super().__init__(game_state, player)
+        
+        # Map analysis cache
+        self.map_analyzed = False
+        self.hq_positions = {}
+        self.defensive_positions = []
+        self.turn_count = 0
+
+    def take_turn(self):
+        """Execute the bot's turn with enhanced strategy."""
+        self.turn_count += 1
+        
+        # Phase 1: Analyze map on first turn
+        if not self.map_analyzed:
+            self.analyze_map()
+            self.map_analyzed = True
+
+        # Phase 2: Use enhanced purchase strategy
+        self.purchase_units_enhanced()
+
+        # Phase 3: Enhanced unit actions with special abilities and better tactics
+        self.move_and_act_units_enhanced()
+        
+        # Phase 4: End turn
+        self.game_state.end_turn()
+
+    def analyze_map(self):
+        """Pre-compute strategic map features on first turn."""
+        grid = self.game_state.grid
+        
+        # Identify HQ positions
+        for row in grid.tiles:
+            for tile in row:
+                if tile.type == 'h' and tile.player:
+                    self.hq_positions[tile.player] = (tile.x, tile.y)
+        
+        # Identify defensive positions (mountains for attack bonuses)
+        self.defensive_positions = []
+        for row in grid.tiles:
+            for tile in row:
+                if tile.type == 'm':  # Mountains give attack bonuses
+                    self.defensive_positions.append((tile.x, tile.y))
+
+    def purchase_units_enhanced(self):
+        """Enhanced unit purchasing with better composition."""
+        # Count existing unit types
+        my_units = [u for u in self.game_state.units if u.player == self.bot_player]
+        unit_counts = {'W': 0, 'A': 0, 'M': 0, 'C': 0, 'B': 0}
+        for unit in my_units:
+            unit_counts[unit.type] = unit_counts.get(unit.type, 0) + 1
+        
+        total_units = len(my_units)
+        
+        # Enhanced composition: more ranged units (Archers/Mages) for better trades
+        while True:
+            legal_actions = self.game_state.get_legal_actions(self.bot_player)
+            create_actions = legal_actions['create_unit']
+            
+            if not create_actions:
+                break
+            
+            available_gold = self.game_state.player_gold[self.bot_player]
+            affordable_actions = [
+                a for a in create_actions 
+                if UNIT_DATA[a['unit_type']]['cost'] <= available_gold
+            ]
+            
+            if not affordable_actions:
+                break
+            
+            # Prioritize ranged units (Archers/Mages) early, Warriors for capturing
+            archer_ratio = unit_counts.get('A', 0) / max(1, total_units + 1)
+            mage_ratio = unit_counts.get('M', 0) / max(1, total_units + 1)
+            warrior_ratio = unit_counts.get('W', 0) / max(1, total_units + 1)
+            cleric_ratio = unit_counts.get('C', 0) / max(1, total_units + 1)
+            
+            # Desired ratios: 35% Warriors, 30% Archers, 25% Mages, 10% Clerics
+            best_action = None
+            best_priority = -float('inf')
+            
+            for action in affordable_actions:
+                unit_type = action['unit_type']
+                priority = 0
+                
+                if unit_type == 'W' and warrior_ratio < 0.35:
+                    priority = 0.35 - warrior_ratio
+                elif unit_type == 'A' and archer_ratio < 0.30:
+                    priority = 0.30 - archer_ratio + 0.1  # Slight boost for Archers
+                elif unit_type == 'M' and mage_ratio < 0.25:
+                    priority = 0.25 - mage_ratio + 0.05  # Slight boost for Mages
+                elif unit_type == 'C' and cleric_ratio < 0.10 and total_units >= 3:
+                    priority = 0.10 - cleric_ratio
+                else:
+                    priority = -1  # Fallback
+                
+                if priority > best_priority:
+                    best_priority = priority
+                    best_action = action
+            
+            if best_action:
+                self.game_state.create_unit(
+                    best_action['unit_type'],
+                    best_action['x'],
+                    best_action['y'],
+                    self.bot_player
+                )
+                unit_counts[best_action['unit_type']] += 1
+                total_units += 1
+            else:
+                break
+
+    def move_and_act_units_enhanced(self):
+        """Enhanced version of MediumBot's unit movement with special abilities."""
+        # Get all bot units that can act
+        bot_units = [
+            u for u in self.game_state.units
+            if u.player == self.bot_player and (u.can_move or u.can_attack)
+            and not u.is_paralyzed()
+        ]
+
+        # First, coordinate attacks to kill targets (from MediumBot)
+        self.coordinate_attacks(bot_units)
+
+        # Then, act with remaining units (enhanced)
+        for unit in bot_units:
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit)
+
+    def act_with_unit_enhanced(self, unit):
+        """Enhanced version of MediumBot's act_with_unit with superior tactics."""
+        # Check if already seizing a structure
+        tile = self.game_state.grid.get_tile(unit.x, unit.y)
+        if (tile.is_capturable() and tile.player != self.bot_player and
+                tile.health < tile.max_health):
+            self.game_state.seize(unit)
+            return
+
+        # Try special abilities first (Cleric heal, Mage paralyze)
+        if self.try_use_special_ability(unit):
+            return
+
+        # PRIORITY 1: Position on mountains for attack bonus before attacking
+        if unit.type in ['W', 'B', 'A', 'M'] and not tile.type == 'm':
+            nearby_mountains = [
+                pos for pos in self.defensive_positions
+                if self.manhattan_distance(unit.x, unit.y, pos[0], pos[1]) <= unit.movement_range
+            ]
+            if nearby_mountains:
+                # Check if an enemy is nearby
+                enemy_units = [u for u in self.game_state.units 
+                              if u.player != self.bot_player and u.health > 0]
+                for enemy in enemy_units:
+                    if self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y) <= 4:
+                        # Move to mountain to get attack bonus
+                        for mountain_pos in nearby_mountains:
+                            target_pos = self.find_best_move_position(unit, mountain_pos[0], mountain_pos[1])
+                            if target_pos and target_pos == mountain_pos:
+                                self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                                # Try to attack after positioning
+                                if self.try_ranged_attack(unit):
+                                    return
+                                break
+
+        # PRIORITY 2: Ranged attacks (Archers/Mages should attack from range)
+        if unit.type in ['A', 'M'] and self.try_ranged_attack(unit):
+            return
+
+        # PRIORITY 3: Move to attack range and attack
+        enemy_units = [u for u in self.game_state.units 
+                      if u.player != self.bot_player and u.health > 0]
+        
+        if enemy_units:
+            # Find closest attackable enemy
+            best_target = None
+            best_score = -float('inf')
+            
+            for enemy in enemy_units:
+                # Calculate if we can attack or move to attack
+                attackable = self.game_state.mechanics.get_attackable_enemies(
+                    unit, [enemy], self.game_state.grid
+                )
+                
+                if enemy in attackable:
+                    # Can attack now
+                    value = self.calculate_attack_value(unit, enemy)
+                    # Bonus for killing
+                    on_mountain = tile.type == 'm'
+                    damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
+                    if damage >= enemy.health:
+                        value += 500
+                    
+                    if value > best_score:
+                        best_score = value
+                        best_target = enemy
+            
+            if best_target and best_score > -500:  # More aggressive threshold
+                self.game_state.attack(unit, best_target)
+                return
+            
+            # Try to move towards nearest enemy
+            if enemy_units:
+                nearest_enemy = min(enemy_units, 
+                                   key=lambda e: self.manhattan_distance(unit.x, unit.y, e.x, e.y))
+                target_pos = self.find_best_move_position(unit, nearest_enemy.x, nearest_enemy.y)
+                if target_pos:
+                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                    # Try to attack after moving
+                    attackable_after = self.game_state.mechanics.get_attackable_enemies(
+                        unit, enemy_units, self.game_state.grid
+                    )
+                    if attackable_after:
+                        best_after_move = max(attackable_after, 
+                                             key=lambda e: self.calculate_attack_value(unit, e))
+                        self.game_state.attack(unit, best_after_move)
+                        return
+
+        # PRIORITY 4: Interrupt enemy captures (from MediumBot)
+        contested = self.find_contested_structures()
+        if contested:
+            contested.sort(key=lambda x: x[2], reverse=True)
+            for structure, enemy_unit, progress in contested:
+                target_pos = self.find_best_move_position(unit, enemy_unit.x, enemy_unit.y)
+                if target_pos:
+                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                    attackable = self.game_state.mechanics.get_attackable_enemies(
+                        unit, [enemy_unit], self.game_state.grid
+                    )
+                    if enemy_unit in attackable:
+                        self.game_state.attack(unit, enemy_unit)
+                        return
+
+        # PRIORITY 5: Capture structures (fallback)
+        capturable_structures = []
+        for row in self.game_state.grid.tiles:
+            for structure in row:
+                if structure.is_capturable() and structure.player != self.bot_player:
+                    priority = self.get_structure_priority(structure)
+                    capturable_structures.append((structure, priority))
+
+        capturable_structures.sort(key=lambda x: x[1])
+
+        if capturable_structures:
+            target_structure = capturable_structures[0][0]
+            if unit.x == target_structure.x and unit.y == target_structure.y:
+                self.game_state.seize(unit)
+                return
+
+            target_pos = self.find_best_move_position(unit, target_structure.x, target_structure.y)
+            if target_pos:
+                self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                if unit.x == target_structure.x and unit.y == target_structure.y:
+                    self.game_state.seize(unit)
+                    return
+
+        # Fallback: End turn
+        unit.end_unit_turn()
+
+    def try_use_special_ability(self, unit):
+        """Try to use unit special abilities effectively."""
+        # Mage Paralyze on high-value targets
+        if unit.type == 'M' and unit.can_attack:
+            enemies = [u for u in self.game_state.units 
+                      if u.player != self.bot_player and u.health > 0]
+            
+            for enemy in enemies:
+                # Check if enemy is capturing a structure
+                enemy_tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
+                if (enemy_tile.is_capturable() and 
+                    enemy_tile.player != self.bot_player and 
+                    enemy_tile.health < enemy_tile.max_health):
+                    
+                    # Check if in range
+                    attackable = self.game_state.mechanics.get_attackable_enemies(
+                        unit, [enemy], self.game_state.grid
+                    )
+                    if enemy in attackable:
+                        self.game_state.attack(unit, enemy)
+                        return True
+        
+        # Cleric Heal
+        if unit.type == 'C':
+            adjacent_allies = self.game_state.mechanics.get_adjacent_allies(
+                unit, self.game_state.units
+            )
+            
+            if adjacent_allies:
+                # Prioritize frontline units (Warriors, Barbarians)
+                frontline_allies = [a for a in adjacent_allies if a.type in ['W', 'B']]
+                if frontline_allies:
+                    target = min(frontline_allies, key=lambda a: a.health)
+                else:
+                    target = min(adjacent_allies, key=lambda a: a.health)
+                
+                self.game_state.heal(unit, target)
+                return True
+        
+        return False
+
+    def try_ranged_attack(self, unit):
+        """Try to use ranged attacks to minimize counter-attack damage."""
+        if unit.type not in ['A', 'M']:
+            return False
+        
+        enemy_units = [u for u in self.game_state.units 
+                      if u.player != self.bot_player and u.health > 0]
+        
+        attackable = self.game_state.mechanics.get_attackable_enemies(
+            unit, enemy_units, self.game_state.grid
+        )
+        
+        if not attackable:
+            return False
+        
+        # Prioritize melee units (they can't counter-attack ranged)
+        melee_targets = [e for e in attackable if e.type not in ['A', 'M']]
+        
+        if melee_targets:
+            # Attack the one with lowest health (finish off)
+            target = min(melee_targets, key=lambda e: e.health)
+            self.game_state.attack(unit, target)
+            return True
+        
+        # Otherwise attack any target
+        target = min(attackable, key=lambda e: e.health)
+        self.game_state.attack(unit, target)
+        return True
