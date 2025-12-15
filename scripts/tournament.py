@@ -949,11 +949,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle map arguments
+    # Handle map arguments with proper precedence
     maps = []
     if args.maps:
-        # Use explicitly provided maps
+        # Use explicitly provided maps (takes precedence)
         maps = args.maps
+        # If both --map and --maps are provided, add --map to the list if not already present
+        if args.map and args.map not in args.maps:
+            maps = [args.map] + args.maps
     elif args.map_dir:
         # Load all maps from directory
         map_dir = Path(args.map_dir)
@@ -973,10 +976,6 @@ def main():
     else:
         # Use default map
         maps = ['maps/1v1/6x6_beginner.csv']
-    
-    # If both --map and --maps are provided, combine them
-    if args.map and args.maps:
-        maps = [args.map] + args.maps
 
     # Validate all map files exist
     for map_file in maps:
