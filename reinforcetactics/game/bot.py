@@ -25,6 +25,9 @@ class SimpleBot:
 
         # Phase 2: Move and act with units
         self.move_and_act_units()
+        
+        # Phase 3: End turn
+        self.game_state.end_turn()
 
     def purchase_units(self):
         """Purchase units with available gold, most expensive first."""
@@ -215,6 +218,9 @@ class MediumBot:
 
         # Phase 2: Move and act with units using coordinated strategy
         self.move_and_act_units()
+        
+        # Phase 3: End turn
+        self.game_state.end_turn()
 
     def find_our_hq(self):
         """
