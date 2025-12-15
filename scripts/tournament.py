@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.game.bot import SimpleBot, MediumBot
 from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.settings import get_settings
 
@@ -62,6 +62,8 @@ class BotDescriptor:
         """
         if self.bot_type == 'simple':
             return SimpleBot(game_state, player)
+        elif self.bot_type == 'medium':
+            return MediumBot(game_state, player)
         elif self.bot_type == 'llm':
             bot_class = self.kwargs['bot_class']
             api_key = self.kwargs.get('api_key')
@@ -128,9 +130,12 @@ class TournamentRunner:
         """
         bots = []
 
-        # Always include SimpleBot
+        # Always include SimpleBot and MediumBot
         bots.append(BotDescriptor('SimpleBot', 'simple'))
         logger.info("Added SimpleBot")
+        
+        bots.append(BotDescriptor('MediumBot', 'medium'))
+        logger.info("Added MediumBot")
 
         # For testing: add duplicate SimpleBots if requested
         if include_test_bots:
