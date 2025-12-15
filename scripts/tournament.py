@@ -167,6 +167,11 @@ class EloRatingSystem:
 
         Args:
             filepath: Path to load ratings from
+        
+        Note:
+            When loading, initial_ratings is set to current ratings so that
+            rating changes track from this load point forward, not from the
+            original tournament start.
         """
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -174,7 +179,7 @@ class EloRatingSystem:
         self.rating_history = data['rating_history']
         self.starting_elo = data.get('starting_elo', 1500)
         self.k_factor = data.get('k_factor', 32)
-        # Set initial ratings to current ratings when loading
+        # Set initial ratings to current ratings when loading to track changes from this point
         self.initial_ratings = {k: v for k, v in self.ratings.items()}
 
 
@@ -949,14 +954,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle map arguments with proper precedence
+    # Handle map arguments with clear precedence
     maps = []
     if args.maps:
-        # Use explicitly provided maps (takes precedence)
+        # --maps takes precedence; use explicitly provided maps
         maps = args.maps
-        # If both --map and --maps are provided, add --map to the list if not already present
-        if args.map and args.map not in args.maps:
-            maps = [args.map] + args.maps
     elif args.map_dir:
         # Load all maps from directory
         map_dir = Path(args.map_dir)
