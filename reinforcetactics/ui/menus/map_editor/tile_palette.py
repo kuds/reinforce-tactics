@@ -47,9 +47,9 @@ class TilePalette:
         self.selected_player = 1  # For structures
         
         # Fonts
-        self.title_font = get_font(28)
-        self.label_font = get_font(22)
-        self.tile_font = get_font(18)
+        self.title_font = get_font(20)
+        self.label_font = get_font(16)
+        self.tile_font = get_font(14)
         
         # Colors
         self.bg_color = (40, 40, 50)
@@ -58,9 +58,9 @@ class TilePalette:
         self.text_color = (255, 255, 255)
         
         # Layout
-        self.tile_size = 40
-        self.padding = 10
-        self.section_spacing = 20
+        self.tile_size = 30
+        self.padding = 8
+        self.section_spacing = 12
         
         # Clickable rectangles
         self.tile_rects = {}  # tile_code -> rect
@@ -125,7 +125,7 @@ class TilePalette:
         title_rect = title_surface.get_rect(centerx=self.x + self.width // 2, y=self.y + 10)
         screen.blit(title_surface, title_rect)
         
-        current_y = self.y + 50
+        current_y = self.y + 35
         
         # Draw terrain section
         current_y = self._draw_terrain_section(screen, current_y, lang)
@@ -157,7 +157,7 @@ class TilePalette:
         label_rect = label_surface.get_rect(x=self.x + self.padding, y=start_y)
         screen.blit(label_surface, label_rect)
         
-        current_y = start_y + 30
+        current_y = start_y + 22
         current_x = self.x + self.padding
         
         # Draw each terrain tile
@@ -207,7 +207,7 @@ class TilePalette:
         label_rect = label_surface.get_rect(x=self.x + self.padding, y=start_y)
         screen.blit(label_surface, label_rect)
         
-        current_y = start_y + 30
+        current_y = start_y + 22
         current_x = self.x + self.padding
         
         # Draw each structure tile
@@ -262,9 +262,9 @@ class TilePalette:
         label_rect = label_surface.get_rect(x=self.x + self.padding, y=start_y)
         screen.blit(label_surface, label_rect)
         
-        current_y = start_y + 30
+        current_y = start_y + 22
         current_x = self.x + self.padding
-        button_size = 35
+        button_size = 28
         
         # Draw player buttons
         for player_num in range(1, self.num_players + 1):

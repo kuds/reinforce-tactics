@@ -23,7 +23,7 @@ def dummy_display():
     os.environ['SDL_VIDEODRIVER'] = 'dummy'
     os.environ['SDL_AUDIODRIVER'] = 'dummy'
     pygame.init()
-    screen = pygame.display.set_mode((1200, 800))
+    screen = pygame.display.set_mode((1400, 900))
     yield screen
     pygame.quit()
 
@@ -90,7 +90,7 @@ class TestEditorCanvas:
         """Test canvas initialization."""
         map_data = pd.DataFrame(np.full((30, 30), 'p', dtype=object))
         canvas = EditorCanvas(20, 20, 600, 500, map_data)
-        assert canvas.tile_size == 32
+        assert canvas.tile_size == 24
         assert canvas.grid_enabled is True
 
     def test_grid_toggle(self, dummy_display):

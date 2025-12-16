@@ -37,7 +37,7 @@ class MapEditor:
         # Create screen if not provided
         self.owns_screen = screen is None
         if self.owns_screen:
-            self.screen = pygame.display.set_mode((1200, 800))
+            self.screen = pygame.display.set_mode((1400, 900))
             pygame.display.set_caption("Map Editor - Reinforce Tactics")
         else:
             self.screen = screen
@@ -75,9 +75,9 @@ class MapEditor:
         )
         
         # Fonts
-        self.title_font = get_font(36)
-        self.info_font = get_font(22)
-        self.shortcut_font = get_font(18)
+        self.title_font = get_font(28)
+        self.info_font = get_font(18)
+        self.shortcut_font = get_font(14)
         
         # Colors
         self.bg_color = (30, 30, 40)
