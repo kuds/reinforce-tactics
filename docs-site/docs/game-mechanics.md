@@ -10,7 +10,7 @@ This page provides detailed information about the game mechanics, units, structu
 
 ## Units
 
-Reinforce Tactics features **5 distinct unit types**, each with unique abilities and tactical roles:
+Reinforce Tactics features **4 distinct unit types**, each with unique abilities and tactical roles:
 
 ### Unit Statistics
 
@@ -19,7 +19,6 @@ Reinforce Tactics features **5 distinct unit types**, each with unique abilities
 | **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
 | **Mage** | M | 250 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns |
 | **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP), Can CURE paralyzed units |
-| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High mobility, high HP but low defense |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 
 ### Unit Details
@@ -50,13 +49,6 @@ Reinforce Tactics features **5 distinct unit types**, each with unique abilities
   - Can CURE paralyzed units
   - Weak combat capabilities (2 attack)
 - **Best for**: Keeping your army healthy and removing status effects
-
-#### Barbarian (B)
-- **Role**: High-mobility bruiser
-- **Cost**: $400
-- **Stats**: 20 HP, 5 Movement, 10 Attack, 2 Defence
-- **Abilities**: High health pool and exceptional movement range
-- **Best for**: Flanking maneuvers and quick strikes, but vulnerable to counter-attacks
 
 #### Archer (A)
 - **Role**: Long-range attacker
@@ -118,7 +110,7 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Counter-Attack Mechanics
 - Counter-attacks occur when a melee unit (range 1) is attacked by another melee unit
-- Counter-attacks deal **90% of normal damage** (`COUNTER_ATTACK_MULTIPLIER = 0.9`)
+- Counter-attacks deal **80% of normal damage** (`COUNTER_ATTACK_MULTIPLIER = 0.8`)
 - Archers are special: melee units **cannot counter-attack Archers** even when attacked
 - Units cannot counter-attack if they are paralyzed
 
@@ -168,14 +160,14 @@ Structures provide income and serve as strategic objectives. They can be capture
 ## Strategic Tips
 
 ### Unit Composition
-- **Balance your army**: Mix melee units (Warriors, Barbarians) with ranged units (Mages, Archers) and support (Clerics)
+- **Balance your army**: Mix melee units (Warriors) with ranged units (Mages, Archers) and support (Clerics)
 - **Protect support units**: Keep Clerics and Archers behind your frontline
 - **Use terrain**: Position Archers on mountains for extended range
 
 ### Economy Management
 - **Capture structures early**: More income means more units
 - **Protect your structures**: Losing income puts you at a disadvantage
-- **Consider unit costs**: Barbarians are expensive but powerful; Warriors and Clerics are cost-effective
+- **Consider unit costs**: Warriors and Clerics are cost-effective; Mages and Archers are more specialized
 
 ### Combat Tactics
 - **Use Mages to disable**: Paralyze key enemy units before engaging
@@ -187,4 +179,3 @@ Structures provide income and serve as strategic objectives. They can be capture
 - **Mountain control**: Fight for mountain tiles to give your Archers extended range
 - **Structure denial**: Capture or destroy enemy structures to starve their economy
 - **Unit synergy**: Combine paralysis (Mage) with healing (Cleric) to maintain board control
-- **Mobility advantage**: Use Barbarians' 5 movement to flank and capture undefended structures

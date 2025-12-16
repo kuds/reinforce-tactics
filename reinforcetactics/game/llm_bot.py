@@ -96,7 +96,7 @@ UNIT TYPES:
 2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
    - Can PARALYZE enemies (disable them for turns)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 3, Movement 2
+3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
    - Can HEAL allies and CURE paralyzed units
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
@@ -443,7 +443,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     building_info = {
                         'type': tile.type,
                         'position': [tile.x, tile.y],
-                        'income': 1000 if tile.type == 'h' else (200 if tile.type == 'b' else 100)
+                        'income': 150 if tile.type == 'h' else (100 if tile.type == 'b' else 50)
                     }
 
                     if tile.player == self.bot_player:
@@ -551,7 +551,7 @@ Respond with a JSON object in the following format:
 {{
     "reasoning": "Brief explanation of your strategy (1-2 sentences)",
     "actions": [
-        {{"type": "CREATE_UNIT", "unit_type": "W|M|C", "position": [x, y]}},
+        {{"type": "CREATE_UNIT", "unit_type": "W|M|C|A", "position": [x, y]}},
         {{"type": "MOVE", "unit_id": 0, "from": [x, y], "to": [x, y]}},
         {{"type": "ATTACK", "unit_id": 0, "target_position": [x, y]}},
         {{"type": "PARALYZE", "unit_id": 0, "target_position": [x, y]}},
