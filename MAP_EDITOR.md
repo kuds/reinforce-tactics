@@ -73,6 +73,8 @@ o,b,t,b,o
 o,o,o,o,o
 ```
 
+In this example, `h_1` is Player 1's headquarters, while `b` and `t` are neutral structures that can be captured by any player during gameplay.
+
 ## Map Requirements
 
 For a map to be valid:

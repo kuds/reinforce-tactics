@@ -218,7 +218,7 @@ class TilePalette:
             # Tile rectangle
             tile_rect = pygame.Rect(current_x, current_y, self.tile_size, self.tile_size)
             
-            # Draw tile with color (use player color if selected and owned)
+            # Draw tile with color (use player color if selected and player-owned)
             if is_selected and self.selected_player > 0:
                 # Show with player color
                 base_color = TILE_COLORS.get(tile_code, (100, 100, 100))
@@ -282,7 +282,8 @@ class TilePalette:
         pygame.draw.rect(screen, border_color, button_rect, width=border_width)
         
         # Draw "N" for Neutral
-        neutral_text = lang.get('map_editor.tile_palette.neutral', 'Neutral')[0]  # First letter
+        neutral_label = lang.get('map_editor.tile_palette.neutral', 'Neutral')
+        neutral_text = neutral_label[0] if neutral_label else 'N'  # First letter, fallback to 'N'
         num_surface = self.tile_font.render(neutral_text, True, (0, 0, 0))
         num_rect = num_surface.get_rect(center=button_rect.center)
         screen.blit(num_surface, num_rect)
