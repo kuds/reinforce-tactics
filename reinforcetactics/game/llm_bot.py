@@ -6,6 +6,7 @@ import json
 import re
 import time
 import logging
+import random
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -158,7 +159,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
                  model: Optional[str] = None, max_retries: int = 3,
                  log_conversations: bool = False,
-                 conversation_log_dir: Optional[str] = None):
+                 conversation_log_dir: Optional[str] = None,
+                 game_session_id: Optional[str] = None,
+                 pretty_print_logs: bool = True,
+                 stateful: bool = False):
         """
         Initialize the LLM bot.
 
@@ -170,6 +174,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             max_retries: Maximum number of retries for API calls
             log_conversations: Enable conversation logging to JSON files (default False)
             conversation_log_dir: Directory for conversation logs (default: logs/llm_conversations/)
+            game_session_id: Unique game session identifier (default: auto-generated)
+            pretty_print_logs: Format JSON logs with indentation for readability (default True)
+            stateful: Maintain conversation history across turns (default False)
         """
         self.game_state = game_state
         self.bot_player = player
@@ -178,6 +185,20 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.max_retries = max_retries
         self.log_conversations = log_conversations
         self.conversation_log_dir = conversation_log_dir or 'logs/llm_conversations/'
+        self.pretty_print_logs = pretty_print_logs
+        self.stateful = stateful
+
+        # Initialize conversation history for stateful mode
+        self.conversation_history = []
+
+        # Generate or use provided game session ID
+        if game_session_id:
+            self.game_session_id = game_session_id
+        else:
+            # Generate unique session ID: timestamp + random component
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            random_component = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=6))
+            self.game_session_id = f"{timestamp}_{random_component}"
 
         if not self.api_key:
             raise ValueError(
@@ -228,9 +249,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     def _log_conversation_to_json(self, system_prompt: str, user_prompt: str,
                                    assistant_response: str) -> None:
         """
-        Log the conversation to a JSON file.
+        Log the conversation to a JSON file (single file per game).
 
         Only logs if log_conversations is True AND logging level is DEBUG.
+        Creates a single log file per game with all turns appended.
 
         Args:
             system_prompt: The system prompt sent to the LLM
@@ -246,35 +268,56 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             log_dir = Path(self.conversation_log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate timestamped filename with microseconds to avoid collisions
-            timestamp = datetime.now()
-            timestamp_str = timestamp.strftime("%Y-%m-%d_%H%M%S_%f")
-            turn = self.game_state.turn_number
-            filename = f"conversation_{timestamp_str}_turn{turn}.json"
-            filepath = log_dir / filename
-
             # Get provider name from class name
             provider = self.__class__.__name__.replace('Bot', '')
 
-            # Create conversation log data
-            log_data = {
-                "timestamp": timestamp.isoformat(),
-                "model": self.model,
-                "provider": provider,
-                "player": self.bot_player,
-                "turn_number": turn,
-                "conversation": {
-                    "system_prompt": system_prompt,
+            # Generate filename: game_{session_id}_player{player}_model{model}.json
+            safe_model = self.model.replace('/', '_').replace(':', '_')
+            filename = f"game_{self.game_session_id}_player{self.bot_player}_model{safe_model}.json"
+            filepath = log_dir / filename
+
+            # Current timestamp and turn
+            timestamp = datetime.now()
+            turn = self.game_state.turn_number
+
+            # Check if file exists
+            if filepath.exists():
+                # Load existing data and append new turn
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+
+                # Append new turn
+                log_data['turns'].append({
+                    "turn_number": turn,
+                    "timestamp": timestamp.isoformat(),
                     "user_prompt": user_prompt,
                     "assistant_response": assistant_response
+                })
+            else:
+                # Create new log file with metadata
+                log_data = {
+                    "game_session_id": self.game_session_id,
+                    "model": self.model,
+                    "provider": provider,
+                    "player": self.bot_player,
+                    "start_time": timestamp.isoformat(),
+                    "system_prompt": system_prompt,
+                    "turns": [
+                        {
+                            "turn_number": turn,
+                            "timestamp": timestamp.isoformat(),
+                            "user_prompt": user_prompt,
+                            "assistant_response": assistant_response
+                        }
+                    ]
                 }
-            }
 
-            # Write to file
+            # Write to file with configurable formatting
+            indent = 2 if self.pretty_print_logs else None
             with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(log_data, f, indent=2, ensure_ascii=False)
+                json.dump(log_data, f, indent=indent, ensure_ascii=False)
 
-            logger.debug("Logged conversation to %s", filepath)
+            logger.debug("Logged conversation to %s (turn %s)", filepath, turn)
 
         except Exception as e:
             # Don't let logging errors break the bot
@@ -286,7 +329,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         This method orchestrates the entire turn-taking process:
         1. Serializes the current game state into JSON
-        2. Calls the LLM API with retry logic
+        2. Calls the LLM API with retry logic (including conversation history if stateful)
         3. Parses the LLM response
         4. Validates and executes the suggested actions
 
@@ -305,10 +348,19 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         response_text = None
         for attempt in range(self.max_retries):
             try:
-                messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ]
+                # Build messages list
+                if self.stateful and self.conversation_history:
+                    # In stateful mode, include full conversation history
+                    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                    messages.extend(self.conversation_history)
+                    messages.append({"role": "user", "content": user_prompt})
+                else:
+                    # In stateless mode, only send current turn
+                    messages = [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ]
+
                 response_text = self._call_llm(messages)
                 break
             except Exception as e:
@@ -325,6 +377,11 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         if not response_text:
             logger.error("No response from LLM. Ending turn.")
             return
+
+        # Store conversation in history if stateful mode is enabled
+        if self.stateful:
+            self.conversation_history.append({"role": "user", "content": user_prompt})
+            self.conversation_history.append({"role": "assistant", "content": response_text})
 
         # Log the conversation if enabled
         self._log_conversation_to_json(SYSTEM_PROMPT, user_prompt, response_text)

@@ -355,25 +355,29 @@ class TestConversationLogging:
                     log_data = json.load(f)
 
                 # Verify structure
-                assert 'timestamp' in log_data
+                assert 'game_session_id' in log_data
                 assert 'model' in log_data
                 assert log_data['model'] == 'test-model'
                 assert 'provider' in log_data
                 assert log_data['provider'] == 'Test'
                 assert 'player' in log_data
                 assert log_data['player'] == 2
-                assert 'turn_number' in log_data
-                assert 'conversation' in log_data
-
-                conversation = log_data['conversation']
-                assert 'system_prompt' in conversation
-                assert 'user_prompt' in conversation
-                assert 'assistant_response' in conversation
-                assert conversation['assistant_response'] == response
+                assert 'start_time' in log_data
+                assert 'system_prompt' in log_data
+                assert 'turns' in log_data
 
                 # Verify system prompt contains game rules
-                assert 'Reinforce Tactics' in conversation['system_prompt']
-                assert 'GAME OBJECTIVE' in conversation['system_prompt']
+                assert 'Reinforce Tactics' in log_data['system_prompt']
+                assert 'GAME OBJECTIVE' in log_data['system_prompt']
+
+                # Verify turns structure
+                assert len(log_data['turns']) == 1
+                turn = log_data['turns'][0]
+                assert 'turn_number' in turn
+                assert 'timestamp' in turn
+                assert 'user_prompt' in turn
+                assert 'assistant_response' in turn
+                assert turn['assistant_response'] == response
 
             finally:
                 logger.setLevel(original_level)
@@ -430,10 +434,165 @@ class TestConversationLogging:
                 assert len(log_files) == 1
 
                 filename = log_files[0].name
-                # Should be like: conversation_2025-12-12_143052_turn1.json
-                assert filename.startswith("conversation_")
-                assert "_turn" in filename
+                # Should be like: game_{session_id}_player2_model{model}.json
+                assert filename.startswith("game_")
+                assert "_player2_" in filename
+                assert "_modeltest-model.json" in filename or "model" in filename
                 assert filename.endswith(".json")
+            finally:
+                logger.setLevel(original_level)
+
+    def test_game_session_id_parameter(self, simple_game, test_bot_class):
+        """Test that custom game_session_id is used when provided."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            custom_session_id = "test_session_12345"
+            bot = test_bot_class(simple_game, player=2, api_key="test-key",
+                                log_conversations=True,
+                                conversation_log_dir=tmpdir,
+                                game_session_id=custom_session_id)
+
+            assert bot.game_session_id == custom_session_id
+
+            # Set logging level to DEBUG
+            logger = logging.getLogger('reinforcetactics.game.llm_bot')
+            original_level = logger.level
+            logger.setLevel(logging.DEBUG)
+
+            try:
+                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                with patch.object(bot, '_call_llm', return_value=response):
+                    bot.take_turn()
+
+                # Verify filename includes custom session ID
+                log_files = list(Path(tmpdir).glob("*.json"))
+                assert len(log_files) == 1
+                assert custom_session_id in log_files[0].name
+
+                # Verify session ID is in the log data
+                with open(log_files[0], 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+                assert log_data['game_session_id'] == custom_session_id
+            finally:
+                logger.setLevel(original_level)
+
+    def test_auto_generated_session_id(self, simple_game, test_bot_class):
+        """Test that session ID is auto-generated if not provided."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        
+        # Session ID should be auto-generated
+        assert bot.game_session_id is not None
+        assert len(bot.game_session_id) > 0
+        
+        # Should have format: YYYYMMDD_HHMMSS_{random}
+        parts = bot.game_session_id.split('_')
+        assert len(parts) == 3
+        assert len(parts[0]) == 8  # YYYYMMDD
+        assert len(parts[1]) == 6  # HHMMSS
+        assert len(parts[2]) == 6  # random component
+
+    def test_multiple_games_create_separate_files(self, simple_game, test_bot_class):
+        """Test that multiple games create separate log files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create two bots with different session IDs (simulating different games)
+            bot1 = test_bot_class(simple_game, player=2, api_key="test-key",
+                                 log_conversations=True,
+                                 conversation_log_dir=tmpdir,
+                                 game_session_id="game1")
+            bot2 = test_bot_class(simple_game, player=2, api_key="test-key",
+                                 log_conversations=True,
+                                 conversation_log_dir=tmpdir,
+                                 game_session_id="game2")
+
+            # Set logging level to DEBUG
+            logger = logging.getLogger('reinforcetactics.game.llm_bot')
+            original_level = logger.level
+            logger.setLevel(logging.DEBUG)
+
+            try:
+                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                with patch.object(bot1, '_call_llm', return_value=response):
+                    with patch.object(bot2, '_call_llm', return_value=response):
+                        bot1.take_turn()
+                        bot2.take_turn()
+
+                # Two files should be created (one per game)
+                log_files = list(Path(tmpdir).glob("*.json"))
+                assert len(log_files) == 2
+
+                # Verify they have different session IDs
+                session_ids = set()
+                for log_file in log_files:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        log_data = json.load(f)
+                        session_ids.add(log_data['game_session_id'])
+
+                assert len(session_ids) == 2
+                assert "game1" in session_ids
+                assert "game2" in session_ids
+            finally:
+                logger.setLevel(original_level)
+
+    def test_pretty_print_logs_enabled(self, simple_game, test_bot_class):
+        """Test that pretty_print_logs=True creates indented JSON."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bot = test_bot_class(simple_game, player=2, api_key="test-key",
+                                log_conversations=True,
+                                conversation_log_dir=tmpdir,
+                                pretty_print_logs=True)
+
+            # Set logging level to DEBUG
+            logger = logging.getLogger('reinforcetactics.game.llm_bot')
+            original_level = logger.level
+            logger.setLevel(logging.DEBUG)
+
+            try:
+                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                with patch.object(bot, '_call_llm', return_value=response):
+                    bot.take_turn()
+
+                # Read the file as text
+                log_files = list(Path(tmpdir).glob("*.json"))
+                assert len(log_files) == 1
+
+                with open(log_files[0], 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # Pretty-printed JSON should have newlines and indentation
+                assert '\n' in content
+                assert '  ' in content  # Indentation
+            finally:
+                logger.setLevel(original_level)
+
+    def test_pretty_print_logs_disabled(self, simple_game, test_bot_class):
+        """Test that pretty_print_logs=False creates compact JSON."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bot = test_bot_class(simple_game, player=2, api_key="test-key",
+                                log_conversations=True,
+                                conversation_log_dir=tmpdir,
+                                pretty_print_logs=False)
+
+            # Set logging level to DEBUG
+            logger = logging.getLogger('reinforcetactics.game.llm_bot')
+            original_level = logger.level
+            logger.setLevel(logging.DEBUG)
+
+            try:
+                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                with patch.object(bot, '_call_llm', return_value=response):
+                    bot.take_turn()
+
+                # Read the file as text
+                log_files = list(Path(tmpdir).glob("*.json"))
+                assert len(log_files) == 1
+
+                with open(log_files[0], 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # Compact JSON should be mostly on one line (no indentation)
+                # It may have some newlines but shouldn't have the 2-space indentation pattern
+                lines = content.split('\n')
+                # For compact JSON, most content is on fewer lines
+                assert len(lines) < 10  # Pretty version would have many more lines
             finally:
                 logger.setLevel(original_level)
 
@@ -461,8 +620,8 @@ class TestConversationLogging:
             finally:
                 logger.setLevel(original_level)
 
-    def test_multiple_turns_create_separate_files(self, simple_game, test_bot_class):
-        """Test that multiple turns create separate log files."""
+    def test_multiple_turns_create_single_file(self, simple_game, test_bot_class):
+        """Test that multiple turns create a single log file with all turns."""
         with tempfile.TemporaryDirectory() as tmpdir:
             bot = test_bot_class(simple_game, player=2, api_key="test-key",
                                 log_conversations=True,
@@ -482,17 +641,146 @@ class TestConversationLogging:
                     bot.game_state.turn_number += 1
                     bot.take_turn()
 
-                # Two files should be created
+                # Only one file should be created
                 log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 2
+                assert len(log_files) == 1
+
+                # Verify it contains two turns
+                with open(log_files[0], 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+
+                assert 'turns' in log_data
+                assert len(log_data['turns']) == 2
 
                 # Verify they have different turn numbers
-                turn_numbers = []
-                for log_file in log_files:
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        log_data = json.load(f)
-                        turn_numbers.append(log_data['turn_number'])
-
+                turn_numbers = [turn['turn_number'] for turn in log_data['turns']]
                 assert len(set(turn_numbers)) == 2  # Should be different
+                assert turn_numbers[0] < turn_numbers[1]  # Should be in order
             finally:
                 logger.setLevel(original_level)
+
+
+class TestStatefulConversation:
+    """Test stateful conversation functionality."""
+
+    @pytest.fixture
+    def test_bot_class(self):
+        """Create a test bot class for testing."""
+        class TestBot(LLMBot):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.call_count = 0
+                self.messages_received = []
+
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                self.call_count += 1
+                self.messages_received.append(messages)
+                return f'{{"reasoning": "Turn {self.call_count}", "actions": [{{"type": "END_TURN"}}]}}'
+
+        return TestBot
+
+    def test_stateful_parameter_default(self, simple_game, test_bot_class):
+        """Test that stateful parameter defaults to False."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        assert bot.stateful is False
+        assert bot.conversation_history == []
+
+    def test_stateful_parameter_enabled(self, simple_game, test_bot_class):
+        """Test that stateful parameter can be enabled."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+        assert bot.stateful is True
+        assert bot.conversation_history == []
+
+    def test_stateless_mode_no_history(self, simple_game, test_bot_class):
+        """Test that stateless mode doesn't accumulate conversation history."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=False)
+
+        # Take 3 turns
+        for i in range(3):
+            bot.take_turn()
+            simple_game.turn_number += 1
+
+        # In stateless mode, history should remain empty
+        assert len(bot.conversation_history) == 0
+
+        # Each call should only have system + user message (no history)
+        assert bot.call_count == 3
+        for messages in bot.messages_received:
+            assert len(messages) == 2  # system + user only
+            assert messages[0]['role'] == 'system'
+            assert messages[1]['role'] == 'user'
+
+    def test_stateful_mode_accumulates_history(self, simple_game, test_bot_class):
+        """Test that stateful mode accumulates conversation history."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # Take 3 turns
+        for i in range(3):
+            bot.take_turn()
+            simple_game.turn_number += 1
+
+        # In stateful mode, history should accumulate (2 messages per turn: user + assistant)
+        assert len(bot.conversation_history) == 6  # 3 turns * 2 messages
+        
+        # Verify the pattern: user, assistant, user, assistant, ...
+        for i in range(0, 6, 2):
+            assert bot.conversation_history[i]['role'] == 'user'
+            assert bot.conversation_history[i + 1]['role'] == 'assistant'
+
+    def test_stateful_mode_sends_history_to_llm(self, simple_game, test_bot_class):
+        """Test that stateful mode sends conversation history to LLM."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # First turn
+        bot.take_turn()
+        assert len(bot.messages_received[0]) == 2  # system + user
+
+        # Second turn should include history
+        simple_game.turn_number += 1
+        bot.take_turn()
+        assert len(bot.messages_received[1]) == 4  # system + prev_user + prev_assistant + current_user
+        assert bot.messages_received[1][0]['role'] == 'system'
+        assert bot.messages_received[1][1]['role'] == 'user'  # previous turn
+        assert bot.messages_received[1][2]['role'] == 'assistant'  # previous response
+        assert bot.messages_received[1][3]['role'] == 'user'  # current turn
+
+        # Third turn should include even more history
+        simple_game.turn_number += 1
+        bot.take_turn()
+        assert len(bot.messages_received[2]) == 6  # system + 2 prev exchanges + current_user
+
+    def test_stateful_mode_history_content(self, simple_game, test_bot_class):
+        """Test that conversation history contains actual content."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # Take 2 turns
+        bot.take_turn()
+        simple_game.turn_number += 1
+        bot.take_turn()
+
+        # Check that history has content
+        assert len(bot.conversation_history) == 4
+        
+        # First user message should have game state
+        assert 'Current Game State' in bot.conversation_history[0]['content']
+        
+        # First assistant message should have reasoning
+        assert 'Turn 1' in bot.conversation_history[1]['content']
+        
+        # Second user message should have game state
+        assert 'Current Game State' in bot.conversation_history[2]['content']
+        
+        # Second assistant message should have reasoning
+        assert 'Turn 2' in bot.conversation_history[3]['content']
