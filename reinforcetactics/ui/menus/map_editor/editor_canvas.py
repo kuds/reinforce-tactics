@@ -27,7 +27,7 @@ class EditorCanvas:
         self.map_data = map_data
         
         # View settings
-        self.tile_size = 32
+        self.tile_size = 24
         self.grid_enabled = True
         self.offset_x = 0
         self.offset_y = 0
