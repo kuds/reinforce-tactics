@@ -54,22 +54,22 @@ From the main menu, select **"Map Editor"** to access:
 
 ### Structures
 - **Tower** (t): Neutral or player-owned, generates $50/turn
-- **Building** (b): Player-owned, generates $100/turn
-- **Headquarters** (h): Player-owned, generates $150/turn (required: 1 per player)
+- **Building** (b): Neutral or player-owned, generates $100/turn
+- **Headquarters** (h): Neutral or player-owned, generates $150/turn (required: 1 per player)
 
 ## Map Format
 
 Maps are saved as CSV files with tile codes:
 - Single-letter codes for terrain: `p`, `o`, `w`, `m`, `f`, `r`
+- Neutral structures (no owner): `t`, `b`, `h`
 - Owner-specific codes for structures: `h_1`, `b_2`, `t_3`
-- Neutral towers: `t`
 
 Example:
 ```
 o,o,o,o,o
 o,p,p,p,o
 o,p,h_1,p,o
-o,p,p,p,o
+o,b,t,b,o
 o,o,o,o,o
 ```
 
