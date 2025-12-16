@@ -648,13 +648,139 @@ class TestConversationLogging:
                 # Verify it contains two turns
                 with open(log_files[0], 'r', encoding='utf-8') as f:
                     log_data = json.load(f)
-                
+
                 assert 'turns' in log_data
                 assert len(log_data['turns']) == 2
-                
+
                 # Verify they have different turn numbers
                 turn_numbers = [turn['turn_number'] for turn in log_data['turns']]
                 assert len(set(turn_numbers)) == 2  # Should be different
                 assert turn_numbers[0] < turn_numbers[1]  # Should be in order
             finally:
                 logger.setLevel(original_level)
+
+
+class TestStatefulConversation:
+    """Test stateful conversation functionality."""
+
+    @pytest.fixture
+    def test_bot_class(self):
+        """Create a test bot class for testing."""
+        class TestBot(LLMBot):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.call_count = 0
+                self.messages_received = []
+
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                self.call_count += 1
+                self.messages_received.append(messages)
+                return f'{{"reasoning": "Turn {self.call_count}", "actions": [{{"type": "END_TURN"}}]}}'
+
+        return TestBot
+
+    def test_stateful_parameter_default(self, simple_game, test_bot_class):
+        """Test that stateful parameter defaults to False."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        assert bot.stateful is False
+        assert bot.conversation_history == []
+
+    def test_stateful_parameter_enabled(self, simple_game, test_bot_class):
+        """Test that stateful parameter can be enabled."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+        assert bot.stateful is True
+        assert bot.conversation_history == []
+
+    def test_stateless_mode_no_history(self, simple_game, test_bot_class):
+        """Test that stateless mode doesn't accumulate conversation history."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=False)
+
+        # Take 3 turns
+        for i in range(3):
+            bot.take_turn()
+            simple_game.turn_number += 1
+
+        # In stateless mode, history should remain empty
+        assert len(bot.conversation_history) == 0
+
+        # Each call should only have system + user message (no history)
+        assert bot.call_count == 3
+        for messages in bot.messages_received:
+            assert len(messages) == 2  # system + user only
+            assert messages[0]['role'] == 'system'
+            assert messages[1]['role'] == 'user'
+
+    def test_stateful_mode_accumulates_history(self, simple_game, test_bot_class):
+        """Test that stateful mode accumulates conversation history."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # Take 3 turns
+        for i in range(3):
+            bot.take_turn()
+            simple_game.turn_number += 1
+
+        # In stateful mode, history should accumulate (2 messages per turn: user + assistant)
+        assert len(bot.conversation_history) == 6  # 3 turns * 2 messages
+        
+        # Verify the pattern: user, assistant, user, assistant, ...
+        for i in range(0, 6, 2):
+            assert bot.conversation_history[i]['role'] == 'user'
+            assert bot.conversation_history[i + 1]['role'] == 'assistant'
+
+    def test_stateful_mode_sends_history_to_llm(self, simple_game, test_bot_class):
+        """Test that stateful mode sends conversation history to LLM."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # First turn
+        bot.take_turn()
+        assert len(bot.messages_received[0]) == 2  # system + user
+
+        # Second turn should include history
+        simple_game.turn_number += 1
+        bot.take_turn()
+        assert len(bot.messages_received[1]) == 4  # system + prev_user + prev_assistant + current_user
+        assert bot.messages_received[1][0]['role'] == 'system'
+        assert bot.messages_received[1][1]['role'] == 'user'  # previous turn
+        assert bot.messages_received[1][2]['role'] == 'assistant'  # previous response
+        assert bot.messages_received[1][3]['role'] == 'user'  # current turn
+
+        # Third turn should include even more history
+        simple_game.turn_number += 1
+        bot.take_turn()
+        assert len(bot.messages_received[2]) == 6  # system + 2 prev exchanges + current_user
+
+    def test_stateful_mode_history_content(self, simple_game, test_bot_class):
+        """Test that conversation history contains actual content."""
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=True)
+
+        # Take 2 turns
+        bot.take_turn()
+        simple_game.turn_number += 1
+        bot.take_turn()
+
+        # Check that history has content
+        assert len(bot.conversation_history) == 4
+        
+        # First user message should have game state
+        assert 'Current Game State' in bot.conversation_history[0]['content']
+        
+        # First assistant message should have reasoning
+        assert 'Turn 1' in bot.conversation_history[1]['content']
+        
+        # Second user message should have game state
+        assert 'Current Game State' in bot.conversation_history[2]['content']
+        
+        # Second assistant message should have reasoning
+        assert 'Turn 2' in bot.conversation_history[3]['content']

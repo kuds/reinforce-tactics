@@ -161,7 +161,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  log_conversations: bool = False,
                  conversation_log_dir: Optional[str] = None,
                  game_session_id: Optional[str] = None,
-                 pretty_print_logs: bool = True):
+                 pretty_print_logs: bool = True,
+                 stateful: bool = False):
         """
         Initialize the LLM bot.
 
@@ -175,6 +176,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             conversation_log_dir: Directory for conversation logs (default: logs/llm_conversations/)
             game_session_id: Unique game session identifier (default: auto-generated)
             pretty_print_logs: Format JSON logs with indentation for readability (default True)
+            stateful: Maintain conversation history across turns (default False)
         """
         self.game_state = game_state
         self.bot_player = player
@@ -184,6 +186,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.log_conversations = log_conversations
         self.conversation_log_dir = conversation_log_dir or 'logs/llm_conversations/'
         self.pretty_print_logs = pretty_print_logs
+        self.stateful = stateful
+
+        # Initialize conversation history for stateful mode
+        self.conversation_history = []
 
         # Generate or use provided game session ID
         if game_session_id:
@@ -323,7 +329,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         This method orchestrates the entire turn-taking process:
         1. Serializes the current game state into JSON
-        2. Calls the LLM API with retry logic
+        2. Calls the LLM API with retry logic (including conversation history if stateful)
         3. Parses the LLM response
         4. Validates and executes the suggested actions
 
@@ -342,10 +348,19 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         response_text = None
         for attempt in range(self.max_retries):
             try:
-                messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ]
+                # Build messages list
+                if self.stateful and self.conversation_history:
+                    # In stateful mode, include full conversation history
+                    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                    messages.extend(self.conversation_history)
+                    messages.append({"role": "user", "content": user_prompt})
+                else:
+                    # In stateless mode, only send current turn
+                    messages = [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ]
+
                 response_text = self._call_llm(messages)
                 break
             except Exception as e:
@@ -362,6 +377,11 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         if not response_text:
             logger.error("No response from LLM. Ending turn.")
             return
+
+        # Store conversation in history if stateful mode is enabled
+        if self.stateful:
+            self.conversation_history.append({"role": "user", "content": user_prompt})
+            self.conversation_history.append({"role": "assistant", "content": response_text})
 
         # Log the conversation if enabled
         self._log_conversation_to_json(SYSTEM_PROMPT, user_prompt, response_text)
