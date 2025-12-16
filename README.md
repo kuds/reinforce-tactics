@@ -454,7 +454,7 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
   - Ranged attacker (stronger at distance)
   - Can paralyze enemies for 3 turns
 
-- **Cleric (C)**: 200 gold, 2 movement, 8 HP, 2 ATK
+- **Cleric (C)**: 200 gold, 2 movement, 8 HP, 2 ATK, 4 DEF
   - Support unit that can heal allies (+5 HP)
   - Can cure paralyzed allies
 
@@ -467,7 +467,7 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 ### Combat
 
 - Units attack adjacent enemies
-- Defending units counter-attack with 90% damage
+- Defending units counter-attack with 80% damage
 - Paralyzed units cannot move, attack, or counter-attack
 - Units can't move or attack the turn they're created
 
@@ -489,7 +489,7 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 
 ### Economy
 
-- Starting gold: $1000
+- Starting gold: $250
 - Income generated at start of each turn
 - Use gold to create units at your buildings
 
