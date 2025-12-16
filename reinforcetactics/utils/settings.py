@@ -20,7 +20,7 @@ class Settings:
         },
         'video': {
             'fullscreen': False,
-            'resolution': [800, 600],
+            'resolution': [900, 700],
             'fps': 60
         },
         'audio': {

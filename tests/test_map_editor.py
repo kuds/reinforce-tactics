@@ -23,7 +23,7 @@ def dummy_display():
     os.environ['SDL_VIDEODRIVER'] = 'dummy'
     os.environ['SDL_AUDIODRIVER'] = 'dummy'
     pygame.init()
-    screen = pygame.display.set_mode((1400, 900))
+    screen = pygame.display.set_mode((1500, 1000))
     yield screen
     pygame.quit()
 
