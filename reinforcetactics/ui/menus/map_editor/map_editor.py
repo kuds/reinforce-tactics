@@ -37,7 +37,7 @@ class MapEditor:
         # Create screen if not provided
         self.owns_screen = screen is None
         if self.owns_screen:
-            self.screen = pygame.display.set_mode((1400, 900))
+            self.screen = pygame.display.set_mode((1500, 1000))
             pygame.display.set_caption("Map Editor - Reinforce Tactics")
         else:
             self.screen = screen

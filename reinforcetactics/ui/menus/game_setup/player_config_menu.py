@@ -42,7 +42,7 @@ class PlayerConfigMenu:
         # Create screen if not provided
         self.owns_screen = screen is None
         if self.owns_screen:
-            self.screen = pygame.display.set_mode((800, 600))
+            self.screen = pygame.display.set_mode((900, 700))
             pygame.display.set_caption("Reinforce Tactics")
         else:
             self.screen = screen
