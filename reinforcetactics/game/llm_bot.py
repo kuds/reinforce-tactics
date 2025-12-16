@@ -184,7 +184,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.log_conversations = log_conversations
         self.conversation_log_dir = conversation_log_dir or 'logs/llm_conversations/'
         self.pretty_print_logs = pretty_print_logs
-        
+
         # Generate or use provided game session ID
         if game_session_id:
             self.game_session_id = game_session_id
@@ -279,7 +279,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 # Load existing data and append new turn
                 with open(filepath, 'r', encoding='utf-8') as f:
                     log_data = json.load(f)
-                
+
                 # Append new turn
                 log_data['turns'].append({
                     "turn_number": turn,
