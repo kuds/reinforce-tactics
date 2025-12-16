@@ -44,7 +44,7 @@ class TilePalette:
         
         # Selected tile
         self.selected_tile = 'p'  # Default to grass
-        self.selected_player = 1  # For structures
+        self.selected_player = 0  # For structures (0 = neutral)
         
         # Fonts
         self.title_font = get_font(20)
@@ -95,14 +95,15 @@ class TilePalette:
         Get the currently selected tile code.
 
         Returns:
-            Tile code (e.g., 'p', 'h_1', 'b_2')
+            Tile code (e.g., 'p', 'h_1', 'b_2', 't', 'b', 'h')
         """
-        # If it's a structure, append player number
-        if self.selected_tile in ('b', 'h'):
-            return f"{self.selected_tile}_{self.selected_player}"
-        elif self.selected_tile == 't':
-            # Towers can be neutral or owned
-            return f"t_{self.selected_player}" if self.selected_player > 0 else 't'
+        # If it's a structure, append player number (unless neutral)
+        if self.selected_tile in ('t', 'b', 'h'):
+            # Player 0 means neutral (no suffix)
+            if self.selected_player == 0:
+                return self.selected_tile
+            else:
+                return f"{self.selected_tile}_{self.selected_player}"
         return self.selected_tile
 
     def draw(self, screen: pygame.Surface) -> None:
@@ -217,14 +218,15 @@ class TilePalette:
             # Tile rectangle
             tile_rect = pygame.Rect(current_x, current_y, self.tile_size, self.tile_size)
             
-            # Draw tile with color (use player color if selected)
-            if is_selected and tile_code in ('b', 'h'):
+            # Draw tile with color (use player color if selected and player-owned)
+            if is_selected and self.selected_player > 0:
                 # Show with player color
                 base_color = TILE_COLORS.get(tile_code, (100, 100, 100))
                 player_color = PLAYER_COLORS.get(self.selected_player, (255, 255, 255))
                 # Blend colors
                 tile_color = tuple((base_color[i] + player_color[i]) // 2 for i in range(3))
             else:
+                # Show neutral or unselected color
                 tile_color = TILE_COLORS.get(tile_code, (100, 100, 100))
             
             pygame.draw.rect(screen, tile_color, tile_rect)
@@ -265,6 +267,31 @@ class TilePalette:
         current_y = start_y + 22
         current_x = self.x + self.padding
         button_size = 28
+        
+        # Draw neutral button (player 0)
+        is_selected = self.selected_player == 0
+        button_rect = pygame.Rect(current_x, current_y, button_size, button_size)
+        
+        # Neutral color (gray)
+        neutral_color = (150, 150, 150)
+        pygame.draw.rect(screen, neutral_color, button_rect)
+        
+        # Draw border
+        border_color = self.selected_color if is_selected else (80, 80, 80)
+        border_width = 3 if is_selected else 1
+        pygame.draw.rect(screen, border_color, button_rect, width=border_width)
+        
+        # Draw "N" for Neutral
+        neutral_label = lang.get('map_editor.tile_palette.neutral', 'Neutral')
+        neutral_text = neutral_label[0] if neutral_label else 'N'  # First letter, fallback to 'N'
+        num_surface = self.tile_font.render(neutral_text, True, (0, 0, 0))
+        num_rect = num_surface.get_rect(center=button_rect.center)
+        screen.blit(num_surface, num_rect)
+        
+        # Store rectangle for click detection
+        self.player_rects[0] = button_rect
+        
+        current_x += button_size + 5
         
         # Draw player buttons
         for player_num in range(1, self.num_players + 1):

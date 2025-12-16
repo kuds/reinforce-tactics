@@ -57,7 +57,7 @@ class TestTilePalette:
         """Test palette initialization."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
         assert palette.selected_tile == 'p'
-        assert palette.selected_player == 1
+        assert palette.selected_player == 0  # Defaults to neutral
 
     def test_terrain_tile_selection(self, dummy_display):
         """Test terrain tile selection."""
@@ -81,6 +81,39 @@ class TestTilePalette:
         palette.selected_tile = 'b'
         palette.selected_player = 2
         assert palette.get_selected_tile() == 'b_2'
+
+    def test_neutral_structure_selection(self, dummy_display):
+        """Test neutral structure selection (player 0)."""
+        palette = TilePalette(20, 20, 250, 500, num_players=2)
+        
+        # Neutral tower
+        palette.selected_tile = 't'
+        palette.selected_player = 0
+        assert palette.get_selected_tile() == 't'
+        
+        # Neutral building
+        palette.selected_tile = 'b'
+        palette.selected_player = 0
+        assert palette.get_selected_tile() == 'b'
+        
+        # Neutral headquarters
+        palette.selected_tile = 'h'
+        palette.selected_player = 0
+        assert palette.get_selected_tile() == 'h'
+        
+    def test_player_owned_vs_neutral_tower(self, dummy_display):
+        """Test that towers can be neutral or player-owned."""
+        palette = TilePalette(20, 20, 250, 500, num_players=2)
+        
+        # Tower with player 1
+        palette.selected_tile = 't'
+        palette.selected_player = 1
+        assert palette.get_selected_tile() == 't_1'
+        
+        # Neutral tower (player 0)
+        palette.selected_player = 0
+        assert palette.get_selected_tile() == 't'
+
 
 
 class TestEditorCanvas:
