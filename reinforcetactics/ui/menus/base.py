@@ -329,6 +329,12 @@ class Menu:
             pos_rect = pos_text.get_rect(right=screen_width - 20, bottom=screen_height - 20)
             self.screen.blit(pos_text, pos_rect)
 
+        # Draw ESC hint at bottom left
+        esc_hint = self.lang.get('common.esc_hint', 'Press ESC to go back')
+        esc_text = self.indicator_font.render(esc_hint, True, (120, 120, 140))
+        esc_rect = esc_text.get_rect(left=20, bottom=screen_height - 20)
+        self.screen.blit(esc_text, esc_rect)
+
         pygame.display.flip()
 
     def run(self) -> Optional[Any]:

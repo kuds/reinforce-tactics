@@ -85,7 +85,8 @@ class InputHandler:
                 self.active_menu = None
                 return None
             else:
-                return 'quit'
+                # Show pause menu instead of quitting directly
+                return 'pause'
 
         # Handle keyboard shortcuts for UnitActionMenu
         elif self.active_menu and isinstance(self.active_menu, UnitActionMenu):
