@@ -59,10 +59,6 @@ class FileIO:
                 map_data = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
 
             print(f"✅ Map loaded: {width}x{height}")
-            print(
-                f"   First few tiles: "
-                f"{map_data.iloc[0, :5].tolist() if width >= 5 else map_data.iloc[0].tolist()}"
-            )
 
             return map_data
 
