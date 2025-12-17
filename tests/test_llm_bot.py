@@ -138,6 +138,80 @@ class TestLLMBotBase:
         assert extracted is not None
         assert extracted['reasoning'] == "test strategy"
 
+    def test_take_turn_ends_turn(self, simple_game):
+        """Test that take_turn() properly ends the turn and advances game state."""
+        class TestBot(LLMBot):
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+
+        # Game starts at player 1's turn
+        assert simple_game.current_player == 1
+        initial_turn = simple_game.turn_number
+
+        # End player 1's turn manually
+        simple_game.end_turn()
+        assert simple_game.current_player == 2
+
+        # Bot plays as player 2
+        bot = TestBot(simple_game, player=2, api_key="test-key")
+
+        # Bot takes turn - should call end_turn() and advance to player 1
+        bot.take_turn()
+
+        # After bot's turn, current player should be back to 1
+        assert simple_game.current_player == 1
+        # Turn number should have advanced by 1 (since we went through full cycle)
+        assert simple_game.turn_number == initial_turn + 1
+
+    def test_take_turn_ends_turn_on_llm_failure(self, simple_game):
+        """Test that take_turn() ends the turn even when LLM fails."""
+        call_count = 0
+
+        class FailingBot(LLMBot):
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                nonlocal call_count
+                call_count += 1
+                raise Exception("API Error")
+
+        # End player 1's turn
+        simple_game.end_turn()
+        assert simple_game.current_player == 2
+
+        # Bot plays as player 2 with max_retries=1 for faster test
+        bot = FailingBot(simple_game, player=2, api_key="test-key", max_retries=1)
+
+        # Bot takes turn - should call end_turn() even on failure
+        bot.take_turn()
+
+        # After bot's turn, current player should be back to 1
+        assert simple_game.current_player == 1
+        # Verify that the LLM was called (to confirm the failure path was taken)
+        assert call_count == 1
+
 
 class TestOpenAIBot:
     """Test OpenAIBot implementation."""
