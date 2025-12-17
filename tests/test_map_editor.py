@@ -263,7 +263,7 @@ class TestWaterBorderStripping:
         assert (stripped == 'p').all().all()
 
     def test_strip_water_border_partial_ocean(self, dummy_display):
-        """Test that partial ocean borders are not stripped."""
+        """Test stripping with partial ocean borders - strips each side independently."""
         # Create map with partial ocean border
         map_data = pd.DataFrame(np.full((10, 10), 'o', dtype=object))
         # Make one tile on the border not ocean
@@ -271,8 +271,12 @@ class TestWaterBorderStripping:
         
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
-        # Should not strip at all
-        assert stripped.shape == (10, 10)
+        # With independent stripping, ocean-only rows/columns are stripped
+        # while respecting min_size. The grass tile at (0,5) is preserved.
+        assert stripped.shape[0] >= MIN_STRIP_SIZE  # Height at least min_size
+        assert stripped.shape[1] >= MIN_STRIP_SIZE  # Width at least min_size
+        # The non-ocean tile should still be present in the result
+        assert 'p' in stripped.values
 
     def test_strip_water_border_respects_min_size(self, dummy_display):
         """Test that stripping stops at minimum size."""
@@ -329,6 +333,57 @@ class TestWaterBorderStripping:
         assert stripped.iloc[6, 6] == 'h_2'
         assert stripped.iloc[3, 3] == 'w'
         assert stripped.iloc[4, 4] == 'm'
+
+    def test_strip_water_border_off_center_map(self, dummy_display):
+        """Test stripping an off-center map strips each side independently."""
+        # Create a 14x14 map with content offset to the top-left
+        # More ocean on bottom and right than on top and left
+        map_data = pd.DataFrame(np.full((14, 14), 'o', dtype=object))
+        # Place content in top-left area (1 row from top, 1 col from left)
+        # Content is 6x6 starting at (1,1)
+        for i in range(1, 7):
+            for j in range(1, 7):
+                map_data.iloc[i, j] = 'p'
+        map_data.iloc[2, 2] = 'h_1'
+        map_data.iloc[5, 5] = 'h_2'
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
+        
+        # The map should be stripped to approximately 6x6 (the content area)
+        # The content should now be at the edges (no wasted ocean on any side)
+        assert stripped.shape[0] >= MIN_STRIP_SIZE
+        assert stripped.shape[1] >= MIN_STRIP_SIZE
+        # The HQ tiles should be preserved
+        assert 'h_1' in stripped.values
+        assert 'h_2' in stripped.values
+        # The first row/column should not be all ocean (content is at edge)
+        assert not all(tile == 'o' for tile in stripped.iloc[0, :])
+        assert not all(tile == 'o' for tile in stripped.iloc[:, 0])
+
+    def test_strip_water_border_asymmetric(self, dummy_display):
+        """Test stripping with different amounts of ocean on each side."""
+        # Create a 12x10 map with:
+        # - 1 row of ocean at top
+        # - 3 rows of ocean at bottom
+        # - 2 cols of ocean at left
+        # - 2 cols of ocean at right
+        # Inner content is 8x6
+        map_data = pd.DataFrame(np.full((12, 10), 'o', dtype=object))
+        # Fill inner area with grass (rows 1-8, cols 2-7)
+        for i in range(1, 9):
+            for j in range(2, 8):
+                map_data.iloc[i, j] = 'p'
+        map_data.iloc[2, 3] = 'h_1'
+        map_data.iloc[7, 6] = 'h_2'
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
+        
+        # Should strip: 1 from top, 3 from bottom, 2 from left, 2 from right
+        # Result should be 8x6
+        assert stripped.shape == (8, 6)
+        # HQ positions should be adjusted
+        assert stripped.iloc[1, 1] == 'h_1'  # Was at (2,3), shifted by (1,2)
+        assert stripped.iloc[6, 4] == 'h_2'  # Was at (7,6), shifted by (1,2)
 
     def test_add_water_border(self, dummy_display):
         """Test adding water borders."""
