@@ -497,7 +497,7 @@ class FileIO:
     def save_map(map_data, filepath):
         """
         Save a map to a CSV file.
-        
+
         Ocean borders are automatically stripped before saving to reduce file size.
 
         Args:
@@ -513,7 +513,7 @@ class FileIO:
         try:
             # Strip ocean borders before saving
             stripped_map = FileIO.strip_water_border(map_data)
-            
+
             stripped_map.to_csv(filepath, header=False, index=False)
             print(f"✅ Map saved: {filepath}")
             return str(filepath)

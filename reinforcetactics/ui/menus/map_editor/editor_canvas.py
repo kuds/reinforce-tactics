@@ -25,26 +25,26 @@ class EditorCanvas:
         self.width = width
         self.height = height
         self.map_data = map_data
-        
+
         # View settings
         self.tile_size = 24
         self.grid_enabled = True
         self.offset_x = 0
         self.offset_y = 0
-        
+
         # Mouse state
         self.hover_tile = None  # (x, y) of hovered tile
         self.is_painting = False
-        
+
         # Colors
         self.bg_color = (30, 30, 40)
         self.grid_color = (60, 60, 70)
         self.highlight_color = (255, 255, 0)
         self.hover_color = (255, 255, 255, 100)
-        
+
         # Fonts
         self.coord_font = get_font(18)
-        
+
         # Calculate visible tiles
         self._update_visible_area()
 
@@ -66,18 +66,18 @@ class EditorCanvas:
         if not self._is_over_canvas(mouse_pos):
             self.hover_tile = None
             return False
-        
+
         # Calculate tile coordinates
         tile_x = (mouse_pos[0] - self.x + self.offset_x) // self.tile_size
         tile_y = (mouse_pos[1] - self.y + self.offset_y) // self.tile_size
-        
+
         # Check bounds
         map_height, map_width = self.map_data.shape
         if 0 <= tile_x < map_width and 0 <= tile_y < map_height:
             self.hover_tile = (tile_x, tile_y)
         else:
             self.hover_tile = None
-        
+
         return True
 
     def handle_mouse_click(self, mouse_pos: Tuple[int, int], tile_code: str) -> bool:
@@ -93,13 +93,13 @@ class EditorCanvas:
         """
         if not self._is_over_canvas(mouse_pos):
             return False
-        
+
         if self.hover_tile:
             tile_x, tile_y = self.hover_tile
             self.map_data.iloc[tile_y, tile_x] = tile_code
             self.is_painting = True
             return True
-        
+
         return False
 
     def handle_mouse_release(self) -> None:
@@ -117,7 +117,7 @@ class EditorCanvas:
         map_height, map_width = self.map_data.shape
         max_offset_x = max(0, map_width * self.tile_size - self.width)
         max_offset_y = max(0, map_height * self.tile_size - self.height)
-        
+
         self.offset_x = max(0, min(max_offset_x, self.offset_x + dx))
         self.offset_y = max(0, min(max_offset_y, self.offset_y + dy))
 
@@ -160,22 +160,22 @@ class EditorCanvas:
         # Draw background
         bg_rect = pygame.Rect(self.x, self.y, self.width, self.height)
         pygame.draw.rect(screen, self.bg_color, bg_rect)
-        
+
         # Draw map tiles
         self._draw_tiles(screen)
-        
+
         # Draw grid if enabled
         if self.grid_enabled:
             self._draw_grid(screen)
-        
+
         # Draw hover highlight
         if self.hover_tile:
             self._draw_hover_highlight(screen)
-        
+
         # Draw coordinates
         if self.hover_tile:
             self._draw_coordinates(screen)
-        
+
         # Draw border
         pygame.draw.rect(screen, (100, 100, 120), bg_rect, width=2)
 
@@ -187,28 +187,28 @@ class EditorCanvas:
             screen: Pygame surface to draw on
         """
         map_height, map_width = self.map_data.shape
-        
+
         # Calculate visible range
         start_col = self.offset_x // self.tile_size
         start_row = self.offset_y // self.tile_size
         end_col = min(map_width, start_col + self.visible_cols + 1)
         end_row = min(map_height, start_row + self.visible_rows + 1)
-        
+
         # Draw each visible tile
         for row in range(start_row, end_row):
             for col in range(start_col, end_col):
                 tile_code = str(self.map_data.iloc[row, col])
-                
+
                 # Calculate screen position
                 screen_x = self.x + col * self.tile_size - self.offset_x
                 screen_y = self.y + row * self.tile_size - self.offset_y
-                
+
                 # Get base tile code (without player number)
                 base_code = tile_code.split('_')[0] if '_' in tile_code else tile_code
-                
+
                 # Get tile color
                 tile_color = TILE_COLORS.get(base_code, (50, 50, 50))
-                
+
                 # For structures with ownership, blend with player color
                 if '_' in tile_code:
                     parts = tile_code.split('_')
@@ -217,7 +217,7 @@ class EditorCanvas:
                         player_color = PLAYER_COLORS.get(player_num, (255, 255, 255))
                         # Blend colors
                         tile_color = tuple((tile_color[i] + player_color[i]) // 2 for i in range(3))
-                
+
                 # Draw tile
                 tile_rect = pygame.Rect(screen_x, screen_y, self.tile_size, self.tile_size)
                 pygame.draw.rect(screen, tile_color, tile_rect)
@@ -230,13 +230,13 @@ class EditorCanvas:
             screen: Pygame surface to draw on
         """
         map_height, map_width = self.map_data.shape
-        
+
         # Calculate visible range
         start_col = self.offset_x // self.tile_size
         start_row = self.offset_y // self.tile_size
         end_col = min(map_width, start_col + self.visible_cols + 1)
         end_row = min(map_height, start_row + self.visible_rows + 1)
-        
+
         # Draw vertical lines
         for col in range(start_col, end_col + 1):
             screen_x = self.x + col * self.tile_size - self.offset_x
@@ -247,7 +247,7 @@ class EditorCanvas:
                 (screen_x, self.y + self.height),
                 1
             )
-        
+
         # Draw horizontal lines
         for row in range(start_row, end_row + 1):
             screen_y = self.y + row * self.tile_size - self.offset_y
@@ -268,16 +268,16 @@ class EditorCanvas:
         """
         if not self.hover_tile:
             return
-        
+
         tile_x, tile_y = self.hover_tile
         screen_x = self.x + tile_x * self.tile_size - self.offset_x
         screen_y = self.y + tile_y * self.tile_size - self.offset_y
-        
+
         # Create semi-transparent surface
         highlight_surface = pygame.Surface((self.tile_size, self.tile_size), pygame.SRCALPHA)
         highlight_surface.fill(self.hover_color)
         screen.blit(highlight_surface, (screen_x, screen_y))
-        
+
         # Draw border
         tile_rect = pygame.Rect(screen_x, screen_y, self.tile_size, self.tile_size)
         pygame.draw.rect(screen, self.highlight_color, tile_rect, width=2)
@@ -291,11 +291,11 @@ class EditorCanvas:
         """
         if not self.hover_tile:
             return
-        
+
         tile_x, tile_y = self.hover_tile
         coord_text = f"X: {tile_x}, Y: {tile_y}"
         coord_surface = self.coord_font.render(coord_text, True, (255, 255, 255))
-        
+
         # Draw with background
         coord_rect = coord_surface.get_rect(x=self.x + 10, y=self.y + self.height - 30)
         bg_rect = coord_rect.inflate(10, 5)
