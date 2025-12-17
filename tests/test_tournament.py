@@ -126,12 +126,12 @@ class TestTournamentSystem:
         from tournament import TournamentRunner
 
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=2
         )
 
-        assert runner.map_file == 'maps/1v1/6x6_beginner.csv'
+        assert runner.map_file == 'maps/1v1/beginner.csv'
         assert runner.games_per_side == 2
         assert runner.output_dir.exists()
 
@@ -143,7 +143,7 @@ class TestTournamentSystem:
 
         # Test with log_conversations=True and default log dir
         runner1 = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=True
@@ -154,7 +154,7 @@ class TestTournamentSystem:
 
         # Test with custom log dir
         runner2 = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=True,
@@ -166,7 +166,7 @@ class TestTournamentSystem:
 
         # Test with logging disabled
         runner3 = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=False
@@ -229,7 +229,7 @@ class TestTournamentSystem:
         from tournament import TournamentRunner
 
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=1
         )
@@ -247,7 +247,7 @@ class TestTournamentSystem:
         from tournament import TournamentRunner, BotDescriptor
 
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=1
         )
@@ -277,7 +277,7 @@ class TestTournamentSystem:
         from tournament import TournamentRunner
 
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament_results',
             games_per_side=1
         )
@@ -319,7 +319,7 @@ class TestModelBotActionTranslation:
         """Test that ModelBot correctly translates create_unit actions."""
         from reinforcetactics.game.model_bot import ModelBot
 
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game_state = GameState(map_data, num_players=2)
         game_state.current_player = 2
         game_state.player_gold[2] = 1000
@@ -567,7 +567,7 @@ class TestMultiMapTournament:
         sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
         from tournament import TournamentRunner
 
-        maps = ['maps/1v1/6x6_beginner.csv', 'maps/1v1/10x10_easy.csv']
+        maps = ['maps/1v1/beginner.csv', 'maps/1v1/center_mountains.csv']
         runner = TournamentRunner(
             maps=maps,
             output_dir='/tmp/test_multimap',
@@ -585,13 +585,13 @@ class TestMultiMapTournament:
         from tournament import TournamentRunner
 
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_backward',
             games_per_side=1
         )
 
         assert len(runner.maps) == 1
-        assert runner.maps[0] == 'maps/1v1/6x6_beginner.csv'
+        assert runner.maps[0] == 'maps/1v1/beginner.csv'
 
     def test_select_map_cycle_mode(self):
         """Test map selection in cycle mode."""

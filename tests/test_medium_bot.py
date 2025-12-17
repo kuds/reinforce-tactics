@@ -112,7 +112,7 @@ class TestMediumBotCoordinatedAttacks:
     def test_mediumbot_identifies_killable_targets(self):
         """Test that MediumBot can identify enemies that can be killed."""
         # Create a game with specific setup
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
         
         # Create enemy unit with low health
@@ -138,7 +138,7 @@ class TestMediumBotContestedStructures:
 
     def test_finds_contested_structures(self):
         """Test that MediumBot can find structures being captured."""
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
         
         bot = MediumBot(game, player=2)
@@ -169,7 +169,7 @@ class TestMediumBotVsSimpleBot:
     def test_mediumbot_vs_simplebot_single_game(self):
         """Test a single game between MediumBot and SimpleBot."""
         # Load a standard map
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
         
         # Create bots
@@ -197,7 +197,7 @@ class TestMediumBotAttackValue:
 
     def test_calculate_attack_value_kill_bonus(self):
         """Test that killing blows have high value."""
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
         
         # Create attacker
@@ -245,7 +245,7 @@ class TestTournamentMediumBot:
         from tournament import TournamentRunner
         
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament_medium',
             games_per_side=1
         )
