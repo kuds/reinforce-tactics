@@ -50,10 +50,13 @@ OPENAI_MODELS = [
     # O3 models (if available)
     'o3-mini',
     'o3-mini-2025-01-31',
+    'gpt-5.2-2025-12-11',
+    'gpt-5-mini-2025-08-07',
 ]
 
 ANTHROPIC_MODELS = [
     # Claude 4 (latest generation)
+    'claude-sonnet-4-5-20250929',
     'claude-sonnet-4-20250514',
     # Claude 3.5 (high performance)
     'claude-3-5-sonnet-20241022',
@@ -63,6 +66,8 @@ ANTHROPIC_MODELS = [
     'claude-3-opus-20240229',
     'claude-3-sonnet-20240229',
     'claude-3-haiku-20240307',
+    'claude-haiku-4-5-20251001',
+    'claude-opus-4-5-20251101',
 ]
 
 GEMINI_MODELS = [
@@ -80,6 +85,7 @@ GEMINI_MODELS = [
     # Gemini 1.0 (legacy)
     'gemini-1.0-pro',
     'gemini-pro',
+    'gemini-3-pro-preview',
 ]
 
 
