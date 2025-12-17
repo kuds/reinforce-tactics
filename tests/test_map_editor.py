@@ -241,3 +241,199 @@ class TestMapEditorMenu:
         map_data.iloc[1, 23] = 'h_3'
         map_data.iloc[23, 1] = 'h_4'
         assert menu._detect_num_players(map_data) == 4
+
+
+class TestWaterBorderStripping:
+    """Test water border stripping and restoration."""
+
+    def test_strip_water_border_fully_surrounded(self, dummy_display):
+        """Test stripping when map is fully surrounded by ocean."""
+        # Create a 10x10 map with 2 layers of ocean border
+        map_data = pd.DataFrame(np.full((10, 10), 'o', dtype=object))
+        # Inner 6x6 area has grass
+        for i in range(2, 8):
+            for j in range(2, 8):
+                map_data.iloc[i, j] = 'p'
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should strip to 6x6
+        assert stripped.shape == (6, 6)
+        # All tiles should be grass
+        assert (stripped == 'p').all().all()
+
+    def test_strip_water_border_partial_ocean(self, dummy_display):
+        """Test that partial ocean borders are not stripped."""
+        # Create map with partial ocean border
+        map_data = pd.DataFrame(np.full((10, 10), 'o', dtype=object))
+        # Make one tile on the border not ocean
+        map_data.iloc[0, 5] = 'p'  # Top row has one grass tile
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should not strip at all
+        assert stripped.shape == (10, 10)
+
+    def test_strip_water_border_respects_min_size(self, dummy_display):
+        """Test that stripping stops at minimum size."""
+        # Create an 8x8 map fully of ocean
+        map_data = pd.DataFrame(np.full((8, 8), 'o', dtype=object))
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should strip to exactly 6x6, not smaller
+        assert stripped.shape == (6, 6)
+
+    def test_strip_water_border_no_ocean_border(self, dummy_display):
+        """Test map with no ocean borders."""
+        # Create map with grass borders
+        map_data = pd.DataFrame(np.full((10, 10), 'p', dtype=object))
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should not strip anything
+        assert stripped.shape == (10, 10)
+
+    def test_strip_water_border_iterative(self, dummy_display):
+        """Test iterative stripping of multiple layers."""
+        # Create a 14x14 map with 4 layers of ocean border
+        map_data = pd.DataFrame(np.full((14, 14), 'o', dtype=object))
+        # Inner 6x6 area has grass
+        for i in range(4, 10):
+            for j in range(4, 10):
+                map_data.iloc[i, j] = 'p'
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should strip all 4 layers to get to 6x6
+        assert stripped.shape == (6, 6)
+        assert (stripped == 'p').all().all()
+
+    def test_strip_water_border_mixed_tiles(self, dummy_display):
+        """Test stripping with various tile types inside."""
+        # Create map with ocean border
+        map_data = pd.DataFrame(np.full((12, 12), 'o', dtype=object))
+        # Inner area has various tiles
+        map_data.iloc[2:10, 2:10] = 'p'
+        map_data.iloc[3, 3] = 'h_1'
+        map_data.iloc[8, 8] = 'h_2'
+        map_data.iloc[5, 5] = 'w'  # Water (not ocean)
+        map_data.iloc[6, 6] = 'm'  # Mountain
+        
+        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        
+        # Should strip 2 layers
+        assert stripped.shape == (8, 8)
+        # Check that interior tiles are preserved
+        assert stripped.iloc[1, 1] == 'h_1'
+        assert stripped.iloc[6, 6] == 'h_2'
+        assert stripped.iloc[3, 3] == 'w'
+        assert stripped.iloc[4, 4] == 'm'
+
+    def test_add_water_border(self, dummy_display):
+        """Test adding water borders."""
+        # Create a small 6x6 map
+        map_data = pd.DataFrame(np.full((6, 6), 'p', dtype=object))
+        map_data.iloc[1, 1] = 'h_1'
+        map_data.iloc[4, 4] = 'h_2'
+        
+        bordered = FileIO.add_water_border(map_data, border_size=2)
+        
+        # Should be 10x10 now
+        assert bordered.shape == (10, 10)
+        
+        # Check borders are ocean
+        assert all(bordered.iloc[0, :] == 'o')  # Top row
+        assert all(bordered.iloc[-1, :] == 'o')  # Bottom row
+        assert all(bordered.iloc[:, 0] == 'o')  # Left column
+        assert all(bordered.iloc[:, -1] == 'o')  # Right column
+        
+        # Check interior is preserved with offset
+        assert bordered.iloc[3, 3] == 'h_1'  # 1,1 + 2 offset
+        assert bordered.iloc[6, 6] == 'h_2'  # 4,4 + 2 offset
+
+    def test_add_water_border_zero_size(self, dummy_display):
+        """Test adding zero-size border returns unchanged map."""
+        map_data = pd.DataFrame(np.full((6, 6), 'p', dtype=object))
+        
+        bordered = FileIO.add_water_border(map_data, border_size=0)
+        
+        assert bordered.shape == (6, 6)
+        assert (bordered == 'p').all().all()
+
+    def test_save_map_strips_border(self, dummy_display, tmp_path):
+        """Test that saving a map strips ocean borders."""
+        # Create map with ocean border (larger than MIN_MAP_SIZE)
+        map_data = pd.DataFrame(np.full((24, 24), 'o', dtype=object))
+        # Inner 20x20 area
+        for i in range(2, 22):
+            for j in range(2, 22):
+                map_data.iloc[i, j] = 'p'
+        map_data.iloc[3, 3] = 'h_1'
+        map_data.iloc[20, 20] = 'h_2'
+        
+        # Save the map
+        save_path = tmp_path / "test_strip.csv"
+        FileIO.save_map(map_data, str(save_path))
+        
+        # Load it back (without UI borders)
+        loaded = FileIO.load_map(str(save_path), for_ui=False)
+        
+        # Should be stripped to 20x20
+        assert loaded.shape == (20, 20)
+        # Check HQs are at correct positions after stripping
+        assert loaded.iloc[1, 1] == 'h_1'
+        assert loaded.iloc[18, 18] == 'h_2'
+
+    def test_load_map_for_ui(self, dummy_display, tmp_path):
+        """Test loading map with UI borders."""
+        # Create and save a map that's already at MIN_MAP_SIZE
+        map_data = pd.DataFrame(np.full((20, 20), 'p', dtype=object))
+        map_data.iloc[1, 1] = 'h_1'
+        map_data.iloc[18, 18] = 'h_2'
+        
+        save_path = tmp_path / "test_ui_load.csv"
+        # Save directly without borders
+        map_data.to_csv(save_path, header=False, index=False)
+        
+        # Load for UI (should add borders)
+        loaded_ui = FileIO.load_map(str(save_path), for_ui=True, border_size=2)
+        
+        # Should be 24x24 now (20 + 2*2)
+        assert loaded_ui.shape == (24, 24)
+        
+        # Check borders are ocean
+        assert all(loaded_ui.iloc[0, :] == 'o')
+        assert all(loaded_ui.iloc[-1, :] == 'o')
+        
+        # Check interior is offset correctly
+        assert loaded_ui.iloc[3, 3] == 'h_1'  # 1,1 + 2 offset
+        assert loaded_ui.iloc[20, 20] == 'h_2'  # 18,18 + 2 offset
+
+    def test_round_trip_save_load(self, dummy_display, tmp_path):
+        """Test that save and load preserve map content."""
+        # Create original map with borders (larger than MIN_MAP_SIZE)
+        original = pd.DataFrame(np.full((24, 24), 'o', dtype=object))
+        for i in range(2, 22):
+            for j in range(2, 22):
+                original.iloc[i, j] = 'p'
+        original.iloc[5, 5] = 'h_1'
+        original.iloc[20, 20] = 'h_2'
+        original.iloc[10, 10] = 'm'
+        original.iloc[12, 12] = 'w'
+        
+        # Save (will strip borders)
+        save_path = tmp_path / "test_round_trip.csv"
+        FileIO.save_map(original, str(save_path))
+        
+        # Load for UI (will add borders back)
+        loaded = FileIO.load_map(str(save_path), for_ui=True, border_size=2)
+        
+        # Should have same dimensions
+        assert loaded.shape == original.shape
+        
+        # Check critical tiles match
+        assert loaded.iloc[5, 5] == 'h_1'
+        assert loaded.iloc[20, 20] == 'h_2'
+        assert loaded.iloc[10, 10] == 'm'
+        assert loaded.iloc[12, 12] == 'w'

@@ -15,12 +15,14 @@ class FileIO:
     """Handles all file I/O operations for the game."""
 
     @staticmethod
-    def load_map(filepath):
+    def load_map(filepath, for_ui=False, border_size=2):
         """
         Load a map from a CSV file.
 
         Args:
             filepath: Path to the CSV map file
+            for_ui: If True, adds water borders for UI display (default: False)
+            border_size: Number of ocean border layers to add when for_ui=True (default: 2)
 
         Returns:
             pandas DataFrame containing the map data
@@ -48,7 +50,7 @@ class FileIO:
             # Reset index after dropping
             map_data = map_data.reset_index(drop=True)
 
-            # Ensure minimum size
+            # Ensure minimum size BEFORE adding UI borders
             height, width = map_data.shape
             if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
                 print(
@@ -58,6 +60,11 @@ class FileIO:
                 print("   Padding map to minimum size...")
                 map_data = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
 
+            # Add water borders if loading for UI (after ensuring minimum size)
+            if for_ui:
+                map_data = FileIO.add_water_border(map_data, border_size)
+
+            height, width = map_data.shape
             print(f"✅ Map loaded: {width}x{height}")
 
             return map_data
@@ -106,6 +113,83 @@ class FileIO:
             return padded
 
         return map_data
+
+    @staticmethod
+    def strip_water_border(map_data, min_size=6):
+        """
+        Strip ocean borders from a map iteratively until a non-ocean border is found
+        or minimum size is reached.
+
+        Args:
+            map_data: pandas DataFrame with map data
+            min_size: Minimum map size to preserve (default: 6)
+
+        Returns:
+            pandas DataFrame with ocean borders stripped
+        """
+        if map_data is None or map_data.empty:
+            return map_data
+
+        result = map_data.copy()
+
+        while True:
+            height, width = result.shape
+
+            # Stop if we've reached minimum size
+            if height <= min_size or width <= min_size:
+                break
+
+            # Check if all border tiles are ocean ('o')
+            top_row = result.iloc[0, :].values
+            bottom_row = result.iloc[-1, :].values
+            left_col = result.iloc[:, 0].values
+            right_col = result.iloc[:, -1].values
+
+            all_ocean = (
+                all(tile == 'o' for tile in top_row) and
+                all(tile == 'o' for tile in bottom_row) and
+                all(tile == 'o' for tile in left_col) and
+                all(tile == 'o' for tile in right_col)
+            )
+
+            if not all_ocean:
+                break
+
+            # Strip one layer of border
+            result = result.iloc[1:-1, 1:-1].reset_index(drop=True)
+            result.columns = range(result.shape[1])
+
+        return result
+
+    @staticmethod
+    def add_water_border(map_data, border_size=2):
+        """
+        Add ocean borders around a map for UI display.
+
+        Args:
+            map_data: pandas DataFrame with map data
+            border_size: Number of ocean border layers to add (default: 2)
+
+        Returns:
+            pandas DataFrame with ocean borders added
+        """
+        if map_data is None or map_data.empty or border_size <= 0:
+            return map_data
+
+        height, width = map_data.shape
+        new_height = height + 2 * border_size
+        new_width = width + 2 * border_size
+
+        # Create new map filled with ocean
+        bordered = pd.DataFrame(
+            np.full((new_height, new_width), 'o', dtype=object)
+        )
+
+        # Copy original data into center
+        bordered.iloc[border_size:border_size + height,
+                      border_size:border_size + width] = map_data.values
+
+        return bordered
 
     @staticmethod
     def generate_random_map(width, height, num_players=2):
@@ -358,6 +442,8 @@ class FileIO:
     def save_map(map_data, filepath):
         """
         Save a map to a CSV file.
+        
+        Ocean borders are automatically stripped before saving to reduce file size.
 
         Args:
             map_data: pandas DataFrame with map data
@@ -370,7 +456,10 @@ class FileIO:
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            map_data.to_csv(filepath, header=False, index=False)
+            # Strip ocean borders before saving
+            stripped_map = FileIO.strip_water_border(map_data, min_size=6)
+            
+            stripped_map.to_csv(filepath, header=False, index=False)
             print(f"✅ Map saved: {filepath}")
             return str(filepath)
 
