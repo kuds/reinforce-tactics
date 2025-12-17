@@ -63,8 +63,10 @@ class TestUnitCreationRestrictions:
         legal_actions = game_with_building.get_legal_actions(player=1)
         
         # Check that no action has HQ coordinates
-        hq_actions = [action for action in legal_actions['create_unit'] 
-                      if action['x'] == 0 and action['y'] == 0]
+        hq_actions = [
+            action for action in legal_actions['create_unit']
+            if action['x'] == 0 and action['y'] == 0
+        ]
         assert len(hq_actions) == 0, "HQ should not allow unit creation"
 
 
