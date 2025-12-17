@@ -82,12 +82,9 @@ class TestInputHandlerBotTurns:
         assert simple_bot.take_turn.call_count == 1, \
             f"Bot's take_turn should be called once, but was called {simple_bot.take_turn.call_count} times"
         
-        # The fix: end_turn should only be called once (by the bot internally)
-        # Before the fix: end_turn is called twice (once by bot, once by InputHandler)
+        # Verify end_turn is only called once (by the bot internally)
+        # Before the fix: end_turn was called twice (once by bot, once by InputHandler)
         # After the fix: end_turn is called once (only by bot)
-        # 
-        # Currently this test will FAIL with count=2 because InputHandler also calls it
-        # After removing the duplicate call, it should pass with count=1
         assert end_turn_call_count == 1, \
             f"end_turn should be called once (by bot only), but was called {end_turn_call_count} times. " \
             f"This indicates InputHandler is also calling end_turn(), which is a bug."
@@ -134,8 +131,9 @@ class TestInputHandlerBotTurns:
         assert bot1.take_turn.call_count == 1
         assert bot2.take_turn.call_count == 1
         
-        # After fix: end_turn should only be called by bots internally (2 times total)
-        # Before fix: would be called 2 times by InputHandler + 2 times by bots = 4 times
+        # Verify end_turn is called the correct number of times
+        # After fix: end_turn is called 2 times (once by each bot internally)
+        # Before fix: was called 4 times (2 by InputHandler + 2 by bots)
         assert mock_game.end_turn.call_count == 2, \
             f"end_turn should be called 2 times (once by each bot), but was called {mock_game.end_turn.call_count} times"
 
