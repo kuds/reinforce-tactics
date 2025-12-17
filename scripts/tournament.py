@@ -167,7 +167,7 @@ class EloRatingSystem:
 
         Args:
             filepath: Path to load ratings from
-        
+
         Note:
             When loading, initial_ratings is set to current ratings so that
             rating changes track from this load point forward, not from the
@@ -179,8 +179,8 @@ class EloRatingSystem:
         self.rating_history = data['rating_history']
         self.starting_elo = data.get('starting_elo', 1500)
         self.k_factor = data.get('k_factor', 32)
-        # Set initial ratings to current ratings when loading to track changes from this point
-        self.initial_ratings = {k: v for k, v in self.ratings.items()}
+        # Set initial ratings to current ratings when loading to track changes
+        self.initial_ratings = dict(self.ratings.items())
 
 
 class BotDescriptor:
@@ -212,11 +212,11 @@ class BotDescriptor:
         """
         if self.bot_type == 'simple':
             return SimpleBot(game_state, player)
-        elif self.bot_type == 'medium':
+        if self.bot_type == 'medium':
             return MediumBot(game_state, player)
-        elif self.bot_type == 'advanced':
+        if self.bot_type == 'advanced':
             return AdvancedBot(game_state, player)
-        elif self.bot_type == 'llm':
+        if self.bot_type == 'llm':
             bot_class = self.kwargs['bot_class']
             api_key = self.kwargs.get('api_key')
             log_conversations = self.kwargs.get('log_conversations', False)
@@ -226,12 +226,11 @@ class BotDescriptor:
                 log_conversations=log_conversations,
                 conversation_log_dir=conversation_log_dir
             )
-        elif self.bot_type == 'model':
+        if self.bot_type == 'model':
             from reinforcetactics.game.model_bot import ModelBot
             model_path = self.kwargs['model_path']
             return ModelBot(game_state, player, model_path=model_path)
-        else:
-            raise ValueError(f"Unknown bot type: {self.bot_type}")
+        raise ValueError(f"Unknown bot type: {self.bot_type}")
 
     def __repr__(self):
         return f"BotDescriptor(name={self.name}, type={self.bot_type})"
@@ -252,7 +251,8 @@ class TournamentRunner:
             output_dir: Directory for results and replays
             games_per_side: Number of games per side (total games = 2 * games_per_side)
             log_conversations: Enable conversation logging for LLM bots (default: False)
-            conversation_log_dir: Directory for conversation logs (default: output_dir/llm_conversations/)
+            conversation_log_dir: Directory for conversation logs
+                                  (default: output_dir/llm_conversations/)
             maps: List of map file paths to use (takes precedence over map_file)
             map_pool_mode: Map selection mode ('cycle', 'random', 'all')
         """
@@ -276,7 +276,9 @@ class TournamentRunner:
             self.conversation_log_dir = conversation_log_dir
         self.results = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0})
         self.matchup_results = []
-        self.per_map_stats = defaultdict(lambda: defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0}))
+        self.per_map_stats = defaultdict(
+            lambda: defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0})
+        )
         self.map_game_lengths = defaultdict(list)
         self.current_map_index = 0  # For cycling through maps
         self.elo_system = EloRatingSystem()
@@ -286,7 +288,9 @@ class TournamentRunner:
         self.replays_dir = self.output_dir / 'replays'
         self.replays_dir.mkdir(exist_ok=True)
 
-    def discover_bots(self, models_dir: Optional[str] = None, include_test_bots: bool = False) -> List[BotDescriptor]:
+    def discover_bots(
+        self, models_dir: Optional[str] = None, include_test_bots: bool = False
+    ) -> List[BotDescriptor]:
         """
         Discover all available bots.
 
@@ -302,10 +306,10 @@ class TournamentRunner:
         # Always include SimpleBot, MediumBot, and AdvancedBot
         bots.append(BotDescriptor('SimpleBot', 'simple'))
         logger.info("Added SimpleBot")
-        
+
         bots.append(BotDescriptor('MediumBot', 'medium'))
         logger.info("Added MediumBot")
-        
+
         bots.append(BotDescriptor('AdvancedBot', 'advanced'))
         logger.info("Added AdvancedBot")
 
@@ -403,7 +407,7 @@ class TournamentRunner:
         """Test if Anthropic API key is valid."""
         try:
             import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
+            anthropic.Anthropic(api_key=api_key)
             # Try to create a client - if the key format is invalid, it will fail
             # We can't easily test without making a real API call
             return True
@@ -478,12 +482,12 @@ class TournamentRunner:
             logger.warning(f"Failed to load model {model_path.name}: {e}")
             return False
 
-    def _select_map(self, matchup_idx: int, game_num: int) -> str:
+    def _select_map(self, _matchup_idx: int, game_num: int) -> str:
         """
         Select a map based on the configured map pool mode.
 
         Args:
-            matchup_idx: Index of current matchup
+            _matchup_idx: Index of current matchup (unused, kept for API)
             game_num: Game number within matchup
 
         Returns:
@@ -497,15 +501,14 @@ class TournamentRunner:
             map_file = self.maps[self.current_map_index % len(self.maps)]
             self.current_map_index += 1
             return map_file
-        elif self.map_pool_mode == 'random':
+        if self.map_pool_mode == 'random':
             # Random selection
             return random.choice(self.maps)
-        elif self.map_pool_mode == 'all':
+        if self.map_pool_mode == 'all':
             # This is handled differently in _run_matchup
             # For now, cycle through (will be overridden)
             return self.maps[(game_num - 1) % len(self.maps)]
-        else:
-            raise ValueError(f"Unknown map_pool_mode: {self.map_pool_mode}")
+        raise ValueError(f"Unknown map_pool_mode: {self.map_pool_mode}")
 
     def run_tournament(self, bots: List[BotDescriptor]) -> Dict[str, Any]:
         """
@@ -534,31 +537,34 @@ class TournamentRunner:
             for map_file in self.maps:
                 logger.info(f"  - {map_file}")
             logger.info(f"Map Pool Mode: {self.map_pool_mode}")
-        
+
         # Calculate total games based on map pool mode
         if self.map_pool_mode == 'all' and len(self.maps) > 1:
             games_per_matchup = self.games_per_side * 2 * len(self.maps)
         else:
             games_per_matchup = self.games_per_side * 2
-        
+
         logger.info(f"Games per matchup: {games_per_matchup}")
         if self.log_conversations:
-            logger.info(f"LLM Conversation Logging: ENABLED")
+            logger.info("LLM Conversation Logging: ENABLED")
             logger.info(f"Conversation Log Directory: {self.conversation_log_dir}")
-        logger.info(f"{'='*80}\n")
+        logger.info("%s\n", "=" * 80)
 
         # Generate all matchups (round-robin)
         matchups = []
-        for i in range(len(bots)):
+        for i, bot_i in enumerate(bots):
             for j in range(i + 1, len(bots)):
-                matchups.append((bots[i], bots[j]))
+                matchups.append((bot_i, bots[j]))
 
         logger.info(f"Total matchups: {len(matchups)}")
         logger.info(f"Total games: {len(matchups) * games_per_matchup}\n")
 
         # Run all matchups
         for matchup_idx, (bot1_desc, bot2_desc) in enumerate(matchups, 1):
-            logger.info(f"\n--- Matchup {matchup_idx}/{len(matchups)}: {bot1_desc.name} vs {bot2_desc.name} ---")
+            logger.info(
+                f"\n--- Matchup {matchup_idx}/{len(matchups)}: "
+                f"{bot1_desc.name} vs {bot2_desc.name} ---"
+            )
             self._run_matchup(bot1_desc, bot2_desc, matchup_idx)
 
         # Generate results
@@ -567,7 +573,9 @@ class TournamentRunner:
 
         return results
 
-    def _run_matchup(self, bot1_desc: BotDescriptor, bot2_desc: BotDescriptor, matchup_idx: int) -> None:
+    def _run_matchup(
+        self, bot1_desc: BotDescriptor, bot2_desc: BotDescriptor, matchup_idx: int
+    ) -> None:
         """
         Run a single matchup between two bots.
 
@@ -591,45 +599,84 @@ class TournamentRunner:
                 for game_num in range(self.games_per_side):
                     game_counter += 1
                     map_name = Path(map_file).name
-                    logger.info(f"  Game {game_counter}: {bot1_desc.name} (P1) vs {bot2_desc.name} (P2) on {map_name}")
-                    result = self._run_game(bot1_desc, bot2_desc, 1, 2, matchup_idx, game_counter, map_file)
+                    logger.info(
+                        f"  Game {game_counter}: {bot1_desc.name} (P1) "
+                        f"vs {bot2_desc.name} (P2) on {map_name}"
+                    )
+                    result = self._run_game(
+                        bot1_desc, bot2_desc, 1, 2, matchup_idx, game_counter, map_file
+                    )
                     matchup_results['games'].append(result)
-                    self._update_results(bot1_desc.name, bot2_desc.name, result['winner'], map_file)
-                
+                    self._update_results(
+                        bot1_desc.name, bot2_desc.name, result['winner'], map_file
+                    )
+
                 # Play games_per_side games with bot2 as player 1
                 for game_num in range(self.games_per_side):
                     game_counter += 1
                     map_name = Path(map_file).name
-                    logger.info(f"  Game {game_counter}: {bot2_desc.name} (P1) vs {bot1_desc.name} (P2) on {map_name}")
-                    result = self._run_game(bot2_desc, bot1_desc, 1, 2, matchup_idx, game_counter, map_file)
+                    logger.info(
+                        f"  Game {game_counter}: {bot2_desc.name} (P1) "
+                        f"vs {bot1_desc.name} (P2) on {map_name}"
+                    )
+                    result = self._run_game(
+                        bot2_desc, bot1_desc, 1, 2, matchup_idx, game_counter, map_file
+                    )
                     matchup_results['games'].append(result)
                     # Swap perspective for results
-                    winner = 2 if result['winner'] == 1 else (1 if result['winner'] == 2 else 0)
-                    self._update_results(bot1_desc.name, bot2_desc.name, winner, map_file)
+                    if result['winner'] == 1:
+                        winner = 2
+                    elif result['winner'] == 2:
+                        winner = 1
+                    else:
+                        winner = 0
+                    self._update_results(
+                        bot1_desc.name, bot2_desc.name, winner, map_file
+                    )
         else:
             # Standard mode: cycle or random
             # Play games_per_side games with bot1 as player 1
             for game_num in range(self.games_per_side):
                 map_file = self._select_map(matchup_idx, game_num + 1)
                 map_name = Path(map_file).name
-                logger.info(f"  Game {game_num + 1}/{self.games_per_side * 2}: "
-                           f"{bot1_desc.name} (P1) vs {bot2_desc.name} (P2) on {map_name}")
-                result = self._run_game(bot1_desc, bot2_desc, 1, 2, matchup_idx, game_num + 1, map_file)
+                logger.info(
+                    f"  Game {game_num + 1}/{self.games_per_side * 2}: "
+                    f"{bot1_desc.name} (P1) vs {bot2_desc.name} (P2) on {map_name}"
+                )
+                result = self._run_game(
+                    bot1_desc, bot2_desc, 1, 2, matchup_idx, game_num + 1, map_file
+                )
                 matchup_results['games'].append(result)
-                self._update_results(bot1_desc.name, bot2_desc.name, result['winner'], map_file)
+                self._update_results(
+                    bot1_desc.name, bot2_desc.name, result['winner'], map_file
+                )
 
             # Play games_per_side games with bot2 as player 1
             for game_num in range(self.games_per_side):
-                map_file = self._select_map(matchup_idx, game_num + self.games_per_side + 1)
+                map_file = self._select_map(
+                    matchup_idx, game_num + self.games_per_side + 1
+                )
                 map_name = Path(map_file).name
-                logger.info(f"  Game {game_num + self.games_per_side + 1}/{self.games_per_side * 2}: "
-                           f"{bot2_desc.name} (P1) vs {bot1_desc.name} (P2) on {map_name}")
-                result = self._run_game(bot2_desc, bot1_desc, 1, 2, matchup_idx,
-                                       game_num + self.games_per_side + 1, map_file)
+                game_idx = game_num + self.games_per_side + 1
+                logger.info(
+                    f"  Game {game_idx}/{self.games_per_side * 2}: "
+                    f"{bot2_desc.name} (P1) vs {bot1_desc.name} (P2) on {map_name}"
+                )
+                result = self._run_game(
+                    bot2_desc, bot1_desc, 1, 2, matchup_idx,
+                    game_num + self.games_per_side + 1, map_file
+                )
                 matchup_results['games'].append(result)
                 # Swap perspective for results
-                winner = 2 if result['winner'] == 1 else (1 if result['winner'] == 2 else 0)
-                self._update_results(bot1_desc.name, bot2_desc.name, winner, map_file)
+                if result['winner'] == 1:
+                    winner = 2
+                elif result['winner'] == 2:
+                    winner = 1
+                else:
+                    winner = 0
+                self._update_results(
+                    bot1_desc.name, bot2_desc.name, winner, map_file
+                )
 
         self.matchup_results.append(matchup_results)
 
@@ -654,7 +701,7 @@ class TournamentRunner:
         # Use provided map or default
         if map_file is None:
             map_file = self.map_file
-        
+
         # Load map and create game state
         map_data = FileIO.load_map(map_file)
         game_state = GameState(map_data, num_players=2)
@@ -702,7 +749,10 @@ class TournamentRunner:
 
             # Save replay with map name in filename
             map_basename = Path(map_file).stem
-            replay_filename = f"matchup{matchup_idx:03d}_game{game_num:02d}_{map_basename}_{bot1_desc.name}_vs_{bot2_desc.name}.json"
+            replay_filename = (
+                f"matchup{matchup_idx:03d}_game{game_num:02d}_{map_basename}_"
+                f"{bot1_desc.name}_vs_{bot2_desc.name}.json"
+            )
             replay_path = self.replays_dir / replay_filename
 
             game_info = {
@@ -791,12 +841,14 @@ class TournamentRunner:
             # Add Elo ratings and per-map stats
             elo = self.elo_system.get_rating(bot_name)
             elo_change = self.elo_system.get_rating_change(bot_name)
-            
+
             # Convert per-map stats to regular dict
             per_map_stats = {}
             if bot_name in self.per_map_stats:
-                per_map_stats = {map_name: dict(map_stats) 
-                                for map_name, map_stats in self.per_map_stats[bot_name].items()}
+                per_map_stats = {
+                    map_name: dict(map_stats)
+                    for map_name, map_stats in self.per_map_stats[bot_name].items()
+                }
 
             rankings.append({
                 'bot': bot_name,
@@ -818,19 +870,23 @@ class TournamentRunner:
         for map_file in self.maps:
             map_name = Path(map_file).name
             map_winners = defaultdict(int)
-            
+
             # Count wins per bot on this map
             for bot_name in self.per_map_stats:
                 if map_name in self.per_map_stats[bot_name]:
                     wins = self.per_map_stats[bot_name][map_name]['wins']
                     map_winners[bot_name] = wins
-            
+
             # Find best performer
             best_bot = max(map_winners.items(), key=lambda x: x[1])[0] if map_winners else 'N/A'
-            
+
             # Calculate average game length
-            avg_length = sum(self.map_game_lengths[map_name]) / len(self.map_game_lengths[map_name]) if self.map_game_lengths[map_name] else 0
-            
+            game_lengths = self.map_game_lengths[map_name]
+            if game_lengths:
+                avg_length = sum(game_lengths) / len(game_lengths)
+            else:
+                avg_length = 0
+
             per_map_summary[map_name] = {
                 'best_performer': best_bot,
                 'avg_game_length': round(avg_length, 1)
@@ -842,8 +898,10 @@ class TournamentRunner:
             'map_pool_mode': self.map_pool_mode,
             'games_per_side': self.games_per_side,
             'rankings': rankings,
-            'elo_history': {bot_name: [round(r, 0) for r in history] 
-                          for bot_name, history in self.elo_system.rating_history.items()},
+            'elo_history': {
+                bot_name: [round(r, 0) for r in history]
+                for bot_name, history in self.elo_system.rating_history.items()
+            },
             'per_map_summary': per_map_summary,
             'matchups': self.matchup_results
         }
@@ -875,7 +933,10 @@ class TournamentRunner:
         logger.info(f"\n{'='*84}")
         logger.info("TOURNAMENT RESULTS")
         logger.info(f"{'='*84}")
-        logger.info(f"{'Rank':<6}{'Bot':<20}{'Wins':<8}{'Losses':<8}{'Draws':<8}{'Win Rate':<10}{'Elo':<8}{'Δ Elo':<8}")
+        logger.info(
+            f"{'Rank':<6}{'Bot':<20}{'Wins':<8}{'Losses':<8}{'Draws':<8}"
+            f"{'Win Rate':<10}{'Elo':<8}{'Δ Elo':<8}"
+        )
         logger.info(f"{'-'*84}")
         for rank, ranking in enumerate(results['rankings'], 1):
             elo_change_str = f"{ranking['elo_change']:+.0f}"
@@ -886,13 +947,18 @@ class TournamentRunner:
 
         # Print per-map performance if multiple maps were used
         if len(self.maps) > 1 and 'per_map_summary' in results:
-            logger.info(f"\nPer-Map Performance:")
-            logger.info(f"{'-'*84}")
-            logger.info(f"{'Map':<30}{'Best Performer':<30}{'Avg Game Length':<24}")
-            logger.info(f"{'-'*84}")
+            logger.info("\nPer-Map Performance:")
+            logger.info("-" * 84)
+            logger.info(
+                f"{'Map':<30}{'Best Performer':<30}{'Avg Game Length':<24}"
+            )
+            logger.info("-" * 84)
             for map_name, summary in results['per_map_summary'].items():
-                logger.info(f"{map_name:<30}{summary['best_performer']:<30}{summary['avg_game_length']:.0f} turns")
-            logger.info(f"{'='*84}\n")
+                logger.info(
+                    f"{map_name:<30}{summary['best_performer']:<30}"
+                    f"{summary['avg_game_length']:.0f} turns"
+                )
+            logger.info("%s\n", "=" * 84)
         else:
             logger.info("")
 
