@@ -2,9 +2,21 @@
 
 Includes support for Latin accents, CJK characters, and symbols.
 """
+from pathlib import Path
 from typing import Dict, Optional
 
 import pygame
+
+# Path to bundled fonts directory
+FONTS_DIR = Path(__file__).parent.parent / "assets" / "fonts"
+
+# Bundled font files to look for (in priority order)
+# These fonts should support Latin extended + CJK characters
+BUNDLED_FONT_FILES = [
+    "NotoSansCJKsc-Regular.ttf",  # Noto Sans CJK Simplified Chinese (includes Latin)
+    "NotoSansCJK-Regular.ttc",     # Noto Sans CJK collection
+    "NotoSans-Regular.ttf",        # Noto Sans (Latin + extended)
+]
 
 # Priority list of fonts supporting comprehensive Unicode
 # Includes Latin, CJK, and symbols
@@ -43,6 +55,34 @@ CJK_FONT_CANDIDATES = [
 
 _font_cache: Dict[int, pygame.font.Font] = {}
 _available_fonts_cache: Optional[list] = None
+_bundled_font_path: Optional[Path] = None
+_bundled_font_checked: bool = False
+
+
+def _find_bundled_font() -> Optional[Path]:
+    """Find a bundled font file in the assets directory.
+
+    Returns:
+        Path to the bundled font file, or None if not found
+    """
+    global _bundled_font_path, _bundled_font_checked
+
+    if _bundled_font_checked:
+        return _bundled_font_path
+
+    _bundled_font_checked = True
+
+    if not FONTS_DIR.exists():
+        return None
+
+    # Check for each bundled font in priority order
+    for font_file in BUNDLED_FONT_FILES:
+        font_path = FONTS_DIR / font_file
+        if font_path.exists():
+            _bundled_font_path = font_path
+            return _bundled_font_path
+
+    return None
 
 
 def _get_available_fonts() -> list:
@@ -63,7 +103,10 @@ def get_font(size: int) -> pygame.font.Font:
     Get a font that supports comprehensive Unicode.
 
     Includes Latin accents, CJK characters, and symbols.
-    Selects a single font with the best comprehensive Unicode coverage.
+    Priority order:
+    1. Bundled font from assets/fonts directory (most reliable)
+    2. System fonts known to support CJK + Latin
+    3. Default pygame font (limited Unicode support)
 
     Args:
         size: Font size in points
@@ -87,7 +130,18 @@ def get_font(size: int) -> pygame.font.Font:
             # Font is invalid, remove from cache
             del _font_cache[size]
 
-    # Find the best available font with comprehensive Unicode support
+    # Priority 1: Try to use bundled font (most reliable for Unicode)
+    bundled_font_path = _find_bundled_font()
+    if bundled_font_path:
+        try:
+            font = pygame.font.Font(str(bundled_font_path), size)
+            _font_cache[size] = font
+            return font
+        except (pygame.error, OSError, FileNotFoundError):
+            # Bundled font loading failed, try system fonts
+            pass
+
+    # Priority 2: Find the best available system font with Unicode support
     try:
         # Check which fonts are available (cached)
         available_fonts_lower = _get_available_fonts()
@@ -104,7 +158,97 @@ def get_font(size: int) -> pygame.font.Font:
         # Font loading failed, will fallback to default
         pass
 
-    # Fallback to default
+    # Priority 3: Fallback to default (WARNING: limited Unicode support)
     font = pygame.font.Font(None, size)
     _font_cache[size] = font
     return font
+
+
+def get_font_info() -> dict:
+    """
+    Get information about the current font configuration.
+
+    Returns:
+        Dictionary with font status information:
+        - bundled_font: Path to bundled font if available, None otherwise
+        - using_bundled: True if bundled font will be used
+        - system_fonts_available: List of available CJK-capable system fonts
+        - unicode_support: 'full', 'partial', or 'limited'
+        - recommendation: String with setup recommendation if needed
+    """
+    info = {
+        "bundled_font": None,
+        "using_bundled": False,
+        "system_fonts_available": [],
+        "unicode_support": "limited",
+        "recommendation": None,
+    }
+
+    # Check for bundled font
+    bundled = _find_bundled_font()
+    if bundled:
+        info["bundled_font"] = str(bundled)
+        info["using_bundled"] = True
+        info["unicode_support"] = "full"
+        return info
+
+    # Check for system fonts
+    if not pygame.font.get_init():
+        pygame.font.init()
+
+    available_fonts_lower = _get_available_fonts()
+    for candidate in CJK_FONT_CANDIDATES:
+        candidate_normalized = candidate.lower().replace(" ", "")
+        if candidate_normalized in available_fonts_lower:
+            info["system_fonts_available"].append(candidate)
+
+    if info["system_fonts_available"]:
+        # Check if any are CJK-capable (not just Latin)
+        cjk_fonts = [
+            "Arial Unicode MS", "Noto Sans CJK", "Noto Sans CJK SC",
+            "Noto Sans CJK JP", "Noto Sans CJK KR", "Microsoft YaHei",
+            "Malgun Gothic", "PingFang SC", "PingFang TC",
+            "Apple SD Gothic Neo", "Hiragino Sans"
+        ]
+        has_cjk = any(
+            f.lower().replace(" ", "") in [c.lower().replace(" ", "") for c in cjk_fonts]
+            for f in info["system_fonts_available"]
+        )
+        if has_cjk:
+            info["unicode_support"] = "full"
+        else:
+            info["unicode_support"] = "partial"
+            info["recommendation"] = (
+                "System fonts support Latin characters but may not render "
+                "Chinese/Korean text. Consider installing a Noto Sans CJK font."
+            )
+    else:
+        info["unicode_support"] = "limited"
+        info["recommendation"] = (
+            "No Unicode-capable fonts found. Special characters (French accents, "
+            "Chinese, Korean) may not render correctly. "
+            "To fix this, download NotoSansCJKsc-Regular.ttf and place it in:\n"
+            f"  {FONTS_DIR}\n"
+            "Download from: https://fonts.google.com/noto/specimen/Noto+Sans+SC"
+        )
+
+    return info
+
+
+def check_font_support() -> bool:
+    """
+    Check if the current font configuration supports all game languages.
+
+    Returns:
+        True if full Unicode support is available, False otherwise.
+        Prints a warning message if support is limited.
+    """
+    info = get_font_info()
+
+    if info["unicode_support"] == "full":
+        return True
+
+    if info["recommendation"]:
+        print(f"⚠️  Font Warning: {info['recommendation']}")
+
+    return False
