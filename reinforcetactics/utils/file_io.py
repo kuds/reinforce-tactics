@@ -117,8 +117,13 @@ class FileIO:
     @staticmethod
     def strip_water_border(map_data, min_size=MIN_STRIP_SIZE):
         """
-        Strip ocean borders from a map iteratively until a non-ocean border is found
+        Strip ocean borders from a map by removing full-ocean rows/columns
+        from each side independently until a non-ocean row/column is found
         or minimum size is reached.
+
+        This handles off-center maps by stripping each side based on how many
+        consecutive ocean rows/columns exist on that side, rather than requiring
+        all four sides to have ocean borders before stripping.
 
         Args:
             map_data: pandas DataFrame with map data
@@ -131,32 +136,82 @@ class FileIO:
             return map_data
 
         result = map_data.copy()
+        height, width = result.shape
 
-        while True:
-            height, width = result.shape
-
-            # Stop if we've reached minimum size
-            if height <= min_size or width <= min_size:
+        # Count consecutive ocean rows from top
+        top_strip = 0
+        for i in range(height):
+            if all(tile == 'o' for tile in result.iloc[i, :].values):
+                top_strip += 1
+            else:
                 break
 
-            # Check if all border tiles are ocean ('o')
-            top_row = result.iloc[0, :].values
-            bottom_row = result.iloc[-1, :].values
-            left_col = result.iloc[:, 0].values
-            right_col = result.iloc[:, -1].values
-
-            all_ocean = (
-                all(tile == 'o' for tile in top_row) and
-                all(tile == 'o' for tile in bottom_row) and
-                all(tile == 'o' for tile in left_col) and
-                all(tile == 'o' for tile in right_col)
-            )
-
-            if not all_ocean:
+        # Count consecutive ocean rows from bottom
+        bottom_strip = 0
+        for i in range(height - 1, -1, -1):
+            if all(tile == 'o' for tile in result.iloc[i, :].values):
+                bottom_strip += 1
+            else:
                 break
 
-            # Strip one layer of border
-            result = result.iloc[1:-1, 1:-1].reset_index(drop=True)
+        # Count consecutive ocean columns from left
+        left_strip = 0
+        for j in range(width):
+            if all(tile == 'o' for tile in result.iloc[:, j].values):
+                left_strip += 1
+            else:
+                break
+
+        # Count consecutive ocean columns from right
+        right_strip = 0
+        for j in range(width - 1, -1, -1):
+            if all(tile == 'o' for tile in result.iloc[:, j].values):
+                right_strip += 1
+            else:
+                break
+
+        # Calculate how much we can actually strip while respecting min_size
+        max_vertical_strip = max(0, height - min_size)
+        max_horizontal_strip = max(0, width - min_size)
+
+        # Limit strips to respect minimum size
+        total_vertical = top_strip + bottom_strip
+        total_horizontal = left_strip + right_strip
+
+        if total_vertical > max_vertical_strip:
+            # Scale down proportionally if we would go below min_size
+            if total_vertical > 0:
+                scale = max_vertical_strip / total_vertical
+                # Use round() to minimize leftover ocean borders
+                top_strip = round(top_strip * scale)
+                bottom_strip = round(bottom_strip * scale)
+                # Ensure we don't exceed max by adjusting the larger value
+                while top_strip + bottom_strip > max_vertical_strip:
+                    if top_strip >= bottom_strip:
+                        top_strip -= 1
+                    else:
+                        bottom_strip -= 1
+
+        if total_horizontal > max_horizontal_strip:
+            # Scale down proportionally if we would go below min_size
+            if total_horizontal > 0:
+                scale = max_horizontal_strip / total_horizontal
+                # Use round() to minimize leftover ocean borders
+                left_strip = round(left_strip * scale)
+                right_strip = round(right_strip * scale)
+                # Ensure we don't exceed max by adjusting the larger value
+                while left_strip + right_strip > max_horizontal_strip:
+                    if left_strip >= right_strip:
+                        left_strip -= 1
+                    else:
+                        right_strip -= 1
+
+        # Apply the strips
+        if top_strip > 0 or bottom_strip > 0 or left_strip > 0 or right_strip > 0:
+            row_end = height - bottom_strip if bottom_strip > 0 else height
+            col_end = width - right_strip if right_strip > 0 else width
+            result = result.iloc[top_strip:row_end, left_strip:col_end]
+            result = result.reset_index(drop=True)
             result.columns = range(result.shape[1])
 
         return result
