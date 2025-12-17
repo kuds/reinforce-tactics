@@ -22,17 +22,16 @@ class TestMapPreviewGenerator(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.generator = MapPreviewGenerator()
-        self.test_map_path = "maps/1v1/6x6_beginner.csv"
+        self.test_map_path = "maps/1v1/beginner.csv"
 
     def test_format_display_name(self):
         """Test display name formatting."""
         test_cases = [
-            ("6x6_beginner.csv", "6×6 Beginner"),
-            ("10x10_easy.csv", "10×10 Easy"),
-            ("14x14_medium.csv", "14×14 Medium"),
-            ("24x24_hard.csv", "24×24 Hard"),
-            ("32x32_expert.csv", "32×32 Expert"),
-            ("10x10_forest_battle.csv", "10×10 Forest Battle"),
+            ("beginner.csv", "Beginner"),
+            ("center_mountains.csv", "Center Mountains"),
+            ("corner_points.csv", "Corner Points"),
+            ("difficult_terrain.csv", "Difficult Terrain"),
+            ("funnel_point.csv", "Funnel Point"),
         ]
 
         for filename, expected in test_cases:
@@ -69,8 +68,8 @@ class TestMapPreviewGenerator(unittest.TestCase):
         self.assertIn('terrain_breakdown', metadata)
         self.assertIn('difficulty', metadata)
 
-        # For 6x6_beginner map
-        self.assertEqual(metadata['name'], "6×6 Beginner")
+        # For beginner map
+        self.assertEqual(metadata['name'], "Beginner")
         self.assertGreater(metadata['width'], 0)
         self.assertGreater(metadata['height'], 0)
         self.assertGreater(metadata['player_count'], 0)

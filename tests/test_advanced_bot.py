@@ -216,7 +216,7 @@ class TestTournamentAdvancedBot:
         from scripts.tournament import TournamentRunner
         
         runner = TournamentRunner(
-            map_file='maps/1v1/6x6_beginner.csv',
+            map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=1
         )
@@ -231,7 +231,7 @@ class TestTournamentAdvancedBot:
         """Test BotDescriptor can create AdvancedBot."""
         from reinforcetactics.utils.file_io import FileIO
         
-        map_data = FileIO.load_map('maps/1v1/6x6_beginner.csv')
+        map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game_state = GameState(map_data, num_players=2)
         
         descriptor = BotDescriptor('AdvancedBot', 'advanced')
