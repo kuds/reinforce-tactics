@@ -378,10 +378,12 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     time.sleep(wait_time)
                 else:
                     logger.error("Max retries reached. Ending turn.")
+                    self.game_state.end_turn()
                     return
 
         if not response_text:
             logger.error("No response from LLM. Ending turn.")
+            self.game_state.end_turn()
             return
 
         # Store conversation in history if stateful mode is enabled
@@ -394,6 +396,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         # Parse and execute actions
         self._execute_actions(response_text)
+
+        # End turn (advance game state to next player, collect income, etc.)
+        self.game_state.end_turn()
 
     def _serialize_game_state(self) -> Dict[str, Any]:
         """
