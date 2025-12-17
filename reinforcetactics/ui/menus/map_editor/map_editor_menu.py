@@ -107,7 +107,7 @@ class MapEditorMenu(Menu):
             return None  # User cancelled or selected random
         
         # Load the map
-        map_data = FileIO.load_map(selected_map)
+        map_data = FileIO.load_map(selected_map, for_ui=True, border_size=2)
         if map_data is None:
             print(f"Failed to load map: {selected_map}")
             return None

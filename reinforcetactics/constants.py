@@ -37,6 +37,7 @@ class TileType(Enum):
 TILE_SIZE = 32
 FPS = 60
 MIN_MAP_SIZE = 20
+MIN_STRIP_SIZE = 6  # Minimum size to preserve when stripping water borders
 
 # Tile type colors (fallback when images aren't available)
 # Made more distinct and vibrant

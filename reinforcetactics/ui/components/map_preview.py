@@ -75,7 +75,7 @@ class MapPreviewGenerator:
             return preview, metadata
 
         # Load map data
-        map_data = FileIO.load_map(map_path)
+        map_data = FileIO.load_map(map_path, for_ui=True, border_size=2)
         if map_data is None:
             return None, {}
 
