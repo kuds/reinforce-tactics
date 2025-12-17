@@ -200,7 +200,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             map_file_used = None
         else:
             print(f"Loading map: {selected_map}")
-            map_data = FileIO.load_map(selected_map)
+            map_data = FileIO.load_map(selected_map, for_ui=True, border_size=2)
             map_file_used = selected_map
 
         if map_data is None:
@@ -269,7 +269,7 @@ def load_saved_game():
     try:
         # Load map
         if 'map_file' in save_data:
-            map_data = FileIO.load_map(save_data['map_file'])
+            map_data = FileIO.load_map(save_data['map_file'], for_ui=True, border_size=2)
         else:
             print("⚠️  Map file not in save, reconstructing from tiles...")
             map_data = FileIO.generate_random_map(
