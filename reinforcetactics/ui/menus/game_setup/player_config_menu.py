@@ -230,7 +230,8 @@ class PlayerConfigMenu:
                             config = self.player_configs[player_idx]
                             if config['type'] == 'computer':
                                 # Build list of available bot types
-                                bot_types = ['SimpleBot']  # SimpleBot is always available
+                                # All built-in bots are always available
+                                bot_types = ['SimpleBot', 'MediumBot', 'AdvancedBot']
                                 for bot_name, is_available in self.available_llm_bots.items():
                                     if is_available:
                                         bot_types.append(bot_name)
@@ -354,7 +355,9 @@ class PlayerConfigMenu:
                 bot_type = config.get('bot_type', 'SimpleBot')
                 # Get display text for bot type
                 bot_display_names = {
-                    'SimpleBot': 'SimpleBot',
+                    'SimpleBot': 'Simple Bot',
+                    'MediumBot': 'Medium Bot',
+                    'AdvancedBot': 'Advanced Bot',
                     'OpenAIBot': 'OpenAI (GPT)',
                     'ClaudeBot': 'Claude',
                     'GeminiBot': 'Gemini',
