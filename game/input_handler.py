@@ -355,6 +355,6 @@ class InputHandler:
             current_bot = self.bots[self.game.current_player]
             print(f"Bot (Player {self.game.current_player}) is thinking...")
             current_bot.take_turn()
-            self.game.end_turn()
+            # Note: Bots call end_turn() internally, so we don't call it here
             bot_turn_count += 1
             print(f"Bot finished. Player {self.game.current_player}'s turn\n")
