@@ -182,15 +182,29 @@ class FileIO:
             # Scale down proportionally if we would go below min_size
             if total_vertical > 0:
                 scale = max_vertical_strip / total_vertical
-                top_strip = int(top_strip * scale)
-                bottom_strip = int(bottom_strip * scale)
+                # Use round() to minimize leftover ocean borders
+                top_strip = round(top_strip * scale)
+                bottom_strip = round(bottom_strip * scale)
+                # Ensure we don't exceed max by adjusting the larger value
+                while top_strip + bottom_strip > max_vertical_strip:
+                    if top_strip >= bottom_strip:
+                        top_strip -= 1
+                    else:
+                        bottom_strip -= 1
 
         if total_horizontal > max_horizontal_strip:
             # Scale down proportionally if we would go below min_size
             if total_horizontal > 0:
                 scale = max_horizontal_strip / total_horizontal
-                left_strip = int(left_strip * scale)
-                right_strip = int(right_strip * scale)
+                # Use round() to minimize leftover ocean borders
+                left_strip = round(left_strip * scale)
+                right_strip = round(right_strip * scale)
+                # Ensure we don't exceed max by adjusting the larger value
+                while left_strip + right_strip > max_horizontal_strip:
+                    if left_strip >= right_strip:
+                        left_strip -= 1
+                    else:
+                        right_strip -= 1
 
         # Apply the strips
         if top_strip > 0 or bottom_strip > 0 or left_strip > 0 or right_strip > 0:
