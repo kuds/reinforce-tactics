@@ -222,7 +222,7 @@ class GameState:
             defeated_player = target.player
             self.units.remove(target)
             self._invalidate_cache()
-            
+
             # Check if defeated player has any remaining units
             remaining_units = [u for u in self.units if u.player == defeated_player]
             if len(remaining_units) == 0:
@@ -240,7 +240,7 @@ class GameState:
             defeated_player = attacker.player
             self.units.remove(attacker)
             self._invalidate_cache()
-            
+
             # Check if defeated player has any remaining units
             remaining_units = [u for u in self.units if u.player == defeated_player]
             if len(remaining_units) == 0:

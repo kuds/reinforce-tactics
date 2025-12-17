@@ -48,7 +48,7 @@ class TestModelBot:
     def test_modelbot_with_mock_model(self):
         """Test ModelBot with a mocked SB3 model."""
         try:
-            import stable_baselines3
+            import stable_baselines3  # pylint: disable=unused-import
         except ImportError:
             pytest.skip("stable-baselines3 not installed")
 
@@ -182,7 +182,7 @@ class TestTournamentSystem:
         from tournament import BotDescriptor
 
         # Mock LLM bot class
-        class MockLLMBot:
+        class MockLLMBot:  # pylint: disable=missing-class-docstring
             def __init__(self, game_state, player, api_key=None,
                         log_conversations=False, conversation_log_dir=None):
                 self.game_state = game_state
@@ -246,7 +246,7 @@ class TestTournamentSystem:
         sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
         from tournament import TournamentRunner, BotDescriptor
 
-        runner = TournamentRunner(
+        _ = TournamentRunner(
             map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=1
@@ -261,9 +261,9 @@ class TestTournamentSystem:
 
         # Generate matchups (should be 3 choose 2 = 3 matchups)
         matchups = []
-        for i in range(len(bots)):
-            for j in range(i + 1, len(bots)):
-                matchups.append((bots[i], bots[j]))
+        for i, bot_i in enumerate(bots):
+            for bot_j in bots[i + 1:]:
+                matchups.append((bot_i, bot_j))
 
         assert len(matchups) == 3
         assert (bots[0], bots[1]) in matchups
@@ -465,7 +465,7 @@ class TestEloRatingSystem:
 
         elo = EloRatingSystem()
         elo.initialize_bot('TestBot')
-        
+
         assert elo.get_rating('TestBot') == 1500.0
         assert elo.get_rating_change('TestBot') == 0.0
         assert len(elo.rating_history['TestBot']) == 1
@@ -490,7 +490,7 @@ class TestEloRatingSystem:
         # Higher rated player should have higher expected score
         higher_expected = elo.calculate_expected_score(1600, 1500)
         lower_expected = elo.calculate_expected_score(1500, 1600)
-        
+
         assert higher_expected > 0.5
         assert lower_expected < 0.5
         assert abs(higher_expected + lower_expected - 1.0) < 0.001
@@ -504,13 +504,13 @@ class TestEloRatingSystem:
         elo = EloRatingSystem(k_factor=32)
         elo.initialize_bot('Winner')
         elo.initialize_bot('Loser')
-        
+
         # Winner wins against Loser
         elo.update_ratings('Winner', 'Loser', result=1)
-        
+
         winner_rating = elo.get_rating('Winner')
         loser_rating = elo.get_rating('Loser')
-        
+
         # Winner should gain points, loser should lose points
         assert winner_rating > 1500
         assert loser_rating < 1500
@@ -526,10 +526,10 @@ class TestEloRatingSystem:
         elo = EloRatingSystem(k_factor=32)
         elo.initialize_bot('Bot1')
         elo.initialize_bot('Bot2')
-        
+
         # Draw
         elo.update_ratings('Bot1', 'Bot2', result=0)
-        
+
         # With equal starting ratings, draw should not change ratings
         assert abs(elo.get_rating('Bot1') - 1500) < 0.001
         assert abs(elo.get_rating('Bot2') - 1500) < 0.001
@@ -543,16 +543,16 @@ class TestEloRatingSystem:
         elo = EloRatingSystem()
         elo.initialize_bot('Bot1')
         elo.initialize_bot('Bot2')
-        
+
         # Play multiple games
         elo.update_ratings('Bot1', 'Bot2', result=1)  # Bot1 wins
         elo.update_ratings('Bot1', 'Bot2', result=1)  # Bot1 wins again
         elo.update_ratings('Bot1', 'Bot2', result=2)  # Bot2 wins
-        
+
         # History should have 4 entries (initial + 3 games)
         assert len(elo.rating_history['Bot1']) == 4
         assert len(elo.rating_history['Bot2']) == 4
-        
+
         # Ratings should be increasing for Bot1 (won first 2)
         assert elo.rating_history['Bot1'][1] > elo.rating_history['Bot1'][0]
         assert elo.rating_history['Bot1'][2] > elo.rating_history['Bot1'][1]
@@ -713,5 +713,3 @@ class TestMultiMapTournament:
         # Check Elo history
         assert 'Bot1' in results['elo_history']
         assert 'Bot2' in results['elo_history']
-
-

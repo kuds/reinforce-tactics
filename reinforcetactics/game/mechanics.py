@@ -40,11 +40,11 @@ class GameMechanics:
                 # If this is the final destination, block all units
                 if is_destination:
                     return False
-                
+
                 # For pathfinding, allow passing through friendly units
                 if moving_unit is not None and unit.player == moving_unit.player:
                     continue  # Allow passing through friendly units
-                
+
                 # Block enemy units or if no moving_unit specified (legacy behavior)
                 return False
 
@@ -82,23 +82,23 @@ class GameMechanics:
             List of enemy units within attack range
         """
         attackable_enemies = []
-        
+
         # Check if unit is on a mountain (for Archer range bonus)
         on_mountain = False
         if grid:
             tile = grid.get_tile(unit.x, unit.y)
             on_mountain = tile.type == 'm'
-        
+
         # Get the unit's attack range
         min_range, max_range = unit.get_attack_range(on_mountain)
-        
+
         # Check all enemies
         for enemy in units:
             if enemy.player != unit.player and enemy.health > 0:
                 distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
                 if min_range <= distance <= max_range:
                     attackable_enemies.append(enemy)
-        
+
         return attackable_enemies
 
     @staticmethod

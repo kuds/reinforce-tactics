@@ -21,7 +21,13 @@ disable=
     import-outside-toplevel,
     broad-exception-caught,
     inconsistent-return-statements,
-    possibly-used-before-assignment
+    possibly-used-before-assignment,
+    protected-access,
+    redefined-outer-name,
+    too-few-public-methods,
+    broad-exception-raised,
+    missing-class-docstring,
+    unused-argument
 
 [DESIGN]
 # Relax some design constraints

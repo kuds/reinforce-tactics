@@ -552,11 +552,11 @@ class TestConversationLogging:
     def test_auto_generated_session_id(self, simple_game, test_bot_class):
         """Test that session ID is auto-generated if not provided."""
         bot = test_bot_class(simple_game, player=2, api_key="test-key")
-        
+
         # Session ID should be auto-generated
         assert bot.game_session_id is not None
         assert len(bot.game_session_id) > 0
-        
+
         # Should have format: YYYYMMDD_HHMMSS_{random}
         parts = bot.game_session_id.split('_')
         assert len(parts) == 3
@@ -782,7 +782,7 @@ class TestStatefulConversation:
         bot = test_bot_class(simple_game, player=2, api_key="test-key", stateful=False)
 
         # Take 3 turns
-        for i in range(3):
+        for _ in range(3):
             bot.take_turn()
             simple_game.turn_number += 1
 
@@ -807,7 +807,7 @@ class TestStatefulConversation:
 
         # In stateful mode, history should accumulate (2 messages per turn: user + assistant)
         assert len(bot.conversation_history) == 6  # 3 turns * 2 messages
-        
+
         # Verify the pattern: user, assistant, user, assistant, ...
         for i in range(0, 6, 2):
             assert bot.conversation_history[i]['role'] == 'user'
@@ -846,15 +846,15 @@ class TestStatefulConversation:
 
         # Check that history has content
         assert len(bot.conversation_history) == 4
-        
+
         # First user message should have game state
         assert 'Current Game State' in bot.conversation_history[0]['content']
-        
+
         # First assistant message should have reasoning
         assert 'Turn 1' in bot.conversation_history[1]['content']
-        
+
         # Second user message should have game state
         assert 'Current Game State' in bot.conversation_history[2]['content']
-        
+
         # Second assistant message should have reasoning
         assert 'Turn 2' in bot.conversation_history[3]['content']

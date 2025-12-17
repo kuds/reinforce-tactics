@@ -46,33 +46,33 @@ class MapEditorMenu(Menu):
         dialog = NewMapDialog(self.screen)
         result = dialog.run()
         pygame.event.clear()
-        
+
         if not result:
             return None  # User cancelled
-        
+
         # Create empty map with specified dimensions
         width = result['width']
         height = result['height']
         num_players = result['num_players']
-        
+
         # Create map filled with ocean tiles
         map_data = pd.DataFrame(
             np.full((height, width), 'o', dtype=object)
         )
-        
+
         # Place headquarters for each player in corners
         if num_players >= 1:
             map_data.iloc[1, 1] = 'h_1'  # Player 1 HQ (top-left)
-        
+
         if num_players >= 2:
             map_data.iloc[height-2, width-2] = 'h_2'  # Player 2 HQ (bottom-right)
-        
+
         if num_players >= 3:
             map_data.iloc[1, width-2] = 'h_3'  # Player 3 HQ (top-right)
-        
+
         if num_players >= 4:
             map_data.iloc[height-2, 1] = 'h_4'  # Player 4 HQ (bottom-left)
-        
+
         # Launch editor
         editor = MapEditor(
             self.screen,
@@ -82,7 +82,7 @@ class MapEditorMenu(Menu):
         )
         editor_result = editor.run()
         pygame.event.clear()
-        
+
         return editor_result
 
     def _edit_map(self) -> Optional[Dict[str, Any]]:
@@ -96,25 +96,25 @@ class MapEditorMenu(Menu):
         map_menu_1v1 = MapSelectionMenu(self.screen, game_mode="1v1")
         selected_map = map_menu_1v1.run()
         pygame.event.clear()
-        
+
         if not selected_map:
             # Try 2v2 maps if user cancelled 1v1
             map_menu_2v2 = MapSelectionMenu(self.screen, game_mode="2v2")
             selected_map = map_menu_2v2.run()
             pygame.event.clear()
-        
+
         if not selected_map or selected_map == "random":
             return None  # User cancelled or selected random
-        
+
         # Load the map
         map_data = FileIO.load_map(selected_map, for_ui=True, border_size=2)
         if map_data is None:
             print(f"Failed to load map: {selected_map}")
             return None
-        
+
         # Detect number of players
         num_players = self._detect_num_players(map_data)
-        
+
         # Launch editor
         editor = MapEditor(
             self.screen,
@@ -124,7 +124,7 @@ class MapEditorMenu(Menu):
         )
         editor_result = editor.run()
         pygame.event.clear()
-        
+
         return editor_result
 
     def _detect_num_players(self, map_data: pd.DataFrame) -> int:
@@ -139,7 +139,7 @@ class MapEditorMenu(Menu):
         """
         # Count unique player numbers in headquarters
         max_player = 0
-        
+
         for row in range(map_data.shape[0]):
             for col in range(map_data.shape[1]):
                 cell = str(map_data.iloc[row, col])
@@ -148,7 +148,7 @@ class MapEditorMenu(Menu):
                     if len(parts) == 2 and parts[1].isdigit():
                         player_num = int(parts[1])
                         max_player = max(max_player, player_num)
-        
+
         # Default to 2 if no headquarters found
         return max(2, max_player)
 
@@ -161,25 +161,25 @@ class MapEditorMenu(Menu):
         """
         result = None
         clock = pygame.time.Clock()
-        
+
         # Populate option_rects before event loop for click detection
         self._populate_option_rects()
-        
+
         # Clear any residual events AFTER option_rects are populated
         pygame.event.clear()
-        
+
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     import sys
                     sys.exit()
-                
+
                 result = self.handle_input(event)
                 if result is not None:
                     return result
-            
+
             self.draw()
             clock.tick(30)
-        
+
         return result

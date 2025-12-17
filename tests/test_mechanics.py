@@ -61,7 +61,7 @@ class TestMovement:
         moving_unit = Unit('W', 3, 3, 1)
         friendly_unit = Unit('M', 5, 5, 1)  # Same player
         units = [moving_unit, friendly_unit]
-        
+
         # During pathfinding (is_destination=False), should allow passing through friendly
         result = GameMechanics.can_move_to_position(
             5, 5, simple_grid, units, moving_unit=moving_unit, is_destination=False
@@ -73,7 +73,7 @@ class TestMovement:
         moving_unit = Unit('W', 3, 3, 1)
         friendly_unit = Unit('M', 5, 5, 1)  # Same player
         units = [moving_unit, friendly_unit]
-        
+
         # As final destination (is_destination=True), should block friendly units
         result = GameMechanics.can_move_to_position(
             5, 5, simple_grid, units, moving_unit=moving_unit, is_destination=True
@@ -85,7 +85,7 @@ class TestMovement:
         moving_unit = Unit('W', 3, 3, 1)
         enemy_unit = Unit('M', 5, 5, 2)  # Different player
         units = [moving_unit, enemy_unit]
-        
+
         # During pathfinding, should block enemy units
         result = GameMechanics.can_move_to_position(
             5, 5, simple_grid, units, moving_unit=moving_unit, is_destination=False
@@ -97,7 +97,7 @@ class TestMovement:
         moving_unit = Unit('W', 3, 3, 1)
         enemy_unit = Unit('M', 5, 5, 2)  # Different player
         units = [moving_unit, enemy_unit]
-        
+
         # As final destination, should block enemy units
         result = GameMechanics.can_move_to_position(
             5, 5, simple_grid, units, moving_unit=moving_unit, is_destination=True
@@ -109,11 +109,11 @@ class TestMovement:
         # Create a unit at (2, 2) with movement range 3
         moving_unit = Unit('W', 2, 2, 1)
         moving_unit.movement_range = 3
-        
+
         # Place a friendly unit at (3, 2) blocking the direct path
         friendly_unit = Unit('M', 3, 2, 1)  # Same player
         units = [moving_unit, friendly_unit]
-        
+
         # Get reachable positions - should be able to reach (4, 2) and beyond
         reachable = moving_unit.get_reachable_positions(
             simple_grid.width,
@@ -122,24 +122,24 @@ class TestMovement:
                 x, y, simple_grid, units, moving_unit=moving_unit, is_destination=False
             )
         )
-        
+
         # Should be able to reach (4, 2) by passing through (3, 2)
         assert (4, 2) in reachable
         # Should be able to reach (5, 2) with movement 3
         assert (5, 2) in reachable
         # But should NOT include the friendly unit's position (3, 2) as reachable destination
         # because we check is_destination=True in game logic
-        
+
     def test_pathfinding_blocked_by_enemy_unit(self, simple_grid):
         """Test that pathfinding cannot reach tiles beyond an enemy unit."""
         # Create a unit at (2, 2) with movement range 3
         moving_unit = Unit('W', 2, 2, 1)
         moving_unit.movement_range = 3
-        
+
         # Place an enemy unit at (3, 2) blocking the path
         enemy_unit = Unit('M', 3, 2, 2)  # Different player
         units = [moving_unit, enemy_unit]
-        
+
         # Get reachable positions - should NOT be able to reach (4, 2) through enemy
         reachable = moving_unit.get_reachable_positions(
             simple_grid.width,
@@ -148,7 +148,7 @@ class TestMovement:
                 x, y, simple_grid, units, moving_unit=moving_unit, is_destination=False
             )
         )
-        
+
         # Should NOT be able to reach (4, 2) because enemy blocks at (3, 2)
         assert (4, 2) not in reachable
         # Should be able to reach (2, 3) going around

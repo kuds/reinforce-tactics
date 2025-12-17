@@ -82,7 +82,7 @@ class TestMediumBotPurchasing:
         bot.purchase_units()
 
         final_gold = simple_game.player_gold[2]
-        
+
         # Should have purchased something
         assert final_gold <= initial_gold
 
@@ -93,15 +93,15 @@ class TestMediumBotStructurePriority:
     def test_structure_priority_prefers_closer(self, simple_game):
         """Test that structures closer to HQ have higher priority (lower score)."""
         bot = MediumBot(simple_game, player=2)
-        
+
         # Create two structures at different distances
         # Bot HQ is at (9, 9)
         close_tile = simple_game.grid.get_tile(8, 8)
         far_tile = simple_game.grid.get_tile(0, 0)
-        
+
         close_priority = bot.get_structure_priority(close_tile)
         far_priority = bot.get_structure_priority(far_tile)
-        
+
         # Lower score = higher priority
         assert close_priority < far_priority
 
@@ -114,23 +114,23 @@ class TestMediumBotCoordinatedAttacks:
         # Create a game with specific setup
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
-        
+
         # Create enemy unit with low health
         game.create_unit('W', 3, 3, 1)
         enemy = game.units[-1]
         enemy.health = 5  # Low health
-        
+
         # Create bot units nearby
         game.create_unit('W', 2, 3, 2)
         game.create_unit('W', 4, 3, 2)
-        
+
         bot = MediumBot(game, player=2)
         bot_units = [u for u in game.units if u.player == 2]
-        
+
         killable = bot.find_killable_targets(bot_units)
-        
-        # Should identify the low-health enemy as killable
-        assert len(killable) > 0 or True  # May not be killable depending on exact positions
+
+        # Should identify the low-health enemy as killable (or may not be killable depending on exact positions)
+        _ = len(killable)  # Check computed without error
 
 
 class TestMediumBotContestedStructures:
@@ -140,25 +140,25 @@ class TestMediumBotContestedStructures:
         """Test that MediumBot can find structures being captured."""
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
-        
+
         bot = MediumBot(game, player=2)
-        
+
         # Get a structure owned by player 1
         p1_structures = [
             tile for row in game.grid.tiles for tile in row
             if tile.is_capturable() and tile.player == 1
         ]
-        
+
         if p1_structures:
             structure = p1_structures[0]
             # Simulate partial capture
             structure.health = structure.max_health - 5
-            
+
             # Place enemy unit on structure
             game.create_unit('W', structure.x, structure.y, 1)
-            
+
             contested = bot.find_contested_structures()
-            
+
             # Should find the contested structure
             assert len(contested) >= 1
 
@@ -171,22 +171,22 @@ class TestMediumBotVsSimpleBot:
         # Load a standard map
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
-        
+
         # Create bots
         simple_bot = SimpleBot(game, player=1)
         medium_bot = MediumBot(game, player=2)
-        
+
         bots = {1: simple_bot, 2: medium_bot}
-        
+
         # Play game
         max_turns = 200
         turn_count = 0
-        
+
         while not game.game_over and turn_count < max_turns:
             current_bot = bots[game.current_player]
             current_bot.take_turn()
             turn_count += 1
-        
+
         # Game should complete within turn limit or reach game over
         # This is just a smoke test - the bot should be able to play
         assert turn_count > 0  # At least one turn was taken
@@ -199,19 +199,19 @@ class TestMediumBotAttackValue:
         """Test that killing blows have high value."""
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game = GameState(map_data, num_players=2)
-        
+
         # Create attacker
         game.create_unit('W', 2, 2, 2)
         attacker = game.units[-1]
-        
+
         # Create weak target
         game.create_unit('W', 3, 2, 1)
         target = game.units[-1]
         target.health = 5  # Low health
-        
+
         bot = MediumBot(game, player=2)
         value = bot.calculate_attack_value(attacker, target)
-        
+
         # Should have high value for a kill
         assert value > 100
 
@@ -223,13 +223,13 @@ class TestBotFactoryMediumBot:
         """Test that bot factory can create MediumBot."""
         from game.bot_factory import create_bot
         from reinforcetactics.utils.settings import get_settings
-        
+
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
         settings = get_settings()
-        
+
         bot = create_bot(game_state, 2, 'MediumBot', settings)
-        
+
         assert isinstance(bot, MediumBot)
         assert bot.bot_player == 2
 
@@ -243,15 +243,15 @@ class TestTournamentMediumBot:
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
         from tournament import TournamentRunner
-        
+
         runner = TournamentRunner(
             map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament_medium',
             games_per_side=1
         )
-        
+
         bots = runner.discover_bots(models_dir=None, include_test_bots=False)
-        
+
         # Should find both SimpleBot and MediumBot
         bot_names = [bot.name for bot in bots]
         assert 'SimpleBot' in bot_names
@@ -263,14 +263,14 @@ class TestTournamentMediumBot:
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
         from tournament import BotDescriptor
-        
+
         desc = BotDescriptor('TestMediumBot', 'medium')
         assert desc.name == 'TestMediumBot'
         assert desc.bot_type == 'medium'
-        
+
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
-        
+
         bot = desc.create_bot(game_state, 2)
         assert isinstance(bot, MediumBot)
         assert bot.bot_player == 2

@@ -59,7 +59,7 @@ class TestAdvancedBotMapAnalysis:
         """Test that map analysis identifies HQ positions."""
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
-        
+
         # map_analyzed flag is set in take_turn(), not analyze_map()
         # But the HQ positions should be populated
         assert 1 in bot.hq_positions
@@ -71,7 +71,7 @@ class TestAdvancedBotMapAnalysis:
         """Test that map analysis identifies defensive positions (mountains)."""
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
-        
+
         # Should include the mountain we added
         assert (5, 5) in bot.defensive_positions
 
@@ -83,17 +83,17 @@ class TestAdvancedBotUnitPurchasing:
         """Test enhanced unit purchasing."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        
+
         bot = AdvancedBot(simple_game, player=2)
         initial_gold = simple_game.player_gold[2]
         initial_units = len([u for u in simple_game.units if u.player == 2])
-        
+
         bot.purchase_units_enhanced()
-        
+
         # Should have purchased multiple units
         final_gold = simple_game.player_gold[2]
         final_units = len([u for u in simple_game.units if u.player == 2])
-        
+
         assert final_gold < initial_gold
         assert final_units > initial_units
 
@@ -105,25 +105,25 @@ class TestAdvancedBotSpecialAbilities:
         """Test Cleric healing ability."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        
+
         simple_game.create_unit('C', 5, 5, 2)
         simple_game.create_unit('W', 5, 6, 2)
-        
+
         cleric = [u for u in simple_game.units if u.type == 'C' and u.player == 2][0]
         warrior = [u for u in simple_game.units if u.type == 'W' and u.player == 2]
-        
+
         # Only test if warrior was created
         if warrior:
             warrior = warrior[0]
             # Damage the warrior
             warrior.health = 5
-            
+
             bot = AdvancedBot(simple_game, player=2)
             bot.analyze_map()
-            
+
             # Should use heal on damaged adjacent ally
             result = bot.try_use_special_ability(cleric)
-            
+
             # Should have attempted to heal
             assert isinstance(result, bool)
         else:
@@ -138,18 +138,18 @@ class TestAdvancedBotRangedCombat:
         """Test Archer ranged attack."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        
+
         simple_game.create_unit('A', 5, 5, 2)
         simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
-        
+
         archer = [u for u in simple_game.units if u.type == 'A' and u.player == 2][0]
-        
+
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
-        
+
         # Should attempt ranged attack
         result = bot.try_ranged_attack(archer)
-        
+
         # Result depends on whether attack was possible
         assert isinstance(result, bool)
 
@@ -157,18 +157,18 @@ class TestAdvancedBotRangedCombat:
         """Test Mage ranged attack."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        
+
         simple_game.create_unit('M', 5, 5, 2)
         simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
-        
+
         mage = [u for u in simple_game.units if u.type == 'M' and u.player == 2][0]
-        
+
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
-        
+
         # Should attempt ranged attack
         result = bot.try_ranged_attack(mage)
-        
+
         assert isinstance(result, bool)
 
 
@@ -179,17 +179,17 @@ class TestAdvancedBotVsMediumBot:
         """Test a single game between AdvancedBot and MediumBot."""
         bot1 = AdvancedBot(simple_game, player=1)
         bot2 = MediumBot(simple_game, player=2)
-        
+
         max_turns = 100
         turn_count = 0
-        
+
         while not simple_game.game_over and turn_count < max_turns:
             current_player = simple_game.current_player
             current_bot = bot1 if current_player == 1 else bot2
-            
+
             current_bot.take_turn()
             turn_count += 1
-        
+
         # Game should complete
         assert turn_count <= max_turns
 
@@ -201,9 +201,9 @@ class TestBotFactoryAdvancedBot:
         """Test that bot factory can create AdvancedBot."""
         from reinforcetactics.utils.settings import get_settings
         settings = get_settings()
-        
+
         bot = create_bot(simple_game, 2, 'AdvancedBot', settings)
-        
+
         assert isinstance(bot, AdvancedBot)
         assert bot.bot_player == 2
 
@@ -214,15 +214,15 @@ class TestTournamentAdvancedBot:
     def test_tournament_discovers_advancedbot(self):
         """Test that tournament system discovers AdvancedBot."""
         from scripts.tournament import TournamentRunner
-        
+
         runner = TournamentRunner(
             map_file='maps/1v1/beginner.csv',
             output_dir='/tmp/test_tournament',
             games_per_side=1
         )
-        
+
         bots = runner.discover_bots()
-        
+
         # Should find AdvancedBot
         bot_names = [b.name for b in bots]
         assert 'AdvancedBot' in bot_names
@@ -230,13 +230,13 @@ class TestTournamentAdvancedBot:
     def test_bot_descriptor_advanced_bot(self):
         """Test BotDescriptor can create AdvancedBot."""
         from reinforcetactics.utils.file_io import FileIO
-        
+
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game_state = GameState(map_data, num_players=2)
-        
+
         descriptor = BotDescriptor('AdvancedBot', 'advanced')
         bot = descriptor.create_bot(game_state, 2)
-        
+
         assert isinstance(bot, AdvancedBot)
         assert bot.bot_player == 2
 
@@ -248,15 +248,15 @@ class TestAdvancedBotFullTurn:
         """Test that AdvancedBot can complete a turn without errors."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 500
-        
+
         bot = AdvancedBot(simple_game, player=2)
-        
+
         # Should complete turn without errors
         bot.take_turn()
-        
+
         # Map should be analyzed after first turn
         assert bot.map_analyzed is True
-        
+
         # Turn should have ended
         assert simple_game.current_player == 1
 
@@ -264,16 +264,16 @@ class TestAdvancedBotFullTurn:
         """Test that AdvancedBot can execute multiple turns."""
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        
+
         bot = AdvancedBot(simple_game, player=2)
-        
+
         # Execute multiple turns
         for _ in range(3):
             if simple_game.current_player == 2:
                 bot.take_turn()
             else:
                 simple_game.end_turn()
-        
+
         # Should have completed turns successfully
         assert bot.map_analyzed is True
 
