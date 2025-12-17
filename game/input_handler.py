@@ -318,7 +318,7 @@ class InputHandler:
 
         # Priority 2: Building clicked for unit purchase
         if (not clicked_unit and clicked_tile.player == self.game.current_player and
-            clicked_tile.type in ['h', 'b']):
+            clicked_tile.type == 'b'):
             self.active_menu = UnitPurchaseMenu(
                 self.renderer.screen, self.game, (grid_x, grid_y)
             )

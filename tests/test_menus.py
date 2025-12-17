@@ -419,7 +419,7 @@ class TestPlayerConfigMenu:
             assert config['type'] in ['human', 'computer']
             assert 'bot_type' in config
             if config['type'] == 'computer':
-                assert config['bot_type'] in ['SimpleBot', 'NormalBot', 'HardBot', None]
+                assert config['bot_type'] in ['SimpleBot', 'MediumBot', 'AdvancedBot', 'NormalBot', 'HardBot', None]
             else:
                 assert config['bot_type'] is None
 
