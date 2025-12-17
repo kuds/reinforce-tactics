@@ -14,6 +14,60 @@ def simple_game():
     return GameState(map_data, num_players=2)
 
 
+@pytest.fixture
+def game_with_building():
+    """Create a game state with a building for unit creation tests."""
+    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data[0][0] = 'h_1'  # HQ for player 1
+    map_data[1][1] = 'b_1'  # Building for player 1
+    map_data[9][9] = 'h_2'  # HQ for player 2
+    return GameState(map_data, num_players=2)
+
+
+class TestUnitCreationRestrictions:
+    """Test that unit creation is restricted to Buildings only, not HQ."""
+
+    def test_hq_cannot_create_units(self, simple_game):
+        """Test that HQ (headquarters) cannot create units."""
+        # Player 1 has HQ at (0, 0) with enough gold
+        simple_game.player_gold[1] = 500
+        
+        # Get legal actions for player 1
+        legal_actions = simple_game.get_legal_actions(player=1)
+        
+        # No create_unit actions should be available (no Buildings, only HQ)
+        assert len(legal_actions['create_unit']) == 0
+        
+    def test_building_can_create_units(self, game_with_building):
+        """Test that Buildings can create units."""
+        # Player 1 has Building at (1, 1) with enough gold
+        game_with_building.player_gold[1] = 500
+        
+        # Get legal actions for player 1
+        legal_actions = game_with_building.get_legal_actions(player=1)
+        
+        # Create unit actions should be available at the Building
+        assert len(legal_actions['create_unit']) > 0
+        
+        # All create_unit actions should be at the Building location (1, 1), not HQ (0, 0)
+        for action in legal_actions['create_unit']:
+            assert action['x'] == 1 and action['y'] == 1, \
+                "Unit creation should only be at Building (1,1), not HQ (0,0)"
+
+    def test_hq_not_in_legal_create_actions(self, game_with_building):
+        """Test that HQ location is never in create_unit legal actions."""
+        # Player 1 has both HQ at (0, 0) and Building at (1, 1)
+        game_with_building.player_gold[1] = 500
+        
+        # Get legal actions
+        legal_actions = game_with_building.get_legal_actions(player=1)
+        
+        # Check that no action has HQ coordinates
+        hq_actions = [action for action in legal_actions['create_unit'] 
+                      if action['x'] == 0 and action['y'] == 0]
+        assert len(hq_actions) == 0, "HQ should not allow unit creation"
+
+
 class TestUnitEliminationWinCondition:
     """Test that eliminating all enemy units results in a win."""
 

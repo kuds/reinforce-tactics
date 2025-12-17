@@ -90,7 +90,7 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Regeneration stops once a structure is captured by a player
 
 #### Unit Creation
-- Units can be created at owned **Buildings** and **Headquarters**
+- Units can be created at owned **Buildings** only
 - The creating structure must not have a unit standing on it
 - Costs are deducted from the player's gold reserves
 

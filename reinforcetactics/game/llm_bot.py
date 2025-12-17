@@ -112,7 +112,7 @@ UNIT TYPES:
 
 BUILDING TYPES:
 - HQ (h): Generates 150 gold/turn, losing it means defeat
-- Building (b): Generates 100 gold/turn, can recruit units
+- Building (b): Generates 100 gold/turn, used to recruit units
 - Tower (t): Generates 50 gold/turn, defensive structure
 
 AVAILABLE ACTIONS:
