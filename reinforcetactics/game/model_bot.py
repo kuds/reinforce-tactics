@@ -210,7 +210,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 return False
 
             tile = self.game_state.grid.get_tile(x, y)
-            if tile.player != self.bot_player or tile.type not in ['b', 'h']:
+            if tile.player != self.bot_player or tile.type != 'b':
                 return False
 
             # Check if location is occupied

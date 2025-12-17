@@ -519,7 +519,7 @@ class GameState:
             'end_turn': True
         }
 
-        # Building units
+        # Building units (only at Buildings, not HQ)
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
                 for unit_type in ['W', 'M', 'C', 'A']:
