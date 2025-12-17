@@ -13,7 +13,7 @@ from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
 from reinforcetactics.ui.menus.map_editor.map_editor import MapEditor
 from reinforcetactics.ui.menus.map_editor.map_editor_menu import MapEditorMenu
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.constants import MIN_MAP_SIZE, MIN_STRIP_SIZE
 from reinforcetactics.utils.file_io import FileIO
 
 
@@ -255,7 +255,7 @@ class TestWaterBorderStripping:
             for j in range(2, 8):
                 map_data.iloc[i, j] = 'p'
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should strip to 6x6
         assert stripped.shape == (6, 6)
@@ -269,7 +269,7 @@ class TestWaterBorderStripping:
         # Make one tile on the border not ocean
         map_data.iloc[0, 5] = 'p'  # Top row has one grass tile
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should not strip at all
         assert stripped.shape == (10, 10)
@@ -279,7 +279,7 @@ class TestWaterBorderStripping:
         # Create an 8x8 map fully of ocean
         map_data = pd.DataFrame(np.full((8, 8), 'o', dtype=object))
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should strip to exactly 6x6, not smaller
         assert stripped.shape == (6, 6)
@@ -289,7 +289,7 @@ class TestWaterBorderStripping:
         # Create map with grass borders
         map_data = pd.DataFrame(np.full((10, 10), 'p', dtype=object))
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should not strip anything
         assert stripped.shape == (10, 10)
@@ -303,7 +303,7 @@ class TestWaterBorderStripping:
             for j in range(4, 10):
                 map_data.iloc[i, j] = 'p'
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should strip all 4 layers to get to 6x6
         assert stripped.shape == (6, 6)
@@ -320,7 +320,7 @@ class TestWaterBorderStripping:
         map_data.iloc[5, 5] = 'w'  # Water (not ocean)
         map_data.iloc[6, 6] = 'm'  # Mountain
         
-        stripped = FileIO.strip_water_border(map_data, min_size=6)
+        stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
         
         # Should strip 2 layers
         assert stripped.shape == (8, 8)

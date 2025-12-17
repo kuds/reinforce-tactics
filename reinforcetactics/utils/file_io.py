@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.constants import MIN_MAP_SIZE, MIN_STRIP_SIZE
 
 
 class FileIO:
@@ -81,7 +81,7 @@ class FileIO:
     @staticmethod
     def _pad_map(map_data, min_width, min_height):
         """
-        Pad a map to minimum dimensions with grass tiles.
+        Pad a map to minimum dimensions with ocean tiles.
 
         Args:
             map_data: pandas DataFrame with map data
@@ -115,14 +115,14 @@ class FileIO:
         return map_data
 
     @staticmethod
-    def strip_water_border(map_data, min_size=6):
+    def strip_water_border(map_data, min_size=MIN_STRIP_SIZE):
         """
         Strip ocean borders from a map iteratively until a non-ocean border is found
         or minimum size is reached.
 
         Args:
             map_data: pandas DataFrame with map data
-            min_size: Minimum map size to preserve (default: 6)
+            min_size: Minimum map size to preserve (default: MIN_STRIP_SIZE)
 
         Returns:
             pandas DataFrame with ocean borders stripped
@@ -457,7 +457,7 @@ class FileIO:
 
         try:
             # Strip ocean borders before saving
-            stripped_map = FileIO.strip_water_border(map_data, min_size=6)
+            stripped_map = FileIO.strip_water_border(map_data)
             
             stripped_map.to_csv(filepath, header=False, index=False)
             print(f"✅ Map saved: {filepath}")
