@@ -180,7 +180,7 @@ class EloRatingSystem:
         self.starting_elo = data.get('starting_elo', 1500)
         self.k_factor = data.get('k_factor', 32)
         # Set initial ratings to current ratings when loading to track changes
-        self.initial_ratings = dict(self.ratings.items())
+        self.initial_ratings = self.ratings.copy()
 
 
 class BotDescriptor:
