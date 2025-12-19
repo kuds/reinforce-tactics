@@ -197,6 +197,13 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Initialize conversation history for stateful mode
         self.conversation_history = []
 
+        # Initialize token usage tracking
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        # Per-call token tracking (set by subclasses that support it)
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
+
         # Generate or use provided game session ID
         if game_session_id:
             self.game_session_id = game_session_id
@@ -253,7 +260,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             )
 
     def _log_conversation_to_json(self, system_prompt: str, user_prompt: str,
-                                   assistant_response: str) -> None:
+                                   assistant_response: str,
+                                   input_tokens: int = 0,
+                                   output_tokens: int = 0) -> None:
         """
         Log the conversation to a JSON file (single file per game).
 
@@ -264,6 +273,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             system_prompt: The system prompt sent to the LLM
             user_prompt: The user prompt (formatted game state)
             assistant_response: The LLM's response
+            input_tokens: Number of input tokens used for this turn (Claude only)
+            output_tokens: Number of output tokens used for this turn (Claude only)
         """
         # Only log if enabled and at DEBUG level
         if not self.log_conversations or not logger.isEnabledFor(logging.DEBUG):
@@ -286,6 +297,22 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             timestamp = datetime.now()
             turn = self.game_state.turn_number
 
+            # Build turn data with token usage
+            turn_data = {
+                "turn_number": turn,
+                "timestamp": timestamp.isoformat(),
+                "user_prompt": user_prompt,
+                "assistant_response": assistant_response
+            }
+
+            # Include token usage if tracked (Claude models)
+            if input_tokens > 0 or output_tokens > 0:
+                turn_data["token_usage"] = {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens
+                }
+
             # Check if file exists
             if filepath.exists():
                 # Load existing data and append new turn
@@ -293,12 +320,15 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     log_data = json.load(f)
 
                 # Append new turn
-                log_data['turns'].append({
-                    "turn_number": turn,
-                    "timestamp": timestamp.isoformat(),
-                    "user_prompt": user_prompt,
-                    "assistant_response": assistant_response
-                })
+                log_data['turns'].append(turn_data)
+
+                # Update cumulative token usage for Claude models
+                if input_tokens > 0 or output_tokens > 0:
+                    log_data['total_token_usage'] = {
+                        "total_input_tokens": self.total_input_tokens,
+                        "total_output_tokens": self.total_output_tokens,
+                        "total_tokens": self.total_input_tokens + self.total_output_tokens
+                    }
             else:
                 # Create new log file with metadata
                 # Extract map name from file path
@@ -322,15 +352,16 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                         "height": self.game_state.grid.height
                     },
                     "system_prompt": system_prompt,
-                    "turns": [
-                        {
-                            "turn_number": turn,
-                            "timestamp": timestamp.isoformat(),
-                            "user_prompt": user_prompt,
-                            "assistant_response": assistant_response
-                        }
-                    ]
+                    "turns": [turn_data]
                 }
+
+                # Add cumulative token usage for Claude models
+                if input_tokens > 0 or output_tokens > 0:
+                    log_data['total_token_usage'] = {
+                        "total_input_tokens": self.total_input_tokens,
+                        "total_output_tokens": self.total_output_tokens,
+                        "total_tokens": self.total_input_tokens + self.total_output_tokens
+                    }
 
             # Write to file with configurable formatting
             indent = 2 if self.pretty_print_logs else None
@@ -382,6 +413,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     ]
 
                 response_text = self._call_llm(messages)
+                # Accumulate token usage (only if tracked by subclass)
+                self.total_input_tokens += self._last_input_tokens
+                self.total_output_tokens += self._last_output_tokens
                 break
             except Exception as e:
                 logger.error("Attempt %s/%s failed: %s", attempt + 1, self.max_retries, e)
@@ -405,8 +439,12 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             self.conversation_history.append({"role": "user", "content": user_prompt})
             self.conversation_history.append({"role": "assistant", "content": response_text})
 
-        # Log the conversation if enabled
-        self._log_conversation_to_json(SYSTEM_PROMPT, user_prompt, response_text)
+        # Log the conversation if enabled (include token usage for Claude)
+        self._log_conversation_to_json(
+            SYSTEM_PROMPT, user_prompt, response_text,
+            input_tokens=self._last_input_tokens,
+            output_tokens=self._last_output_tokens
+        )
 
         # Parse and execute actions
         self._execute_actions(response_text)
@@ -1012,6 +1050,10 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             messages=user_messages,
             temperature=0.7
         )
+
+        # Capture token usage from Claude API response
+        self._last_input_tokens = response.usage.input_tokens
+        self._last_output_tokens = response.usage.output_tokens
 
         return response.content[0].text
 
