@@ -355,53 +355,21 @@ class TestConversationLogging:
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 0
 
-    def test_no_logging_when_not_debug_level(self, simple_game, test_bot_class):
-        """Test that no logging occurs when logging level is not DEBUG."""
+    def test_logging_when_enabled(self, simple_game, test_bot_class):
+        """Test that logging occurs when log_conversations is True."""
         with tempfile.TemporaryDirectory() as tmpdir:
             bot = test_bot_class(simple_game, player=2, api_key="test-key",
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
 
-            # Set logging level to INFO (not DEBUG)
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.INFO)
+            # Mock _call_llm to avoid actual API calls
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                # Mock _call_llm to avoid actual API calls
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
-
-                # No files should be created
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 0
-            finally:
-                logger.setLevel(original_level)
-
-    def test_logging_at_debug_level(self, simple_game, test_bot_class):
-        """Test that logging occurs when enabled and at DEBUG level."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
-
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
-
-            try:
-                # Mock _call_llm to avoid actual API calls
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
-
-                # One file should be created
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
-            finally:
-                logger.setLevel(original_level)
+            # One file should be created
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
     def test_json_file_structure(self, simple_game, test_bot_class):
         """Test that JSON log file has correct structure."""
@@ -410,51 +378,42 @@ class TestConversationLogging:
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            response = '{"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}'
+            # Mock _call_llm to avoid actual API calls
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                response = '{"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}'
-                # Mock _call_llm to avoid actual API calls
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Read the log file
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
-                # Read the log file
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
 
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    log_data = json.load(f)
+            # Verify structure
+            assert 'game_session_id' in log_data
+            assert 'model' in log_data
+            assert log_data['model'] == 'test-model'
+            assert 'provider' in log_data
+            assert log_data['provider'] == 'Test'
+            assert 'player' in log_data
+            assert log_data['player'] == 2
+            assert 'start_time' in log_data
+            assert 'system_prompt' in log_data
+            assert 'turns' in log_data
 
-                # Verify structure
-                assert 'game_session_id' in log_data
-                assert 'model' in log_data
-                assert log_data['model'] == 'test-model'
-                assert 'provider' in log_data
-                assert log_data['provider'] == 'Test'
-                assert 'player' in log_data
-                assert log_data['player'] == 2
-                assert 'start_time' in log_data
-                assert 'system_prompt' in log_data
-                assert 'turns' in log_data
+            # Verify system prompt contains game rules
+            assert 'Reinforce Tactics' in log_data['system_prompt']
+            assert 'GAME OBJECTIVE' in log_data['system_prompt']
 
-                # Verify system prompt contains game rules
-                assert 'Reinforce Tactics' in log_data['system_prompt']
-                assert 'GAME OBJECTIVE' in log_data['system_prompt']
-
-                # Verify turns structure
-                assert len(log_data['turns']) == 1
-                turn = log_data['turns'][0]
-                assert 'turn_number' in turn
-                assert 'timestamp' in turn
-                assert 'user_prompt' in turn
-                assert 'assistant_response' in turn
-                assert turn['assistant_response'] == response
-
-            finally:
-                logger.setLevel(original_level)
+            # Verify turns structure
+            assert len(log_data['turns']) == 1
+            turn = log_data['turns'][0]
+            assert 'turn_number' in turn
+            assert 'timestamp' in turn
+            assert 'user_prompt' in turn
+            assert 'assistant_response' in turn
+            assert turn['assistant_response'] == response
 
     def test_custom_log_directory(self, simple_game, test_bot_class):
         """Test that custom log directory is used."""
@@ -464,26 +423,18 @@ class TestConversationLogging:
                                 log_conversations=True,
                                 conversation_log_dir=str(custom_dir))
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            # Mock _call_llm to avoid actual API calls
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                # Mock _call_llm to avoid actual API calls
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Verify directory was created
+            assert custom_dir.exists()
+            assert custom_dir.is_dir()
 
-                # Verify directory was created
-                assert custom_dir.exists()
-                assert custom_dir.is_dir()
-
-                # Verify file was created in custom directory
-                log_files = list(custom_dir.glob("*.json"))
-                assert len(log_files) == 1
-            finally:
-                logger.setLevel(original_level)
+            # Verify file was created in custom directory
+            log_files = list(custom_dir.glob("*.json"))
+            assert len(log_files) == 1
 
     def test_filename_format(self, simple_game, test_bot_class):
         """Test that log filename has correct format."""
@@ -492,29 +443,21 @@ class TestConversationLogging:
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            # Mock _call_llm to avoid actual API calls
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                # Mock _call_llm to avoid actual API calls
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Verify filename format
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
-                # Verify filename format
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
-
-                filename = log_files[0].name
-                # Should be like: game_{session_id}_player2_model{model}.json
-                assert filename.startswith("game_")
-                assert "_player2_" in filename
-                assert "_modeltest-model.json" in filename or "model" in filename
-                assert filename.endswith(".json")
-            finally:
-                logger.setLevel(original_level)
+            filename = log_files[0].name
+            # Should be like: game_{session_id}_player2_model{model}.json
+            assert filename.startswith("game_")
+            assert "_player2_" in filename
+            assert "_modeltest-model.json" in filename or "model" in filename
+            assert filename.endswith(".json")
 
     def test_game_session_id_parameter(self, simple_game, test_bot_class):
         """Test that custom game_session_id is used when provided."""
@@ -527,27 +470,19 @@ class TestConversationLogging:
 
             assert bot.game_session_id == custom_session_id
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Verify filename includes custom session ID
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
+            assert custom_session_id in log_files[0].name
 
-                # Verify filename includes custom session ID
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
-                assert custom_session_id in log_files[0].name
-
-                # Verify session ID is in the log data
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    log_data = json.load(f)
-                assert log_data['game_session_id'] == custom_session_id
-            finally:
-                logger.setLevel(original_level)
+            # Verify session ID is in the log data
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
+            assert log_data['game_session_id'] == custom_session_id
 
     def test_auto_generated_session_id(self, simple_game, test_bot_class):
         """Test that session ID is auto-generated if not provided."""
@@ -577,34 +512,26 @@ class TestConversationLogging:
                                  conversation_log_dir=tmpdir,
                                  game_session_id="game2")
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot1, '_call_llm', return_value=response):
+                with patch.object(bot2, '_call_llm', return_value=response):
+                    bot1.take_turn()
+                    bot2.take_turn()
 
-            try:
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot1, '_call_llm', return_value=response):
-                    with patch.object(bot2, '_call_llm', return_value=response):
-                        bot1.take_turn()
-                        bot2.take_turn()
+            # Two files should be created (one per game)
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 2
 
-                # Two files should be created (one per game)
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 2
+            # Verify they have different session IDs
+            session_ids = set()
+            for log_file in log_files:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+                    session_ids.add(log_data['game_session_id'])
 
-                # Verify they have different session IDs
-                session_ids = set()
-                for log_file in log_files:
-                    with open(log_file, 'r', encoding='utf-8') as f:
-                        log_data = json.load(f)
-                        session_ids.add(log_data['game_session_id'])
-
-                assert len(session_ids) == 2
-                assert "game1" in session_ids
-                assert "game2" in session_ids
-            finally:
-                logger.setLevel(original_level)
+            assert len(session_ids) == 2
+            assert "game1" in session_ids
+            assert "game2" in session_ids
 
     def test_pretty_print_logs_enabled(self, simple_game, test_bot_class):
         """Test that pretty_print_logs=True creates indented JSON."""
@@ -614,28 +541,20 @@ class TestConversationLogging:
                                 conversation_log_dir=tmpdir,
                                 pretty_print_logs=True)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Read the file as text
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
-                # Read the file as text
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                content = f.read()
 
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                # Pretty-printed JSON should have newlines and indentation
-                assert '\n' in content
-                assert '  ' in content  # Indentation
-            finally:
-                logger.setLevel(original_level)
+            # Pretty-printed JSON should have newlines and indentation
+            assert '\n' in content
+            assert '  ' in content  # Indentation
 
     def test_pretty_print_logs_disabled(self, simple_game, test_bot_class):
         """Test that pretty_print_logs=False creates compact JSON."""
@@ -645,30 +564,22 @@ class TestConversationLogging:
                                 conversation_log_dir=tmpdir,
                                 pretty_print_logs=False)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
 
-            try:
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
+            # Read the file as text
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
-                # Read the file as text
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                content = f.read()
 
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                # Compact JSON should be mostly on one line (no indentation)
-                # It may have some newlines but shouldn't have the 2-space indentation pattern
-                lines = content.split('\n')
-                # For compact JSON, most content is on fewer lines
-                assert len(lines) < 10  # Pretty version would have many more lines
-            finally:
-                logger.setLevel(original_level)
+            # Compact JSON should be mostly on one line (no indentation)
+            # It may have some newlines but shouldn't have the 2-space indentation pattern
+            lines = content.split('\n')
+            # For compact JSON, most content is on fewer lines
+            assert len(lines) < 10  # Pretty version would have many more lines
 
     def test_logging_error_handling(self, simple_game, test_bot_class):
         """Test that logging errors don't break the bot."""
@@ -677,22 +588,13 @@ class TestConversationLogging:
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
-
-            try:
-                # Mock Path.mkdir to raise an exception
-                with patch('reinforcetactics.game.llm_bot.Path.mkdir', side_effect=OSError("Permission denied")):
-                    # Mock _call_llm to avoid actual API calls
-                    # This should not raise an exception even if logging fails
-                    response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                    with patch.object(bot, '_call_llm', return_value=response):
-                        bot.take_turn()  # Should complete without exception
-
-            finally:
-                logger.setLevel(original_level)
+            # Mock Path.mkdir to raise an exception
+            with patch('reinforcetactics.game.llm_bot.Path.mkdir', side_effect=OSError("Permission denied")):
+                # Mock _call_llm to avoid actual API calls
+                # This should not raise an exception even if logging fails
+                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+                with patch.object(bot, '_call_llm', return_value=response):
+                    bot.take_turn()  # Should complete without exception
 
     def test_multiple_turns_create_single_file(self, simple_game, test_bot_class):
         """Test that multiple turns create a single log file with all turns."""
@@ -701,37 +603,29 @@ class TestConversationLogging:
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
 
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
+            # Mock _call_llm to avoid actual API calls
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
+                # Advance turn
+                bot.game_state.turn_number += 1
+                bot.take_turn()
 
-            try:
-                # Mock _call_llm to avoid actual API calls
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
-                    # Advance turn
-                    bot.game_state.turn_number += 1
-                    bot.take_turn()
+            # Only one file should be created
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
 
-                # Only one file should be created
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
+            # Verify it contains two turns
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
 
-                # Verify it contains two turns
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    log_data = json.load(f)
+            assert 'turns' in log_data
+            assert len(log_data['turns']) == 2
 
-                assert 'turns' in log_data
-                assert len(log_data['turns']) == 2
-
-                # Verify they have different turn numbers
-                turn_numbers = [turn['turn_number'] for turn in log_data['turns']]
-                assert len(set(turn_numbers)) == 2  # Should be different
-                assert turn_numbers[0] < turn_numbers[1]  # Should be in order
-            finally:
-                logger.setLevel(original_level)
+            # Verify they have different turn numbers
+            turn_numbers = [turn['turn_number'] for turn in log_data['turns']]
+            assert len(set(turn_numbers)) == 2  # Should be different
+            assert turn_numbers[0] < turn_numbers[1]  # Should be in order
 
 
 class TestStatefulConversation:
@@ -1066,39 +960,30 @@ class TestMapCoordinateConversion:
             bot = test_bot_class(padded_game, player=2, api_key="test-key",
                                 log_conversations=True,
                                 conversation_log_dir=tmpdir)
-            
-            # Set logging level to DEBUG
-            logger = logging.getLogger('reinforcetactics.game.llm_bot')
-            original_level = logger.level
-            logger.setLevel(logging.DEBUG)
-            
-            try:
-                response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
-                    bot.take_turn()
-                
-                # Read the log file
-                log_files = list(Path(tmpdir).glob("*.json"))
-                assert len(log_files) == 1
-                
-                with open(log_files[0], 'r', encoding='utf-8') as f:
-                    log_data = json.load(f)
-                
-                # Verify map metadata is present
-                assert 'map_file' in log_data
-                assert log_data['map_file'] == "maps/1v1/beginner.csv"
-                
-                assert 'map_dimensions' in log_data
-                assert log_data['map_dimensions']['width'] == 6
-                assert log_data['map_dimensions']['height'] == 6
-                
-                assert 'padded_dimensions' in log_data
-                # The actual grid may not be padded in this test since we mocked it
-                assert 'width' in log_data['padded_dimensions']
-                assert 'height' in log_data['padded_dimensions']
-                
-            finally:
-                logger.setLevel(original_level)
+
+            response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+            with patch.object(bot, '_call_llm', return_value=response):
+                bot.take_turn()
+
+            # Read the log file
+            log_files = list(Path(tmpdir).glob("*.json"))
+            assert len(log_files) == 1
+
+            with open(log_files[0], 'r', encoding='utf-8') as f:
+                log_data = json.load(f)
+
+            # Verify map metadata is present
+            assert 'map_file' in log_data
+            assert log_data['map_file'] == "maps/1v1/beginner.csv"
+
+            assert 'map_dimensions' in log_data
+            assert log_data['map_dimensions']['width'] == 6
+            assert log_data['map_dimensions']['height'] == 6
+
+            assert 'padded_dimensions' in log_data
+            # The actual grid may not be padded in this test since we mocked it
+            assert 'width' in log_data['padded_dimensions']
+            assert 'height' in log_data['padded_dimensions']
 
     def test_non_padded_map_works_correctly(self, simple_game, test_bot_class):
         """Test that non-padded maps (20x20+) work correctly without coordinate conversion."""

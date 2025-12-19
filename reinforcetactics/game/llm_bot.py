@@ -266,7 +266,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         """
         Log the conversation to a JSON file (single file per game).
 
-        Only logs if log_conversations is True AND logging level is DEBUG.
+        Only logs if log_conversations is True.
         Creates a single log file per game with all turns appended.
 
         Args:
@@ -276,8 +276,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             input_tokens: Number of input tokens used for this turn (Claude only)
             output_tokens: Number of output tokens used for this turn (Claude only)
         """
-        # Only log if enabled and at DEBUG level
-        if not self.log_conversations or not logger.isEnabledFor(logging.DEBUG):
+        # Only log if enabled
+        if not self.log_conversations:
             return
 
         try:
