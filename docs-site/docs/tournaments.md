@@ -90,7 +90,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 - SimpleBot (rule-based)
 - MediumBot (rule-based)
 - AdvancedBot (rule-based)
-- Claude Haiku (claude-haiku-4-5-20251001)
+- Claude Haiku 4.5 (claude-haiku-4-5-20251001)
 
 #### Final Standings
 
@@ -99,7 +99,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | 🥇 1 | AdvancedBot | 36 | 2 | 10 | 48 | 75.0% | 1693 | +193 |
 | 🥈 2 | MediumBot | 19 | 10 | 19 | 48 | 39.6% | 1575 | +75 |
 | 🥉 3 | SimpleBot | 1 | 20 | 27 | 48 | 2.1% | 1405 | -95 |
-| 4 | Claude Haiku | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
+| 4 | Claude Haiku 4.5 | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
 
 #### Head-to-Head Results
 
@@ -107,10 +107,10 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 |---------|------|--------|-------|-------|
 | SimpleBot vs MediumBot | 0 | 6 | 10 | MediumBot dominates |
 | SimpleBot vs AdvancedBot | 0 | 12 | 4 | Complete sweep by AdvancedBot |
-| SimpleBot vs Claude Haiku | 1 | 2 | 13 | Mostly draws, slight LLM edge |
+| SimpleBot vs Claude Haiku 4.5 | 1 | 2 | 13 | Mostly draws, slight LLM edge |
 | MediumBot vs AdvancedBot | 2 | 10 | 4 | AdvancedBot clearly superior |
-| MediumBot vs Claude Haiku | 11 | 0 | 5 | MediumBot perfect record |
-| AdvancedBot vs Claude Haiku | 14 | 0 | 2 | Complete domination |
+| MediumBot vs Claude Haiku 4.5 | 11 | 0 | 5 | MediumBot perfect record |
+| AdvancedBot vs Claude Haiku 4.5 | 14 | 0 | 2 | Complete domination |
 
 #### Per-Map Performance
 
@@ -120,7 +120,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 |-----|------|--------|-------|
 | AdvancedBot | 12 | 0 | 0 |
 | MediumBot | 4 | 4 | 4 |
-| Claude Haiku | 2 | 7 | 3 |
+| Claude Haiku 4.5 | 2 | 7 | 3 |
 | SimpleBot | 1 | 8 | 3 |
 
 ##### funnel_point.csv
@@ -130,7 +130,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | MediumBot | 8 | 0 | 4 |
 | AdvancedBot | 6 | 2 | 4 |
 | SimpleBot | 0 | 4 | 8 |
-| Claude Haiku | 0 | 8 | 4 |
+| Claude Haiku 4.5 | 0 | 8 | 4 |
 
 ##### center_mountains.csv
 
@@ -139,7 +139,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | AdvancedBot | 6 | 0 | 6 |
 | MediumBot | 1 | 2 | 9 |
 | SimpleBot | 0 | 2 | 10 |
-| Claude Haiku | 0 | 3 | 9 |
+| Claude Haiku 4.5 | 0 | 3 | 9 |
 
 ##### corner_points.csv
 
@@ -148,7 +148,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | AdvancedBot | 12 | 0 | 0 |
 | MediumBot | 6 | 4 | 2 |
 | SimpleBot | 0 | 6 | 6 |
-| Claude Haiku | 0 | 8 | 4 |
+| Claude Haiku 4.5 | 0 | 8 | 4 |
 
 #### Analysis
 
@@ -180,7 +180,7 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | AdvancedBot | 36 | 2 | 10 | 75.0% | 1693 |
 | MediumBot | 19 | 10 | 19 | 39.6% | 1575 |
 | SimpleBot | 1 | 20 | 27 | 2.1% | 1405 |
-| Claude Haiku | 2 | 26 | 20 | 4.2% | 1327 |
+| Claude Haiku 4.5 | 2 | 26 | 20 | 4.2% | 1327 |
 
 ### Head-to-Head Records
 
@@ -188,10 +188,10 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 |-------|-------|--------|--------|-------|---------|
 | AdvancedBot | MediumBot | 10 | 2 | 4 | 62.5% |
 | AdvancedBot | SimpleBot | 12 | 0 | 4 | 75.0% |
-| AdvancedBot | Claude Haiku | 14 | 0 | 2 | 87.5% |
+| AdvancedBot | Claude Haiku 4.5 | 14 | 0 | 2 | 87.5% |
 | MediumBot | SimpleBot | 6 | 0 | 10 | 37.5% |
-| MediumBot | Claude Haiku | 11 | 0 | 5 | 68.8% |
-| SimpleBot | Claude Haiku | 1 | 2 | 13 | 6.3% |
+| MediumBot | Claude Haiku 4.5 | 11 | 0 | 5 | 68.8% |
+| SimpleBot | Claude Haiku 4.5 | 1 | 2 | 13 | 6.3% |
 
 ## How to Contribute Results
 
