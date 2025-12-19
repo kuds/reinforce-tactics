@@ -951,8 +951,7 @@ class TestMapCoordinateConversion:
         assert 'map_height' in game_state_json
         assert game_state_json['map_height'] == 6
         
-        assert 'map_padding_applied' in game_state_json
-        assert game_state_json['map_padding_applied'] is True
+        # map_padding_applied field has been removed from serialization
 
     def test_serialized_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that serialized coordinates are in original map system."""
@@ -1124,7 +1123,7 @@ class TestMapCoordinateConversion:
         # Map dimensions should match grid dimensions
         assert game_state_json['map_width'] == 10
         assert game_state_json['map_height'] == 10
-        assert game_state_json['map_padding_applied'] is False
+        # map_padding_applied field has been removed from serialization
 
     def test_action_history_uses_original_coordinates(self, padded_game):
         """Test that action history records use original/unpadded coordinates."""

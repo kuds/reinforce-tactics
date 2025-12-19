@@ -39,17 +39,17 @@ class FileIO:
 
         Args:
             filepath: Path to the CSV map file
-            for_ui: If True, adds water borders for UI display (default: False)
+            for_ui: If True, adds minimum size padding and water borders for UI display (default: False)
             border_size: Number of ocean border layers to add when for_ui=True (default: 2)
 
         Returns:
             dict with keys:
-                - map_data: pandas DataFrame containing the map data (padded)
+                - map_data: pandas DataFrame containing the map data (padded if for_ui=True)
                 - original_map_data: 2D list of the unpadded map data
                 - original_width: width before padding
                 - original_height: height before padding
-                - padding_offset_x: x offset due to padding (0 if no padding)
-                - padding_offset_y: y offset due to padding (0 if no padding)
+                - padding_offset_x: x offset due to padding (0 if no padding or for_ui=False)
+                - padding_offset_y: y offset due to padding (0 if no padding or for_ui=False)
                 - map_file: filepath that was loaded
         """
         try:
@@ -81,17 +81,18 @@ class FileIO:
             padding_offset_x = 0
             padding_offset_y = 0
 
-            # Ensure minimum size BEFORE adding UI borders
-            height, width = map_data.shape
-            if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-                print(
-                    f"⚠️  Map size ({width}x{height}) is smaller than "
-                    f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
-                )
-                print("   Padding map to minimum size...")
-                map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(
-                    map_data, MIN_MAP_SIZE, MIN_MAP_SIZE
-                )
+            # Only apply minimum size padding if loading for UI
+            if for_ui:
+                height, width = map_data.shape
+                if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
+                    print(
+                        f"⚠️  Map size ({width}x{height}) is smaller than "
+                        f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
+                    )
+                    print("   Padding map to minimum size for UI...")
+                    map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(
+                        map_data, MIN_MAP_SIZE, MIN_MAP_SIZE
+                    )
 
             # Add water borders if loading for UI (after ensuring minimum size)
             if for_ui:

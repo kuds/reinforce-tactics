@@ -493,8 +493,6 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             'map_name': map_name,
             'map_width': self.game_state.original_map_width,
             'map_height': self.game_state.original_map_height,
-            'map_padding_applied': (self.game_state.map_padding_offset_x > 0 or 
-                                   self.game_state.map_padding_offset_y > 0),
             'turn_number': self.game_state.turn_number,
             'player_gold': self.game_state.player_gold[self.bot_player],
             'opponent_gold': self.game_state.player_gold[
