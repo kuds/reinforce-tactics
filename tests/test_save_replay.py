@@ -283,6 +283,152 @@ class TestFullSaveLoadCycle:
             assert restored_game.player_configs == game_with_actions.player_configs
 
 
+class TestReplayPadding:
+    """Test replay padding functionality."""
+
+    @pytest.fixture(autouse=True)
+    def setup_pygame(self):
+        """Setup pygame for tests."""
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        pygame.init()
+        yield
+        pygame.quit()
+
+    def test_replay_player_pads_small_map(self, simple_map):
+        """Test that ReplayPlayer adds padding to small maps."""
+        from reinforcetactics.utils.replay_player import ReplayPlayer, REPLAY_BORDER_SIZE
+        from reinforcetactics.constants import MIN_MAP_SIZE
+        import pandas as pd
+
+        game = GameState(simple_map, num_players=2)
+        game.create_unit('W', 1, 1, player=1)
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            original_height, original_width = map_df.shape
+
+            player = ReplayPlayer(replay_data, map_df)
+
+            # Check that padding was applied
+            padded_height = player.game_state.grid.height
+            padded_width = player.game_state.grid.width
+
+            # The padded size should be at least MIN_MAP_SIZE + border on each side
+            expected_min_size = MIN_MAP_SIZE + 2 * REPLAY_BORDER_SIZE
+            assert padded_height >= expected_min_size
+            assert padded_width >= expected_min_size
+
+            # Check padding offsets are set
+            assert player.padding_offset_x > 0
+            assert player.padding_offset_y > 0
+
+    def test_replay_player_translates_coordinates(self, simple_map):
+        """Test that ReplayPlayer translates coordinates correctly."""
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+        import pandas as pd
+
+        game = GameState(simple_map, num_players=2)
+        # Create unit at position (1, 1) in original coordinates
+        game.create_unit('W', 1, 1, player=1)
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+
+            player = ReplayPlayer(replay_data, map_df)
+
+            # Execute the create_unit action (it's in original coordinates)
+            # The ReplayPlayer should translate to padded coordinates
+            for action in player.actions:
+                if action['type'] == 'create_unit':
+                    player.execute_action(action)
+                    break
+
+            # The unit should be at translated position
+            expected_x = 1 + player.padding_offset_x
+            expected_y = 1 + player.padding_offset_y
+            unit = player.game_state.get_unit_at_position(expected_x, expected_y)
+            assert unit is not None
+            assert unit.type == 'W'
+            assert unit.player == 1
+
+    def test_replay_player_move_action_translates(self, simple_map):
+        """Test that move actions translate coordinates."""
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+        import pandas as pd
+
+        game = GameState(simple_map, num_players=2)
+        unit = game.create_unit('W', 1, 1, player=1)
+        if unit:
+            game.move_unit(unit, 2, 1)
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+
+            player = ReplayPlayer(replay_data, map_df)
+
+            # Execute actions
+            for action in player.actions:
+                if action['type'] in ['create_unit', 'move']:
+                    player.execute_action(action)
+
+            # The unit should be at translated destination position
+            expected_x = 2 + player.padding_offset_x
+            expected_y = 1 + player.padding_offset_y
+            unit = player.game_state.get_unit_at_position(expected_x, expected_y)
+            assert unit is not None
+            assert unit.type == 'W'
+
+    def test_replay_player_restart_preserves_padding(self, simple_map):
+        """Test that restart maintains padding offsets."""
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+        import pandas as pd
+
+        game = GameState(simple_map, num_players=2)
+        game.create_unit('W', 1, 1, player=1)
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+
+            player = ReplayPlayer(replay_data, map_df)
+            original_offset_x = player.padding_offset_x
+            original_offset_y = player.padding_offset_y
+
+            # Execute some actions
+            for action in player.actions:
+                player.execute_action(action)
+
+            # Restart
+            player.restart()
+
+            # Padding offsets should still be the same
+            assert player.padding_offset_x == original_offset_x
+            assert player.padding_offset_y == original_offset_y
+
+
 class TestReplayVideoExport:
     """Test replay video export functionality."""
 
@@ -312,6 +458,9 @@ class TestReplayVideoExport:
             assert player.recording is False
             assert len(player.recorded_frames) == 0
             assert hasattr(player, 'save_video_button')
+            # Check padding is applied
+            assert hasattr(player, 'padding_offset_x')
+            assert hasattr(player, 'padding_offset_y')
 
     def test_start_stop_recording(self, game_with_actions):
         """Test starting and stopping video recording."""

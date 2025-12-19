@@ -5,9 +5,11 @@ import time
 from pathlib import Path
 from datetime import datetime
 import numpy as np
+import pandas as pd
 import pygame
 
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.constants import MIN_MAP_SIZE
 
 # Optional OpenCV import for video export
 try:
@@ -15,6 +17,9 @@ try:
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
+
+# Default border size for replay padding (same as UI)
+REPLAY_BORDER_SIZE = 2
 
 
 class ReplayPlayer:
@@ -31,7 +36,12 @@ class ReplayPlayer:
         self.replay_data = replay_data
         self.actions = replay_data.get('actions', [])
         self.game_info = replay_data.get('game_info', {})
-        self.initial_map_data = initial_map_data
+
+        # Pad the map for UI display (same as gameplay)
+        padded_map, offset_x, offset_y = self._pad_map_for_replay(initial_map_data)
+        self.initial_map_data = padded_map
+        self.padding_offset_x = offset_x
+        self.padding_offset_y = offset_y
 
         self.current_action_index = 0
         self.playing = False
@@ -43,9 +53,9 @@ class ReplayPlayer:
         self.recording = False
         self.recorded_frames = []
 
-        # Create initial game state
+        # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
-        self.game_state = GameState(initial_map_data,
+        self.game_state = GameState(padded_map,
                                     num_players=self.game_info.get('num_players', 2))
 
         # Create renderer
@@ -54,6 +64,83 @@ class ReplayPlayer:
 
         # UI elements
         self.setup_ui()
+
+    def _pad_map_for_replay(self, map_data):
+        """
+        Pad the map for replay display (same as UI gameplay).
+
+        Applies minimum size padding and water border, matching the
+        behavior of FileIO.load_map(for_ui=True).
+
+        Args:
+            map_data: Initial map data (DataFrame or array-like)
+
+        Returns:
+            Tuple of (padded_map_dataframe, offset_x, offset_y)
+        """
+        # Convert to DataFrame if needed
+        if isinstance(map_data, pd.DataFrame):
+            df = map_data.copy()
+        elif isinstance(map_data, np.ndarray):
+            df = pd.DataFrame(map_data)
+        else:
+            df = pd.DataFrame(map_data)
+
+        height, width = df.shape
+        offset_x = 0
+        offset_y = 0
+
+        # Apply minimum size padding if needed
+        if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
+            min_height = max(height, MIN_MAP_SIZE)
+            min_width = max(width, MIN_MAP_SIZE)
+
+            pad_width = max(0, min_width - width)
+            pad_height = max(0, min_height - height)
+
+            if pad_width > 0 or pad_height > 0:
+                padded = pd.DataFrame(
+                    np.full((min_height, min_width), 'o', dtype=object)
+                )
+                start_y = pad_height // 2
+                start_x = pad_width // 2
+                end_y = start_y + height
+                end_x = start_x + width
+                padded.iloc[start_y:end_y, start_x:end_x] = df.values
+                df = padded
+                offset_x = start_x
+                offset_y = start_y
+
+        # Add water border
+        border_size = REPLAY_BORDER_SIZE
+        height, width = df.shape
+        new_height = height + 2 * border_size
+        new_width = width + 2 * border_size
+
+        bordered = pd.DataFrame(
+            np.full((new_height, new_width), 'o', dtype=object)
+        )
+        bordered.iloc[border_size:border_size + height,
+                      border_size:border_size + width] = df.values
+
+        # Update offsets to include border
+        offset_x += border_size
+        offset_y += border_size
+
+        return bordered, offset_x, offset_y
+
+    def _translate_coords(self, x, y):
+        """
+        Translate original coordinates to padded coordinates.
+
+        Args:
+            x: Original x coordinate
+            y: Original y coordinate
+
+        Returns:
+            Tuple of (padded_x, padded_y)
+        """
+        return (x + self.padding_offset_x, y + self.padding_offset_y)
 
     def setup_ui(self):
         """Setup UI elements for replay controls."""
@@ -80,6 +167,9 @@ class ReplayPlayer:
         """
         Execute a single replay action.
 
+        Coordinates in the action are in original (unpadded) space and are
+        translated to padded coordinates before execution.
+
         Args:
             action: Action dictionary to execute
         """
@@ -87,23 +177,30 @@ class ReplayPlayer:
 
         try:
             if action_type == 'create_unit':
+                # Translate coordinates from original to padded
+                padded_x, padded_y = self._translate_coords(action['x'], action['y'])
                 self.game_state.create_unit(
                     action['unit_type'],
-                    action['x'],
-                    action['y'],
+                    padded_x,
+                    padded_y,
                     action['player']
                 )
 
             elif action_type == 'move':
-                # Find the unit
-                unit = self.game_state.get_unit_at_position(action['from_x'], action['from_y'])
+                # Translate coordinates from original to padded
+                from_x, from_y = self._translate_coords(action['from_x'], action['from_y'])
+                to_x, to_y = self._translate_coords(action['to_x'], action['to_y'])
+                # Find the unit at the translated position
+                unit = self.game_state.get_unit_at_position(from_x, from_y)
                 if unit and unit.player == action['player']:
-                    self.game_state.move_unit(unit, action['to_x'], action['to_y'])
+                    self.game_state.move_unit(unit, to_x, to_y)
 
             elif action_type == 'attack':
-                # Find attacker and target
-                attacker_pos = action['attacker_pos']
-                target_pos = action['target_pos']
+                # Translate coordinates from original to padded
+                orig_attacker_pos = action['attacker_pos']
+                orig_target_pos = action['target_pos']
+                attacker_pos = self._translate_coords(*orig_attacker_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
                 attacker = self.game_state.get_unit_at_position(*attacker_pos)
                 target = self.game_state.get_unit_at_position(*target_pos)
 
@@ -111,30 +208,41 @@ class ReplayPlayer:
                     self.game_state.attack(attacker, target)
 
             elif action_type == 'seize':
-                position = action['position']
+                # Translate coordinates from original to padded
+                orig_position = action['position']
+                position = self._translate_coords(*orig_position)
                 unit = self.game_state.get_unit_at_position(*position)
                 if unit:
                     self.game_state.seize(unit)
 
             elif action_type == 'paralyze':
-                paralyzer_pos = action['paralyzer_pos']
-                target_pos = action['target_pos']
+                # Translate coordinates from original to padded
+                orig_paralyzer_pos = action['paralyzer_pos']
+                orig_target_pos = action['target_pos']
+                paralyzer_pos = self._translate_coords(*orig_paralyzer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
                 paralyzer = self.game_state.get_unit_at_position(*paralyzer_pos)
                 target = self.game_state.get_unit_at_position(*target_pos)
                 if paralyzer and target:
                     self.game_state.paralyze(paralyzer, target)
 
             elif action_type == 'heal':
-                healer_pos = action['healer_pos']
-                target_pos = action['target_pos']
+                # Translate coordinates from original to padded
+                orig_healer_pos = action['healer_pos']
+                orig_target_pos = action['target_pos']
+                healer_pos = self._translate_coords(*orig_healer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
                 healer = self.game_state.get_unit_at_position(*healer_pos)
                 target = self.game_state.get_unit_at_position(*target_pos)
                 if healer and target:
                     self.game_state.heal(healer, target)
 
             elif action_type == 'cure':
-                curer_pos = action['curer_pos']
-                target_pos = action['target_pos']
+                # Translate coordinates from original to padded
+                orig_curer_pos = action['curer_pos']
+                orig_target_pos = action['target_pos']
+                curer_pos = self._translate_coords(*orig_curer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
                 curer = self.game_state.get_unit_at_position(*curer_pos)
                 target = self.game_state.get_unit_at_position(*target_pos)
                 if curer and target:
