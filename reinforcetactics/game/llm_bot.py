@@ -304,8 +304,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 # Extract map name from file path
                 map_name = "unknown"
                 if self.game_state.map_file_used:
-                    from pathlib import Path as LogPath
-                    map_name = LogPath(self.game_state.map_file_used).stem
+                    map_name = Path(self.game_state.map_file_used).stem
 
                 log_data = {
                     "game_session_id": self.game_session_id,
@@ -488,7 +487,6 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Extract map name from file path
         map_name = "unknown"
         if self.game_state.map_file_used:
-            from pathlib import Path
             map_name = Path(self.game_state.map_file_used).stem
 
         return {
