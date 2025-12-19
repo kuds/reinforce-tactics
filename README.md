@@ -671,10 +671,10 @@ Built with:
 ## To Do List
 - [x] Game play save and load
 - [x] Implement Replay Functionality
-- [ ] Implement Basic AI (Deterministics, no NN)
+- [x] Implement Basic AI (Deterministics, no NN)
   - [x] Easy
-  - [ ] Normal
-  - [ ] Hard
+  - [x] Normal
+  - [x] Hard
 - [X] Implement Range Units
 - [X] Implement Routing Functionality for Units
 - [X] Buildings Healing Units
