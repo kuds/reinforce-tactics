@@ -94,11 +94,11 @@ def evaluate_agent(
     env.close()
 
     # Compute statistics
-    win_rate = wins / n_episodes
-    avg_reward = np.mean(total_rewards)
-    std_reward = np.std(total_rewards)
-    avg_length = np.mean(episode_lengths)
-    avg_invalid = np.mean(invalid_actions)
+    win_rate = wins / n_episodes if n_episodes > 0 else 0.0
+    avg_reward = np.mean(total_rewards) if total_rewards else 0.0
+    std_reward = np.std(total_rewards) if total_rewards else 0.0
+    avg_length = np.mean(episode_lengths) if episode_lengths else 0.0
+    avg_invalid = np.mean(invalid_actions) if invalid_actions else 0.0
 
     # Print results
     print(f"\n{'='*60}")
