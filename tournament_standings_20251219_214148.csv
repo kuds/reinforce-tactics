@@ -1,0 +1,5 @@
+name,wins,losses,draws,total,win_rate,elo,elo_change
+AdvancedBot,36,2,10,48,0.75,1693.0,193.0
+MediumBot,19,10,19,48,0.3958333333333333,1575.0,75.0
+SimpleBot,1,20,27,48,0.020833333333333332,1405.0,-95.0
+Claude Haiku,2,26,20,48,0.041666666666666664,1327.0,-173.0
