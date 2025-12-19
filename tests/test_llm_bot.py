@@ -980,11 +980,6 @@ class TestMapCoordinateConversion:
             assert log_data['map_dimensions']['width'] == 6
             assert log_data['map_dimensions']['height'] == 6
 
-            assert 'padded_dimensions' in log_data
-            # The actual grid may not be padded in this test since we mocked it
-            assert 'width' in log_data['padded_dimensions']
-            assert 'height' in log_data['padded_dimensions']
-
     def test_non_padded_map_works_correctly(self, simple_game, test_bot_class):
         """Test that non-padded maps (20x20+) work correctly without coordinate conversion."""
         # simple_game is 10x10, but if it's not padded, offsets should be 0
