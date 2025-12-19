@@ -1125,3 +1125,51 @@ class TestMapCoordinateConversion:
         assert game_state_json['map_width'] == 10
         assert game_state_json['map_height'] == 10
         assert game_state_json['map_padding_applied'] is False
+
+    def test_action_history_uses_original_coordinates(self, padded_game):
+        """Test that action history records use original/unpadded coordinates."""
+        # Create a unit at padded position [7, 7] (original [0, 0])
+        unit = padded_game.create_unit('W', 7, 7, player=1)
+        
+        # Check the create_unit action was recorded with original coordinates
+        assert len(padded_game.action_history) >= 1
+        create_action = padded_game.action_history[-1]
+        assert create_action['type'] == 'create_unit'
+        assert create_action['x'] == 0  # Original coordinate, not 7
+        assert create_action['y'] == 0  # Original coordinate, not 7
+        
+        # Move the unit from padded [7, 7] to [7, 8] (original [0, 0] to [0, 1])
+        unit.can_move = True
+        padded_game.move_unit(unit, 7, 8)
+        
+        # Check the move action was recorded with original coordinates
+        move_action = padded_game.action_history[-1]
+        assert move_action['type'] == 'move'
+        assert move_action['from_x'] == 0  # Original coordinate, not 7
+        assert move_action['from_y'] == 0  # Original coordinate, not 7
+        assert move_action['to_x'] == 0    # Original coordinate, not 7
+        assert move_action['to_y'] == 1    # Original coordinate, not 8
+        
+        # Create an enemy unit at padded [7, 9] (original [0, 2])
+        enemy = padded_game.create_unit('W', 7, 9, player=2)
+        
+        # Attack the enemy
+        unit.can_attack = True
+        padded_game.attack(unit, enemy)
+        
+        # Check the attack action was recorded with original coordinates
+        attack_action = padded_game.action_history[-1]
+        assert attack_action['type'] == 'attack'
+        assert attack_action['attacker_pos'] == (0, 1)  # Original coords
+        assert attack_action['target_pos'] == (0, 2)    # Original coords
+
+    def test_action_history_no_padding(self, simple_game):
+        """Test that action history works correctly when there's no padding."""
+        # Create a unit at position [5, 5] (no padding, so original = padded)
+        unit = simple_game.create_unit('W', 5, 5, player=1)
+        
+        # Check the create_unit action
+        create_action = simple_game.action_history[-1]
+        assert create_action['type'] == 'create_unit'
+        assert create_action['x'] == 5  # Same as input since no padding
+        assert create_action['y'] == 5

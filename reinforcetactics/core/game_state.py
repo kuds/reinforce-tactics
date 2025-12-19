@@ -152,17 +152,58 @@ class GameState:
     def record_action(self, action_type: str, **kwargs) -> None:
         """
         Record an action for replay purposes.
+        
+        Automatically converts any coordinate parameters from padded to original coordinates.
 
         Args:
             action_type: Type of action (move, attack, create_unit, etc.)
-            **kwargs: Action-specific parameters
+            **kwargs: Action-specific parameters (coordinates will be converted)
         """
+        # Convert coordinate parameters from padded to original
+        converted_kwargs = {}
+        for key, value in kwargs.items():
+            if key in ['x', 'y', 'from_x', 'from_y', 'to_x', 'to_y']:
+                # Single coordinate value
+                if key.endswith('_x'):
+                    # Store x coordinate to pair with y
+                    converted_kwargs[key] = value
+                elif key.endswith('_y'):
+                    # Convert the x,y pair
+                    x_key = key.replace('_y', '_x')
+                    if x_key in kwargs:
+                        orig_x, orig_y = self.padded_to_original_coords(kwargs[x_key], value)
+                        converted_kwargs[x_key] = orig_x
+                        converted_kwargs[key] = orig_y
+                    else:
+                        converted_kwargs[key] = value
+                elif key == 'x':
+                    # Will be converted when we see 'y'
+                    converted_kwargs[key] = value
+                elif key == 'y':
+                    # Convert x,y pair
+                    if 'x' in kwargs:
+                        orig_x, orig_y = self.padded_to_original_coords(kwargs['x'], value)
+                        converted_kwargs['x'] = orig_x
+                        converted_kwargs[key] = orig_y
+                    else:
+                        converted_kwargs[key] = value
+            elif key in ['position', 'attacker_pos', 'target_pos', 'healer_pos', 'paralyzer_pos', 'curer_pos']:
+                # Tuple/list of (x, y) coordinates
+                if isinstance(value, (tuple, list)) and len(value) == 2:
+                    orig_x, orig_y = self.padded_to_original_coords(value[0], value[1])
+                    converted_kwargs[key] = (orig_x, orig_y)
+                else:
+                    converted_kwargs[key] = value
+            else:
+                # Non-coordinate parameter, keep as-is
+                converted_kwargs[key] = value
+        
         action_record = {
             'turn': self.turn_number,
             'player': self.current_player,
             'type': action_type,
             'timestamp': datetime.now().isoformat(),
-            **kwargs
+            **converted_kwargs
         }
         self.action_history.append(action_record)
 
