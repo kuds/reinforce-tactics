@@ -51,12 +51,17 @@ class GameState:
         self.map_padding_offset_y: int = 0
 
         # Store initial map data for replays (as 2D list of tile codes)
+        # This stores the PADDED map by default
         if isinstance(map_data, pd.DataFrame):
             self.initial_map_data: List[List[str]] = map_data.values.tolist()
         elif isinstance(map_data, np.ndarray):
             self.initial_map_data: List[List[str]] = map_data.tolist()
         else:
             self.initial_map_data: List[List[str]] = [list(row) for row in map_data]
+
+        # Store original unpadded map data (will be set via set_map_metadata if map was padded)
+        # If not set, defaults to the same as initial_map_data (no padding)
+        self.original_map_data: Optional[List[List[str]]] = None
 
         # Player configurations (human vs bot)
         self.player_configs: List[Dict[str, Any]] = []
@@ -75,7 +80,8 @@ class GameState:
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
-                         map_file: Optional[str] = None) -> None:
+                         map_file: Optional[str] = None,
+                         original_map_data: Optional[List[List[str]]] = None) -> None:
         """
         Set metadata about the original map before padding.
 
@@ -85,6 +91,7 @@ class GameState:
             padding_offset_x: X offset added by padding (left side)
             padding_offset_y: Y offset added by padding (top side)
             map_file: Path to the map file
+            original_map_data: The unpadded map data (2D list of tile codes)
         """
         self.original_map_width = original_width
         self.original_map_height = original_height
@@ -92,6 +99,8 @@ class GameState:
         self.map_padding_offset_y = padding_offset_y
         if map_file:
             self.map_file_used = map_file
+        if original_map_data:
+            self.original_map_data = original_map_data
 
     def padded_to_original_coords(self, x: int, y: int) -> Tuple[int, int]:
         """
@@ -731,6 +740,9 @@ class GameState:
         """
         from reinforcetactics.utils.file_io import FileIO
 
+        # Use original unpadded map if available, otherwise use initial_map_data
+        map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
+
         game_info = {
             'num_players': self.num_players,
             'total_turns': self.turn_number,
@@ -739,7 +751,7 @@ class GameState:
             'start_time': self.game_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
-            'initial_map': self.initial_map_data,
+            'initial_map': map_to_save,
             'player_configs': self.player_configs
         }
 

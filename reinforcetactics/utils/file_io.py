@@ -44,7 +44,8 @@ class FileIO:
 
         Returns:
             dict with keys:
-                - map_data: pandas DataFrame containing the map data
+                - map_data: pandas DataFrame containing the map data (padded)
+                - original_map_data: 2D list of the unpadded map data
                 - original_width: width before padding
                 - original_height: height before padding
                 - padding_offset_x: x offset due to padding (0 if no padding)
@@ -74,8 +75,9 @@ class FileIO:
             # Reset index after dropping
             map_data = map_data.reset_index(drop=True)
 
-            # Store original dimensions
+            # Store original dimensions and data
             original_height, original_width = map_data.shape
+            original_map_data = map_data.values.tolist()  # Store unpadded map as 2D list
             padding_offset_x = 0
             padding_offset_y = 0
 
@@ -100,6 +102,7 @@ class FileIO:
 
             return {
                 'map_data': map_data,
+                'original_map_data': original_map_data,
                 'original_width': original_width,
                 'original_height': original_height,
                 'padding_offset_x': padding_offset_x,
