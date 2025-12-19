@@ -301,12 +301,26 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 })
             else:
                 # Create new log file with metadata
+                # Extract map name from file path
+                map_name = "unknown"
+                if self.game_state.map_file_used:
+                    map_name = Path(self.game_state.map_file_used).stem
+
                 log_data = {
                     "game_session_id": self.game_session_id,
                     "model": self.model,
                     "provider": provider,
                     "player": self.bot_player,
                     "start_time": timestamp.isoformat(),
+                    "map_file": self.game_state.map_file_used,
+                    "map_dimensions": {
+                        "width": self.game_state.original_map_width,
+                        "height": self.game_state.original_map_height
+                    },
+                    "padded_dimensions": {
+                        "width": self.game_state.grid.width,
+                        "height": self.game_state.grid.height
+                    },
                     "system_prompt": system_prompt,
                     "turns": [
                         {
@@ -410,17 +424,18 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Get legal actions first
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
 
-        # Serialize player's units with IDs
+        # Serialize player's units with IDs (convert to original coordinates)
         player_units = []
         unit_id = 0
         unit_id_map = {}  # Map unit objects to IDs for later reference
 
         for unit in self.game_state.units:
             if unit.player == self.bot_player:
+                orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
                 unit_data = {
                     'id': unit_id,
                     'type': unit.type,
-                    'position': [unit.x, unit.y],
+                    'position': [orig_x, orig_y],
                     'hp': unit.health,
                     'max_hp': UNIT_DATA[unit.type]['health'],
                     'can_move': unit.can_move,
@@ -431,19 +446,20 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 unit_id_map[unit] = unit_id
                 unit_id += 1
 
-        # Serialize enemy units (less detail)
+        # Serialize enemy units (less detail, convert to original coordinates)
         enemy_units = []
         for unit in self.game_state.units:
             if unit.player != self.bot_player:
+                orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
                 enemy_data = {
                     'type': unit.type,
-                    'position': [unit.x, unit.y],
+                    'position': [orig_x, orig_y],
                     'hp': unit.health,
                     'max_hp': UNIT_DATA[unit.type]['health']
                 }
                 enemy_units.append(enemy_data)
 
-        # Serialize buildings
+        # Serialize buildings (convert to original coordinates)
         player_buildings = []
         enemy_buildings = []
         neutral_buildings = []
@@ -451,9 +467,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         for row in self.game_state.grid.tiles:
             for tile in row:
                 if tile.type in ['b', 'h', 't']:
+                    orig_x, orig_y = self.game_state.padded_to_original_coords(tile.x, tile.y)
                     building_info = {
                         'type': tile.type,
-                        'position': [tile.x, tile.y],
+                        'position': [orig_x, orig_y],
                         'income': 150 if tile.type == 'h' else (100 if tile.type == 'b' else 50)
                     }
 
@@ -467,7 +484,15 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Format legal actions for the LLM
         formatted_legal_actions = self._format_legal_actions(legal_actions, unit_id_map)
 
+        # Extract map name from file path
+        map_name = "unknown"
+        if self.game_state.map_file_used:
+            map_name = Path(self.game_state.map_file_used).stem
+
         return {
+            'map_name': map_name,
+            'map_width': self.game_state.original_map_width,
+            'map_height': self.game_state.original_map_height,
             'turn_number': self.game_state.turn_number,
             'player_gold': self.game_state.player_gold[self.bot_player],
             'opponent_gold': self.game_state.player_gold[
@@ -483,7 +508,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
     def _format_legal_actions(self, legal_actions: Dict[str, List[Any]],
                               unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
-        """Format legal actions for LLM consumption."""
+        """Format legal actions for LLM consumption with original map coordinates."""
         formatted = {
             'create_unit': [],
             'move': [],
@@ -494,61 +519,85 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             'seize': []
         }
 
-        # Create unit actions
+        # Create unit actions (convert coordinates)
         for action in legal_actions['create_unit']:
+            orig_x, orig_y = self.game_state.padded_to_original_coords(
+                action['x'], action['y']
+            )
             formatted['create_unit'].append({
                 'unit_type': action['unit_type'],
-                'position': [action['x'], action['y']],
+                'position': [orig_x, orig_y],
                 'cost': UNIT_DATA[action['unit_type']]['cost']
             })
 
-        # Move actions
+        # Move actions (convert coordinates)
         for action in legal_actions['move']:
             if action['unit'] in unit_id_map:
+                from_x, from_y = self.game_state.padded_to_original_coords(
+                    action['from_x'], action['from_y']
+                )
+                to_x, to_y = self.game_state.padded_to_original_coords(
+                    action['to_x'], action['to_y']
+                )
                 formatted['move'].append({
                     'unit_id': unit_id_map[action['unit']],
-                    'from': [action['from_x'], action['from_y']],
-                    'to': [action['to_x'], action['to_y']]
+                    'from': [from_x, from_y],
+                    'to': [to_x, to_y]
                 })
 
-        # Attack actions
+        # Attack actions (convert coordinates)
         for action in legal_actions['attack']:
             if action['attacker'] in unit_id_map:
+                target_x, target_y = self.game_state.padded_to_original_coords(
+                    action['target'].x, action['target'].y
+                )
                 formatted['attack'].append({
                     'unit_id': unit_id_map[action['attacker']],
-                    'target_position': [action['target'].x, action['target'].y]
+                    'target_position': [target_x, target_y]
                 })
 
-        # Paralyze actions
+        # Paralyze actions (convert coordinates)
         for action in legal_actions['paralyze']:
             if action['paralyzer'] in unit_id_map:
+                target_x, target_y = self.game_state.padded_to_original_coords(
+                    action['target'].x, action['target'].y
+                )
                 formatted['paralyze'].append({
                     'unit_id': unit_id_map[action['paralyzer']],
-                    'target_position': [action['target'].x, action['target'].y]
+                    'target_position': [target_x, target_y]
                 })
 
-        # Heal actions
+        # Heal actions (convert coordinates)
         for action in legal_actions['heal']:
             if action['healer'] in unit_id_map:
+                target_x, target_y = self.game_state.padded_to_original_coords(
+                    action['target'].x, action['target'].y
+                )
                 formatted['heal'].append({
                     'unit_id': unit_id_map[action['healer']],
-                    'target_position': [action['target'].x, action['target'].y]
+                    'target_position': [target_x, target_y]
                 })
 
-        # Cure actions
+        # Cure actions (convert coordinates)
         for action in legal_actions['cure']:
             if action['curer'] in unit_id_map:
+                target_x, target_y = self.game_state.padded_to_original_coords(
+                    action['target'].x, action['target'].y
+                )
                 formatted['cure'].append({
                     'unit_id': unit_id_map[action['curer']],
-                    'target_position': [action['target'].x, action['target'].y]
+                    'target_position': [target_x, target_y]
                 })
 
-        # Seize actions
+        # Seize actions (convert coordinates)
         for action in legal_actions['seize']:
             if action['unit'] in unit_id_map:
+                tile_x, tile_y = self.game_state.padded_to_original_coords(
+                    action['tile'].x, action['tile'].y
+                )
                 formatted['seize'].append({
                     'unit_id': unit_id_map[action['unit']],
-                    'position': [action['tile'].x, action['tile'].y]
+                    'position': [tile_x, tile_y]
                 })
 
         return formatted
@@ -670,7 +719,7 @@ You can take multiple actions in one turn."""
         return unit_map
 
     def _execute_create_unit(self, action: Dict[str, Any]):
-        """Execute a CREATE_UNIT action."""
+        """Execute a CREATE_UNIT action (converts from original to padded coordinates)."""
         unit_type = action.get('unit_type')
         position = action.get('position')
 
@@ -678,9 +727,11 @@ You can take multiple actions in one turn."""
             logger.warning("Invalid CREATE_UNIT action: %s", action)
             return
 
-        x, y = position
+        # Convert from original to padded coordinates
+        orig_x, orig_y = position
+        x, y = self.game_state.original_to_padded_coords(orig_x, orig_y)
 
-        # Validate this is a legal action
+        # Validate this is a legal action (using padded coordinates)
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
         is_legal = any(
             a['unit_type'] == unit_type and a['x'] == x and a['y'] == y
@@ -688,14 +739,16 @@ You can take multiple actions in one turn."""
         )
 
         if not is_legal:
-            logger.warning("Illegal CREATE_UNIT action: %s", action)
+            logger.warning("Illegal CREATE_UNIT action: %s (converted to padded: [%s, %s])", 
+                         action, x, y)
             return
 
         self.game_state.create_unit(unit_type, x, y, self.bot_player)
-        logger.info("Created %s at (%s, %s)", unit_type, x, y)
+        logger.info("Created %s at original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_type, orig_x, orig_y, x, y)
 
     def _execute_move(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
-        """Execute a MOVE action."""
+        """Execute a MOVE action (converts from original to padded coordinates)."""
         unit_id = action.get('unit_id')
         to_pos = action.get('to')
 
@@ -704,7 +757,9 @@ You can take multiple actions in one turn."""
             return
 
         unit = unit_map[unit_id]
-        to_x, to_y = to_pos
+        # Convert from original to padded coordinates
+        orig_to_x, orig_to_y = to_pos
+        to_x, to_y = self.game_state.original_to_padded_coords(orig_to_x, orig_to_y)
 
         # Validate this is a legal move
         if not unit.can_move:
@@ -712,10 +767,11 @@ You can take multiple actions in one turn."""
             return
 
         self.game_state.move_unit(unit, to_x, to_y)
-        logger.info("Moved unit %s to (%s, %s)", unit_id, to_x, to_y)
+        logger.info("Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_id, orig_to_x, orig_to_y, to_x, to_y)
 
     def _execute_attack(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
-        """Execute an ATTACK action."""
+        """Execute an ATTACK action (converts from original to padded coordinates)."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
 
@@ -724,7 +780,11 @@ You can take multiple actions in one turn."""
             return
 
         unit = unit_map[unit_id]
-        target_x, target_y = target_pos
+        # Convert from original to padded coordinates
+        orig_target_x, orig_target_y = target_pos
+        target_x, target_y = self.game_state.original_to_padded_coords(
+            orig_target_x, orig_target_y
+        )
 
         # Find target unit
         target = self.game_state.get_unit_at_position(target_x, target_y)
@@ -733,10 +793,11 @@ You can take multiple actions in one turn."""
             return
 
         self.game_state.attack(unit, target)
-        logger.info("Unit %s attacked enemy at (%s, %s)", unit_id, target_x, target_y)
+        logger.info("Unit %s attacked enemy at original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_paralyze(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
-        """Execute a PARALYZE action."""
+        """Execute a PARALYZE action (converts from original to padded coordinates)."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
 
@@ -745,7 +806,11 @@ You can take multiple actions in one turn."""
             return
 
         unit = unit_map[unit_id]
-        target_x, target_y = target_pos
+        # Convert from original to padded coordinates
+        orig_target_x, orig_target_y = target_pos
+        target_x, target_y = self.game_state.original_to_padded_coords(
+            orig_target_x, orig_target_y
+        )
 
         if unit.type != 'M':
             logger.warning("Unit %s is not a Mage, cannot paralyze", unit_id)
@@ -758,10 +823,11 @@ You can take multiple actions in one turn."""
             return
 
         self.game_state.paralyze(unit, target)
-        logger.info("Unit %s paralyzed enemy at (%s, %s)", unit_id, target_x, target_y)
+        logger.info("Unit %s paralyzed enemy at original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_heal(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
-        """Execute a HEAL action."""
+        """Execute a HEAL action (converts from original to padded coordinates)."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
 
@@ -770,7 +836,11 @@ You can take multiple actions in one turn."""
             return
 
         unit = unit_map[unit_id]
-        target_x, target_y = target_pos
+        # Convert from original to padded coordinates
+        orig_target_x, orig_target_y = target_pos
+        target_x, target_y = self.game_state.original_to_padded_coords(
+            orig_target_x, orig_target_y
+        )
 
         if unit.type != 'C':
             logger.warning("Unit %s is not a Cleric, cannot heal", unit_id)
@@ -783,10 +853,11 @@ You can take multiple actions in one turn."""
             return
 
         self.game_state.heal(unit, target)
-        logger.info("Unit %s healed ally at (%s, %s)", unit_id, target_x, target_y)
+        logger.info("Unit %s healed ally at original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_cure(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
-        """Execute a CURE action."""
+        """Execute a CURE action (converts from original to padded coordinates)."""
         unit_id = action.get('unit_id')
         target_pos = action.get('target_position')
 
@@ -795,7 +866,11 @@ You can take multiple actions in one turn."""
             return
 
         unit = unit_map[unit_id]
-        target_x, target_y = target_pos
+        # Convert from original to padded coordinates
+        orig_target_x, orig_target_y = target_pos
+        target_x, target_y = self.game_state.original_to_padded_coords(
+            orig_target_x, orig_target_y
+        )
 
         if unit.type != 'C':
             logger.warning("Unit %s is not a Cleric, cannot cure", unit_id)
@@ -808,7 +883,8 @@ You can take multiple actions in one turn."""
             return
 
         self.game_state.cure(unit, target)
-        logger.info("Unit %s cured ally at (%s, %s)", unit_id, target_x, target_y)
+        logger.info("Unit %s cured ally at original coords (%s, %s) / padded coords (%s, %s)", 
+                   unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_seize(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
         """Execute a SEIZE action."""

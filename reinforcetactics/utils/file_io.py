@@ -27,6 +27,31 @@ class FileIO:
         Returns:
             pandas DataFrame containing the map data
         """
+        result = FileIO.load_map_with_metadata(filepath, for_ui, border_size)
+        if result is None:
+            return None
+        return result['map_data']
+
+    @staticmethod
+    def load_map_with_metadata(filepath, for_ui=False, border_size=2):
+        """
+        Load a map from a CSV file with metadata about padding.
+
+        Args:
+            filepath: Path to the CSV map file
+            for_ui: If True, adds minimum size padding and water borders for UI display (default: False)
+            border_size: Number of ocean border layers to add when for_ui=True (default: 2)
+
+        Returns:
+            dict with keys:
+                - map_data: pandas DataFrame containing the map data (padded if for_ui=True)
+                - original_map_data: 2D list of the unpadded map data
+                - original_width: width before padding
+                - original_height: height before padding
+                - padding_offset_x: x offset due to padding (0 if no padding or for_ui=False)
+                - padding_offset_y: y offset due to padding (0 if no padding or for_ui=False)
+                - map_file: filepath that was loaded
+        """
         try:
             # Load CSV file - force all data to be strings and strip whitespace
             map_data = pd.read_csv(
@@ -50,15 +75,24 @@ class FileIO:
             # Reset index after dropping
             map_data = map_data.reset_index(drop=True)
 
-            # Ensure minimum size BEFORE adding UI borders
-            height, width = map_data.shape
-            if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-                print(
-                    f"⚠️  Map size ({width}x{height}) is smaller than "
-                    f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
-                )
-                print("   Padding map to minimum size...")
-                map_data = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
+            # Store original dimensions and data
+            original_height, original_width = map_data.shape
+            original_map_data = map_data.values.tolist()  # Store unpadded map as 2D list
+            padding_offset_x = 0
+            padding_offset_y = 0
+
+            # Only apply minimum size padding if loading for UI
+            if for_ui:
+                height, width = map_data.shape
+                if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
+                    print(
+                        f"⚠️  Map size ({width}x{height}) is smaller than "
+                        f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
+                    )
+                    print("   Padding map to minimum size for UI...")
+                    map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(
+                        map_data, MIN_MAP_SIZE, MIN_MAP_SIZE
+                    )
 
             # Add water borders if loading for UI (after ensuring minimum size)
             if for_ui:
@@ -67,7 +101,15 @@ class FileIO:
             height, width = map_data.shape
             print(f"✅ Map loaded: {width}x{height}")
 
-            return map_data
+            return {
+                'map_data': map_data,
+                'original_map_data': original_map_data,
+                'original_width': original_width,
+                'original_height': original_height,
+                'padding_offset_x': padding_offset_x,
+                'padding_offset_y': padding_offset_y,
+                'map_file': filepath
+            }
 
         except FileNotFoundError:
             print(f"❌ Map file not found: {filepath}")
@@ -89,7 +131,7 @@ class FileIO:
             min_height: Minimum height
 
         Returns:
-            Padded pandas DataFrame
+            tuple: (padded_map, offset_x, offset_y) where offsets are the padding on left/top
         """
         current_height, current_width = map_data.shape
 
@@ -98,7 +140,7 @@ class FileIO:
         pad_height = max(0, min_height - current_height)
 
         if pad_width > 0 or pad_height > 0:
-            # Pad with grass tiles ('p')
+            # Pad with ocean tiles ('o')
             padded = pd.DataFrame(
                 np.full((min_height, min_width), 'o', dtype=object)
             )
@@ -110,9 +152,9 @@ class FileIO:
             end_x = start_x + current_width
             padded.iloc[start_y:end_y, start_x:end_x] = map_data.values
 
-            return padded
+            return padded, start_x, start_y
 
-        return map_data
+        return map_data, 0, 0
 
     @staticmethod
     def strip_water_border(map_data, min_size=MIN_STRIP_SIZE):

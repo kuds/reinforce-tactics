@@ -43,13 +43,25 @@ class GameState:
         # Optional map file reference for saving
         self.map_file_used: Optional[str] = None
 
+        # Original map dimensions (before padding)
+        # These default to the current grid dimensions if not set
+        self.original_map_width: int = self.grid.width
+        self.original_map_height: int = self.grid.height
+        self.map_padding_offset_x: int = 0
+        self.map_padding_offset_y: int = 0
+
         # Store initial map data for replays (as 2D list of tile codes)
+        # This stores the PADDED map by default
         if isinstance(map_data, pd.DataFrame):
             self.initial_map_data: List[List[str]] = map_data.values.tolist()
         elif isinstance(map_data, np.ndarray):
             self.initial_map_data: List[List[str]] = map_data.tolist()
         else:
             self.initial_map_data: List[List[str]] = [list(row) for row in map_data]
+
+        # Store original unpadded map data (will be set via set_map_metadata if map was padded)
+        # If not set, defaults to the same as initial_map_data (no padding)
+        self.original_map_data: Optional[List[List[str]]] = None
 
         # Player configurations (human vs bot)
         self.player_configs: List[Dict[str, Any]] = []
@@ -65,6 +77,56 @@ class GameState:
     def reset(self, map_data) -> None:
         """Reset the game state."""
         self.__init__(map_data, self.num_players)
+
+    def set_map_metadata(self, original_width: int, original_height: int,
+                         padding_offset_x: int, padding_offset_y: int,
+                         map_file: Optional[str] = None,
+                         original_map_data: Optional[List[List[str]]] = None) -> None:
+        """
+        Set metadata about the original map before padding.
+
+        Args:
+            original_width: Width of the map before padding
+            original_height: Height of the map before padding
+            padding_offset_x: X offset added by padding (left side)
+            padding_offset_y: Y offset added by padding (top side)
+            map_file: Path to the map file
+            original_map_data: The unpadded map data (2D list of tile codes)
+        """
+        self.original_map_width = original_width
+        self.original_map_height = original_height
+        self.map_padding_offset_x = padding_offset_x
+        self.map_padding_offset_y = padding_offset_y
+        if map_file:
+            self.map_file_used = map_file
+        if original_map_data:
+            self.original_map_data = original_map_data
+
+    def padded_to_original_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert padded map coordinates to original map coordinates.
+
+        Args:
+            x: X coordinate in padded map
+            y: Y coordinate in padded map
+
+        Returns:
+            Tuple of (original_x, original_y)
+        """
+        return (x - self.map_padding_offset_x, y - self.map_padding_offset_y)
+
+    def original_to_padded_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert original map coordinates to padded map coordinates.
+
+        Args:
+            x: X coordinate in original map
+            y: Y coordinate in original map
+
+        Returns:
+            Tuple of (padded_x, padded_y)
+        """
+        return (x + self.map_padding_offset_x, y + self.map_padding_offset_y)
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
@@ -90,17 +152,58 @@ class GameState:
     def record_action(self, action_type: str, **kwargs) -> None:
         """
         Record an action for replay purposes.
+        
+        Automatically converts any coordinate parameters from padded to original coordinates.
 
         Args:
             action_type: Type of action (move, attack, create_unit, etc.)
-            **kwargs: Action-specific parameters
+            **kwargs: Action-specific parameters (coordinates will be converted)
         """
+        # Convert coordinate parameters from padded to original
+        converted_kwargs = {}
+        for key, value in kwargs.items():
+            if key in ['x', 'y', 'from_x', 'from_y', 'to_x', 'to_y']:
+                # Single coordinate value
+                if key.endswith('_x'):
+                    # Store x coordinate to pair with y
+                    converted_kwargs[key] = value
+                elif key.endswith('_y'):
+                    # Convert the x,y pair
+                    x_key = key.replace('_y', '_x')
+                    if x_key in kwargs:
+                        orig_x, orig_y = self.padded_to_original_coords(kwargs[x_key], value)
+                        converted_kwargs[x_key] = orig_x
+                        converted_kwargs[key] = orig_y
+                    else:
+                        converted_kwargs[key] = value
+                elif key == 'x':
+                    # Will be converted when we see 'y'
+                    converted_kwargs[key] = value
+                elif key == 'y':
+                    # Convert x,y pair
+                    if 'x' in kwargs:
+                        orig_x, orig_y = self.padded_to_original_coords(kwargs['x'], value)
+                        converted_kwargs['x'] = orig_x
+                        converted_kwargs[key] = orig_y
+                    else:
+                        converted_kwargs[key] = value
+            elif key in ['position', 'attacker_pos', 'target_pos', 'healer_pos', 'paralyzer_pos', 'curer_pos']:
+                # Tuple/list of (x, y) coordinates
+                if isinstance(value, (tuple, list)) and len(value) == 2:
+                    orig_x, orig_y = self.padded_to_original_coords(value[0], value[1])
+                    converted_kwargs[key] = (orig_x, orig_y)
+                else:
+                    converted_kwargs[key] = value
+            else:
+                # Non-coordinate parameter, keep as-is
+                converted_kwargs[key] = value
+        
         action_record = {
             'turn': self.turn_number,
             'player': self.current_player,
             'type': action_type,
             'timestamp': datetime.now().isoformat(),
-            **kwargs
+            **converted_kwargs
         }
         self.action_history.append(action_record)
 
@@ -678,6 +781,9 @@ class GameState:
         """
         from reinforcetactics.utils.file_io import FileIO
 
+        # Use original unpadded map if available, otherwise use initial_map_data
+        map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
+
         game_info = {
             'num_players': self.num_players,
             'total_turns': self.turn_number,
@@ -686,7 +792,7 @@ class GameState:
             'start_time': self.game_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
-            'initial_map': self.initial_map_data,
+            'initial_map': map_to_save,
             'player_configs': self.player_configs
         }
 
