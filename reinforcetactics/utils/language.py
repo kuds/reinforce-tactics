@@ -97,6 +97,7 @@ TRANSLATIONS = {
         'common.back': 'Back',
         'common.confirm': 'Confirm',
         'common.cancel': 'Cancel',
+        'common.esc_hint': 'Press ESC to go back',
 
         # Credits
         'credits.title': 'Credits',
@@ -270,6 +271,7 @@ TRANSLATIONS = {
         'common.back': 'Retour',
         'common.confirm': 'Confirmer',
         'common.cancel': 'Annuler',
+        'common.esc_hint': 'Appuyez sur ESC pour revenir',
 
         # Credits
         'credits.title': 'Crédits',
@@ -443,6 +445,7 @@ TRANSLATIONS = {
         'common.back': '뒤로',
         'common.confirm': '확인',
         'common.cancel': '취소',
+        'common.esc_hint': 'ESC를 눌러 뒤로',
 
         # Credits
         'credits.title': '크레딧',
@@ -616,6 +619,7 @@ TRANSLATIONS = {
         'common.back': 'Atrás',
         'common.confirm': 'Confirmar',
         'common.cancel': 'Cancelar',
+        'common.esc_hint': 'Presiona ESC para volver',
 
         # Credits
         'credits.title': 'Créditos',
@@ -753,6 +757,7 @@ TRANSLATIONS = {
         'common.back': '返回',
         'common.confirm': '确认',
         'common.cancel': '取消',
+        'common.esc_hint': '按ESC返回',
 
         # Credits
         'credits.title': '制作人员',

@@ -10,8 +10,9 @@ import pandas as pd
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.ui.renderer import Renderer
 from reinforcetactics.ui.menus import (
-    MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu
+    MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu, PauseMenu
 )
+from reinforcetactics.ui.menus.settings.settings_menu import SettingsMenu
 from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.settings import get_settings
 from reinforcetactics.utils.replay_player import ReplayPlayer
@@ -64,7 +65,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
         print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
-        print("  - Press ESC to quit")
+        print("  - Press ESC to pause")
         print()
 
         while self.running and not self.game.game_over:
@@ -81,6 +82,13 @@ class GameSession:  # pylint: disable=too-few-public-methods
                         self.running = False
                     elif result == 'save':
                         self._handle_save_game()
+                    elif result == 'pause':
+                        pause_result = self._handle_pause_menu()
+                        if pause_result == 'quit':
+                            return 'quit'
+                        elif pause_result == 'main_menu':
+                            return 'main_menu'
+                        # 'resume' or None: continue playing
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
@@ -115,6 +123,37 @@ class GameSession:  # pylint: disable=too-few-public-methods
         result = save_menu.run()
         if result:
             print(f"✅ Game saved to {result}")
+
+    def _handle_pause_menu(self):
+        """
+        Handle pause menu display and interaction.
+
+        Returns:
+            'resume', 'main_menu', 'quit', or None
+        """
+        pause_menu = PauseMenu(self.renderer.screen)
+        result = pause_menu.run()
+        pygame.event.clear()
+
+        if result == 'resume':
+            return 'resume'
+        elif result == 'save':
+            self._handle_save_game()
+            return 'resume'
+        elif result == 'load':
+            # Loading from pause menu - return to main menu to handle properly
+            return 'main_menu'
+        elif result == 'settings':
+            settings_menu = SettingsMenu(self.renderer.screen)
+            settings_menu.run()
+            pygame.event.clear()
+            return 'resume'
+        elif result == 'main_menu':
+            return 'main_menu'
+        elif result == 'quit':
+            return 'quit'
+
+        return 'resume'
 
     def _render_frame(self):
         """Render a single frame."""
@@ -301,7 +340,7 @@ def load_saved_game():
         print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
-        print("  - Press ESC to quit")
+        print("  - Press ESC to pause")
         print()
 
         # Create and run game session
