@@ -433,7 +433,7 @@ class MediumBot:
             # Check if enemy is capturing a structure
             tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
             if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
-                return 0  # Highest priority
+                return (0,)  # Highest priority - tuple for consistent sorting
             # Otherwise, prioritize by unit cost (kill expensive units first)
             cost = UNIT_DATA[enemy.type]['cost']
             # Also consider minimizing overkill (fewer attackers needed = better)
