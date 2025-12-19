@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics import __version__
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -338,6 +339,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
                 log_data = {
                     "game_session_id": self.game_session_id,
+                    "version": __version__,
                     "model": self.model,
                     "provider": provider,
                     "player": self.bot_player,
@@ -346,10 +348,6 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     "map_dimensions": {
                         "width": self.game_state.original_map_width,
                         "height": self.game_state.original_map_height
-                    },
-                    "padded_dimensions": {
-                        "width": self.game_state.grid.width,
-                        "height": self.game_state.grid.height
                     },
                     "system_prompt": system_prompt,
                     "turns": [turn_data]
