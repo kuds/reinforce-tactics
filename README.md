@@ -462,7 +462,7 @@ Official tournament results between different bot types. For detailed results an
 | 1 | AdvancedBot | 36 | 2 | 10 | 48 | 75.0% | 1693 | +193 |
 | 2 | MediumBot | 19 | 10 | 19 | 48 | 39.6% | 1575 | +75 |
 | 3 | SimpleBot | 1 | 20 | 27 | 48 | 2.1% | 1405 | -95 |
-| 4 | Claude Haiku | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
+| 4 | Claude Haiku 4.5 | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
 
 #### Head-to-Head Results
 
@@ -470,10 +470,10 @@ Official tournament results between different bot types. For detailed results an
 |---------|------------|------------|-------|
 | SimpleBot vs MediumBot | 0 | 6 | 10 |
 | SimpleBot vs AdvancedBot | 0 | 12 | 4 |
-| SimpleBot vs Claude Haiku | 1 | 2 | 13 |
+| SimpleBot vs Claude Haiku 4.5 | 1 | 2 | 13 |
 | MediumBot vs AdvancedBot | 2 | 10 | 4 |
-| MediumBot vs Claude Haiku | 11 | 0 | 5 |
-| AdvancedBot vs Claude Haiku | 14 | 0 | 2 |
+| MediumBot vs Claude Haiku 4.5 | 11 | 0 | 5 |
+| AdvancedBot vs Claude Haiku 4.5 | 14 | 0 | 2 |
 
 ## Game Rules
 
