@@ -441,6 +441,40 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 - Invalid moves are automatically skipped with no game impact
 - Check logs for details on which actions were rejected
 
+## Tournament Results
+
+Official tournament results between different bot types. For detailed results and analysis, see the [Bot Tournaments](https://reinforcetactics.com/docs/tournaments) page.
+
+### Version 0.1.0
+
+**Tournament Date:** December 19, 2025
+
+**Bots:** SimpleBot, MediumBot, AdvancedBot, Claude Haiku (claude-haiku-4-5-20251001)
+
+**Maps:** beginner.csv, funnel_point.csv, center_mountains.csv, corner_points.csv
+
+**Games per matchup:** 2 per side (16 games per bot pair across 4 maps)
+
+#### Standings
+
+| Rank | Bot | Wins | Losses | Draws | Games | Win Rate | ELO | ELO Δ |
+|------|-----|------|--------|-------|-------|----------|-----|-------|
+| 1 | AdvancedBot | 36 | 2 | 10 | 48 | 75.0% | 1693 | +193 |
+| 2 | MediumBot | 19 | 10 | 19 | 48 | 39.6% | 1575 | +75 |
+| 3 | SimpleBot | 1 | 20 | 27 | 48 | 2.1% | 1405 | -95 |
+| 4 | Claude Haiku | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
+
+#### Head-to-Head Results
+
+| Matchup | Bot 1 Wins | Bot 2 Wins | Draws |
+|---------|------------|------------|-------|
+| SimpleBot vs MediumBot | 0 | 6 | 10 |
+| SimpleBot vs AdvancedBot | 0 | 12 | 4 |
+| SimpleBot vs Claude Haiku | 1 | 2 | 13 |
+| MediumBot vs AdvancedBot | 2 | 10 | 4 |
+| MediumBot vs Claude Haiku | 11 | 0 | 5 |
+| AdvancedBot vs Claude Haiku | 14 | 0 | 2 |
+
 ## Game Rules
 
 ![](images/rt_demo.gif)

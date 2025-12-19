@@ -72,71 +72,102 @@ python3 scripts/tournament.py
 
 ## Official Tournament Results
 
-Below are the results from official tournaments run on the Reinforce Tactics platform.
-
-### Tournament #1 - [Date TBD]
-
-**Configuration:**
-- Map: `maps/1v1/6x6_beginner.csv`
-- Games per matchup: 4 (2 per side)
-- Max turns per game: 500
-
-**Results:**
-
-| Rank | Bot Name | Wins | Losses | Draws | Total Games | Win Rate |
-|------|----------|------|--------|-------|-------------|----------|
-| 1    | TBD      | -    | -      | -     | -           | -        |
-| 2    | TBD      | -    | -      | -     | -           | -        |
-| 3    | TBD      | -    | -      | -     | -           | -        |
-| 4    | TBD      | -    | -      | -     | -           | -        |
-
-**Analysis:**
-_Tournament analysis will be added after completion._
-
-**Notable Matches:**
-_Interesting matchups and key moments will be highlighted here._
+Below are the results from official tournaments run on the Reinforce Tactics platform. Results are organized by game version.
 
 ---
 
-### Tournament #2 - [Date TBD]
+## Version 0.1.0
+
+### Tournament #1 - December 19, 2025
 
 **Configuration:**
-- Map: `maps/1v1/10x10_easy.csv`
-- Games per matchup: 4 (2 per side)
-- Max turns per game: 500
+- **Maps:** beginner.csv, funnel_point.csv, center_mountains.csv, corner_points.csv
+- **Games per matchup:** 2 per side (16 total games per bot pair across all maps)
+- **Map pool mode:** All maps played
+- **Starting ELO:** 1500
 
-**Results:**
+**Participants:**
+- SimpleBot (rule-based)
+- MediumBot (rule-based)
+- AdvancedBot (rule-based)
+- Claude Haiku (claude-haiku-4-5-20251001)
 
-| Rank | Bot Name | Wins | Losses | Draws | Total Games | Win Rate |
-|------|----------|------|--------|-------|-------------|----------|
-| 1    | TBD      | -    | -      | -     | -           | -        |
-| 2    | TBD      | -    | -      | -     | -           | -        |
-| 3    | TBD      | -    | -      | -     | -           | -        |
-| 4    | TBD      | -    | -      | -     | -           | -        |
+#### Final Standings
 
-**Analysis:**
-_Tournament analysis will be added after completion._
+| Rank | Bot Name | Wins | Losses | Draws | Total Games | Win Rate | ELO | ELO Change |
+|------|----------|------|--------|-------|-------------|----------|-----|------------|
+| 🥇 1 | AdvancedBot | 36 | 2 | 10 | 48 | 75.0% | 1693 | +193 |
+| 🥈 2 | MediumBot | 19 | 10 | 19 | 48 | 39.6% | 1575 | +75 |
+| 🥉 3 | SimpleBot | 1 | 20 | 27 | 48 | 2.1% | 1405 | -95 |
+| 4 | Claude Haiku | 2 | 26 | 20 | 48 | 4.2% | 1327 | -173 |
 
----
+#### Head-to-Head Results
 
-### Tournament #3 - [Date TBD]
+| Matchup | Wins | Losses | Draws | Notes |
+|---------|------|--------|-------|-------|
+| SimpleBot vs MediumBot | 0 | 6 | 10 | MediumBot dominates |
+| SimpleBot vs AdvancedBot | 0 | 12 | 4 | Complete sweep by AdvancedBot |
+| SimpleBot vs Claude Haiku | 1 | 2 | 13 | Mostly draws, slight LLM edge |
+| MediumBot vs AdvancedBot | 2 | 10 | 4 | AdvancedBot clearly superior |
+| MediumBot vs Claude Haiku | 11 | 0 | 5 | MediumBot perfect record |
+| AdvancedBot vs Claude Haiku | 14 | 0 | 2 | Complete domination |
 
-**Configuration:**
-- Map: TBD
-- Games per matchup: TBD
-- Max turns per game: 500
+#### Per-Map Performance
 
-**Results:**
+##### beginner.csv
 
-| Rank | Bot Name | Wins | Losses | Draws | Total Games | Win Rate |
-|------|----------|------|--------|-------|-------------|----------|
-| 1    | TBD      | -    | -      | -     | -           | -        |
-| 2    | TBD      | -    | -      | -     | -           | -        |
-| 3    | TBD      | -    | -      | -     | -           | -        |
-| 4    | TBD      | -    | -      | -     | -           | -        |
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 12 | 0 | 0 |
+| MediumBot | 4 | 4 | 4 |
+| Claude Haiku | 2 | 7 | 3 |
+| SimpleBot | 1 | 8 | 3 |
 
-**Analysis:**
-_Tournament analysis will be added after completion._
+##### funnel_point.csv
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| MediumBot | 8 | 0 | 4 |
+| AdvancedBot | 6 | 2 | 4 |
+| SimpleBot | 0 | 4 | 8 |
+| Claude Haiku | 0 | 8 | 4 |
+
+##### center_mountains.csv
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 6 | 0 | 6 |
+| MediumBot | 1 | 2 | 9 |
+| SimpleBot | 0 | 2 | 10 |
+| Claude Haiku | 0 | 3 | 9 |
+
+##### corner_points.csv
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 12 | 0 | 0 |
+| MediumBot | 6 | 4 | 2 |
+| SimpleBot | 0 | 6 | 6 |
+| Claude Haiku | 0 | 8 | 4 |
+
+#### Analysis
+
+**Key Findings:**
+
+1. **AdvancedBot dominance**: The AdvancedBot performed exceptionally well, achieving a 75% win rate and gaining +193 ELO. Its sophisticated strategies (mountain positioning, ranged combat, special abilities) proved highly effective.
+
+2. **MediumBot solid performance**: With a 39.6% win rate and +75 ELO gain, MediumBot showed the value of coordinated attacks and maximized unit production over SimpleBot's basic approach.
+
+3. **LLM bot struggles**: Claude Haiku placed last with only a 4.2% win rate (-173 ELO). This suggests that current LLM reasoning may not be optimized for the tactical decision-making required in this game format.
+
+4. **High draw rates**: Many matches ended in draws, particularly on center_mountains.csv (defensive terrain) and between lower-performing bots. This indicates the game's strategic depth and defensive viability.
+
+5. **Map influence**: AdvancedBot dominated on beginner.csv and corner_points.csv (100% win rate), while MediumBot actually outperformed on funnel_point.csv.
+
+**Notable Observations:**
+- AdvancedBot never lost on 3 of 4 maps
+- The hierarchy is clear: AdvancedBot > MediumBot > SimpleBot/Claude Haiku
+- Center mountains map produces the most draws (defensive terrain advantage)
 
 ---
 
@@ -144,18 +175,23 @@ _Tournament analysis will be added after completion._
 
 ### Overall Performance (All Tournaments)
 
-| Bot Type    | Total Wins | Total Losses | Total Draws | Overall Win Rate |
-|-------------|------------|--------------|-------------|------------------|
-| SimpleBot   | TBD        | TBD          | TBD         | TBD              |
-| MediumBot   | TBD        | TBD          | TBD         | TBD              |
-| OpenAIBot   | TBD        | TBD          | TBD         | TBD              |
-| ClaudeBot   | TBD        | TBD          | TBD         | TBD              |
-| GeminiBot   | TBD        | TBD          | TBD         | TBD              |
-| Model Bots  | TBD        | TBD          | TBD         | TBD              |
+| Bot Type | Total Wins | Total Losses | Total Draws | Overall Win Rate | Current ELO |
+|----------|------------|--------------|-------------|------------------|-------------|
+| AdvancedBot | 36 | 2 | 10 | 75.0% | 1693 |
+| MediumBot | 19 | 10 | 19 | 39.6% | 1575 |
+| SimpleBot | 1 | 20 | 27 | 2.1% | 1405 |
+| Claude Haiku | 2 | 26 | 20 | 4.2% | 1327 |
 
 ### Head-to-Head Records
 
-Coming soon! This section will show direct matchup statistics between bot types.
+| Bot A | Bot B | A Wins | B Wins | Draws | A Win % |
+|-------|-------|--------|--------|-------|---------|
+| AdvancedBot | MediumBot | 10 | 2 | 4 | 62.5% |
+| AdvancedBot | SimpleBot | 12 | 0 | 4 | 75.0% |
+| AdvancedBot | Claude Haiku | 14 | 0 | 2 | 87.5% |
+| MediumBot | SimpleBot | 6 | 0 | 10 | 37.5% |
+| MediumBot | Claude Haiku | 11 | 0 | 5 | 68.8% |
+| SimpleBot | Claude Haiku | 1 | 2 | 13 | 6.3% |
 
 ## How to Contribute Results
 
