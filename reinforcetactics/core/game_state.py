@@ -43,6 +43,13 @@ class GameState:
         # Optional map file reference for saving
         self.map_file_used: Optional[str] = None
 
+        # Original map dimensions (before padding)
+        # These default to the current grid dimensions if not set
+        self.original_map_width: int = self.grid.width
+        self.original_map_height: int = self.grid.height
+        self.map_padding_offset_x: int = 0
+        self.map_padding_offset_y: int = 0
+
         # Store initial map data for replays (as 2D list of tile codes)
         if isinstance(map_data, pd.DataFrame):
             self.initial_map_data: List[List[str]] = map_data.values.tolist()
@@ -65,6 +72,52 @@ class GameState:
     def reset(self, map_data) -> None:
         """Reset the game state."""
         self.__init__(map_data, self.num_players)
+
+    def set_map_metadata(self, original_width: int, original_height: int,
+                         padding_offset_x: int, padding_offset_y: int,
+                         map_file: Optional[str] = None) -> None:
+        """
+        Set metadata about the original map before padding.
+
+        Args:
+            original_width: Width of the map before padding
+            original_height: Height of the map before padding
+            padding_offset_x: X offset added by padding (left side)
+            padding_offset_y: Y offset added by padding (top side)
+            map_file: Path to the map file
+        """
+        self.original_map_width = original_width
+        self.original_map_height = original_height
+        self.map_padding_offset_x = padding_offset_x
+        self.map_padding_offset_y = padding_offset_y
+        if map_file:
+            self.map_file_used = map_file
+
+    def padded_to_original_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert padded map coordinates to original map coordinates.
+
+        Args:
+            x: X coordinate in padded map
+            y: Y coordinate in padded map
+
+        Returns:
+            Tuple of (original_x, original_y)
+        """
+        return (x - self.map_padding_offset_x, y - self.map_padding_offset_y)
+
+    def original_to_padded_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Convert original map coordinates to padded map coordinates.
+
+        Args:
+            x: X coordinate in original map
+            y: Y coordinate in original map
+
+        Returns:
+            Tuple of (padded_x, padded_y)
+        """
+        return (x + self.map_padding_offset_x, y + self.map_padding_offset_y)
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
