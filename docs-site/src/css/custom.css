@@ -1,30 +1,297 @@
 /**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
+ * Reinforce Tactics - Tactical Game Theme
+ * Inspired by Advance Wars and Fire Emblem
  */
 
-/* You can override the default Infima variables here. */
+/* ===== Color Variables ===== */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
+  /* Primary: Fire Emblem Blue */
+  --ifm-color-primary: #1e3a5f;
+  --ifm-color-primary-dark: #1a3353;
+  --ifm-color-primary-darker: #18304e;
+  --ifm-color-primary-darkest: #132740;
+  --ifm-color-primary-light: #22416b;
+  --ifm-color-primary-lighter: #244470;
+  --ifm-color-primary-lightest: #2a4e80;
+
+  /* Accent Colors - Tactical Theme */
+  --tactics-gold: #c9a227;
+  --tactics-gold-light: #e3c251;
+  --tactics-red: #8b2942;
+  --tactics-red-light: #b33d59;
+  --tactics-blue: #1e3a5f;
+  --tactics-blue-light: #2e5a8f;
+  --tactics-green: #2d5a3d;
+  --tactics-parchment: #f5f0e1;
+  --tactics-dark: #1a1a2e;
+
+  /* Code styling */
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(30, 58, 95, 0.1);
+
+  /* Typography */
+  --ifm-heading-font-weight: 700;
+  --ifm-font-family-base: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
+/* Dark mode theme */
 [data-theme='dark'] {
-  --ifm-color-primary: #25c2a0;
-  --ifm-color-primary-dark: #21af90;
-  --ifm-color-primary-darker: #1fa588;
-  --ifm-color-primary-darkest: #1a8870;
-  --ifm-color-primary-light: #29d5b0;
-  --ifm-color-primary-lighter: #32d8b4;
-  --ifm-color-primary-lightest: #4fddbf;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #5c9ece;
+  --ifm-color-primary-dark: #4590c8;
+  --ifm-color-primary-darker: #3c8ac5;
+  --ifm-color-primary-darkest: #2f75ab;
+  --ifm-color-primary-light: #73acd4;
+  --ifm-color-primary-lighter: #7db2d7;
+  --ifm-color-primary-lightest: #9fc7e2;
+
+  --tactics-parchment: #1a1a2e;
+  --tactics-gold: #e3c251;
+  --docusaurus-highlighted-code-line-bg: rgba(92, 158, 206, 0.2);
+}
+
+/* ===== Tactical Grid Background Pattern ===== */
+.tactical-grid-bg {
+  background-image:
+    linear-gradient(rgba(30, 58, 95, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 58, 95, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+[data-theme='dark'] .tactical-grid-bg {
+  background-image:
+    linear-gradient(rgba(92, 158, 206, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 158, 206, 0.05) 1px, transparent 1px);
+}
+
+/* ===== Custom Button Styles ===== */
+.button--tactics-primary {
+  background: linear-gradient(135deg, var(--tactics-blue) 0%, var(--tactics-blue-light) 100%);
+  border: 2px solid var(--tactics-gold);
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(30, 58, 95, 0.3);
+}
+
+.button--tactics-primary:hover {
+  background: linear-gradient(135deg, var(--tactics-blue-light) 0%, var(--tactics-blue) 100%);
+  border-color: var(--tactics-gold-light);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(30, 58, 95, 0.4);
+  color: white;
+}
+
+.button--tactics-secondary {
+  background: transparent;
+  border: 2px solid var(--tactics-gold);
+  color: var(--tactics-gold);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+}
+
+.button--tactics-secondary:hover {
+  background: var(--tactics-gold);
+  color: var(--tactics-dark);
+  transform: translateY(-2px);
+}
+
+[data-theme='dark'] .button--tactics-secondary {
+  color: var(--tactics-gold-light);
+  border-color: var(--tactics-gold-light);
+}
+
+/* ===== Tactical Card Styles ===== */
+.tactics-card {
+  background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1px solid rgba(30, 58, 95, 0.15);
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.tactics-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--tactics-blue) 0%, var(--tactics-gold) 100%);
+}
+
+.tactics-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(30, 58, 95, 0.15);
+}
+
+[data-theme='dark'] .tactics-card {
+  background: linear-gradient(145deg, #2a2a4e 0%, #1a1a2e 100%);
+  border-color: rgba(92, 158, 206, 0.2);
+}
+
+/* ===== Unit Badge Styles ===== */
+.unit-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 1.25rem;
+  border: 3px solid;
+}
+
+.unit-badge--warrior {
+  background: linear-gradient(135deg, #8b2942 0%, #b33d59 100%);
+  border-color: #c9a227;
+  color: white;
+}
+
+.unit-badge--mage {
+  background: linear-gradient(135deg, #4a148c 0%, #7b1fa2 100%);
+  border-color: #c9a227;
+  color: white;
+}
+
+.unit-badge--cleric {
+  background: linear-gradient(135deg, #2d5a3d 0%, #4caf50 100%);
+  border-color: #c9a227;
+  color: white;
+}
+
+.unit-badge--archer {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2e5a8f 100%);
+  border-color: #c9a227;
+  color: white;
+}
+
+/* ===== Section Divider ===== */
+.tactics-divider {
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--tactics-gold) 20%,
+    var(--tactics-gold) 80%,
+    transparent 100%
+  );
+  margin: 3rem 0;
+}
+
+/* ===== Stat Bar Styles ===== */
+.stat-bar {
+  height: 8px;
+  background: rgba(30, 58, 95, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.stat-bar-fill--hp {
+  background: linear-gradient(90deg, #4caf50 0%, #8bc34a 100%);
+}
+
+.stat-bar-fill--attack {
+  background: linear-gradient(90deg, #f44336 0%, #ff5722 100%);
+}
+
+.stat-bar-fill--defense {
+  background: linear-gradient(90deg, #2196f3 0%, #03a9f4 100%);
+}
+
+.stat-bar-fill--movement {
+  background: linear-gradient(90deg, #ff9800 0%, #ffc107 100%);
+}
+
+/* ===== Navbar Customization ===== */
+.navbar {
+  box-shadow: 0 2px 20px rgba(30, 58, 95, 0.1);
+}
+
+.navbar__title {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* ===== Footer Customization ===== */
+.footer--dark {
+  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
+}
+
+/* ===== Scrollbar Styling ===== */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--tactics-parchment);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--tactics-blue);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tactics-blue-light);
+}
+
+/* ===== Animation Keyframes ===== */
+@keyframes tacticsGlow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(201, 162, 39, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(201, 162, 39, 0.6);
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-glow {
+  animation: tacticsGlow 2s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slideInUp 0.6s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.8s ease-out forwards;
+}
+
+/* ===== Responsive Adjustments ===== */
+@media screen and (max-width: 996px) {
+  .tactics-card {
+    padding: 1rem;
+  }
 }

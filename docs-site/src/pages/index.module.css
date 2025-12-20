@@ -1,23 +1,510 @@
 /**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
+ * Landing Page Styles - Tactical Game Theme
+ * Inspired by Advance Wars and Fire Emblem
  */
 
+/* ===== Hero Section ===== */
 .heroBanner {
-  padding: 4rem 0;
-  text-align: center;
   position: relative;
+  padding: 6rem 0 4rem;
+  text-align: center;
   overflow: hidden;
+  background: linear-gradient(135deg, #0f1a2e 0%, #1e3a5f 50%, #2e4a6f 100%);
 }
 
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    linear-gradient(rgba(201, 162, 39, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201, 162, 39, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+}
+
+.heroBanner::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent);
+  pointer-events: none;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  margin-bottom: 0.5rem;
+  letter-spacing: 2px;
+}
+
+.heroTitleAccent {
+  color: #c9a227;
+  display: block;
+  font-size: 1.1em;
+}
+
+.heroSubtitle {
+  font-size: 1.4rem;
+  color: rgba(255, 255, 255, 0.9);
+  max-width: 700px;
+  margin: 1.5rem auto;
+  line-height: 1.6;
+}
+
+.heroBadge {
+  display: inline-block;
+  background: linear-gradient(135deg, #c9a227 0%, #e3c251 100%);
+  color: #1a1a2e;
+  padding: 0.4rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 1.5rem;
 }
 
 .buttons {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+/* ===== Mission Briefing Section ===== */
+.missionSection {
+  background: linear-gradient(180deg, var(--ifm-background-color) 0%, #f5f0e1 100%);
+  padding: 4rem 0;
+  position: relative;
+}
+
+[data-theme='dark'] .missionSection {
+  background: linear-gradient(180deg, var(--ifm-background-color) 0%, #1a1a2e 100%);
+}
+
+.missionHeader {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.missionTitle {
+  font-size: 2rem;
+  color: var(--tactics-blue);
+  position: relative;
+  display: inline-block;
+}
+
+[data-theme='dark'] .missionTitle {
+  color: var(--tactics-gold);
+}
+
+.missionTitle::before,
+.missionTitle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--tactics-gold));
+}
+
+.missionTitle::before {
+  right: 100%;
+  margin-right: 1rem;
+}
+
+.missionTitle::after {
+  left: 100%;
+  margin-left: 1rem;
+  background: linear-gradient(90deg, var(--tactics-gold), transparent);
+}
+
+/* ===== Unit Showcase Section ===== */
+.unitsSection {
+  padding: 4rem 0;
+  background: var(--ifm-background-color);
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
+  color: var(--ifm-heading-color);
+}
+
+.sectionSubtitle {
+  text-align: center;
+  font-size: 1.1rem;
+  color: var(--ifm-color-emphasis-600);
+  margin-bottom: 3rem;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.unitsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.unitCard {
+  background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid rgba(30, 58, 95, 0.1);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .unitCard {
+  background: linear-gradient(145deg, #2a2a4e 0%, #1e1e38 100%);
+  border-color: rgba(92, 158, 206, 0.15);
+}
+
+.unitCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+.unitCard:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 15px 40px rgba(30, 58, 95, 0.15);
+}
+
+[data-theme='dark'] .unitCard:hover {
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+}
+
+.unitCardWarrior::before {
+  background: linear-gradient(90deg, #8b2942, #b33d59);
+}
+
+.unitCardMage::before {
+  background: linear-gradient(90deg, #4a148c, #7b1fa2);
+}
+
+.unitCardCleric::before {
+  background: linear-gradient(90deg, #2d5a3d, #4caf50);
+}
+
+.unitCardArcher::before {
+  background: linear-gradient(90deg, #1e3a5f, #2e5a8f);
+}
+
+.unitHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.unitIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: white;
+  border: 3px solid #c9a227;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.unitIconWarrior {
+  background: linear-gradient(135deg, #8b2942 0%, #b33d59 100%);
+}
+
+.unitIconMage {
+  background: linear-gradient(135deg, #4a148c 0%, #7b1fa2 100%);
+}
+
+.unitIconCleric {
+  background: linear-gradient(135deg, #2d5a3d 0%, #4caf50 100%);
+}
+
+.unitIconArcher {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2e5a8f 100%);
+}
+
+.unitInfo h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.unitRole {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-600);
+  margin: 0;
+}
+
+.unitDescription {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.unitStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.statItem {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+}
+
+.statLabel {
+  color: var(--ifm-color-emphasis-600);
+}
+
+.statValue {
+  font-weight: 600;
+  color: var(--ifm-heading-color);
+}
+
+/* ===== Features Section ===== */
+.featuresSection {
+  padding: 4rem 0;
+  background: linear-gradient(180deg, #f5f0e1 0%, var(--ifm-background-color) 100%);
+}
+
+[data-theme='dark'] .featuresSection {
+  background: linear-gradient(180deg, #1a1a2e 0%, var(--ifm-background-color) 100%);
+}
+
+.featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.featureCard {
+  background: var(--ifm-background-color);
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  border: 1px solid rgba(30, 58, 95, 0.1);
+  transition: all 0.3s ease;
+}
+
+[data-theme='dark'] .featureCard {
+  border-color: rgba(92, 158, 206, 0.15);
+}
+
+.featureCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(30, 58, 95, 0.1);
+}
+
+[data-theme='dark'] .featureCard:hover {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.featureIcon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.featureCard h3 {
+  font-size: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: var(--ifm-heading-color);
+}
+
+.featureCard p {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ===== Documentation Links Section ===== */
+.docsSection {
+  padding: 4rem 0;
+  background: var(--ifm-background-color);
+}
+
+.docsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.docLink {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1px solid rgba(30, 58, 95, 0.1);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--ifm-heading-color);
+  transition: all 0.3s ease;
+}
+
+[data-theme='dark'] .docLink {
+  background: linear-gradient(145deg, #2a2a4e 0%, #1e1e38 100%);
+  border-color: rgba(92, 158, 206, 0.15);
+}
+
+.docLink:hover {
+  transform: translateX(8px);
+  border-color: var(--tactics-gold);
+  text-decoration: none;
+  color: var(--ifm-heading-color);
+}
+
+.docLinkIcon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.docLinkContent h4 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.docLinkContent p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* ===== Call to Action Section ===== */
+.ctaSection {
+  padding: 5rem 0;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2e5a8f 100%);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.ctaSection::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    linear-gradient(rgba(201, 162, 39, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201, 162, 39, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+.ctaContent {
+  position: relative;
+  z-index: 1;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.ctaTitle {
+  font-size: 2.2rem;
+  color: #ffffff;
+  margin-bottom: 1rem;
+}
+
+.ctaText {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.ctaButtons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* ===== Responsive Styles ===== */
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 4rem 0 3rem;
+  }
+
+  .heroTitle {
+    font-size: 2.5rem;
+  }
+
+  .heroSubtitle {
+    font-size: 1.2rem;
+  }
+
+  .sectionTitle {
+    font-size: 1.8rem;
+  }
+
+  .missionTitle::before,
+  .missionTitle::after {
+    display: none;
+  }
+
+  .unitsGrid,
+  .featuresGrid,
+  .docsGrid {
+    grid-template-columns: 1fr;
+    max-width: 500px;
+  }
+}
+
+@media screen and (max-width: 576px) {
+  .heroTitle {
+    font-size: 2rem;
+  }
+
+  .buttons {
+    flex-direction: column;
+  }
+
+  .unitStats {
+    grid-template-columns: 1fr;
+  }
 }
