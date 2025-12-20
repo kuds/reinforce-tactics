@@ -173,7 +173,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  conversation_log_dir: Optional[str] = None,
                  game_session_id: Optional[str] = None,
                  pretty_print_logs: bool = True,
-                 stateful: bool = False):
+                 stateful: bool = False,
+                 should_reason: bool = False):
         """
         Initialize the LLM bot.
 
@@ -188,6 +189,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             game_session_id: Unique game session identifier (default: auto-generated)
             pretty_print_logs: Format JSON logs with indentation for readability (default True)
             stateful: Maintain conversation history across turns (default False)
+            should_reason: Enable detailed reasoning in responses (default False).
+                When True, prompts for "Brief explanation of your strategy (1-2 sentences)".
+                When False, prompts for "Optional, one sentence max".
         """
         self.game_state = game_state
         self.bot_player = player
@@ -198,6 +202,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.conversation_log_dir = conversation_log_dir or 'logs/llm_conversations/'
         self.pretty_print_logs = pretty_print_logs
         self.stateful = stateful
+        self.should_reason = should_reason
 
         # Initialize conversation history for stateful mode
         self.conversation_history = []
@@ -644,12 +649,17 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
     def _format_prompt(self, game_state_json: Dict[str, Any]) -> str:
         """Format the game state into a prompt for the LLM."""
+        reasoning_description = (
+            "Brief explanation of your strategy (1-2 sentences)"
+            if self.should_reason
+            else "Optional, one sentence max"
+        )
         return f"""Current Game State:
 {json.dumps(game_state_json, indent=2)}
 
 Respond with a JSON object in the following format:
 {{
-    "reasoning": "Brief explanation of your strategy (1-2 sentences)",
+    "reasoning": "{reasoning_description}",
     "actions": [
         {{"type": "CREATE_UNIT", "unit_type": "W|M|C|A", "position": [x, y]}},
         {{"type": "MOVE", "unit_id": 0, "from": [x, y], "to": [x, y]}},
