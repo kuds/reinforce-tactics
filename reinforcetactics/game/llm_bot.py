@@ -147,8 +147,12 @@ STRATEGY TIPS:
 - Archers are excellent for safe ranged attacks, especially from mountains
 - Position units to protect each other
 
-Respond with a JSON object containing your reasoning and a list of actions to take this turn.
-Be strategic and consider the game state carefully before deciding."""
+CRITICAL CONSTRAINTS:
+- Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
+- Each action in your list is executed sequentially - plan accordingly.
+- If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
+
+Respond with ONLY the JSON object below. No extra text before or after."""
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods
