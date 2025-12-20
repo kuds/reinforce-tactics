@@ -85,7 +85,7 @@ const features = [
 // ===== LLM Models Data =====
 const llmModels = [
   {
-    name: 'OpenAI GPT-4',
+    name: 'OpenAI GPT-5',
     icon: '🟢',
     description: 'Evaluate GPT-5 and GPT-5 Mini on complex tactical scenarios requiring multi-step planning.',
   },
@@ -373,7 +373,7 @@ export default function Home(): ReactNode {
       description="Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research, reinforcement learning, and model benchmarking.">
       <Head>
         {/* Additional SEO meta tags */}
-        <meta name="keywords" content="LLM evaluation, LLM benchmark, GPT-4 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning" />
+        <meta name="keywords" content="LLM evaluation, LLM benchmark, GPT-5 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning" />
         <meta name="author" content="Reinforce Tactics" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="Reinforce Tactics" />
