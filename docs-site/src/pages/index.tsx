@@ -87,12 +87,12 @@ const llmModels = [
   {
     name: 'OpenAI GPT-4',
     icon: '🟢',
-    description: 'Evaluate GPT-4 and GPT-4 Turbo on complex tactical scenarios requiring multi-step planning.',
+    description: 'Evaluate GPT-5 and GPT-5 Mini on complex tactical scenarios requiring multi-step planning.',
   },
   {
     name: 'Anthropic Claude',
     icon: '🟣',
-    description: 'Benchmark Claude 3.5 Sonnet, Claude 3 Opus, and Claude Haiku on strategic reasoning tasks.',
+    description: 'Benchmark Claude 4.5 Sonnet, Claude 4.5 Opus, and Claude Haiku 4.5 on strategic reasoning tasks.',
   },
   {
     name: 'Google Gemini',
@@ -152,7 +152,7 @@ const structuredData = {
     name: 'Reinforce Tactics',
     url: 'https://reinforcetactics.com',
   },
-  keywords: 'reinforcement learning, LLM evaluation, AI benchmark, turn-based strategy, tactical AI, GPT-4 evaluation, Claude benchmark, Gemini testing, game AI, Gymnasium environment',
+  keywords: 'reinforcement learning, LLM evaluation, AI benchmark, turn-based strategy, tactical AI, GPT-5 evaluation, Claude benchmark, Gemini testing, game AI, Gymnasium environment',
 };
 
 // ===== Hero Section =====
@@ -166,7 +166,7 @@ function HeroSection(): ReactNode {
         </Heading>
         <p className={styles.heroSubtitle}>
           The open-source tactical strategy environment for evaluating large language models
-          and training reinforcement learning agents. Benchmark GPT-4, Claude, Gemini, and custom
+          and training reinforcement learning agents. Benchmark GPT-5, Claude, Gemini, and custom
           AI on strategic reasoning, multi-step planning, and resource management.
         </p>
         <div className={styles.buttons}>
