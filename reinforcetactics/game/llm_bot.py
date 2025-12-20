@@ -189,9 +189,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             game_session_id: Unique game session identifier (default: auto-generated)
             pretty_print_logs: Format JSON logs with indentation for readability (default True)
             stateful: Maintain conversation history across turns (default False)
-            should_reason: Enable detailed reasoning in responses (default False).
-                When True, prompts for "Brief explanation of your strategy (1-2 sentences)".
-                When False, prompts for "Optional, one sentence max".
+            should_reason: Include reasoning field in response format (default False).
+                When True, includes "reasoning" field prompting for strategy explanation.
+                When False, the reasoning field is omitted entirely from the prompt.
         """
         self.game_state = game_state
         self.bot_player = player
@@ -649,18 +649,17 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
     def _format_prompt(self, game_state_json: Dict[str, Any]) -> str:
         """Format the game state into a prompt for the LLM."""
-        reasoning_description = (
-            "Brief explanation of your strategy (1-2 sentences)"
+        reasoning_line = (
+            '    "reasoning": "Brief explanation of your strategy (1-2 sentences)",\n'
             if self.should_reason
-            else "Optional, one sentence max"
+            else ""
         )
         return f"""Current Game State:
 {json.dumps(game_state_json, indent=2)}
 
 Respond with a JSON object in the following format:
 {{
-    "reasoning": "{reasoning_description}",
-    "actions": [
+{reasoning_line}    "actions": [
         {{"type": "CREATE_UNIT", "unit_type": "W|M|C|A", "position": [x, y]}},
         {{"type": "MOVE", "unit_id": 0, "from": [x, y], "to": [x, y]}},
         {{"type": "ATTACK", "unit_id": 0, "target_position": [x, y]}},
