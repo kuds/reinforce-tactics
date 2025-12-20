@@ -508,3 +508,103 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== LLM Evaluation Section ===== */
+.llmSection {
+  padding: 4rem 0;
+  background: linear-gradient(180deg, var(--ifm-background-color) 0%, #f0f4f8 100%);
+  position: relative;
+}
+
+[data-theme='dark'] .llmSection {
+  background: linear-gradient(180deg, var(--ifm-background-color) 0%, #16162a 100%);
+}
+
+.llmGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto 2.5rem;
+  padding: 0 1rem;
+}
+
+.llmCard {
+  background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+  border-radius: 12px;
+  padding: 1.75rem;
+  text-align: center;
+  border: 1px solid rgba(30, 58, 95, 0.1);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+[data-theme='dark'] .llmCard {
+  background: linear-gradient(145deg, #2a2a4e 0%, #1e1e38 100%);
+  border-color: rgba(92, 158, 206, 0.15);
+}
+
+.llmCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 35px rgba(30, 58, 95, 0.12);
+  border-color: #c9a227;
+}
+
+[data-theme='dark'] .llmCard:hover {
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+  border-color: #e3c251;
+}
+
+.llmIcon {
+  font-size: 2.5rem;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.llmCard h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--ifm-heading-color);
+}
+
+.llmCard p {
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.llmCta {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 2rem 1rem 0;
+  border-top: 1px solid rgba(30, 58, 95, 0.1);
+}
+
+[data-theme='dark'] .llmCta {
+  border-color: rgba(92, 158, 206, 0.1);
+}
+
+.llmCtaText {
+  font-size: 1.05rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+/* Responsive for LLM Section */
+@media screen and (max-width: 996px) {
+  .llmGrid {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 600px;
+  }
+}
+
+@media screen and (max-width: 576px) {
+  .llmGrid {
+    grid-template-columns: 1fr;
+    max-width: 400px;
+  }
+}

@@ -6,8 +6,40 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Reinforce Tactics',
-  tagline: 'Turn-based strategy game with the goal of developing reinforcement learning algorithms',
+  tagline: 'Evaluate LLMs and train RL agents on strategic reasoning. Benchmark GPT-4, Claude, and Gemini.',
   favicon: 'img/favicon.ico',
+
+  // SEO metadata
+  headTags: [
+    {
+      tagName: 'meta',
+      attributes: {
+        name: 'keywords',
+        content: 'LLM evaluation, LLM benchmark, GPT-4 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning, model evaluation',
+      },
+    },
+    {
+      tagName: 'meta',
+      attributes: {
+        name: 'author',
+        content: 'Reinforce Tactics',
+      },
+    },
+    {
+      tagName: 'meta',
+      attributes: {
+        property: 'og:type',
+        content: 'website',
+      },
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'canonical',
+        href: 'https://reinforcetactics.com',
+      },
+    },
+  ],
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -70,8 +102,22 @@ const config: Config = {
   ],
 
   themeConfig: {
-    // Replace with your project's social card
+    // Social card and SEO metadata
     image: 'img/docusaurus-social-card.jpg',
+    metadata: [
+      {
+        name: 'description',
+        content: 'Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research, reinforcement learning, and model benchmarking.',
+      },
+      {
+        property: 'og:description',
+        content: 'Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research and model benchmarking.',
+      },
+      {
+        name: 'twitter:description',
+        content: 'Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source RL environment for AI research.',
+      },
+    ],
     colorMode: {
       respectPrefersColorScheme: true,
     },

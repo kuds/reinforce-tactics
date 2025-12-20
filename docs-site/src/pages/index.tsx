@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import Head from '@docusaurus/Head';
 
 import styles from './index.module.css';
 
@@ -51,33 +52,57 @@ const units = [
 const features = [
   {
     icon: '🎮',
-    title: 'Turn-Based Combat',
-    description: 'Strategic grid-based battles with attacks, counter-attacks, paralysis, and healing mechanics inspired by classic tactical RPGs.',
+    title: 'Turn-Based Tactical Combat',
+    description: 'Strategic grid-based battles with attacks, counter-attacks, paralysis, and healing mechanics inspired by Fire Emblem and Advance Wars.',
   },
   {
     icon: '🤖',
-    title: 'RL-Ready Environment',
-    description: 'Full Gymnasium compatibility with multi-discrete action space, configurable rewards, and headless mode for fast training.',
+    title: 'Gymnasium RL Environment',
+    description: 'Full Gymnasium compatibility with multi-discrete action space, configurable reward shaping, and headless mode for high-speed training.',
   },
   {
     icon: '🧠',
-    title: 'Multiple AI Opponents',
-    description: 'Battle against rule-based bots or LLM-powered opponents using GPT, Claude, or Gemini for dynamic challenges.',
+    title: 'LLM Evaluation Framework',
+    description: 'Benchmark GPT-4, Claude, Gemini, and other large language models on strategic reasoning, planning, and multi-step decision making.',
   },
   {
-    icon: '🏰',
-    title: 'Economic Warfare',
-    description: 'Capture structures for income, build armies, and manage resources. Control the map to starve your enemy.',
+    icon: '🏆',
+    title: 'Tournament System',
+    description: 'Run automated tournaments between AI agents, track ELO ratings, and generate detailed performance analytics and leaderboards.',
   },
   {
     icon: '📊',
-    title: 'Replay & Analysis',
-    description: 'Record battles, export replays to video, and analyze strategies. Perfect for research and learning.',
+    title: 'Replay & Analysis Tools',
+    description: 'Record battles, export replays to video, and analyze decision patterns. Essential for AI research and model interpretability.',
   },
   {
     icon: '🔧',
     title: 'Modular Architecture',
-    description: 'Clean, extensible codebase makes it easy to add new units, mechanics, and reward functions for experiments.',
+    description: 'Clean, extensible Python codebase for adding new units, mechanics, reward functions, and custom AI agents.',
+  },
+];
+
+// ===== LLM Models Data =====
+const llmModels = [
+  {
+    name: 'OpenAI GPT-4',
+    icon: '🟢',
+    description: 'Evaluate GPT-4 and GPT-4 Turbo on complex tactical scenarios requiring multi-step planning.',
+  },
+  {
+    name: 'Anthropic Claude',
+    icon: '🟣',
+    description: 'Benchmark Claude 3.5 Sonnet, Claude 3 Opus, and Claude Haiku on strategic reasoning tasks.',
+  },
+  {
+    name: 'Google Gemini',
+    icon: '🔵',
+    description: 'Test Gemini Pro and Gemini Ultra on spatial reasoning and resource management.',
+  },
+  {
+    name: 'Custom Models',
+    icon: '⚪',
+    description: 'Integrate any LLM via API or local inference for comparative evaluation.',
   },
 ];
 
@@ -86,19 +111,19 @@ const docLinks = [
   {
     icon: '📖',
     title: 'Getting Started',
-    description: 'Installation and quick start guide',
+    description: 'Installation, setup, and quick start guide',
     href: '/docs/',
   },
   {
     icon: '⚔️',
     title: 'Game Mechanics',
-    description: 'Units, combat, and structures',
+    description: 'Units, combat system, and structures',
     href: '/docs/game-mechanics',
   },
   {
     icon: '🏆',
     title: 'Tournament System',
-    description: 'Run AI tournaments and analyze results',
+    description: 'Run AI tournaments and track ELO ratings',
     href: '/docs/tournament-system',
   },
   {
@@ -109,25 +134,46 @@ const docLinks = [
   },
 ];
 
+// ===== SEO Structured Data =====
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Reinforce Tactics',
+  applicationCategory: 'GameApplication',
+  operatingSystem: 'Cross-platform',
+  description: 'A turn-based strategy game environment for reinforcement learning research and LLM evaluation. Benchmark AI models on tactical reasoning and strategic planning.',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+  author: {
+    '@type': 'Organization',
+    name: 'Reinforce Tactics',
+    url: 'https://reinforcetactics.com',
+  },
+  keywords: 'reinforcement learning, LLM evaluation, AI benchmark, turn-based strategy, tactical AI, GPT-4 evaluation, Claude benchmark, Gemini testing, game AI, Gymnasium environment',
+};
+
 // ===== Hero Section =====
 function HeroSection(): ReactNode {
   return (
     <header className={styles.heroBanner}>
       <div className={styles.heroContent}>
-        <span className={styles.heroBadge}>Tactical Strategy + Reinforcement Learning</span>
+        <span className={styles.heroBadge}>LLM Evaluation + Reinforcement Learning</span>
         <Heading as="h1" className={styles.heroTitle}>
           Reinforce<span className={styles.heroTitleAccent}>Tactics</span>
         </Heading>
         <p className={styles.heroSubtitle}>
-          A modular turn-based strategy game designed for developing and testing
-          reinforcement learning algorithms. Command your forces, outsmart AI opponents,
-          and train the next generation of tactical agents.
+          The open-source tactical strategy environment for evaluating large language models
+          and training reinforcement learning agents. Benchmark GPT-4, Claude, Gemini, and custom
+          AI on strategic reasoning, multi-step planning, and resource management.
         </p>
         <div className={styles.buttons}>
           <Link
             className="button button--lg button--tactics-primary"
             to="/docs/">
-            Begin Campaign
+            Get Started
           </Link>
           <Link
             className="button button--lg button--tactics-secondary"
@@ -137,6 +183,44 @@ function HeroSection(): ReactNode {
         </div>
       </div>
     </header>
+  );
+}
+
+// ===== LLM Evaluation Section =====
+function LLMSection(): ReactNode {
+  return (
+    <section className={styles.llmSection}>
+      <div className="container">
+        <Heading as="h2" className={styles.sectionTitle}>
+          Evaluate Large Language Models
+        </Heading>
+        <p className={styles.sectionSubtitle}>
+          Reinforce Tactics provides a rigorous benchmark for testing LLM capabilities in
+          strategic reasoning, spatial awareness, and long-horizon planning. Compare models
+          head-to-head in competitive tournaments.
+        </p>
+        <div className={styles.llmGrid}>
+          {llmModels.map((model) => (
+            <div key={model.name} className={styles.llmCard}>
+              <span className={styles.llmIcon}>{model.icon}</span>
+              <h3>{model.name}</h3>
+              <p>{model.description}</p>
+            </div>
+          ))}
+        </div>
+        <div className={styles.llmCta}>
+          <p className={styles.llmCtaText}>
+            Run automated tournaments, generate ELO ratings, and analyze decision-making patterns
+            across different model architectures and prompting strategies.
+          </p>
+          <Link
+            className="button button--md button--tactics-primary"
+            to="/docs/tournament-system">
+            Learn About Tournaments
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -182,11 +266,11 @@ function UnitsSection(): ReactNode {
     <section className={styles.unitsSection}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
-          Command Your Forces
+          Rich Tactical Environment
         </Heading>
         <p className={styles.sectionSubtitle}>
-          Four distinct unit types, each with unique abilities and tactical roles.
-          Build the perfect army composition for victory.
+          Four distinct unit types create a complex decision space that challenges AI agents
+          to reason about positioning, resource allocation, and opponent modeling.
         </p>
         <div className={styles.unitsGrid}>
           {units.map((unit) => (
@@ -204,11 +288,11 @@ function FeaturesSection(): ReactNode {
     <section className={styles.featuresSection}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
-          Built for Research
+          Built for AI Research
         </Heading>
         <p className={styles.sectionSubtitle}>
-          A complete tactical environment designed for reinforcement learning experimentation
-          and AI development.
+          A complete tactical environment designed for reinforcement learning experimentation,
+          LLM benchmarking, and AI development.
         </p>
         <div className={styles.featuresGrid}>
           {features.map((feature) => (
@@ -233,7 +317,7 @@ function DocsSection(): ReactNode {
           Explore the Documentation
         </Heading>
         <p className={styles.sectionSubtitle}>
-          Everything you need to get started, from installation to advanced RL training.
+          Everything you need to start evaluating LLMs and training RL agents.
         </p>
         <div className={styles.docsGrid}>
           {docLinks.map((doc) => (
@@ -257,12 +341,11 @@ function CTASection(): ReactNode {
     <section className={styles.ctaSection}>
       <div className={styles.ctaContent}>
         <Heading as="h2" className={styles.ctaTitle}>
-          Ready to Deploy Your Agents?
+          Start Evaluating Your AI Models
         </Heading>
         <p className={styles.ctaText}>
-          Clone the repository, train your first RL agent, and join the battle.
-          Whether you're researching new algorithms or just love tactical games,
-          Reinforce Tactics has something for you.
+          Clone the repository, run your first LLM tournament, and discover how different
+          models perform on strategic reasoning tasks. Open source and ready for research.
         </p>
         <div className={styles.ctaButtons}>
           <Link
@@ -286,10 +369,24 @@ export default function Home(): ReactNode {
   const { siteConfig } = useDocusaurusContext();
   return (
     <Layout
-      title={`${siteConfig.title} - Tactical RL Environment`}
-      description="A modular turn-based strategy game built for reinforcement learning research and experimentation. Command your forces, train AI agents, and conquer the battlefield.">
+      title="LLM Evaluation & Reinforcement Learning Benchmark"
+      description="Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research, reinforcement learning, and model benchmarking.">
+      <Head>
+        {/* Additional SEO meta tags */}
+        <meta name="keywords" content="LLM evaluation, LLM benchmark, GPT-4 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning" />
+        <meta name="author" content="Reinforce Tactics" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Reinforce Tactics" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <link rel="canonical" href="https://reinforcetactics.com" />
+        {/* Structured Data for SEO */}
+        <script type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </script>
+      </Head>
       <HeroSection />
       <main>
+        <LLMSection />
         <UnitsSection />
         <FeaturesSection />
         <DocsSection />
