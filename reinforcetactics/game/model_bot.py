@@ -194,11 +194,16 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         """Create a unit at the specified location."""
         try:
             # Map unit_type index to unit code
+            # Note: Using fixed list for RL model compatibility (action space is fixed at training)
             unit_codes = ['W', 'M', 'C', 'A']
             if unit_type < 0 or unit_type >= len(unit_codes):
                 return False
 
             unit_code = unit_codes[unit_type]
+
+            # Check if this unit type is enabled
+            if unit_code not in self.game_state.get_purchasable_unit_types():
+                return False
 
             # Check if we have enough gold
             cost = UNIT_DATA[unit_code]['cost']

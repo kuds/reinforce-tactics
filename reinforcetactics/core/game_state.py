@@ -13,7 +13,10 @@ import pandas as pd
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.game.mechanics import GameMechanics
-from reinforcetactics.constants import STARTING_GOLD, UNIT_DATA, TileType
+from reinforcetactics.constants import (
+    STARTING_GOLD, UNIT_DATA, TileType,
+    get_enabled_units, DEFAULT_PURCHASABLE_UNITS, COUNTER_ATTACK_MULTIPLIER
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -22,13 +25,24 @@ logger = logging.getLogger(__name__)
 class GameState:
     """Manages the core game state without rendering."""
 
-    def __init__(self, map_data, num_players: int = 2) -> None:
+    def __init__(
+        self,
+        map_data,
+        num_players: int = 2,
+        enabled_units: Optional[Dict[str, bool]] = None,
+        counter_attack_multiplier: Optional[float] = None
+    ) -> None:
         """
         Initialize the game state.
 
         Args:
             map_data: 2D array containing map information
             num_players: Number of players (default 2)
+            enabled_units: Optional dict mapping unit type codes to enabled status.
+                          Units not in the dict default to True (enabled).
+                          Example: {'M': False, 'A': False} disables Mage and Archer.
+            counter_attack_multiplier: Multiplier for counter-attack damage (0.0 to 1.0).
+                                       Defaults to COUNTER_ATTACK_MULTIPLIER from constants.
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
@@ -38,7 +52,17 @@ class GameState:
         self.game_over: bool = False
         self.winner: Optional[int] = None
         self.turn_number: int = 0
-        self.mechanics = GameMechanics()
+
+        # Store configuration for enabled units
+        self._enabled_units_config = enabled_units
+        self._purchasable_units = get_enabled_units(enabled_units)
+
+        # Store counter attack multiplier (use default if not specified)
+        self.counter_attack_multiplier = (
+            counter_attack_multiplier if counter_attack_multiplier is not None
+            else COUNTER_ATTACK_MULTIPLIER
+        )
+        self.mechanics = GameMechanics(counter_attack_multiplier=self.counter_attack_multiplier)
 
         # Optional map file reference for saving
         self.map_file_used: Optional[str] = None
@@ -76,7 +100,20 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players)
+        self.__init__(
+            map_data,
+            self.num_players,
+            enabled_units=self._enabled_units_config,
+            counter_attack_multiplier=self.counter_attack_multiplier
+        )
+
+    def get_purchasable_unit_types(self) -> List[str]:
+        """Get list of unit types that can be purchased.
+
+        Returns:
+            List of enabled unit type codes (e.g., ['W', 'M', 'C', 'A']).
+        """
+        return self._purchasable_units.copy()
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
@@ -625,7 +662,7 @@ class GameState:
         # Building units (only at Buildings, not HQ)
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in ['W', 'M', 'C', 'A']:
+                for unit_type in self.get_purchasable_unit_types():
                     if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
                         legal_actions['create_unit'].append({
                             'unit_type': unit_type,
@@ -724,6 +761,8 @@ class GameState:
             'winner': self.winner,
             'map_file': self.map_file_used,
             'player_configs': self.player_configs,
+            'enabled_units': self._enabled_units_config,
+            'counter_attack_multiplier': self.counter_attack_multiplier,
             'units': [unit.to_dict() for unit in self.units],
             'tiles': self.grid.to_dict()['tiles']
         }
@@ -810,7 +849,12 @@ class GameState:
         Returns:
             Restored GameState instance
         """
-        game = cls(map_data, save_data.get('num_players', 2))
+        game = cls(
+            map_data,
+            save_data.get('num_players', 2),
+            enabled_units=save_data.get('enabled_units'),
+            counter_attack_multiplier=save_data.get('counter_attack_multiplier')
+        )
 
         game.current_player = save_data.get('current_player', 1)
         game.turn_number = save_data.get('turn_number', 0)

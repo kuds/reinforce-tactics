@@ -2,6 +2,7 @@
 Game constants for the 2D Strategy Game.
 """
 from enum import Enum
+from typing import Dict, List, TypedDict
 
 
 class TileType(Enum):
@@ -138,6 +139,44 @@ UNIT_DATA = {
         'defence': 1
     }
 }
+
+
+class UnitConfig(TypedDict, total=False):
+    """Configuration for which units are enabled for purchase.
+
+    All units default to True (enabled) if not specified.
+    Example: {'M': False, 'A': False} disables Mage and Archer.
+    """
+    W: bool  # Warrior
+    M: bool  # Mage
+    C: bool  # Cleric
+    B: bool  # Barbarian
+    A: bool  # Archer
+
+
+# All unit type codes
+ALL_UNIT_TYPES: List[str] = ['W', 'M', 'C', 'B', 'A']
+
+# Default purchasable units (excludes Barbarian due to high cost)
+DEFAULT_PURCHASABLE_UNITS: List[str] = ['W', 'M', 'C', 'A']
+
+
+def get_enabled_units(config: Dict[str, bool] | None = None) -> List[str]:
+    """Get list of enabled unit types based on configuration.
+
+    Args:
+        config: Optional dict mapping unit type codes to enabled status.
+                Units not in the dict default to True (enabled).
+                Only units in DEFAULT_PURCHASABLE_UNITS are considered.
+
+    Returns:
+        List of enabled unit type codes.
+    """
+    if config is None:
+        return DEFAULT_PURCHASABLE_UNITS.copy()
+
+    return [u for u in DEFAULT_PURCHASABLE_UNITS if config.get(u, True)]
+
 
 # Starting gold for each player
 STARTING_GOLD = 250

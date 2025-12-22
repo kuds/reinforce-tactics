@@ -3,9 +3,7 @@ Simple AI bot for computer opponents.
 """
 import random
 import copy
-from reinforcetactics.constants import (
-    UNIT_DATA, COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT
-)
+from reinforcetactics.constants import UNIT_DATA, PARALYZE_DURATION, HEAL_AMOUNT
 
 
 class SimpleBot:
@@ -533,8 +531,8 @@ class MediumBot:
             # Target can't counter-attack ranged attacker
             counter_damage = 0
         elif target_damage > 0:
-            # Counter-attacks deal reduced damage (COUNTER_ATTACK_MULTIPLIER = 0.9)
-            counter_damage = int(target_damage * COUNTER_ATTACK_MULTIPLIER)
+            # Counter-attacks deal reduced damage based on game's counter attack multiplier
+            counter_damage = int(target_damage * self.game_state.counter_attack_multiplier)
 
         # Value = damage dealt - damage received
         # Also consider unit costs

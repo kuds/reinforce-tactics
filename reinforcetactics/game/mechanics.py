@@ -1,6 +1,8 @@
 """
 Core game mechanics including combat, movement, income, and structure capture.
 """
+from typing import Optional
+
 from reinforcetactics.constants import (
     COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT,
     STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME
@@ -9,6 +11,18 @@ from reinforcetactics.constants import (
 
 class GameMechanics:
     """Handles core game mechanics and rules."""
+
+    def __init__(self, counter_attack_multiplier: Optional[float] = None) -> None:
+        """Initialize game mechanics with configurable parameters.
+
+        Args:
+            counter_attack_multiplier: Multiplier for counter-attack damage (0.0 to 1.0).
+                                       Defaults to COUNTER_ATTACK_MULTIPLIER from constants.
+        """
+        self.counter_attack_multiplier = (
+            counter_attack_multiplier if counter_attack_multiplier is not None
+            else COUNTER_ATTACK_MULTIPLIER
+        )
 
     @staticmethod
     def can_move_to_position(x, y, grid, units, moving_unit=None, is_destination=False):
@@ -139,8 +153,7 @@ class GameMechanics:
 
         return adjacent_paralyzed
 
-    @staticmethod
-    def _calculate_counter_damage(unit, target_x, target_y, grid):
+    def _calculate_counter_damage(self, unit, target_x, target_y, grid):
         """
         Calculate counter-attack damage for a unit.
 
@@ -159,11 +172,10 @@ class GameMechanics:
             on_mountain = tile.type == 'm'
 
         return int(
-            unit.get_attack_damage(target_x, target_y, on_mountain) * COUNTER_ATTACK_MULTIPLIER
+            unit.get_attack_damage(target_x, target_y, on_mountain) * self.counter_attack_multiplier
         )
 
-    @staticmethod
-    def attack_unit(attacker, target, grid=None):
+    def attack_unit(self, attacker, target, grid=None):
         """
         Execute an attack from attacker to target.
 
@@ -198,7 +210,7 @@ class GameMechanics:
                     can_counter = False
 
             if can_counter:
-                counter_damage = GameMechanics._calculate_counter_damage(
+                counter_damage = self._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
                 )
                 if counter_damage > 0:
@@ -211,7 +223,7 @@ class GameMechanics:
             if attacker.type == 'A' and target.type not in ['A', 'M']:
                 counter_damage_for_response = 0
             else:
-                counter_damage_for_response = GameMechanics._calculate_counter_damage(
+                counter_damage_for_response = self._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
                 )
 
