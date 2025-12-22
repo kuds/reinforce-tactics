@@ -280,7 +280,7 @@ class TestGeminiBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'gemini-2.0-flash'  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'gemini-2.5-flash'  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
@@ -288,10 +288,10 @@ class TestGeminiBot:
             from reinforcetactics.game.llm_bot import GeminiBot as TestBot, GEMINI_MODELS  # pylint: disable=import-outside-toplevel
             assert TestBot._get_supported_models(Mock()) == GEMINI_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
+            assert 'gemini-2.5-flash' in GEMINI_MODELS
+            assert 'gemini-2.5-pro' in GEMINI_MODELS
             assert 'gemini-2.0-flash' in GEMINI_MODELS
             assert 'gemini-1.5-pro' in GEMINI_MODELS
-            assert 'gemini-1.5-flash' in GEMINI_MODELS
-            assert 'gemini-2.0-flash-thinking-exp' in GEMINI_MODELS
 
 
 class TestConversationLogging:
