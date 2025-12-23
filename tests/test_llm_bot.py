@@ -49,6 +49,9 @@ class TestLLMBotBase:
                 def _call_llm(self, messages):
                     return '{"reasoning": "test", "actions": []}'
 
+                def _get_llm_sdk_version(self):
+                    return 'test-sdk-1.0.0'
+
             TestBot(simple_game, player=2)
 
     def test_game_state_serialization(self, simple_game):
@@ -69,6 +72,9 @@ class TestLLMBotBase:
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         bot = TestBot(simple_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
@@ -101,6 +107,9 @@ class TestLLMBotBase:
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
 
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
+
         bot = TestBot(simple_game, player=2, api_key="test-key")
         json_text = '{"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}'
         extracted = bot._extract_json(json_text)
@@ -126,6 +135,9 @@ class TestLLMBotBase:
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         bot = TestBot(simple_game, player=2, api_key="test-key")
         json_text = '''Here is the response:
@@ -155,6 +167,9 @@ class TestLLMBotBase:
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         # Game starts at player 1's turn
         assert simple_game.current_player == 1
@@ -196,6 +211,9 @@ class TestLLMBotBase:
                 nonlocal call_count
                 call_count += 1
                 raise Exception("API Error")
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         # End player 1's turn
         simple_game.end_turn()
@@ -315,6 +333,9 @@ class TestConversationLogging:
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         return TestBot
 
@@ -657,6 +678,9 @@ class TestStatefulConversation:
                 self.messages_received.append(messages)
                 return f'{{"reasoning": "Turn {self.call_count}", "actions": [{{"type": "END_TURN"}}]}}'
 
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
+
         return TestBot
 
     def test_stateful_parameter_default(self, simple_game, test_bot_class):
@@ -806,6 +830,9 @@ class TestMapCoordinateConversion:
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
 
         return TestBot
 
