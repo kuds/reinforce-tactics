@@ -172,6 +172,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     and model invocation.
     """
 
+    # Default max tokens for LLM responses
+    DEFAULT_MAX_TOKENS = 8000
+
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
                  model: Optional[str] = None, max_retries: int = 3,
                  log_conversations: bool = False,
@@ -179,7 +182,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  game_session_id: Optional[str] = None,
                  pretty_print_logs: bool = True,
                  stateful: bool = False,
-                 should_reason: bool = False):
+                 should_reason: bool = False,
+                 max_tokens: Optional[int] = None):
         """
         Initialize the LLM bot.
 
@@ -197,6 +201,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             should_reason: Include reasoning field in response format (default False).
                 When True, includes "reasoning" field prompting for strategy explanation.
                 When False, the reasoning field is omitted entirely from the prompt.
+            max_tokens: Maximum number of tokens for LLM response (default 8000).
+                Set to 0 or None to not pass max_tokens to the LLM provider.
+                If not specified, uses DEFAULT_MAX_TOKENS (8000).
         """
         self.game_state = game_state
         self.bot_player = player
@@ -208,6 +215,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.pretty_print_logs = pretty_print_logs
         self.stateful = stateful
         self.should_reason = should_reason
+        # Handle max_tokens: use default if not specified, keep as-is if explicitly set (including 0/None)
+        self.max_tokens = self.DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens
 
         # Initialize conversation history for stateful mode
         self.conversation_history = []
@@ -1019,13 +1028,17 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
 
         client = openai.OpenAI(api_key=self.api_key)
 
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_completion_tokens=8000
-        )
+        # Build request kwargs, conditionally including max_completion_tokens
+        request_kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.7,
+        }
+        if self.max_tokens:
+            request_kwargs["max_completion_tokens"] = self.max_tokens
+
+        response = client.chat.completions.create(**request_kwargs)
 
         # Capture token usage from OpenAI API response
         if response.usage:
@@ -1100,13 +1113,17 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             else:
                 user_messages.append(msg)
 
-        response = client.messages.create(
-            model=self.model,
-            max_tokens=8000,
-            system=system_message,
-            messages=user_messages,
-            temperature=0.7
-        )
+        # Build request kwargs, conditionally including max_tokens
+        request_kwargs = {
+            "model": self.model,
+            "system": system_message,
+            "messages": user_messages,
+            "temperature": 0.7,
+        }
+        if self.max_tokens:
+            request_kwargs["max_tokens"] = self.max_tokens
+
+        response = client.messages.create(**request_kwargs)
 
         # Capture token usage from Claude API response
         self._last_input_tokens = response.usage.input_tokens
@@ -1215,13 +1232,16 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
                     parts=[types.Part.from_text(text=msg["content"])]
                 ))
 
-        # Build generation config
-        config = types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.7,
-            max_output_tokens=8000,
-            response_mime_type="application/json",
-        )
+        # Build generation config, conditionally including max_output_tokens
+        config_kwargs = {
+            "system_instruction": system_instruction,
+            "temperature": 0.7,
+            "response_mime_type": "application/json",
+        }
+        if self.max_tokens:
+            config_kwargs["max_output_tokens"] = self.max_tokens
+
+        config = types.GenerateContentConfig(**config_kwargs)
 
         try:
             response = client.models.generate_content(
