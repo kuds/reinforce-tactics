@@ -392,7 +392,7 @@ class APIKeysMenu:
         response = client.chat.completions.create(
             model='gpt-4o-mini',
             messages=[{'role': 'user', 'content': 'Hello'}],
-            max_tokens=5
+            max_completion_tokens=5
         )
         if not response.choices:
             raise ValueError("Invalid response from OpenAI")
