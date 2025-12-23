@@ -218,6 +218,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Per-call token tracking (set by subclasses that support it)
         self._last_input_tokens = 0
         self._last_output_tokens = 0
+        # Per-call stop reason tracking (set by subclasses)
+        self._last_stop_reason = ""
 
         # Generate or use provided game session ID
         if game_session_id:
@@ -277,7 +279,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     def _log_conversation_to_json(self, system_prompt: str, user_prompt: str,
                                    assistant_response: str,
                                    input_tokens: int = 0,
-                                   output_tokens: int = 0) -> None:
+                                   output_tokens: int = 0,
+                                   stop_reason: str = "") -> None:
         """
         Log the conversation to a JSON file (single file per game).
 
@@ -288,8 +291,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             system_prompt: The system prompt sent to the LLM
             user_prompt: The user prompt (formatted game state)
             assistant_response: The LLM's response
-            input_tokens: Number of input tokens used for this turn (Claude only)
-            output_tokens: Number of output tokens used for this turn (Claude only)
+            input_tokens: Number of input tokens used for this turn
+            output_tokens: Number of output tokens used for this turn
+            stop_reason: The stop/finish reason from the LLM API response
         """
         # Only log if enabled
         if not self.log_conversations:
@@ -312,7 +316,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             timestamp = datetime.now()
             turn = self.game_state.turn_number
 
-            # Build turn data with token usage
+            # Build turn data with token usage and stop reason
             turn_data = {
                 "turn_number": turn,
                 "timestamp": timestamp.isoformat(),
@@ -320,7 +324,11 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 "assistant_response": assistant_response
             }
 
-            # Include token usage if tracked (Claude models)
+            # Include stop reason if available
+            if stop_reason:
+                turn_data["stop_reason"] = stop_reason
+
+            # Include token usage if tracked
             if input_tokens > 0 or output_tokens > 0:
                 turn_data["token_usage"] = {
                     "input_tokens": input_tokens,
@@ -451,11 +459,12 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             self.conversation_history.append({"role": "user", "content": user_prompt})
             self.conversation_history.append({"role": "assistant", "content": response_text})
 
-        # Log the conversation if enabled (include token usage for Claude)
+        # Log the conversation if enabled (include token usage and stop reason)
         self._log_conversation_to_json(
             SYSTEM_PROMPT, user_prompt, response_text,
             input_tokens=self._last_input_tokens,
-            output_tokens=self._last_output_tokens
+            output_tokens=self._last_output_tokens,
+            stop_reason=self._last_stop_reason
         )
 
         # Parse and execute actions
@@ -1008,6 +1017,10 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
             self._last_input_tokens = response.usage.prompt_tokens
             self._last_output_tokens = response.usage.completion_tokens
 
+        # Capture finish reason from OpenAI API response
+        if response.choices and response.choices[0].finish_reason:
+            self._last_stop_reason = response.choices[0].finish_reason
+
         return response.choices[0].message.content
 
 
@@ -1075,6 +1088,10 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         # Capture token usage from Claude API response
         self._last_input_tokens = response.usage.input_tokens
         self._last_output_tokens = response.usage.output_tokens
+
+        # Capture stop reason from Claude API response
+        if response.stop_reason:
+            self._last_stop_reason = response.stop_reason
 
         return response.content[0].text
 
@@ -1186,6 +1203,14 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
                 usage = response.usage_metadata
                 self._last_input_tokens = getattr(usage, 'prompt_token_count', 0) or 0
                 self._last_output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+
+            # Capture finish reason from Gemini API response
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                    # Convert enum to string if necessary
+                    finish_reason = candidate.finish_reason
+                    self._last_stop_reason = str(finish_reason.name) if hasattr(finish_reason, 'name') else str(finish_reason)
 
             # Handle potential blocked responses
             if not response.text:
