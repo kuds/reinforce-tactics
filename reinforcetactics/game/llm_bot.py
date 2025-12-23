@@ -183,7 +183,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  pretty_print_logs: bool = True,
                  stateful: bool = False,
                  should_reason: bool = False,
-                 max_tokens: Optional[int] = None):
+                 max_tokens: Optional[int] = None,
+                 temperature: Optional[float] = None):
         """
         Initialize the LLM bot.
 
@@ -204,6 +205,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             max_tokens: Maximum number of tokens for LLM response (default 8000).
                 Set to 0 or None to not pass max_tokens to the LLM provider.
                 If not specified, uses DEFAULT_MAX_TOKENS (8000).
+            temperature: Temperature for LLM response (default None).
+                Set to None to use the LLM provider's default temperature.
+                Set to a value (e.g., 0, 0.5, 1.0) to override the default.
         """
         self.game_state = game_state
         self.bot_player = player
@@ -217,6 +221,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.should_reason = should_reason
         # Handle max_tokens: use default if not specified, keep as-is if explicitly set (including 0/None)
         self.max_tokens = self.DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens
+        self.temperature = temperature
 
         # Initialize conversation history for stateful mode
         self.conversation_history = []
@@ -1029,7 +1034,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
 
         client = openai.OpenAI(api_key=self.api_key)
 
-        # Build request kwargs, conditionally including max_completion_tokens
+        # Build request kwargs, conditionally including max_completion_tokens and temperature
         request_kwargs = {
             "model": self.model,
             "messages": messages,
@@ -1037,6 +1042,8 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         }
         if self.max_tokens:
             request_kwargs["max_completion_tokens"] = self.max_tokens
+        if self.temperature is not None:
+            request_kwargs["temperature"] = self.temperature
 
         response = client.chat.completions.create(**request_kwargs)
 
@@ -1113,7 +1120,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             else:
                 user_messages.append(msg)
 
-        # Build request kwargs, conditionally including max_tokens
+        # Build request kwargs, conditionally including max_tokens and temperature
         request_kwargs = {
             "model": self.model,
             "system": system_message,
@@ -1121,6 +1128,8 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         }
         if self.max_tokens:
             request_kwargs["max_tokens"] = self.max_tokens
+        if self.temperature is not None:
+            request_kwargs["temperature"] = self.temperature
 
         response = client.messages.create(**request_kwargs)
 
@@ -1231,13 +1240,15 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
                     parts=[types.Part.from_text(text=msg["content"])]
                 ))
 
-        # Build generation config, conditionally including max_output_tokens
+        # Build generation config, conditionally including max_output_tokens and temperature
         config_kwargs = {
             "system_instruction": system_instruction,
             "response_mime_type": "application/json",
         }
         if self.max_tokens:
             config_kwargs["max_output_tokens"] = self.max_tokens
+        if self.temperature is not None:
+            config_kwargs["temperature"] = self.temperature
 
         config = types.GenerateContentConfig(**config_kwargs)
 
