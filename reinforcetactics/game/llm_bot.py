@@ -172,9 +172,6 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     and model invocation.
     """
 
-    # Default max tokens for LLM responses
-    DEFAULT_MAX_TOKENS = 8000
-
     def __init__(self, game_state, player: int = 2, api_key: Optional[str] = None,
                  model: Optional[str] = None, max_retries: int = 3,
                  log_conversations: bool = False,
@@ -183,7 +180,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  pretty_print_logs: bool = True,
                  stateful: bool = False,
                  should_reason: bool = False,
-                 max_tokens: Optional[int] = None,
+                 max_tokens: Optional[int] = 8_000,
                  temperature: Optional[float] = None):
         """
         Initialize the LLM bot.
@@ -219,8 +216,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.pretty_print_logs = pretty_print_logs
         self.stateful = stateful
         self.should_reason = should_reason
-        # Handle max_tokens: use default if not specified, keep as-is if explicitly set (including 0/None)
-        self.max_tokens = self.DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens
+        self.max_tokens = max_tokens
         self.temperature = temperature
 
         # Initialize conversation history for stateful mode
@@ -384,7 +380,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                         "llm_sdk": self._get_llm_sdk_version()
                     },
                     "model": self.model,
-                    "max_tokens": self.max_tokens,
+                    "max_tokens": self.max_tokens if self.max_token is not None else "None"
                     "temperature": self.temperature,
                     "provider": provider,
                     "player": self.bot_player,
@@ -1041,7 +1037,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
             "messages": messages,
             "response_format": {"type": "json_object"},
         }
-        if self.max_tokens:
+        if self.max_tokens is not None:
             request_kwargs["max_completion_tokens"] = self.max_tokens
         if self.temperature is not None:
             request_kwargs["temperature"] = self.temperature
@@ -1127,7 +1123,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             "system": system_message,
             "messages": user_messages,
         }
-        if self.max_tokens:
+        if self.max_tokens is not None:
             request_kwargs["max_tokens"] = self.max_tokens
         if self.temperature is not None:
             request_kwargs["temperature"] = self.temperature
@@ -1246,7 +1242,7 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
             "system_instruction": system_instruction,
             "response_mime_type": "application/json",
         }
-        if self.max_tokens:
+        if self.max_tokens is not None:
             config_kwargs["max_output_tokens"] = self.max_tokens
         if self.temperature is not None:
             config_kwargs["temperature"] = self.temperature
