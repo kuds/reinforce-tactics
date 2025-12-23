@@ -87,6 +87,11 @@ GEMINI_MODELS = [
     'gemini-1.5-flash',
     'gemini-1.5-flash-latest',
     'gemini-1.5-flash-8b',
+    # Gemini 1.0 (legacy)
+    'gemini-1.0-pro',
+    'gemini-pro',
+    'gemini-3-pro-preview',
+    'gemini-3-flash-preview',
 ]
 
 
