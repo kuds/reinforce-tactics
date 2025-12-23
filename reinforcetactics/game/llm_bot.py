@@ -1024,7 +1024,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
             messages=messages,
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_completion_tokens=2000
+            max_completion_tokens=4000
         )
 
         # Capture token usage from OpenAI API response
@@ -1102,7 +1102,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
         response = client.messages.create(
             model=self.model,
-            max_tokens=2000,
+            max_tokens=4000,
             system=system_message,
             messages=user_messages,
             temperature=0.7
@@ -1219,7 +1219,7 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=0.7,
-            max_output_tokens=2000,
+            max_output_tokens=4000,
             response_mime_type="application/json",
         )
 
