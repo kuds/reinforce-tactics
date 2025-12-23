@@ -415,6 +415,8 @@ class TestConversationLogging:
             assert 'game_session_id' in log_data
             assert 'model' in log_data
             assert log_data['model'] == 'test-model'
+            assert 'temperature' in log_data
+            assert log_data['temperature'] is None
             assert 'provider' in log_data
             assert log_data['provider'] == 'Test'
             assert 'player' in log_data
