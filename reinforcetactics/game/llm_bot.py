@@ -95,8 +95,33 @@ GEMINI_MODELS = [
 ]
 
 
-# System prompt explaining the game rules
-SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
+# System prompt - compact version (saves ~40-60% tokens)
+SYSTEM_PROMPT_COMPACT = """Reinforce Tactics: Turn-based strategy. Win by capturing enemy HQ or eliminating all enemies.
+
+UNITS (Cost/HP/Atk/Def/Mv):
+W=Warrior(200/15/10/6/3): Melee only
+M=Mage(250/10/8-12/4/2): Range 1-2, can PARALYZE
+C=Cleric(200/8/2/4/2): HEAL allies, CURE paralysis
+A=Archer(250/15/5/1/3): Range 1-3(mountain), no adjacent attack, melee can't counter
+
+BUILDINGS: h=HQ(150g,lose=defeat), b=Building(100g,recruit), t=Tower(50g)
+
+ACTIONS: CREATE_UNIT, MOVE, ATTACK, PARALYZE(M), HEAL(C), CURE(C), SEIZE, END_TURN
+
+RULES:
+- Orthogonal attacks only (not diagonal)
+- Counter-attacks occur except: melee vs Archer
+- Move+attack or attack+move allowed
+- One unit per tile
+- Actions execute sequentially
+- Defend HQ if enemies within 2-3 tiles
+
+STATE FORMAT: units have {id,t(type),pos,hp,max,mv,atk,para?}, buildings are [type,x,y], actions.create=[type,x,y,cost], move/attack/etc=[unit_id,x,y]
+
+Reply with JSON only."""
+
+# System prompt - verbose version (better for weaker models)
+SYSTEM_PROMPT_VERBOSE = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
 
 GAME OBJECTIVE:
 - Win by capturing the enemy HQ or eliminating all enemy units
@@ -114,7 +139,6 @@ UNIT TYPES:
    - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
    - Cannot attack adjacent enemies (distance 0)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
-   - Other Archers and Mages CAN counter-attack if Archer is within their range
 
 BUILDING TYPES:
 - HQ (h): Generates 150 gold/turn, losing it means defeat
@@ -139,25 +163,22 @@ COMBAT RULES:
 - Paralyzed units cannot move or attack
 - Units can move then attack, or attack then move (if they survive counter)
 
-ECONOMY:
-- You earn gold from buildings you control at the start of each turn
-- Spend gold to create units at buildings
-- Control more structures to generate more income
-
 STRATEGY TIPS:
 - Balance economy (capturing buildings) with military (building units)
 - Protect your HQ at all costs
 - Mages can disable key enemy units with paralyze
 - Clerics keep your army healthy and mobile
-- Archers are excellent for safe ranged attacks, especially from mountains
 - Position units to protect each other
 
 CRITICAL CONSTRAINTS:
-- Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
-- Each action in your list is executed sequentially - plan accordingly.
-- If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
+- Only ONE unit can occupy any tile
+- Each action in your list is executed sequentially
+- If enemies are within 2-3 tiles of your HQ, defending it is TOP priority
 
 Respond with ONLY the JSON object below. No extra text before or after."""
+
+# Default to compact mode (can be overridden per-bot)
+SYSTEM_PROMPT = SYSTEM_PROMPT_COMPACT
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods
@@ -179,7 +200,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  game_session_id: Optional[str] = None,
                  pretty_print_logs: bool = True,
                  stateful: bool = False,
-                 should_reason: bool = False):
+                 should_reason: bool = False,
+                 compact_mode: bool = True):
         """
         Initialize the LLM bot.
 
@@ -197,6 +219,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             should_reason: Include reasoning field in response format (default False).
                 When True, includes "reasoning" field prompting for strategy explanation.
                 When False, the reasoning field is omitted entirely from the prompt.
+            compact_mode: Use compact token-saving format (default True).
+                When True, uses abbreviated keys and compact JSON (saves ~40-60% tokens).
+                When False, uses verbose descriptive keys (better for weaker models).
         """
         self.game_state = game_state
         self.bot_player = player
@@ -208,6 +233,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.pretty_print_logs = pretty_print_logs
         self.stateful = stateful
         self.should_reason = should_reason
+        self.compact_mode = compact_mode
 
         # Initialize conversation history for stateful mode
         self.conversation_history = []
@@ -409,18 +435,19 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         # Get LLM response with retries
         response_text = None
+        system_prompt = SYSTEM_PROMPT_COMPACT if self.compact_mode else SYSTEM_PROMPT_VERBOSE
         for attempt in range(self.max_retries):
             try:
                 # Build messages list
                 if self.stateful and self.conversation_history:
                     # In stateful mode, include full conversation history
-                    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                    messages = [{"role": "system", "content": system_prompt}]
                     messages.extend(self.conversation_history)
                     messages.append({"role": "user", "content": user_prompt})
                 else:
                     # In stateless mode, only send current turn
                     messages = [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ]
 
@@ -453,7 +480,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         # Log the conversation if enabled (include token usage for Claude)
         self._log_conversation_to_json(
-            SYSTEM_PROMPT, user_prompt, response_text,
+            system_prompt, user_prompt, response_text,
             input_tokens=self._last_input_tokens,
             output_tokens=self._last_output_tokens
         )
@@ -482,16 +509,30 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         for unit in self.game_state.units:
             if unit.player == self.bot_player:
                 orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
-                unit_data = {
-                    'id': unit_id,
-                    'type': unit.type,
-                    'position': [orig_x, orig_y],
-                    'hp': unit.health,
-                    'max_hp': UNIT_DATA[unit.type]['health'],
-                    'can_move': unit.can_move,
-                    'can_attack': unit.can_attack,
-                    'is_paralyzed': unit.is_paralyzed()
-                }
+                if self.compact_mode:
+                    unit_data = {
+                        'id': unit_id,
+                        't': unit.type,
+                        'pos': [orig_x, orig_y],
+                        'hp': unit.health,
+                        'max': UNIT_DATA[unit.type]['health'],
+                        'mv': unit.can_move,
+                        'atk': unit.can_attack,
+                    }
+                    # Only include paralyzed flag if true (saves tokens)
+                    if unit.is_paralyzed():
+                        unit_data['para'] = True
+                else:
+                    unit_data = {
+                        'id': unit_id,
+                        'type': unit.type,
+                        'position': [orig_x, orig_y],
+                        'hp': unit.health,
+                        'max_hp': UNIT_DATA[unit.type]['health'],
+                        'can_move': unit.can_move,
+                        'can_attack': unit.can_attack,
+                        'is_paralyzed': unit.is_paralyzed()
+                    }
                 player_units.append(unit_data)
                 unit_id_map[unit] = unit_id
                 unit_id += 1
@@ -501,12 +542,20 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         for unit in self.game_state.units:
             if unit.player != self.bot_player:
                 orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
-                enemy_data = {
-                    'type': unit.type,
-                    'position': [orig_x, orig_y],
-                    'hp': unit.health,
-                    'max_hp': UNIT_DATA[unit.type]['health']
-                }
+                if self.compact_mode:
+                    enemy_data = {
+                        't': unit.type,
+                        'pos': [orig_x, orig_y],
+                        'hp': unit.health,
+                        'max': UNIT_DATA[unit.type]['health']
+                    }
+                else:
+                    enemy_data = {
+                        'type': unit.type,
+                        'position': [orig_x, orig_y],
+                        'hp': unit.health,
+                        'max_hp': UNIT_DATA[unit.type]['health']
+                    }
                 enemy_units.append(enemy_data)
 
         # Serialize buildings (convert to original coordinates)
@@ -518,11 +567,16 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             for tile in row:
                 if tile.type in ['b', 'h', 't']:
                     orig_x, orig_y = self.game_state.padded_to_original_coords(tile.x, tile.y)
-                    building_info = {
-                        'type': tile.type,
-                        'position': [orig_x, orig_y],
-                        'income': 150 if tile.type == 'h' else (100 if tile.type == 'b' else 50)
-                    }
+                    if self.compact_mode:
+                        # Compact: [type, x, y] - income derivable from type
+                        building_info = [tile.type, orig_x, orig_y]
+                    else:
+                        # Verbose: full dict with income
+                        building_info = {
+                            'type': tile.type,
+                            'position': [orig_x, orig_y],
+                            'income': 150 if tile.type == 'h' else (100 if tile.type == 'b' else 50)
+                        }
 
                     if tile.player == self.bot_player:
                         player_buildings.append(building_info)
@@ -531,56 +585,98 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     else:
                         neutral_buildings.append(building_info)
 
-        # Format legal actions for the LLM
+        # Format legal actions for the LLM (filter out empty action types in compact mode)
         formatted_legal_actions = self._format_legal_actions(legal_actions, unit_id_map)
+        if self.compact_mode:
+            filtered_legal_actions = {k: v for k, v in formatted_legal_actions.items() if v}
+        else:
+            filtered_legal_actions = formatted_legal_actions
 
         # Extract map name from file path
         map_name = "unknown"
         if self.game_state.map_file_used:
             map_name = Path(self.game_state.map_file_used).stem
 
-        return {
-            'map_name': map_name,
-            'map_width': self.game_state.original_map_width,
-            'map_height': self.game_state.original_map_height,
-            'turn_number': self.game_state.turn_number,
-            'player_gold': self.game_state.player_gold[self.bot_player],
-            'opponent_gold': self.game_state.player_gold[
-                1 if self.bot_player == 2 else 2
-            ],
-            'player_units': player_units,
-            'enemy_units': enemy_units,
-            'player_buildings': player_buildings,
-            'enemy_buildings': enemy_buildings,
-            'neutral_buildings': neutral_buildings,
-            'legal_actions': formatted_legal_actions
-        }
+        if self.compact_mode:
+            return {
+                'map': map_name,
+                'w': self.game_state.original_map_width,
+                'h': self.game_state.original_map_height,
+                'turn': self.game_state.turn_number,
+                'gold': self.game_state.player_gold[self.bot_player],
+                'enemy_gold': self.game_state.player_gold[
+                    1 if self.bot_player == 2 else 2
+                ],
+                'units': player_units,
+                'enemies': enemy_units,
+                'buildings': player_buildings,
+                'enemy_buildings': enemy_buildings,
+                'neutral_buildings': neutral_buildings,
+                'actions': filtered_legal_actions
+            }
+        else:
+            return {
+                'map_name': map_name,
+                'map_width': self.game_state.original_map_width,
+                'map_height': self.game_state.original_map_height,
+                'turn_number': self.game_state.turn_number,
+                'player_gold': self.game_state.player_gold[self.bot_player],
+                'opponent_gold': self.game_state.player_gold[
+                    1 if self.bot_player == 2 else 2
+                ],
+                'player_units': player_units,
+                'enemy_units': enemy_units,
+                'player_buildings': player_buildings,
+                'enemy_buildings': enemy_buildings,
+                'neutral_buildings': neutral_buildings,
+                'legal_actions': filtered_legal_actions
+            }
 
     def _format_legal_actions(self, legal_actions: Dict[str, List[Any]],
                               unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
         """Format legal actions for LLM consumption with original map coordinates."""
-        formatted = {
-            'create_unit': [],
-            'move': [],
-            'attack': [],
-            'paralyze': [],
-            'heal': [],
-            'cure': [],
-            'seize': []
-        }
+        if self.compact_mode:
+            formatted = {
+                'create': [],
+                'move': [],
+                'attack': [],
+                'paralyze': [],
+                'heal': [],
+                'cure': [],
+                'seize': []
+            }
+        else:
+            formatted = {
+                'create_unit': [],
+                'move': [],
+                'attack': [],
+                'paralyze': [],
+                'heal': [],
+                'cure': [],
+                'seize': []
+            }
 
-        # Create unit actions (convert coordinates)
+        # Create unit actions
+        create_key = 'create' if self.compact_mode else 'create_unit'
         for action in legal_actions['create_unit']:
             orig_x, orig_y = self.game_state.padded_to_original_coords(
                 action['x'], action['y']
             )
-            formatted['create_unit'].append({
-                'unit_type': action['unit_type'],
-                'position': [orig_x, orig_y],
-                'cost': UNIT_DATA[action['unit_type']]['cost']
-            })
+            if self.compact_mode:
+                # Compact: [type, x, y, cost]
+                formatted[create_key].append([
+                    action['unit_type'], orig_x, orig_y,
+                    UNIT_DATA[action['unit_type']]['cost']
+                ])
+            else:
+                # Verbose: full dict
+                formatted[create_key].append({
+                    'unit_type': action['unit_type'],
+                    'position': [orig_x, orig_y],
+                    'cost': UNIT_DATA[action['unit_type']]['cost']
+                })
 
-        # Move actions (convert coordinates)
+        # Move actions
         for action in legal_actions['move']:
             if action['unit'] in unit_id_map:
                 from_x, from_y = self.game_state.padded_to_original_coords(
@@ -589,77 +685,120 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 to_x, to_y = self.game_state.padded_to_original_coords(
                     action['to_x'], action['to_y']
                 )
-                formatted['move'].append({
-                    'unit_id': unit_id_map[action['unit']],
-                    'from': [from_x, from_y],
-                    'to': [to_x, to_y]
-                })
+                if self.compact_mode:
+                    # Compact: [unit_id, to_x, to_y]
+                    formatted['move'].append([
+                        unit_id_map[action['unit']], to_x, to_y
+                    ])
+                else:
+                    # Verbose: full dict with from position
+                    formatted['move'].append({
+                        'unit_id': unit_id_map[action['unit']],
+                        'from': [from_x, from_y],
+                        'to': [to_x, to_y]
+                    })
 
-        # Attack actions (convert coordinates)
+        # Attack actions
         for action in legal_actions['attack']:
             if action['attacker'] in unit_id_map:
                 target_x, target_y = self.game_state.padded_to_original_coords(
                     action['target'].x, action['target'].y
                 )
-                formatted['attack'].append({
-                    'unit_id': unit_id_map[action['attacker']],
-                    'target_position': [target_x, target_y]
-                })
+                if self.compact_mode:
+                    formatted['attack'].append([
+                        unit_id_map[action['attacker']], target_x, target_y
+                    ])
+                else:
+                    formatted['attack'].append({
+                        'unit_id': unit_id_map[action['attacker']],
+                        'target_position': [target_x, target_y]
+                    })
 
-        # Paralyze actions (convert coordinates)
+        # Paralyze actions
         for action in legal_actions['paralyze']:
             if action['paralyzer'] in unit_id_map:
                 target_x, target_y = self.game_state.padded_to_original_coords(
                     action['target'].x, action['target'].y
                 )
-                formatted['paralyze'].append({
-                    'unit_id': unit_id_map[action['paralyzer']],
-                    'target_position': [target_x, target_y]
-                })
+                if self.compact_mode:
+                    formatted['paralyze'].append([
+                        unit_id_map[action['paralyzer']], target_x, target_y
+                    ])
+                else:
+                    formatted['paralyze'].append({
+                        'unit_id': unit_id_map[action['paralyzer']],
+                        'target_position': [target_x, target_y]
+                    })
 
-        # Heal actions (convert coordinates)
+        # Heal actions
         for action in legal_actions['heal']:
             if action['healer'] in unit_id_map:
                 target_x, target_y = self.game_state.padded_to_original_coords(
                     action['target'].x, action['target'].y
                 )
-                formatted['heal'].append({
-                    'unit_id': unit_id_map[action['healer']],
-                    'target_position': [target_x, target_y]
-                })
+                if self.compact_mode:
+                    formatted['heal'].append([
+                        unit_id_map[action['healer']], target_x, target_y
+                    ])
+                else:
+                    formatted['heal'].append({
+                        'unit_id': unit_id_map[action['healer']],
+                        'target_position': [target_x, target_y]
+                    })
 
-        # Cure actions (convert coordinates)
+        # Cure actions
         for action in legal_actions['cure']:
             if action['curer'] in unit_id_map:
                 target_x, target_y = self.game_state.padded_to_original_coords(
                     action['target'].x, action['target'].y
                 )
-                formatted['cure'].append({
-                    'unit_id': unit_id_map[action['curer']],
-                    'target_position': [target_x, target_y]
-                })
+                if self.compact_mode:
+                    formatted['cure'].append([
+                        unit_id_map[action['curer']], target_x, target_y
+                    ])
+                else:
+                    formatted['cure'].append({
+                        'unit_id': unit_id_map[action['curer']],
+                        'target_position': [target_x, target_y]
+                    })
 
-        # Seize actions (convert coordinates)
+        # Seize actions
         for action in legal_actions['seize']:
             if action['unit'] in unit_id_map:
-                tile_x, tile_y = self.game_state.padded_to_original_coords(
-                    action['tile'].x, action['tile'].y
-                )
-                formatted['seize'].append({
-                    'unit_id': unit_id_map[action['unit']],
-                    'position': [tile_x, tile_y]
-                })
+                if self.compact_mode:
+                    formatted['seize'].append([unit_id_map[action['unit']]])
+                else:
+                    tile_x, tile_y = self.game_state.padded_to_original_coords(
+                        action['tile'].x, action['tile'].y
+                    )
+                    formatted['seize'].append({
+                        'unit_id': unit_id_map[action['unit']],
+                        'position': [tile_x, tile_y]
+                    })
 
         return formatted
 
     def _format_prompt(self, game_state_json: Dict[str, Any]) -> str:
         """Format the game state into a prompt for the LLM."""
-        reasoning_line = (
-            '    "reasoning": "Brief explanation of your strategy (1-2 sentences)",\n'
-            if self.should_reason
-            else ""
-        )
-        return f"""Current Game State:
+        if self.compact_mode:
+            reasoning_line = (
+                '"reasoning":"<strategy>",\n'
+                if self.should_reason
+                else ""
+            )
+            # Compact response format
+            return f"""State:{json.dumps(game_state_json, separators=(',', ':'))}
+
+Reply JSON:{{{reasoning_line}"actions":[{{"type":"CREATE_UNIT","unit_type":"W|M|C|A","position":[x,y]}},{{"type":"MOVE","unit_id":0,"to":[x,y]}},{{"type":"ATTACK|PARALYZE|HEAL|CURE","unit_id":0,"target_position":[x,y]}},{{"type":"SEIZE","unit_id":0}},{{"type":"END_TURN"}}]}}
+Use only legal actions from state."""
+        else:
+            reasoning_line = (
+                '    "reasoning": "Brief explanation of your strategy (1-2 sentences)",\n'
+                if self.should_reason
+                else ""
+            )
+            # Verbose response format with indented JSON
+            return f"""Current Game State:
 {json.dumps(game_state_json, indent=2)}
 
 Respond with a JSON object in the following format:
