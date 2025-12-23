@@ -1003,6 +1003,11 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
             max_tokens=2000
         )
 
+        # Capture token usage from OpenAI API response
+        if response.usage:
+            self._last_input_tokens = response.usage.prompt_tokens
+            self._last_output_tokens = response.usage.completion_tokens
+
         return response.choices[0].message.content
 
 
