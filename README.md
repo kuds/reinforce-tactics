@@ -283,13 +283,13 @@ Install the LLM provider packages you need:
 
 ```bash
 # For OpenAI GPT models
-pip install openai>=1.0.0
+pip install openai
 
 # For Anthropic Claude models
-pip install anthropic>=0.18.0
+pip install anthropic
 
 # For Google Gemini models
-pip install google-generativeai>=0.4.0
+pip install google-genai
 ```
 
 ### Configuration
@@ -430,7 +430,7 @@ Configure player settings in the game menu to select an LLM bot type. The bot wi
 - Check the variable name matches: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY`
 
 **Import Errors:**
-- Install the required package: `pip install openai` (or `anthropic`, `google-generativeai`)
+- Install the required package: `pip install openai` (or `anthropic`, `google-genai`)
 
 **Rate Limiting:**
 - The bot automatically retries with exponential backoff
