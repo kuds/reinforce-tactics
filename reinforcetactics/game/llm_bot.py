@@ -385,6 +385,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     },
                     "model": self.model,
                     "max_tokens": self.max_tokens,
+                    "temperature": self.temperature,
                     "provider": provider,
                     "player": self.bot_player,
                     "start_time": timestamp.isoformat(),
