@@ -13,6 +13,6 @@ pandas
 
 # Optional: LLM bot dependencies
 # Uncomment the ones you need for your LLM provider:
-# openai>=1.0.0              # For OpenAIBot
-# anthropic>=0.18.0          # For ClaudeBot
-# google-generativeai>=0.4.0 # For GeminiBot
+# openai          # For OpenAIBot
+# anthropic       # For ClaudeBot
+# google-genai    # For GeminiBot
