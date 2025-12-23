@@ -1220,6 +1220,7 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
             system_instruction=system_instruction,
             temperature=0.7,
             max_output_tokens=2000,
+            response_mime_type="application/json",
         )
 
         try:
