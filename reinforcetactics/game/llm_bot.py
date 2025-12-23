@@ -72,7 +72,13 @@ ANTHROPIC_MODELS = [
 ]
 
 GEMINI_MODELS = [
-    # Gemini 2.0 (latest generation)
+    # Gemini 3.0 (latest generation)
+    'gemini-3-pro-preview',
+    'gemini-3-flash-preview',
+    # Gemini 2.5 
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    # Gemini 2.0 
     'gemini-2.0-flash',
     'gemini-2.0-flash-exp',
     'gemini-2.0-flash-lite',
@@ -86,8 +92,6 @@ GEMINI_MODELS = [
     # Gemini 1.0 (legacy)
     'gemini-1.0-pro',
     'gemini-pro',
-    'gemini-3-pro-preview',
-    'gemini-3-flash-preview',
 ]
 
 
