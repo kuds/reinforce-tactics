@@ -73,15 +73,15 @@ class TestLLMBotBase:
         bot = TestBot(simple_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
 
-        # Check that serialization includes expected keys
-        assert 'turn_number' in game_state_json
-        assert 'player_gold' in game_state_json
-        assert 'opponent_gold' in game_state_json
-        assert 'player_units' in game_state_json
-        assert 'enemy_units' in game_state_json
-        assert 'player_buildings' in game_state_json
+        # Check that serialization includes expected keys (compact format)
+        assert 'turn' in game_state_json
+        assert 'gold' in game_state_json
+        assert 'enemy_gold' in game_state_json
+        assert 'units' in game_state_json
+        assert 'enemies' in game_state_json
+        assert 'buildings' in game_state_json
         assert 'enemy_buildings' in game_state_json
-        assert 'legal_actions' in game_state_json
+        assert 'actions' in game_state_json
 
     def test_json_extraction_plain(self, simple_game):
         """Test JSON extraction from plain JSON response."""
@@ -404,7 +404,7 @@ class TestConversationLogging:
 
             # Verify system prompt contains game rules
             assert 'Reinforce Tactics' in log_data['system_prompt']
-            assert 'GAME OBJECTIVE' in log_data['system_prompt']
+            assert 'UNITS' in log_data['system_prompt']
 
             # Verify turns structure
             assert len(log_data['turns']) == 1
@@ -742,13 +742,13 @@ class TestStatefulConversation:
         assert len(bot.conversation_history) == 4
 
         # First user message should have game state
-        assert 'Current Game State' in bot.conversation_history[0]['content']
+        assert 'State:' in bot.conversation_history[0]['content']
 
         # First assistant message should have reasoning
         assert 'Turn 1' in bot.conversation_history[1]['content']
 
         # Second user message should have game state
-        assert 'Current Game State' in bot.conversation_history[2]['content']
+        assert 'State:' in bot.conversation_history[2]['content']
 
         # Second assistant message should have reasoning
         assert 'Turn 2' in bot.conversation_history[3]['content']
@@ -834,71 +834,73 @@ class TestMapCoordinateConversion:
         """Test that serialized game state includes map metadata."""
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
-        
-        # Check map metadata fields
-        assert 'map_name' in game_state_json
-        assert game_state_json['map_name'] == 'beginner'
-        
-        assert 'map_width' in game_state_json
-        assert game_state_json['map_width'] == 6
-        
-        assert 'map_height' in game_state_json
-        assert game_state_json['map_height'] == 6
-        
+
+        # Check map metadata fields (compact format)
+        assert 'map' in game_state_json
+        assert game_state_json['map'] == 'beginner'
+
+        assert 'w' in game_state_json
+        assert game_state_json['w'] == 6
+
+        assert 'h' in game_state_json
+        assert game_state_json['h'] == 6
+
         # map_padding_applied field has been removed from serialization
 
     def test_serialized_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that serialized coordinates are in original map system."""
         # Add a unit at padded position [7, 7] (which is original [0, 0])
         padded_game.create_unit('W', 7, 7, player=2)
-        
+
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
-        
-        # Check that unit position is in original coordinates
-        assert len(game_state_json['player_units']) == 1
-        unit = game_state_json['player_units'][0]
-        assert unit['position'] == [0, 0]  # Original coordinates, not [7, 7]
+
+        # Check that unit position is in original coordinates (compact format)
+        assert len(game_state_json['units']) == 1
+        unit = game_state_json['units'][0]
+        assert unit['pos'] == [0, 0]  # Original coordinates, not [7, 7]
 
     def test_serialized_building_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that building coordinates are in original map system."""
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
-        
+
         # The HQ at padded [7, 7] should be at original [0, 0]
         # But it belongs to player 1, so check enemy_buildings
         assert len(game_state_json['enemy_buildings']) >= 1
-        
-        # Find the HQ
+
+        # Find the HQ - buildings are now arrays [type, x, y]
         enemy_hq = None
         for building in game_state_json['enemy_buildings']:
-            if building['type'] == 'h':
+            if building[0] == 'h':  # building[0] is type
                 enemy_hq = building
                 break
-        
+
         assert enemy_hq is not None
         # The padded position would be [7, 7], original should be [0, 0]
-        assert enemy_hq['position'] == [0, 0]
+        # building format is [type, x, y]
+        assert enemy_hq[1] == 0  # x
+        assert enemy_hq[2] == 0  # y
 
     def test_legal_actions_use_original_coordinates(self, padded_game, test_bot_class):
         """Test that legal actions use original coordinates."""
         # Add a unit at padded [7, 8]
         padded_game.create_unit('W', 7, 8, player=2)
-        
+
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
-        
+
         # Check move actions - they should use original coordinates
-        legal_moves = game_state_json['legal_actions']['move']
-        
+        # Compact format: move is array of [unit_id, to_x, to_y]
+        legal_moves = game_state_json['actions'].get('move', [])
+
         if len(legal_moves) > 0:
             # At least one move should exist
             # Positions should be in original coordinate system (0-5, not 7-12)
             for move in legal_moves:
-                assert 0 <= move['from'][0] < 6
-                assert 0 <= move['from'][1] < 6
-                assert 0 <= move['to'][0] < 6
-                assert 0 <= move['to'][1] < 6
+                # move format: [unit_id, to_x, to_y]
+                assert 0 <= move[1] < 6  # to_x
+                assert 0 <= move[2] < 6  # to_y
 
     def test_create_unit_action_converts_coordinates(self, padded_game, test_bot_class):
         """Test that CREATE_UNIT action converts from original to padded coordinates."""
@@ -987,22 +989,22 @@ class TestMapCoordinateConversion:
         assert simple_game.map_padding_offset_y == 0
         assert simple_game.original_map_width == 10
         assert simple_game.original_map_height == 10
-        
+
         bot = test_bot_class(simple_game, player=2, api_key="test-key")
-        
+
         # Create a unit at position [5, 5]
         simple_game.create_unit('W', 5, 5, player=2)
-        
+
         game_state_json = bot._serialize_game_state()
-        
-        # With no padding, coordinates should be identical
-        assert len(game_state_json['player_units']) == 1
-        unit = game_state_json['player_units'][0]
-        assert unit['position'] == [5, 5]  # Same as padded position
-        
-        # Map dimensions should match grid dimensions
-        assert game_state_json['map_width'] == 10
-        assert game_state_json['map_height'] == 10
+
+        # With no padding, coordinates should be identical (compact format)
+        assert len(game_state_json['units']) == 1
+        unit = game_state_json['units'][0]
+        assert unit['pos'] == [5, 5]  # Same as padded position
+
+        # Map dimensions should match grid dimensions (compact keys)
+        assert game_state_json['w'] == 10
+        assert game_state_json['h'] == 10
         # map_padding_applied field has been removed from serialization
 
     def test_action_history_uses_original_coordinates(self, padded_game):
