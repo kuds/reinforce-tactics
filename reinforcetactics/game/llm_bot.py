@@ -259,6 +259,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
     def _get_supported_models(self) -> List[str]:
         """Get the list of supported models for this provider."""
 
+    @abstractmethod
+    def _get_llm_sdk_version(self) -> str:
+        """Get the version of the LLM SDK being used."""
+
     def _validate_model(self) -> None:
         """
         Validate that the requested model is in the supported list.
@@ -361,7 +365,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
                 log_data = {
                     "game_session_id": self.game_session_id,
-                    "version": __version__,
+                    "version": {
+                        "reinforce_tactics": __version__,
+                        "llm_sdk": self._get_llm_sdk_version()
+                    },
                     "model": self.model,
                     "provider": provider,
                     "player": self.bot_player,
@@ -993,6 +1000,14 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     def _get_supported_models(self) -> List[str]:
         return OPENAI_MODELS
 
+    def _get_llm_sdk_version(self) -> str:
+        """Get the OpenAI SDK version."""
+        try:
+            import openai
+            return f"openai=={openai.__version__}"
+        except (ImportError, AttributeError):
+            return "openai==unknown"
+
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call OpenAI API."""
         try:
@@ -1056,6 +1071,14 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
     def _get_supported_models(self) -> List[str]:
         return ANTHROPIC_MODELS
+
+    def _get_llm_sdk_version(self) -> str:
+        """Get the Anthropic SDK version."""
+        try:
+            import anthropic
+            return f"anthropic=={anthropic.__version__}"
+        except (ImportError, AttributeError):
+            return "anthropic==unknown"
 
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call Anthropic API."""
@@ -1140,6 +1163,14 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
 
     def _get_supported_models(self) -> List[str]:
         return GEMINI_MODELS
+
+    def _get_llm_sdk_version(self) -> str:
+        """Get the Google GenAI SDK version."""
+        try:
+            from google import genai
+            return f"google-genai=={genai.__version__}"
+        except (ImportError, AttributeError):
+            return "google-genai==unknown"
 
     def _get_client(self):
         """Get or create the Gemini client."""
