@@ -379,6 +379,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                         "llm_sdk": self._get_llm_sdk_version()
                     },
                     "model": self.model,
+                    "max_tokens": self.max_tokens,
                     "provider": provider,
                     "player": self.bot_player,
                     "start_time": timestamp.isoformat(),
