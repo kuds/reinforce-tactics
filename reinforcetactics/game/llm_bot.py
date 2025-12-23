@@ -1034,7 +1034,6 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
             "model": self.model,
             "messages": messages,
             "response_format": {"type": "json_object"},
-            "temperature": 0.7,
         }
         if self.max_tokens:
             request_kwargs["max_completion_tokens"] = self.max_tokens
@@ -1119,7 +1118,6 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             "model": self.model,
             "system": system_message,
             "messages": user_messages,
-            "temperature": 0.7,
         }
         if self.max_tokens:
             request_kwargs["max_tokens"] = self.max_tokens
@@ -1236,7 +1234,6 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
         # Build generation config, conditionally including max_output_tokens
         config_kwargs = {
             "system_instruction": system_instruction,
-            "temperature": 0.7,
             "response_mime_type": "application/json",
         }
         if self.max_tokens:
