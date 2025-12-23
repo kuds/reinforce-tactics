@@ -80,10 +80,10 @@ GEMINI_MODELS = [
     'gemini-2.5-flash',
     # Gemini 2.0 
     'gemini-2.0-flash',
-    'gemini-2.0-flash-exp',
+    'gemini-2.0-flash-001',
     'gemini-2.0-flash-lite',
-    'gemini-2.0-flash-thinking-exp',
-    # Gemini 1.5 (stable and capable)
+    'gemini-2.0-flash-lite-001',
+    # Gemini 1.5 (legacy but still supported)
     'gemini-1.5-pro',
     'gemini-1.5-pro-latest',
     'gemini-1.5-flash',
@@ -1076,30 +1076,36 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
-    LLM bot using Google's Gemini models.
+    LLM bot using Google's Gemini models via the new google-genai SDK.
 
     Supports Gemini models across multiple generations:
-    - Gemini 2.0: Latest generation (gemini-2.0-flash, including thinking modes)
-    - Gemini 1.5: Stable and capable (gemini-1.5-pro, gemini-1.5-flash)
-    - Gemini 1.0: Legacy models (gemini-1.0-pro)
+    - Gemini 2.5: Latest generation with thinking (gemini-2.5-pro, gemini-2.5-flash)
+    - Gemini 2.0: Stable and fast (gemini-2.0-flash)
+    - Gemini 1.5: Legacy but still supported (gemini-1.5-pro, gemini-1.5-flash)
 
-    Default model: gemini-2.0-flash (latest Flash, excellent speed and quality)
+    Default model: gemini-2.5-flash (latest Flash with thinking capabilities)
 
     Cost tiers:
-    - Budget: gemini-1.5-flash, gemini-2.0-flash (free tier available, ~$0.075/1M)
-    - Standard: gemini-1.5-pro (~$1.25/1M input tokens)
-    - Experimental: gemini-2.0-flash-thinking-exp (enhanced reasoning)
+    - Budget: gemini-2.0-flash-lite, gemini-1.5-flash (~$0.075/1M input tokens)
+    - Standard: gemini-2.5-flash, gemini-2.0-flash (~$0.15/1M input tokens)
+    - Premium: gemini-2.5-pro, gemini-1.5-pro (~$1.25/1M input tokens)
 
     Token limits:
+    - Gemini 2.5: Up to 1M token context window
     - Gemini 2.0: Up to 1M token context window
     - Gemini 1.5: Up to 2M token context window (Pro)
-    - Gemini 1.0: 32K token context window
 
     Best use cases:
-    - gemini-2.0-flash: Fast responses with good quality
-    - gemini-1.5-pro: Complex reasoning and long context
-    - gemini-2.0-flash-thinking-exp: Enhanced strategic thinking
+    - gemini-2.5-flash: Best balance of speed and quality with thinking
+    - gemini-2.5-pro: Complex reasoning tasks
+    - gemini-2.0-flash: Fast responses when thinking not needed
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize GeminiBot with optional chat session for stateful mode."""
+        super().__init__(*args, **kwargs)
+        self._chat_session = None
+        self._client = None
 
     def _get_api_key_from_env(self) -> Optional[str]:
         return os.getenv('GOOGLE_API_KEY')
@@ -1108,38 +1114,88 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'GOOGLE_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'gemini-2.0-flash'
+        return 'gemini-2.5-flash'
 
     def _get_supported_models(self) -> List[str]:
         return GEMINI_MODELS
 
+    def _get_client(self):
+        """Get or create the Gemini client."""
+        if self._client is None:
+            try:
+                from google import genai
+            except ImportError as exc:
+                raise ImportError(
+                    "google-genai package not installed. "
+                    "Install with: pip install google-genai"
+                ) from exc
+            self._client = genai.Client(api_key=self.api_key)
+        return self._client
+
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
-        """Call Google Gemini API."""
+        """Call Google Gemini API using the new google-genai SDK."""
         try:
-            import google.generativeai as genai
+            from google.genai import types
         except ImportError as exc:
             raise ImportError(
-                "google-generativeai package not installed. "
-                "Install with: pip install google-generativeai>=0.4.0"
+                "google-genai package not installed. "
+                "Install with: pip install google-genai"
             ) from exc
 
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(self.model)
+        client = self._get_client()
 
-        # Combine system and user messages for Gemini
-        combined_prompt = ""
+        # Extract system instruction and build conversation contents
+        system_instruction = None
+        contents = []
+
         for msg in messages:
             if msg["role"] == "system":
-                combined_prompt += f"{msg['content']}\n\n"
+                system_instruction = msg["content"]
             elif msg["role"] == "user":
-                combined_prompt += msg['content']
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=msg["content"])]
+                ))
+            elif msg["role"] == "assistant":
+                contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=msg["content"])]
+                ))
 
-        response = model.generate_content(
-            combined_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.7,
-                max_output_tokens=2000
-            )
+        # Build generation config
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.7,
+            max_output_tokens=2000,
         )
 
-        return response.text
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=config,
+            )
+
+            # Track token usage from response metadata
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                usage = response.usage_metadata
+                self._last_input_tokens = getattr(usage, 'prompt_token_count', 0) or 0
+                self._last_output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+
+            # Handle potential blocked responses
+            if not response.text:
+                # Check if response was blocked
+                if hasattr(response, 'prompt_feedback'):
+                    feedback = response.prompt_feedback
+                    if hasattr(feedback, 'block_reason') and feedback.block_reason:
+                        logger.warning("Gemini response blocked: %s", feedback.block_reason)
+                        return '{"reasoning": "Response blocked by safety filter", "actions": [{"type": "END_TURN"}]}'
+
+                logger.warning("Empty response from Gemini API")
+                return '{"reasoning": "Empty response", "actions": [{"type": "END_TURN"}]}'
+
+            return response.text
+
+        except Exception as e:
+            logger.error("Gemini API error: %s", e)
+            raise
