@@ -129,7 +129,9 @@ AVAILABLE ACTIONS:
 5. HEAL: (Cleric only) Heal an adjacent ally unit
 6. CURE: (Cleric only) Remove paralysis from an adjacent ally
 7. SEIZE: Capture a neutral/enemy structure by standing on it
-8. END_TURN: Finish your turn
+8. RESIGN: Concede the game. Only use when the position is clearly lost
+   (e.g., no units and insufficient gold to rebuild, or HQ capture is imminent and unstoppable)
+9. END_TURN: Finish your turn
 
 COMBAT RULES:
 - Most units can only attack adjacent enemies (orthogonally, not diagonally)
@@ -490,7 +492,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self._execute_actions(response_text)
 
         # End turn (advance game state to next player, collect income, etc.)
-        self.game_state.end_turn()
+        # Skip if game is already over (e.g., bot resigned)
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
 
     def _serialize_game_state(self) -> Dict[str, Any]:
         """
@@ -700,6 +704,7 @@ Respond with a JSON object in the following format:
         {{"type": "HEAL", "unit_id": 0, "target_position": [x, y]}},
         {{"type": "CURE", "unit_id": 0, "target_position": [x, y]}},
         {{"type": "SEIZE", "unit_id": 0}},
+        {{"type": "RESIGN"}},
         {{"type": "END_TURN"}}
     ]
 }}
@@ -752,6 +757,10 @@ You can take multiple actions in one turn."""
                         self._execute_cure(action, unit_map)
                     elif action_type == 'SEIZE':
                         self._execute_seize(action, unit_map)
+                    elif action_type == 'RESIGN':
+                        logger.info("Bot chose to resign")
+                        self.game_state.resign(self.bot_player)
+                        return  # Game is over, exit immediately
                     elif action_type == 'END_TURN':
                         logger.info("Bot chose to end turn")
                         break
