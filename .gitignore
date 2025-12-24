@@ -3,6 +3,7 @@
 /__pycache__
 /videos
 *.json
+!docker/tournament/*.json
 /reinforcetactics/ui/__pycache__
 /reinforcetactics/utils/__pycache__
 /reinforcetactics/game/__pycache__

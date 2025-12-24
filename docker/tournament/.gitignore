@@ -1,0 +1,9 @@
+# Ignore output files but keep directory structure
+output/*
+!output/.gitkeep
+
+# Ignore .env file (contains secrets)
+.env
+
+# Ignore any local config overrides
+config.local.json

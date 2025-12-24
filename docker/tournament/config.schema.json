@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tournament Configuration",
+  "description": "Configuration schema for Reinforce Tactics tournament runner",
+  "type": "object",
+  "required": ["tournament", "maps", "bots"],
+  "properties": {
+    "tournament": {
+      "type": "object",
+      "description": "Tournament settings",
+      "required": ["games_per_matchup", "max_turns"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Tournament name for identification"
+        },
+        "games_per_matchup": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of games per side per map (total games = 2 * games_per_matchup * num_maps if 'all' mode)"
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Default maximum turns per game before draw (can be overridden per map)"
+        },
+        "map_pool_mode": {
+          "type": "string",
+          "enum": ["all", "cycle", "random"],
+          "default": "all",
+          "description": "Map selection mode: 'all' plays every map, 'cycle' rotates through, 'random' picks randomly"
+        },
+        "should_reason": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable reasoning output for LLM bots"
+        },
+        "log_conversations": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable conversation logging for LLM bots"
+        },
+        "save_replays": {
+          "type": "boolean",
+          "default": false,
+          "description": "Save game replays"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "Output directory settings",
+      "properties": {
+        "results_dir": {
+          "type": "string",
+          "description": "Directory for tournament results (JSON, CSV)"
+        },
+        "conversation_log_dir": {
+          "type": "string",
+          "description": "Directory for LLM conversation logs"
+        },
+        "replay_dir": {
+          "type": "string",
+          "description": "Directory for game replays"
+        }
+      }
+    },
+    "maps": {
+      "type": "array",
+      "description": "List of maps to use. Each map can be a string (path only) or object (with max_turns)",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Path to map CSV file (uses default max_turns)"
+          },
+          {
+            "type": "object",
+            "description": "Map configuration with optional max_turns override",
+            "required": ["path"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Path to map CSV file"
+              },
+              "max_turns": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 1000,
+                "description": "Maximum turns for this specific map (overrides tournament default)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "bots": {
+      "type": "array",
+      "description": "List of bots to participate in tournament",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name for the bot"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["simple", "medium", "advanced", "llm", "model"],
+            "description": "Bot type"
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "anthropic", "google"],
+            "description": "LLM provider (required for type='llm')"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model name/ID (required for type='llm')"
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Temperature for LLM sampling"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 100,
+            "description": "Maximum tokens for LLM response"
+          },
+          "model_path": {
+            "type": "string",
+            "description": "Path to trained model file (for type='model')"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "type": { "const": "llm" } }
+            },
+            "then": {
+              "required": ["provider", "model"]
+            }
+          },
+          {
+            "if": {
+              "properties": { "type": { "const": "model" } }
+            },
+            "then": {
+              "required": ["model_path"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
