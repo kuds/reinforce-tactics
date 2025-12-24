@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  tournament:
+    build:
+      context: ../..
+      dockerfile: docker/tournament/Dockerfile
+    container_name: reinforce-tactics-tournament
+
+    # Mount volumes for configuration and output
+    volumes:
+      # Configuration file
+      - ./config.json:/app/config/config.json:ro
+
+      # Output directories (results, conversations, replays)
+      - ./output:/app/output
+
+      # Maps directory (read-only)
+      - ../../maps:/app/maps:ro
+
+    # Environment variables for API keys
+    # Set these in your shell or .env file before running
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+    # Restart policy
+    restart: "no"
+
+    # Network (not needed for this service, but included for future use)
+    networks:
+      - tournament-network
+
+networks:
+  tournament-network:
+    driver: bridge

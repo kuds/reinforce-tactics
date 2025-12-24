@@ -1,0 +1,77 @@
+{
+  "$schema": "./config.schema.json",
+  "tournament": {
+    "name": "LLM Bot Tournament",
+    "games_per_matchup": 1,
+    "max_turns": 100,
+    "map_pool_mode": "all",
+    "should_reason": true,
+    "log_conversations": true,
+    "save_replays": true
+  },
+  "output": {
+    "results_dir": "/app/output/results",
+    "conversation_log_dir": "/app/output/conversations",
+    "replay_dir": "/app/output/replays"
+  },
+  "maps": [
+    "maps/1v1/beginner.csv",
+    "maps/1v1/funnel_point.csv",
+    "maps/1v1/center_mountains.csv",
+    "maps/1v1/corner_points.csv"
+  ],
+  "bots": [
+    {
+      "name": "SimpleBot",
+      "type": "simple"
+    },
+    {
+      "name": "MediumBot",
+      "type": "medium"
+    },
+    {
+      "name": "AdvancedBot",
+      "type": "advanced"
+    },
+    {
+      "name": "Claude Haiku 3.5",
+      "type": "llm",
+      "provider": "anthropic",
+      "model": "claude-3-5-haiku-20241022",
+      "temperature": 0.5,
+      "max_tokens": 12000
+    },
+    {
+      "name": "Claude Sonnet 3.5",
+      "type": "llm",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "temperature": 0.5,
+      "max_tokens": 12000
+    },
+    {
+      "name": "GPT-4o Mini",
+      "type": "llm",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "temperature": 0.5,
+      "max_tokens": 8000
+    },
+    {
+      "name": "GPT-4o",
+      "type": "llm",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "temperature": 0.5,
+      "max_tokens": 8000
+    },
+    {
+      "name": "Gemini 2.0 Flash",
+      "type": "llm",
+      "provider": "google",
+      "model": "gemini-2.0-flash",
+      "temperature": 0.5,
+      "max_tokens": 8192
+    }
+  ]
+}
