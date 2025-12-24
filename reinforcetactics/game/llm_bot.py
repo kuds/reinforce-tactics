@@ -380,7 +380,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                         "llm_sdk": self._get_llm_sdk_version()
                     },
                     "model": self.model,
-                    "max_tokens": self.max_tokens if self.max_token is not None else "None",
+                    "max_tokens": self.max_tokens if self.max_tokens is not None else "None",
                     "temperature": self.temperature,
                     "provider": provider,
                     "player": self.bot_player,
