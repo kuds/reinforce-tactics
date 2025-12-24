@@ -14,7 +14,7 @@
     "replay_dir": "/app/output/replays"
   },
   "maps": [
-    "maps/1v1/beginner.csv",
+    {"path": "maps/1v1/beginner.csv", "max_turns": 50},
     "maps/1v1/funnel_point.csv"
   ],
   "bots": [

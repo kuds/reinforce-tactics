@@ -15,10 +15,10 @@
     "replay_dir": "/app/output/replays"
   },
   "maps": [
-    "maps/1v1/beginner.csv",
-    "maps/1v1/funnel_point.csv",
-    "maps/1v1/center_mountains.csv",
-    "maps/1v1/corner_points.csv"
+    {"path": "maps/1v1/beginner.csv", "max_turns": 50},
+    {"path": "maps/1v1/funnel_point.csv", "max_turns": 75},
+    {"path": "maps/1v1/center_mountains.csv", "max_turns": 100},
+    {"path": "maps/1v1/corner_points.csv", "max_turns": 100}
   ],
   "bots": [
     {

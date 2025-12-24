@@ -102,6 +102,39 @@ class TournamentBot:
         self.max_tokens = max_tokens
 
 
+class MapConfig:
+    """Configuration for a map with optional per-map settings."""
+
+    def __init__(self, path: str, max_turns: Optional[int] = None):
+        self.path = path
+        self.max_turns = max_turns
+
+    @classmethod
+    def from_config(cls, config_entry: Union[str, Dict[str, Any]], default_max_turns: int) -> 'MapConfig':
+        """Create MapConfig from config entry (string or dict)."""
+        if isinstance(config_entry, str):
+            return cls(path=config_entry, max_turns=default_max_turns)
+        else:
+            path = config_entry['path']
+            max_turns = config_entry.get('max_turns', default_max_turns)
+            return cls(path=path, max_turns=max_turns)
+
+    def __repr__(self):
+        return f"MapConfig(path={self.path}, max_turns={self.max_turns})"
+
+
+def parse_maps_from_config(config: Dict[str, Any]) -> List[MapConfig]:
+    """Parse maps from config, supporting both string and object format."""
+    default_max_turns = config['tournament'].get('max_turns', 100)
+    map_configs = []
+
+    for entry in config['maps']:
+        map_config = MapConfig.from_config(entry, default_max_turns)
+        map_configs.append(map_config)
+
+    return map_configs
+
+
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load and validate tournament configuration."""
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -180,7 +213,7 @@ def create_bots_from_config(config: Dict[str, Any]) -> List[TournamentBot]:
 def run_tournament(
     bots: List[TournamentBot],
     map_file: str = 'maps/1v1/beginner.csv',
-    maps: Optional[List[str]] = None,
+    maps: Optional[List[MapConfig]] = None,
     map_pool_mode: str = 'all',
     games_per_matchup: int = 2,
     max_turns: int = 500,
@@ -192,20 +225,33 @@ def run_tournament(
 ) -> Dict[str, Any]:
     """
     Run a round-robin tournament between multiple bots with Elo ratings.
+
+    Args:
+        bots: List of TournamentBot configurations
+        map_file: Default map file (used if maps is None)
+        maps: List of MapConfig objects with per-map settings (including max_turns)
+        map_pool_mode: How to select maps - 'all', 'cycle', or 'random'
+        games_per_matchup: Games per side per map
+        max_turns: Default max turns (used when MapConfig has no max_turns)
+        should_reason: Enable LLM reasoning output
+        log_conversations: Save LLM conversation logs
+        conversation_log_dir: Directory for conversation logs
+        save_replays: Save game replays
+        replay_dir: Directory for replays
     """
     if len(bots) < 2:
         raise ValueError("Need at least 2 bots for a tournament")
 
-    # Handle map list
+    # Handle map list - convert to MapConfig if needed
     if maps:
         map_list = maps
     else:
-        map_list = [map_file]
+        map_list = [MapConfig(path=map_file, max_turns=max_turns)]
 
     # Validate maps exist
     for m in map_list:
-        if not Path(m).exists():
-            raise FileNotFoundError(f"Map file not found: {m}")
+        if not Path(m.path).exists():
+            raise FileNotFoundError(f"Map file not found: {m.path}")
 
     # Initialize Elo rating system
     elo_system = EloRatingSystem()
@@ -232,11 +278,12 @@ def run_tournament(
     logger.info("TOURNAMENT START")
     logger.info("=" * 70)
     if len(map_list) == 1:
-        logger.info(f"Map: {map_list[0]}")
+        m = map_list[0]
+        logger.info(f"Map: {m.path} (max_turns: {m.max_turns})")
     else:
         logger.info(f"Maps: {len(map_list)} maps")
         for m in map_list:
-            logger.info(f"  - {m}")
+            logger.info(f"  - {m.path} (max_turns: {m.max_turns})")
         logger.info(f"Map Pool Mode: {map_pool_mode}")
     logger.info(f"Participants: {len(bots)}")
 
@@ -340,12 +387,14 @@ def run_tournament(
                 game_schedule.append((bot2, bot1, 1, 2, m))
 
         # Run games
-        for game_idx, (p1_bot, p2_bot, p1_num, p2_num, game_map) in enumerate(game_schedule, 1):
+        for game_idx, (p1_bot, p2_bot, p1_num, p2_num, map_config) in enumerate(game_schedule, 1):
             game_num += 1
-            map_name = Path(game_map).name
+            map_path = map_config.path
+            map_max_turns = map_config.max_turns
+            map_name = Path(map_path).name
 
             logger.info(f"  Game {game_idx}/{len(game_schedule)}: "
-                       f"{p1_bot.name} (P1) vs {p2_bot.name} (P2) on {map_name}")
+                       f"{p1_bot.name} (P1) vs {p2_bot.name} (P2) on {map_name} (max_turns: {map_max_turns})")
 
             # Set up conversation logging directory for this matchup
             matchup_log_dir = None
@@ -367,10 +416,10 @@ def run_tournament(
                 )
                 os.makedirs(matchup_replay_dir, exist_ok=True)
 
-            # Run the game
+            # Run the game with per-map max_turns
             result = run_single_game(
-                p1_bot, p2_bot, p1_num, p2_num, game_map,
-                max_turns=max_turns,
+                p1_bot, p2_bot, p1_num, p2_num, map_path,
+                max_turns=map_max_turns,
                 should_reason=should_reason,
                 log_conversations=log_conversations,
                 conversation_log_dir=matchup_log_dir,
@@ -469,9 +518,12 @@ def run_tournament(
                    f"{s['draws']:<8}{s['win_rate']:.1%}{'':2}{s['elo']:<8.0f}{elo_change_str:<8}")
     logger.info("=" * 84)
 
+    # Convert MapConfig to serializable format
+    maps_info = [{'path': m.path, 'max_turns': m.max_turns} for m in map_list]
+
     return {
         'timestamp': datetime.now().isoformat(),
-        'maps_used': map_list,
+        'maps_used': maps_info,
         'map_pool_mode': map_pool_mode,
         'games_per_matchup': games_per_matchup,
         'standings': standings,
@@ -771,6 +823,10 @@ def main():
 
     logger.info(f"Created {len(bots)} bots from config")
 
+    # Parse maps from config (supports both string and object format with per-map max_turns)
+    map_configs = parse_maps_from_config(config)
+    logger.info(f"Loaded {len(map_configs)} maps from config")
+
     # Get tournament settings
     tournament_config = config['tournament']
     output_config = config.get('output', {})
@@ -779,7 +835,7 @@ def main():
     try:
         results = run_tournament(
             bots=bots,
-            maps=config['maps'],
+            maps=map_configs,
             map_pool_mode=tournament_config.get('map_pool_mode', 'all'),
             games_per_matchup=tournament_config.get('games_per_matchup', 1),
             max_turns=tournament_config.get('max_turns', 100),

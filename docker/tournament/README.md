@@ -55,11 +55,37 @@ Results are saved to the `output/` directory:
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `games_per_matchup` | Games per side per map | 1 |
-| `max_turns` | Maximum turns before draw | 100 |
+| `max_turns` | Default maximum turns before draw | 100 |
 | `map_pool_mode` | Map selection: `all`, `cycle`, `random` | `all` |
 | `should_reason` | Enable LLM reasoning output | `true` |
 | `log_conversations` | Save LLM conversations | `true` |
 | `save_replays` | Save game replays | `true` |
+
+### Map Configuration
+
+Maps can be specified in two formats:
+
+**Simple format** (uses default `max_turns`):
+```json
+"maps": ["maps/1v1/beginner.csv", "maps/1v1/funnel_point.csv"]
+```
+
+**Object format** (with per-map `max_turns`):
+```json
+"maps": [
+  {"path": "maps/1v1/beginner.csv", "max_turns": 50},
+  {"path": "maps/1v1/funnel_point.csv", "max_turns": 75},
+  {"path": "maps/1v1/center_mountains.csv", "max_turns": 100}
+]
+```
+
+You can mix both formats:
+```json
+"maps": [
+  {"path": "maps/1v1/beginner.csv", "max_turns": 50},
+  "maps/1v1/funnel_point.csv"
+]
+```
 
 ### Bot Types
 
@@ -117,6 +143,28 @@ Results are saved to the `output/` directory:
     {"name": "SimpleBot", "type": "simple"},
     {"name": "GPT-4o Mini", "type": "llm", "provider": "openai", "model": "gpt-4o-mini"},
     {"name": "Claude Haiku", "type": "llm", "provider": "anthropic", "model": "claude-3-5-haiku-20241022"}
+  ]
+}
+```
+
+### Per-Map Turn Limits
+
+```json
+{
+  "tournament": {
+    "games_per_matchup": 1,
+    "max_turns": 100,
+    "map_pool_mode": "all"
+  },
+  "maps": [
+    {"path": "maps/1v1/beginner.csv", "max_turns": 50},
+    {"path": "maps/1v1/funnel_point.csv", "max_turns": 75},
+    {"path": "maps/1v1/center_mountains.csv", "max_turns": 100}
+  ],
+  "bots": [
+    {"name": "SimpleBot", "type": "simple"},
+    {"name": "MediumBot", "type": "medium"},
+    {"name": "AdvancedBot", "type": "advanced"}
   ]
 }
 ```

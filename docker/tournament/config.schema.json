@@ -23,7 +23,7 @@
           "type": "integer",
           "minimum": 10,
           "maximum": 1000,
-          "description": "Maximum turns per game before draw"
+          "description": "Default maximum turns per game before draw (can be overridden per map)"
         },
         "map_pool_mode": {
           "type": "string",
@@ -68,11 +68,32 @@
     },
     "maps": {
       "type": "array",
-      "description": "List of map files to use",
+      "description": "List of maps to use. Each map can be a string (path only) or object (with max_turns)",
       "minItems": 1,
       "items": {
-        "type": "string",
-        "description": "Path to map CSV file"
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Path to map CSV file (uses default max_turns)"
+          },
+          {
+            "type": "object",
+            "description": "Map configuration with optional max_turns override",
+            "required": ["path"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Path to map CSV file"
+              },
+              "max_turns": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 1000,
+                "description": "Maximum turns for this specific map (overrides tournament default)"
+              }
+            }
+          }
+        ]
       }
     },
     "bots": {
