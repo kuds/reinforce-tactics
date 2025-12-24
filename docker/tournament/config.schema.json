@@ -66,6 +66,30 @@
         }
       }
     },
+    "gcs": {
+      "type": "object",
+      "description": "Google Cloud Storage settings for uploading tournament output",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable GCS upload for replays and conversation logs"
+        },
+        "bucket": {
+          "type": "string",
+          "description": "GCS bucket name (required if enabled=true)"
+        },
+        "prefix": {
+          "type": "string",
+          "default": "",
+          "description": "Optional prefix/folder path within the bucket"
+        },
+        "credentials_file": {
+          "type": ["string", "null"],
+          "description": "Path to service account JSON credentials file. If null, uses default credentials (GOOGLE_APPLICATION_CREDENTIALS env var or GCE metadata)"
+        }
+      }
+    },
     "maps": {
       "type": "array",
       "description": "List of maps to use. Each map can be a string (path only) or object (with max_turns)",
