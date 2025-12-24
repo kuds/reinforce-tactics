@@ -647,6 +647,47 @@ def run_single_game(
         }
 
 
+def sanitize_config_for_saving(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a sanitized copy of the configuration with sensitive data removed.
+
+    Removes or masks fields that may contain API keys, secrets, or other sensitive data.
+    """
+    # Fields that should be completely removed (case-insensitive matching)
+    sensitive_field_patterns = [
+        'api_key', 'apikey', 'api-key',
+        'secret', 'password', 'token',
+        'credential', 'auth_key', 'authkey',
+        'private_key', 'privatekey', 'access_key', 'accesskey'
+    ]
+
+    def is_sensitive_field(field_name: str) -> bool:
+        """Check if a field name indicates sensitive data."""
+        field_lower = field_name.lower()
+        return any(pattern in field_lower for pattern in sensitive_field_patterns)
+
+    def sanitize_value(value: Any) -> Any:
+        """Recursively sanitize a value."""
+        if isinstance(value, dict):
+            return sanitize_dict(value)
+        elif isinstance(value, list):
+            return [sanitize_value(item) for item in value]
+        else:
+            return value
+
+    def sanitize_dict(d: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize a dictionary by removing sensitive fields."""
+        result = {}
+        for key, value in d.items():
+            if is_sensitive_field(key):
+                # Skip sensitive fields entirely
+                continue
+            result[key] = sanitize_value(value)
+        return result
+
+    return sanitize_dict(config)
+
+
 def analyze_token_usage(log_dir: str) -> Optional[Dict[str, Any]]:
     """Analyze token usage from log files."""
     if not log_dir or not os.path.exists(log_dir):
@@ -693,9 +734,17 @@ def analyze_token_usage(log_dir: str) -> Optional[Dict[str, Any]]:
 def save_tournament_results(
     results_data: Dict[str, Any],
     output_dir: str,
-    llm_log_dir: Optional[str] = None
+    llm_log_dir: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None
 ) -> None:
-    """Save tournament results to JSON and CSV files."""
+    """Save tournament results to JSON and CSV files.
+
+    Args:
+        results_data: Tournament results data
+        output_dir: Directory to save results
+        llm_log_dir: Directory containing LLM conversation logs for token analysis
+        config: Original tournament configuration (will be sanitized before saving)
+    """
     if not results_data:
         logger.warning("No results data to save.")
         return
@@ -741,6 +790,14 @@ def save_tournament_results(
                     f.write(f"{model},{stats['input_tokens']},{stats['output_tokens']},"
                            f"{total},{stats['count']}\n")
             logger.info(f"Token stats saved to: {token_csv_path}")
+
+    # Save sanitized configuration (API keys removed)
+    if config:
+        sanitized_config = sanitize_config_for_saving(config)
+        config_path = os.path.join(output_dir, f'tournament_config_{timestamp}.json')
+        with open(config_path, 'w') as f:
+            json.dump(sanitized_config, f, indent=2)
+        logger.info(f"Configuration saved to: {config_path}")
 
     # Save full results JSON
     json_path = os.path.join(output_dir, f'tournament_results_{timestamp}.json')
@@ -850,7 +907,7 @@ def main():
         results_dir = output_config.get('results_dir', '/app/output/results')
         conversation_log_dir = output_config.get('conversation_log_dir')
 
-        save_tournament_results(results, results_dir, conversation_log_dir)
+        save_tournament_results(results, results_dir, conversation_log_dir, config)
 
         logger.info("\nTournament completed successfully!")
 
