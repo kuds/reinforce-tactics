@@ -204,3 +204,143 @@ Make sure the `output/` directory is writable:
 ```bash
 chmod -R 777 output/
 ```
+
+## Advanced Features
+
+### Resuming Interrupted Tournaments
+
+If a tournament is interrupted (e.g., due to network issues, container restart, or manual stop), you can resume it by passing the `--resume` flag with the path to the previous output folder:
+
+```bash
+# Resume from previous output
+docker run --rm \
+  -v $(pwd)/docker/tournament/config.json:/app/config/config.json:ro \
+  -v $(pwd)/docker/tournament/output:/app/output \
+  -v $(pwd)/maps:/app/maps:ro \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  reinforce-tactics-tournament --resume /app/output
+```
+
+The resume feature:
+- Scans existing replay files to determine which matches have been completed
+- Skips already completed matches
+- Plays only the remaining matches
+- Logs resume statistics showing skipped vs new games
+
+**Note**: Resume requires `save_replays: true` in the config so that completed match information is available.
+
+### Google Cloud Storage Upload
+
+For cloud deployments (e.g., Google Cloud Run, GCE), you can configure automatic upload of tournament output to Google Cloud Storage.
+
+#### Configuration
+
+Add a `gcs` section to your `config.json`:
+
+```json
+{
+  "gcs": {
+    "enabled": true,
+    "bucket": "your-bucket-name",
+    "prefix": "tournaments/run-001/",
+    "credentials_file": null
+  }
+}
+```
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `enabled` | Enable GCS upload | `false` |
+| `bucket` | GCS bucket name (required if enabled) | - |
+| `prefix` | Optional folder prefix in bucket | `""` |
+| `credentials_file` | Path to service account JSON (optional) | `null` |
+
+#### Authentication
+
+GCS upload supports multiple authentication methods:
+
+1. **Service Account JSON** (recommended for production):
+   ```json
+   {
+     "gcs": {
+       "enabled": true,
+       "bucket": "my-bucket",
+       "credentials_file": "/app/config/service-account.json"
+     }
+   }
+   ```
+
+2. **Environment Variable** (default credentials):
+   ```bash
+   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+   ```
+
+3. **GCE Metadata Server** (automatic on Google Cloud):
+   When running on GCE, GKE, or Cloud Run, credentials are obtained automatically from the metadata server. Just ensure the service account has Storage Object Admin permissions.
+
+#### Running on Google Cloud
+
+Example for Google Cloud Run:
+
+```bash
+# Build and push image
+docker build -f docker/tournament/Dockerfile -t gcr.io/my-project/tournament .
+docker push gcr.io/my-project/tournament
+
+# Deploy to Cloud Run
+gcloud run deploy tournament \
+  --image gcr.io/my-project/tournament \
+  --set-env-vars OPENAI_API_KEY=$OPENAI_API_KEY,ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  --memory 4Gi \
+  --timeout 3600
+```
+
+#### GCS Output Structure
+
+When GCS upload is enabled, files are uploaded with this structure:
+
+```
+gs://bucket-name/prefix/
+├── results/
+│   ├── tournament_results_YYYYMMDD_HHMMSS.json
+│   ├── tournament_standings_YYYYMMDD_HHMMSS.csv
+│   └── ...
+├── replays/
+│   └── {map_name}/{bot1}_vs_{bot2}/
+│       └── game_*.json
+└── conversations/
+    └── {map_name}/{bot1}_vs_{bot2}/
+        └── game_*_player{N}_*.json
+```
+
+### Combined Resume + GCS
+
+You can use both features together for robust cloud execution:
+
+```json
+{
+  "tournament": {
+    "save_replays": true,
+    "log_conversations": true
+  },
+  "gcs": {
+    "enabled": true,
+    "bucket": "my-tournament-bucket",
+    "prefix": "tournament-2024-01/"
+  }
+}
+```
+
+To resume a cloud tournament, download the previous output and mount it:
+
+```bash
+# Download previous output from GCS
+gsutil -m cp -r gs://my-tournament-bucket/tournament-2024-01/replays ./output/replays
+
+# Resume the tournament
+docker run --rm \
+  -v $(pwd)/config.json:/app/config/config.json:ro \
+  -v $(pwd)/output:/app/output \
+  reinforce-tactics-tournament --resume /app/output
+```

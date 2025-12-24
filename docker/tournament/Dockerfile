@@ -29,6 +29,9 @@ RUN pip3 install --no-cache-dir \
     anthropic \
     google-genai
 
+# Install Google Cloud Storage for GCS upload support
+RUN pip3 install --no-cache-dir google-cloud-storage
+
 # Copy the game code
 COPY . .
 

@@ -6,20 +6,25 @@ Reads tournament configuration from config.json and runs a round-robin tournamen
 between specified bots. Supports built-in bots (simple, medium, advanced) and
 LLM bots (OpenAI, Anthropic, Google).
 
+Features:
+- Resume interrupted tournaments by passing --resume with a folder path
+- Upload replays and conversation logs to Google Cloud Storage
+
 Usage:
-    python run_tournament.py [--config CONFIG_PATH]
+    python run_tournament.py [--config CONFIG_PATH] [--resume FOLDER_PATH]
 """
 import argparse
 import json
 import logging
 import os
 import random
+import re
 import sys
 import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Add parent directory to path for imports
 sys.path.insert(0, '/app')
@@ -34,6 +39,306 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class GCSUploader:
+    """Handles uploading files to Google Cloud Storage."""
+
+    def __init__(
+        self,
+        bucket_name: str,
+        prefix: str = "",
+        credentials_file: Optional[str] = None
+    ):
+        """
+        Initialize GCS uploader.
+
+        Args:
+            bucket_name: Name of the GCS bucket
+            prefix: Optional prefix/folder path within the bucket
+            credentials_file: Optional path to service account credentials JSON
+        """
+        self.bucket_name = bucket_name
+        self.prefix = prefix.rstrip('/') + '/' if prefix else ""
+        self.credentials_file = credentials_file
+        self._client = None
+        self._bucket = None
+
+    def _get_client(self):
+        """Lazily initialize GCS client."""
+        if self._client is None:
+            try:
+                from google.cloud import storage
+                if self.credentials_file and os.path.exists(self.credentials_file):
+                    self._client = storage.Client.from_service_account_json(
+                        self.credentials_file
+                    )
+                    logger.info(f"GCS client initialized with credentials from {self.credentials_file}")
+                else:
+                    # Use default credentials (GOOGLE_APPLICATION_CREDENTIALS env var or metadata server)
+                    self._client = storage.Client()
+                    logger.info("GCS client initialized with default credentials")
+                self._bucket = self._client.bucket(self.bucket_name)
+            except ImportError:
+                logger.error("google-cloud-storage package not installed. Install with: pip install google-cloud-storage")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to initialize GCS client: {e}")
+                raise
+        return self._client
+
+    def upload_file(self, local_path: str, remote_path: Optional[str] = None) -> Optional[str]:
+        """
+        Upload a file to GCS.
+
+        Args:
+            local_path: Local file path to upload
+            remote_path: Remote path within the bucket (uses filename if not specified)
+
+        Returns:
+            GCS URI (gs://bucket/path) if successful, None otherwise
+        """
+        try:
+            self._get_client()
+
+            if remote_path is None:
+                remote_path = os.path.basename(local_path)
+
+            # Add prefix
+            full_remote_path = f"{self.prefix}{remote_path}"
+
+            blob = self._bucket.blob(full_remote_path)
+            blob.upload_from_filename(local_path)
+
+            gcs_uri = f"gs://{self.bucket_name}/{full_remote_path}"
+            logger.debug(f"Uploaded {local_path} to {gcs_uri}")
+            return gcs_uri
+
+        except Exception as e:
+            logger.warning(f"Failed to upload {local_path} to GCS: {e}")
+            return None
+
+    def upload_directory(self, local_dir: str, remote_prefix: Optional[str] = None) -> int:
+        """
+        Upload all files in a directory to GCS.
+
+        Args:
+            local_dir: Local directory path
+            remote_prefix: Remote prefix for all files
+
+        Returns:
+            Number of files successfully uploaded
+        """
+        uploaded = 0
+        local_path = Path(local_dir)
+
+        if not local_path.exists():
+            logger.warning(f"Directory does not exist: {local_dir}")
+            return 0
+
+        for file_path in local_path.rglob('*'):
+            if file_path.is_file():
+                relative_path = file_path.relative_to(local_path)
+                if remote_prefix:
+                    remote_path = f"{remote_prefix}/{relative_path}"
+                else:
+                    remote_path = str(relative_path)
+
+                if self.upload_file(str(file_path), remote_path):
+                    uploaded += 1
+
+        logger.info(f"Uploaded {uploaded} files from {local_dir} to GCS")
+        return uploaded
+
+
+class CompletedMatchInfo:
+    """Information about a completed match extracted from replay files."""
+
+    def __init__(
+        self,
+        bot1: str,
+        bot2: str,
+        map_name: str,
+        player1_bot: str,
+        winner: int,
+        turns: int
+    ):
+        self.bot1 = bot1
+        self.bot2 = bot2
+        self.map_name = map_name
+        self.player1_bot = player1_bot  # Which bot was player 1
+        self.winner = winner
+        self.turns = turns
+
+    def __repr__(self):
+        return f"CompletedMatch({self.player1_bot} vs opponent on {self.map_name})"
+
+
+def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchInfo]]:
+    """
+    Scan a folder for completed match replay files.
+
+    Args:
+        resume_folder: Path to folder containing replays or tournament output
+
+    Returns:
+        Dictionary mapping matchup keys to list of completed matches
+        Key format: "bot1_name|bot2_name|map_name" (names sorted alphabetically)
+    """
+    completed = defaultdict(list)
+    resume_path = Path(resume_folder)
+
+    if not resume_path.exists():
+        logger.warning(f"Resume folder does not exist: {resume_folder}")
+        return completed
+
+    # Look for replay files in multiple possible locations
+    search_paths = [
+        resume_path,  # Direct folder
+        resume_path / 'replays',  # replays subfolder
+        resume_path / 'output' / 'replays',  # output/replays subfolder
+    ]
+
+    replay_files = []
+    for search_path in search_paths:
+        if search_path.exists():
+            replay_files.extend(search_path.rglob('game_*.json'))
+
+    logger.info(f"Found {len(replay_files)} replay files to scan")
+
+    for replay_file in replay_files:
+        try:
+            with open(replay_file, 'r') as f:
+                data = json.load(f)
+
+            game_info = data.get('game_info', {})
+            bot1 = game_info.get('bot1', '')
+            bot2 = game_info.get('bot2', '')
+            winner = game_info.get('winner', 0)
+            turns = game_info.get('turns', 0)
+            map_path = game_info.get('map', '')
+            bot1_player = game_info.get('bot1_player', 1)
+
+            # Extract map name from path
+            map_name = Path(map_path).name if map_path else ''
+
+            if not bot1 or not bot2 or not map_name:
+                logger.warning(f"Incomplete game info in {replay_file}")
+                continue
+
+            # Determine which bot was player 1
+            if bot1_player == 1:
+                player1_bot = bot1
+            else:
+                player1_bot = bot2
+
+            # Create sorted key for consistent lookup
+            sorted_bots = tuple(sorted([bot1, bot2]))
+            key = f"{sorted_bots[0]}|{sorted_bots[1]}|{map_name}"
+
+            match_info = CompletedMatchInfo(
+                bot1=bot1,
+                bot2=bot2,
+                map_name=map_name,
+                player1_bot=player1_bot,
+                winner=winner,
+                turns=turns
+            )
+            completed[key].append(match_info)
+
+        except Exception as e:
+            logger.warning(f"Error reading replay file {replay_file}: {e}")
+            continue
+
+    # Log summary
+    total_matches = sum(len(matches) for matches in completed.values())
+    logger.info(f"Found {total_matches} completed matches across {len(completed)} matchup configurations")
+
+    return completed
+
+
+def get_pending_games(
+    bot1_name: str,
+    bot2_name: str,
+    map_name: str,
+    games_per_side: int,
+    completed_matches: Dict[str, List[CompletedMatchInfo]]
+) -> Tuple[int, int]:
+    """
+    Determine how many games still need to be played for a matchup.
+
+    Args:
+        bot1_name: Name of first bot
+        bot2_name: Name of second bot
+        map_name: Name of the map file
+        games_per_side: Target number of games per side
+        completed_matches: Dictionary of completed matches
+
+    Returns:
+        Tuple of (games_needed_bot1_as_p1, games_needed_bot2_as_p1)
+    """
+    sorted_bots = tuple(sorted([bot1_name, bot2_name]))
+    key = f"{sorted_bots[0]}|{sorted_bots[1]}|{map_name}"
+
+    matches = completed_matches.get(key, [])
+
+    # Count completed games for each configuration
+    bot1_as_p1_count = 0
+    bot2_as_p1_count = 0
+
+    for match in matches:
+        if match.player1_bot == bot1_name:
+            bot1_as_p1_count += 1
+        elif match.player1_bot == bot2_name:
+            bot2_as_p1_count += 1
+
+    # Calculate remaining games needed
+    bot1_as_p1_needed = max(0, games_per_side - bot1_as_p1_count)
+    bot2_as_p1_needed = max(0, games_per_side - bot2_as_p1_count)
+
+    return bot1_as_p1_needed, bot2_as_p1_needed
+
+
+def load_previous_results(resume_folder: str) -> Optional[Dict[str, Any]]:
+    """
+    Load previous tournament results from a resume folder.
+
+    Args:
+        resume_folder: Path to folder containing previous results
+
+    Returns:
+        Previous results dictionary if found, None otherwise
+    """
+    resume_path = Path(resume_folder)
+
+    # Look for results files in multiple possible locations
+    search_paths = [
+        resume_path,
+        resume_path / 'results',
+        resume_path / 'output' / 'results',
+    ]
+
+    results_files = []
+    for search_path in search_paths:
+        if search_path.exists():
+            results_files.extend(search_path.glob('tournament_results_*.json'))
+
+    if not results_files:
+        logger.info("No previous results found to merge")
+        return None
+
+    # Get the most recent results file
+    results_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    latest_results = results_files[0]
+
+    try:
+        with open(latest_results, 'r') as f:
+            data = json.load(f)
+        logger.info(f"Loaded previous results from {latest_results}")
+        return data
+    except Exception as e:
+        logger.warning(f"Error loading previous results: {e}")
+        return None
 
 
 class EloRatingSystem:
@@ -221,7 +526,9 @@ def run_tournament(
     log_conversations: bool = False,
     conversation_log_dir: Optional[str] = None,
     save_replays: bool = False,
-    replay_dir: Optional[str] = None
+    replay_dir: Optional[str] = None,
+    completed_matches: Optional[Dict[str, List[CompletedMatchInfo]]] = None,
+    gcs_uploader: Optional[GCSUploader] = None
 ) -> Dict[str, Any]:
     """
     Run a round-robin tournament between multiple bots with Elo ratings.
@@ -238,6 +545,8 @@ def run_tournament(
         conversation_log_dir: Directory for conversation logs
         save_replays: Save game replays
         replay_dir: Directory for replays
+        completed_matches: Dictionary of already completed matches (for resume)
+        gcs_uploader: Optional GCS uploader for cloud storage
     """
     if len(bots) < 2:
         raise ValueError("Need at least 2 bots for a tournament")
@@ -313,6 +622,11 @@ def run_tournament(
         logger.info("LLM Conversation Logging: ENABLED")
     if save_replays:
         logger.info("Replay Saving: ENABLED")
+    if completed_matches:
+        total_completed = sum(len(m) for m in completed_matches.values())
+        logger.info(f"Resume Mode: ENABLED ({total_completed} completed matches found)")
+    if gcs_uploader:
+        logger.info(f"GCS Upload: ENABLED (bucket: {gcs_uploader.bucket_name})")
     logger.info("=" * 70)
 
     # Initialize results tracking
@@ -320,6 +634,8 @@ def run_tournament(
     per_map_stats = defaultdict(lambda: defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0}))
     matchup_details = []
     current_map_index = 0
+    skipped_games = 0
+    new_games_played = 0
 
     def select_map(game_num):
         nonlocal current_map_index
@@ -369,14 +685,31 @@ def run_tournament(
             'draws': 0
         }
 
-        # Determine game schedule
+        # Determine game schedule with resume support
         if map_pool_mode == 'all' and len(map_list) > 1:
             game_schedule = []
             for m in map_list:
-                for _ in range(games_per_matchup):
+                map_name = Path(m.path).name
+
+                # Check how many games still need to be played for this map
+                if completed_matches:
+                    bot1_as_p1_needed, bot2_as_p1_needed = get_pending_games(
+                        bot1.name, bot2.name, map_name,
+                        games_per_matchup, completed_matches
+                    )
+                else:
+                    bot1_as_p1_needed = games_per_matchup
+                    bot2_as_p1_needed = games_per_matchup
+
+                # Add remaining games to schedule
+                for _ in range(bot1_as_p1_needed):
                     game_schedule.append((bot1, bot2, 1, 2, m))
-                for _ in range(games_per_matchup):
+                for _ in range(bot2_as_p1_needed):
                     game_schedule.append((bot2, bot1, 1, 2, m))
+
+                # Track skipped games
+                skipped_games += (games_per_matchup - bot1_as_p1_needed)
+                skipped_games += (games_per_matchup - bot2_as_p1_needed)
         else:
             game_schedule = []
             for g in range(games_per_matchup):
@@ -385,6 +718,10 @@ def run_tournament(
             for g in range(games_per_matchup):
                 m = select_map(game_num + games_per_matchup + g + 1)
                 game_schedule.append((bot2, bot1, 1, 2, m))
+
+        if not game_schedule:
+            logger.info(f"  All games already completed for this matchup, skipping...")
+            continue
 
         # Run games
         for game_idx, (p1_bot, p2_bot, p1_num, p2_num, map_config) in enumerate(game_schedule, 1):
@@ -430,8 +767,16 @@ def run_tournament(
             winner = result['winner']
             winner_name = result['winner_name']
             turns = result['turns']
+            new_games_played += 1
 
             logger.info(f"    Result: {winner_name} (turns: {turns})")
+
+            # Upload replay to GCS if configured
+            if gcs_uploader and result.get('replay_path'):
+                replay_path = result['replay_path']
+                # Create GCS path: replays/{map_name}/{matchup}/filename
+                gcs_replay_path = f"replays/{map_name.replace('.csv', '')}/{p1_bot.name}_vs_{p2_bot.name}/{os.path.basename(replay_path)}"
+                gcs_uploader.upload_file(replay_path, gcs_replay_path)
 
             # Update statistics
             if winner == p1_num:
@@ -505,6 +850,15 @@ def run_tournament(
 
     standings.sort(key=lambda x: x['elo'], reverse=True)
 
+    # Print resume statistics if applicable
+    if completed_matches:
+        logger.info("\n" + "-" * 70)
+        logger.info("RESUME STATISTICS")
+        logger.info("-" * 70)
+        logger.info(f"Games skipped (already completed): {skipped_games}")
+        logger.info(f"New games played this session: {new_games_played}")
+        logger.info("-" * 70)
+
     # Print final standings
     logger.info("\n" + "=" * 84)
     logger.info("TOURNAMENT RESULTS")
@@ -521,7 +875,7 @@ def run_tournament(
     # Convert MapConfig to serializable format
     maps_info = [{'path': m.path, 'max_turns': m.max_turns} for m in map_list]
 
-    return {
+    result_data = {
         'timestamp': datetime.now().isoformat(),
         'maps_used': maps_info,
         'map_pool_mode': map_pool_mode,
@@ -533,6 +887,16 @@ def run_tournament(
             for bot_name, history in elo_system.rating_history.items()
         }
     }
+
+    # Add resume statistics if applicable
+    if completed_matches:
+        result_data['resume_stats'] = {
+            'skipped_games': skipped_games,
+            'new_games_played': new_games_played,
+            'resumed_from_existing': True
+        }
+
+    return result_data
 
 
 def run_single_game(
@@ -606,6 +970,7 @@ def run_single_game(
             winner_name = "Draw"
 
         # Save replay if requested
+        replay_path = None
         if save_replay and replay_dir:
             map_basename = Path(map_file).stem
             replay_filename = (
@@ -634,7 +999,9 @@ def run_single_game(
         return {
             'winner': winner,
             'winner_name': winner_name,
-            'turns': turn_count
+            'turns': turn_count,
+            'replay_path': replay_path,
+            'conversation_log_dir': conversation_log_dir
         }
 
     except Exception as e:
@@ -862,6 +1229,12 @@ def main():
         default='/app/config/config.json',
         help='Path to tournament configuration file (default: /app/config/config.json)'
     )
+    parser.add_argument(
+        '--resume',
+        type=str,
+        default=None,
+        help='Path to folder containing previous tournament output to resume from'
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -887,6 +1260,34 @@ def main():
     # Get tournament settings
     tournament_config = config['tournament']
     output_config = config.get('output', {})
+    gcs_config = config.get('gcs', {})
+
+    # Set up GCS uploader if configured
+    gcs_uploader = None
+    if gcs_config.get('enabled', False):
+        bucket_name = gcs_config.get('bucket')
+        if bucket_name:
+            try:
+                gcs_uploader = GCSUploader(
+                    bucket_name=bucket_name,
+                    prefix=gcs_config.get('prefix', ''),
+                    credentials_file=gcs_config.get('credentials_file')
+                )
+                logger.info(f"GCS uploader configured for bucket: {bucket_name}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize GCS uploader: {e}")
+                logger.warning("Continuing without GCS upload...")
+        else:
+            logger.warning("GCS enabled but no bucket specified")
+
+    # Check for resume mode
+    completed_matches = None
+    if args.resume:
+        logger.info(f"Resume mode enabled, scanning folder: {args.resume}")
+        completed_matches = scan_completed_matches(args.resume)
+        if not completed_matches:
+            logger.info("No completed matches found, starting fresh tournament")
+            completed_matches = None
 
     # Run tournament
     try:
@@ -900,14 +1301,34 @@ def main():
             log_conversations=tournament_config.get('log_conversations', False),
             conversation_log_dir=output_config.get('conversation_log_dir'),
             save_replays=tournament_config.get('save_replays', False),
-            replay_dir=output_config.get('replay_dir')
+            replay_dir=output_config.get('replay_dir'),
+            completed_matches=completed_matches,
+            gcs_uploader=gcs_uploader
         )
 
-        # Save results
+        # Save results locally
         results_dir = output_config.get('results_dir', '/app/output/results')
         conversation_log_dir = output_config.get('conversation_log_dir')
 
         save_tournament_results(results, results_dir, conversation_log_dir, config)
+
+        # Upload results and logs to GCS if configured
+        if gcs_uploader:
+            logger.info("Uploading tournament output to GCS...")
+
+            # Upload results directory
+            gcs_uploader.upload_directory(results_dir, 'results')
+
+            # Upload conversation logs if they exist
+            if conversation_log_dir and os.path.exists(conversation_log_dir):
+                gcs_uploader.upload_directory(conversation_log_dir, 'conversations')
+
+            # Upload replay directory if it exists
+            replay_dir = output_config.get('replay_dir')
+            if replay_dir and os.path.exists(replay_dir):
+                gcs_uploader.upload_directory(replay_dir, 'replays')
+
+            logger.info("GCS upload complete!")
 
         logger.info("\nTournament completed successfully!")
 

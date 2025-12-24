@@ -14,6 +14,12 @@
     "conversation_log_dir": "/app/output/conversations",
     "replay_dir": "/app/output/replays"
   },
+  "gcs": {
+    "enabled": false,
+    "bucket": "",
+    "prefix": "tournaments/",
+    "credentials_file": null
+  },
   "maps": [
     {"path": "maps/1v1/beginner.csv", "max_turns": 50},
     {"path": "maps/1v1/funnel_point.csv", "max_turns": 75},
