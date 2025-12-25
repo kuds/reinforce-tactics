@@ -509,6 +509,46 @@ class ReplayPlayer:
         )
         self.renderer.screen.blit(progress_surface, progress_text_rect)
 
+        # Game outcome display (when replay is finished)
+        if self.current_action_index >= len(self.actions) and len(self.actions) > 0:
+            winner = self.game_info.get('winner')
+            draw_reason = self.game_info.get('draw_reason')
+
+            if winner == 0:
+                # Draw outcome
+                outcome_text = "Game ended in a DRAW"
+                if draw_reason == "max_turns":
+                    outcome_text += f" (max turns: {self.game_info.get('max_turns', '?')})"
+                outcome_color = (255, 200, 50)  # Yellow/gold for draws
+            elif winner is not None:
+                outcome_text = f"Player {winner} WINS!"
+                outcome_color = (100, 255, 100)  # Green for wins
+            else:
+                outcome_text = "Game Over"
+                outcome_color = (200, 200, 200)
+
+            # Draw outcome banner
+            outcome_font = get_font(36)
+            outcome_surface = outcome_font.render(outcome_text, True, outcome_color)
+            banner_width = outcome_surface.get_width() + 40
+            banner_height = outcome_surface.get_height() + 20
+            banner_x = (self.renderer.screen.get_width() - banner_width) // 2
+            banner_y = self.control_y - banner_height - 20
+
+            # Semi-transparent background
+            banner_surface = pygame.Surface((banner_width, banner_height), pygame.SRCALPHA)
+            banner_surface.fill((0, 0, 0, 180))
+            self.renderer.screen.blit(banner_surface, (banner_x, banner_y))
+
+            # Border
+            pygame.draw.rect(self.renderer.screen, outcome_color,
+                           (banner_x, banner_y, banner_width, banner_height), 3)
+
+            # Text
+            text_rect = outcome_surface.get_rect(center=(banner_x + banner_width // 2,
+                                                          banner_y + banner_height // 2))
+            self.renderer.screen.blit(outcome_surface, text_rect)
+
         # Exit button
         self._draw_button(self.exit_button, "Exit", mouse_pos, (150, 70, 70), font)
 

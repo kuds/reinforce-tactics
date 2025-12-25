@@ -69,6 +69,10 @@ class GameState:
         # Maximum turns for the game (None = unlimited)
         self.max_turns: Optional[int] = None
 
+        # Draw reason (only set when game ends in a draw)
+        # Possible values: "max_turns", None
+        self.draw_reason: Optional[str] = None
+
         # Action history for replay
         self.action_history: List[Dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
@@ -563,6 +567,14 @@ class GameState:
             self.current_player = 1
             self.turn_number += 1
 
+            # Check for draw due to max turns after completing a full round
+            if self.max_turns is not None and self.turn_number >= self.max_turns:
+                self.game_over = True
+                self.winner = 0  # 0 indicates a draw
+                self.draw_reason = "max_turns"
+                self.record_action('draw', reason='max_turns', turn=self.turn_number)
+                logger.info(f"Game ended in draw: max turns ({self.max_turns}) reached")
+
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
 
@@ -603,6 +615,32 @@ class GameState:
             self.winner = player + 1 if player < self.num_players else 1
 
         self.game_over = True
+
+    @property
+    def is_draw(self) -> bool:
+        """Check if the game ended in a draw."""
+        return self.game_over and self.winner == 0
+
+    def check_draw_condition(self) -> bool:
+        """
+        Check if draw conditions are met and trigger draw if so.
+
+        Returns:
+            True if game ended in a draw, False otherwise
+        """
+        if self.game_over:
+            return self.is_draw
+
+        # Check max turns condition
+        if self.max_turns is not None and self.turn_number >= self.max_turns:
+            self.game_over = True
+            self.winner = 0
+            self.draw_reason = "max_turns"
+            self.record_action('draw', reason='max_turns', turn=self.turn_number)
+            logger.info(f"Game ended in draw: max turns ({self.max_turns}) reached")
+            return True
+
+        return False
 
     def get_legal_actions(self, player: Optional[int] = None) -> Dict[str, List[Any]]:
         """
@@ -839,6 +877,7 @@ class GameState:
             'total_turns': self.turn_number,
             'winner': self.winner,
             'game_over': self.game_over,
+            'draw_reason': self.draw_reason,  # Only set when winner == 0 (draw)
             'start_time': self.game_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
