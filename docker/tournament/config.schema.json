@@ -45,6 +45,20 @@
           "type": "boolean",
           "default": false,
           "description": "Save game replays"
+        },
+        "concurrent_games": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 1,
+          "description": "Number of games to run concurrently. Set to 1 for sequential execution. Upper bounded by games per round."
+        },
+        "llm_api_delay": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "default": 1.0,
+          "description": "Delay in seconds between LLM API calls to avoid rate limits"
         }
       }
     },
