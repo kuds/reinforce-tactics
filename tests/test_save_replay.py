@@ -163,51 +163,6 @@ class TestPlayerConfigs:
             assert 'player_configs' in replay_data['game_info']
             assert len(replay_data['game_info']['player_configs']) == 2
 
-    def test_player_names_in_replay(self, simple_map):
-        """Test that player_names dictionary is included in replay."""
-        game = GameState(simple_map, num_players=2)
-        game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
-            {'type': 'computer', 'bot_type': 'SimpleBot', 'player_name': 'SimpleBot'}
-        ]
-        game.end_turn()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
-
-            replay_data = FileIO.load_replay(replay_path)
-
-            assert 'game_info' in replay_data
-            assert 'player_names' in replay_data['game_info']
-            player_names = replay_data['game_info']['player_names']
-            assert player_names['1'] == 'Human'
-            assert player_names['2'] == 'SimpleBot'
-
-    def test_player_names_fallback_to_unknown(self, simple_map):
-        """Test that player_names falls back to 'Unknown' when not set."""
-        game = GameState(simple_map, num_players=2)
-        # player_configs without player_name set
-        game.player_configs = [
-            {'type': 'human', 'bot_type': None},
-            {'type': 'computer', 'bot_type': 'SimpleBot'}
-        ]
-        game.end_turn()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
-
-            replay_data = FileIO.load_replay(replay_path)
-
-            assert 'game_info' in replay_data
-            assert 'player_names' in replay_data['game_info']
-            player_names = replay_data['game_info']['player_names']
-            assert player_names['1'] == 'Unknown'
-            assert player_names['2'] == 'Unknown'
-
     def test_max_turns_in_replay(self, simple_map):
         """Test that max_turns is included in replay."""
         game = GameState(simple_map, num_players=2)
@@ -278,6 +233,27 @@ class TestPlayerConfigs:
             assert player_configs[1]['player_no'] == 2
             assert player_configs[1]['type'] == 'bot'
             assert player_configs[1]['name'] == 'SimpleBot'
+
+    def test_player_name_fallback_to_unknown(self, simple_map):
+        """Test that player name falls back to 'Unknown' when not set."""
+        game = GameState(simple_map, num_players=2)
+        # player_configs without player_name set
+        game.player_configs = [
+            {'type': 'human', 'bot_type': None},
+            {'type': 'computer', 'bot_type': 'SimpleBot'}
+        ]
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+
+            player_configs = replay_data['game_info']['player_configs']
+            assert player_configs[0]['name'] == 'Unknown'
+            assert player_configs[1]['name'] == 'Unknown'
 
     def test_llm_player_config_includes_llm_fields(self, simple_map):
         """Test that LLM player configs include temperature and max_tokens."""

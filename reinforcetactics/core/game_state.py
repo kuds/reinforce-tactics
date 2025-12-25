@@ -813,13 +813,11 @@ class GameState:
         # Use original unpadded map if available, otherwise use initial_map_data
         map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
 
-        # Build player_names dict and enhanced player_configs from player_configs
-        player_names = {}
+        # Build enhanced player_configs from player_configs
         enhanced_player_configs = []
         for i, config in enumerate(self.player_configs):
             player_num = i + 1
             player_name = config.get('player_name', 'Unknown')
-            player_names[str(player_num)] = player_name
 
             # Build enhanced config with standardized structure
             enhanced_config = {
@@ -845,8 +843,7 @@ class GameState:
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
             'initial_map': map_to_save,
-            'player_configs': enhanced_player_configs,
-            'player_names': player_names
+            'player_configs': enhanced_player_configs
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)

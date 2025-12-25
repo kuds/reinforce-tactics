@@ -1228,11 +1228,7 @@ def run_single_game(
                 'player_configs': [
                     build_player_config(bot1, player1),
                     build_player_config(bot2, player2)
-                ],
-                'player_names': {
-                    str(player1): bot1.name,
-                    str(player2): bot2.name
-                }
+                ]
             }
 
             FileIO.save_replay(

@@ -797,11 +797,7 @@ class TournamentRunner:
                 'player_configs': [
                     build_player_config(bot1_desc, bot1, player1),
                     build_player_config(bot2_desc, bot2, player2)
-                ],
-                'player_names': {
-                    str(player1): bot1_desc.name,
-                    str(player2): bot2_desc.name
-                }
+                ]
             }
 
             FileIO.save_replay(
