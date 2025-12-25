@@ -66,6 +66,9 @@ class GameState:
         # Player configurations (human vs bot)
         self.player_configs: List[Dict[str, Any]] = []
 
+        # Maximum turns for the game (None = unlimited)
+        self.max_turns: Optional[int] = None
+
         # Action history for replay
         self.action_history: List[Dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
@@ -769,6 +772,32 @@ class GameState:
         from reinforcetactics.utils.file_io import FileIO
         return FileIO.save_game(self, filepath)
 
+    def _get_player_type(self, config: Dict[str, Any]) -> str:
+        """
+        Get the standardized player type for replay logs.
+
+        Args:
+            config: Player configuration dictionary
+
+        Returns:
+            Player type string: 'human', 'bot', 'llm', or 'rl'
+        """
+        if config.get('type') == 'human':
+            return 'human'
+
+        bot_type = config.get('bot_type', '')
+
+        # LLM bots
+        if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
+            return 'llm'
+
+        # RL model bots
+        if bot_type == 'ModelBot':
+            return 'rl'
+
+        # Standard bots (SimpleBot, MediumBot, AdvancedBot)
+        return 'bot'
+
     def save_replay_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
         """
         Save replay to file.
@@ -784,14 +813,31 @@ class GameState:
         # Use original unpadded map if available, otherwise use initial_map_data
         map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
 
-        # Build player_names dict from player_configs
+        # Build player_names dict and enhanced player_configs from player_configs
         player_names = {}
+        enhanced_player_configs = []
         for i, config in enumerate(self.player_configs):
             player_num = i + 1
-            player_names[str(player_num)] = config.get('player_name', 'Unknown')
+            player_name = config.get('player_name', 'Unknown')
+            player_names[str(player_num)] = player_name
+
+            # Build enhanced config with standardized structure
+            enhanced_config = {
+                'player_no': player_num,
+                'type': config.get('player_type', self._get_player_type(config)),
+                'name': player_name
+            }
+
+            # Add LLM-specific fields if applicable
+            if enhanced_config['type'] == 'llm':
+                enhanced_config['temperature'] = config.get('temperature', None)
+                enhanced_config['max_tokens'] = config.get('max_tokens', None)
+
+            enhanced_player_configs.append(enhanced_config)
 
         game_info = {
             'num_players': self.num_players,
+            'max_turns': self.max_turns,
             'total_turns': self.turn_number,
             'winner': self.winner,
             'game_over': self.game_over,
@@ -799,7 +845,7 @@ class GameState:
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
             'initial_map': map_to_save,
-            'player_configs': self.player_configs,
+            'player_configs': enhanced_player_configs,
             'player_names': player_names
         }
 

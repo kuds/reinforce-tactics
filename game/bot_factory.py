@@ -36,6 +36,28 @@ def get_player_name(bot, bot_type, model_path=None):
     return bot_type
 
 
+def get_player_type(bot_type):
+    """
+    Get the standardized player type for a bot.
+
+    Args:
+        bot_type: String identifier for bot type ('SimpleBot', 'OpenAIBot', etc.)
+
+    Returns:
+        Player type string: 'bot', 'llm', or 'rl'
+    """
+    # LLM bots
+    if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
+        return 'llm'
+
+    # RL model bots
+    if bot_type == 'ModelBot':
+        return 'rl'
+
+    # Standard bots (SimpleBot, MediumBot, AdvancedBot)
+    return 'bot'
+
+
 def create_bot(game, player_num, bot_type, settings, model_path=None):
     """
     Create a single bot instance.
@@ -85,7 +107,12 @@ def create_bots_from_config(game, player_configs, settings):
     """
     Create bots based on player configurations.
 
-    Also updates player_configs with 'player_name' for each player:
+    Updates player_configs with:
+    - 'player_name': Display name for the player
+    - 'player_type': Standardized type ('human', 'bot', 'llm', 'rl')
+    - For LLM bots: 'temperature' and 'max_tokens' from bot instance
+
+    Player name sources:
     - Human players: "Human"
     - SimpleBot/MediumBot/AdvancedBot: Class name (e.g., "SimpleBot")
     - LLM bots: Model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
@@ -113,6 +140,13 @@ def create_bots_from_config(game, player_configs, settings):
                 bot = create_bot(game, player_num, bot_type, settings, model_path)
                 bots[player_num] = bot
                 config['player_name'] = get_player_name(bot, bot_type, model_path)
+                config['player_type'] = get_player_type(bot_type)
+
+                # Add LLM-specific fields
+                if config['player_type'] == 'llm':
+                    config['temperature'] = getattr(bot, 'temperature', None)
+                    config['max_tokens'] = getattr(bot, 'max_tokens', None)
+
                 print(f"Bot created for Player {player_num} ({bot_type})")
             except ValueError as e:
                 print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
@@ -120,14 +154,17 @@ def create_bots_from_config(game, player_configs, settings):
                 bot = create_bot(game, player_num, 'SimpleBot', settings)
                 bots[player_num] = bot
                 config['player_name'] = 'SimpleBot'
+                config['player_type'] = 'bot'
             except ImportError as e:
                 print(f"❌ Missing dependency for {bot_type}: {e}")
                 print("   Falling back to SimpleBot")
                 bot = create_bot(game, player_num, 'SimpleBot', settings)
                 bots[player_num] = bot
                 config['player_name'] = 'SimpleBot'
+                config['player_type'] = 'bot'
         else:
             # Human player
             config['player_name'] = 'Human'
+            config['player_type'] = 'human'
 
     return bots
