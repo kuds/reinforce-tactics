@@ -1128,6 +1128,7 @@ def run_single_game(
     # Load map and create game state
     map_data = FileIO.load_map(map_file)
     game_state = GameState(map_data, num_players=2)
+    game_state.max_turns = max_turns
 
     # Create unique session ID for conversation logging
     session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{bot1.name}_vs_{bot2.name}"
@@ -1190,6 +1191,30 @@ def run_single_game(
             )
             replay_path = os.path.join(replay_dir, replay_filename)
 
+            # Build player_configs in standardized format
+            def build_player_config(bot: TournamentBot, player_no: int):
+                """Build player config from TournamentBot."""
+                # Determine player type
+                if bot.bot_class in ('simple', 'medium', 'advanced'):
+                    player_type = 'bot'
+                elif isinstance(bot.bot_class, type):
+                    player_type = 'llm'
+                else:
+                    player_type = 'bot'
+
+                config = {
+                    'player_no': player_no,
+                    'type': player_type,
+                    'name': bot.name
+                }
+
+                # Add LLM-specific fields
+                if player_type == 'llm':
+                    config['temperature'] = bot.temperature
+                    config['max_tokens'] = bot.max_tokens
+
+                return config
+
             game_info = {
                 'bot1': bot1.name,
                 'bot2': bot2.name,
@@ -1198,7 +1223,12 @@ def run_single_game(
                 'winner': winner,
                 'winner_name': winner_name,
                 'turns': turn_count,
-                'map': map_file
+                'max_turns': max_turns,
+                'map': map_file,
+                'player_configs': [
+                    build_player_config(bot1, player1),
+                    build_player_config(bot2, player2)
+                ]
             }
 
             FileIO.save_replay(

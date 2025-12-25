@@ -706,13 +706,16 @@ class TournamentRunner:
         map_data = FileIO.load_map(map_file)
         game_state = GameState(map_data, num_players=2)
 
+        # Set max turns limit
+        max_turns = 500  # Safety limit
+        game_state.max_turns = max_turns
+
         # Create bot instances
         bot1 = bot1_desc.create_bot(game_state, player1)
         bot2 = bot2_desc.create_bot(game_state, player2)
         bots = {player1: bot1, player2: bot2}
 
         # Play the game
-        max_turns = 500  # Safety limit
         turn_count = 0
 
         try:
@@ -755,6 +758,32 @@ class TournamentRunner:
             )
             replay_path = self.replays_dir / replay_filename
 
+            # Build player_configs in standardized format
+            def build_player_config(bot_desc: BotDescriptor, bot_instance, player_no: int):
+                """Build player config from BotDescriptor."""
+                # Map bot_type to standardized player_type
+                type_mapping = {
+                    'simple': 'bot',
+                    'medium': 'bot',
+                    'advanced': 'bot',
+                    'llm': 'llm',
+                    'model': 'rl'
+                }
+                player_type = type_mapping.get(bot_desc.bot_type, 'bot')
+
+                config = {
+                    'player_no': player_no,
+                    'type': player_type,
+                    'name': bot_desc.name
+                }
+
+                # Add LLM-specific fields
+                if player_type == 'llm':
+                    config['temperature'] = getattr(bot_instance, 'temperature', None)
+                    config['max_tokens'] = getattr(bot_instance, 'max_tokens', None)
+
+                return config
+
             game_info = {
                 'bot1': bot1_desc.name,
                 'bot2': bot2_desc.name,
@@ -763,7 +792,12 @@ class TournamentRunner:
                 'winner': winner,
                 'winner_name': winner_name,
                 'turns': turn_count,
-                'map': map_file
+                'max_turns': max_turns,
+                'map': map_file,
+                'player_configs': [
+                    build_player_config(bot1_desc, bot1, player1),
+                    build_player_config(bot2_desc, bot2, player2)
+                ]
             }
 
             FileIO.save_replay(
