@@ -150,6 +150,13 @@ Example with `--games-per-side 2`:
   - One player wins (captures enemy HQ or eliminates all enemy units)
   - Turn limit reached (counts as draw)
 
+### ELO Rating System
+The tournament tracks ELO ratings for all bots:
+- **Starting rating**: 1500 for all bots
+- **K-factor**: 32 (standard chess rating adjustment)
+- Ratings are updated after each game based on expected vs actual outcomes
+- Final rankings include ELO rating and change from initial rating
+
 ## Output Files
 
 The tournament generates the following outputs:
@@ -168,19 +175,22 @@ Complete tournament data in JSON format:
       "losses": 1,
       "draws": 2,
       "total_games": 8,
-      "win_rate": 0.625
+      "win_rate": 0.625,
+      "elo": 1564,
+      "elo_change": 64
     }
   ],
-  "matchups": [...]
+  "matchups": [...],
+  "elo_history": {...}
 }
 ```
 
 ### `tournament_results/tournament_results.csv`
 Simple CSV format for spreadsheet import:
 ```csv
-Bot,Wins,Losses,Draws,Total Games,Win Rate
-SimpleBot,5,1,2,8,0.625
-OpenAIBot,3,3,2,8,0.375
+Bot,Wins,Losses,Draws,Total Games,Win Rate,Elo,Elo Change
+SimpleBot,5,1,2,8,0.625,1564,+64
+OpenAIBot,3,3,2,8,0.375,1436,-64
 ```
 
 ### `tournament_results/replays/`
@@ -285,12 +295,29 @@ tests/
   test_tournament.py    # Tournament system tests
 ```
 
+## Docker Tournament Runner
+
+For more advanced tournament features, see the Docker-based tournament runner in `docker/tournament/`:
+
+```bash
+cd docker/tournament
+docker-compose up --build
+```
+
+The Docker tournament runner includes:
+- **ELO rating system**: Tracks bot skill ratings throughout the tournament
+- **Concurrent game execution**: Run multiple games in parallel (configurable 1-32)
+- **Resume capability**: Continue interrupted tournaments from where they left off
+- **Google Cloud Storage**: Upload results to GCS for cloud deployments
+- **Multi-map tournaments**: Play across multiple maps with per-map configuration
+- **LLM API rate limiting**: Configurable delay between API calls
+
+See `docker/tournament/README.md` for detailed configuration options.
+
 ## Future Enhancements
 
 Possible improvements:
 - Swiss-system tournament format
-- ELO rating calculation
-- Parallel game execution
 - Real-time progress visualization
 - Tournament brackets for elimination format
 - Head-to-head statistics

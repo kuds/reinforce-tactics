@@ -54,12 +54,15 @@ Results are saved to the `output/` directory:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
+| `name` | Tournament name for identification | (none) |
 | `games_per_matchup` | Games per side per map | 1 |
 | `max_turns` | Default maximum turns before draw | 100 |
 | `map_pool_mode` | Map selection: `all`, `cycle`, `random` | `all` |
-| `should_reason` | Enable LLM reasoning output | `true` |
-| `log_conversations` | Save LLM conversations | `true` |
-| `save_replays` | Save game replays | `true` |
+| `should_reason` | Enable LLM reasoning output | `false` |
+| `log_conversations` | Save LLM conversations | `false` |
+| `save_replays` | Save game replays | `false` |
+| `concurrent_games` | Number of games to run in parallel (1-32) | 1 |
+| `llm_api_delay` | Delay in seconds between LLM API calls | 1.0 |
 
 ### Map Configuration
 
@@ -133,7 +136,10 @@ You can mix both formats:
     "games_per_matchup": 1,
     "max_turns": 100,
     "should_reason": true,
-    "log_conversations": true
+    "log_conversations": true,
+    "save_replays": true,
+    "concurrent_games": 1,
+    "llm_api_delay": 1.0
   },
   "maps": [
     "maps/1v1/beginner.csv",
@@ -229,6 +235,30 @@ The resume feature:
 - Logs resume statistics showing skipped vs new games
 
 **Note**: Resume requires `save_replays: true` in the config so that completed match information is available.
+
+### Concurrent Game Execution
+
+To speed up tournaments with rule-based bots or when you have sufficient API quota, you can run multiple games in parallel:
+
+```json
+{
+  "tournament": {
+    "concurrent_games": 4,
+    "llm_api_delay": 0.5
+  }
+}
+```
+
+| Setting | Description | Range | Default |
+|---------|-------------|-------|---------|
+| `concurrent_games` | Number of games to run simultaneously | 1-32 | 1 |
+| `llm_api_delay` | Seconds to wait between LLM API calls | 0-60 | 1.0 |
+
+**Usage Notes:**
+- For rule-based bots only (SimpleBot, MediumBot, AdvancedBot), you can safely use higher concurrency (e.g., 8-16)
+- For LLM bots, keep concurrency low (1-2) and increase `llm_api_delay` to avoid rate limits
+- Games within each round are executed concurrently, but rounds run sequentially
+- Actual concurrency is bounded by the number of games in the current round
 
 ### Google Cloud Storage Upload
 
