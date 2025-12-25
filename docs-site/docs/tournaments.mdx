@@ -81,10 +81,40 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 ### Tournament #1 - December 19, 2025
 
 **Configuration:**
-- **Maps:** beginner.csv, funnel_point.csv, center_mountains.csv, corner_points.csv
 - **Games per matchup:** 2 per side (16 total games per bot pair across all maps)
 - **Map pool mode:** All maps played
 - **Starting ELO:** 1500
+
+**Maps Used:**
+
+<div style={{display: 'flex', flexWrap: 'wrap', gap: '20px', justifyContent: 'center', marginBottom: '20px'}}>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/beginner.png" alt="Beginner Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>beginner.csv</strong><br/>6×6 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/funnel_point.png" alt="Funnel Point Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>funnel_point.csv</strong><br/>13×11 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/center_mountains.png" alt="Center Mountains Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>center_mountains.csv</strong><br/>18×18 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/corner_points.png" alt="Corner Points Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>corner_points.csv</strong><br/>12×10 • 2 Players</p>
+  </div>
+</div>
+
+**Map Legend:**
+- 🟩 **Green** - Plains (walkable terrain)
+- 🟦 **Blue** - Ocean/Water (impassable)
+- ⬜ **Light Gray** - Mountains (impassable, provides attack bonus)
+- 🌲 **Dark Green** - Forest (provides defense bonus)
+- 🟫 **Brown** - Roads (faster movement)
+- 🔴 **Red** - Player 1 structures (HQ, Buildings)
+- 🔵 **Blue Tint** - Player 2 structures (HQ, Buildings)
+- ⬜ **White/Gray** - Neutral Towers/Buildings
 
 **Participants:**
 - SimpleBot (rule-based)
@@ -114,7 +144,11 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 
 #### Per-Map Performance
 
-##### beginner.csv
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/beginner.png" alt="Beginner Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### beginner.csv (6×6)
 
 | Bot | Wins | Losses | Draws |
 |-----|------|--------|-------|
@@ -123,7 +157,14 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | Claude Haiku 4.5 | 2 | 7 | 3 |
 | SimpleBot | 1 | 8 | 3 |
 
-##### funnel_point.csv
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/funnel_point.png" alt="Funnel Point Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### funnel_point.csv (13×11)
 
 | Bot | Wins | Losses | Draws |
 |-----|------|--------|-------|
@@ -132,7 +173,14 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | SimpleBot | 0 | 4 | 8 |
 | Claude Haiku 4.5 | 0 | 8 | 4 |
 
-##### center_mountains.csv
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/center_mountains.png" alt="Center Mountains Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### center_mountains.csv (18×18)
 
 | Bot | Wins | Losses | Draws |
 |-----|------|--------|-------|
@@ -141,7 +189,14 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | SimpleBot | 0 | 2 | 10 |
 | Claude Haiku 4.5 | 0 | 3 | 9 |
 
-##### corner_points.csv
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/corner_points.png" alt="Corner Points Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### corner_points.csv (12×10)
 
 | Bot | Wins | Losses | Draws |
 |-----|------|--------|-------|
@@ -149,6 +204,9 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 | MediumBot | 6 | 4 | 2 |
 | SimpleBot | 0 | 6 | 6 |
 | Claude Haiku 4.5 | 0 | 8 | 4 |
+
+</div>
+</div>
 
 #### Analysis
 
