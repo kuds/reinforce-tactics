@@ -563,6 +563,11 @@ class GameState:
             self.current_player = 1
             self.turn_number += 1
 
+            # Check for draw due to max turns reached
+            if self.max_turns is not None and self.turn_number >= self.max_turns:
+                self.game_over = True
+                # winner remains None to indicate a draw
+
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
 
