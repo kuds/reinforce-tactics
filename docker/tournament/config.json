@@ -7,7 +7,9 @@
     "map_pool_mode": "all",
     "should_reason": true,
     "log_conversations": true,
-    "save_replays": true
+    "save_replays": true,
+    "concurrent_games": 1,
+    "llm_api_delay": 1.0
   },
   "output": {
     "results_dir": "/app/output/results",

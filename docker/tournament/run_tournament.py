@@ -22,8 +22,12 @@ import re
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from queue import Queue
+from threading import Lock
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Add parent directory to path for imports
@@ -428,6 +432,156 @@ class MapConfig:
         return f"MapConfig(path={self.path}, max_turns={self.max_turns})"
 
 
+@dataclass
+class ScheduledGame:
+    """Represents a scheduled game in the tournament."""
+    game_id: int
+    p1_bot: 'TournamentBot'
+    p2_bot: 'TournamentBot'
+    map_config: MapConfig
+    round_index: int  # Which round (map) this game belongs to
+    game_index_in_round: int  # Index within the round
+
+    def __repr__(self):
+        return f"Game({self.game_id}: {self.p1_bot.name} vs {self.p2_bot.name} on {Path(self.map_config.path).name})"
+
+
+@dataclass
+class GameResult:
+    """Result of a completed game."""
+    game_id: int
+    p1_bot_name: str
+    p2_bot_name: str
+    winner: int  # 0=draw, 1=p1 wins, 2=p2 wins
+    winner_name: str
+    turns: int
+    map_name: str
+    replay_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+def generate_round_robin_schedule(
+    bots: List['TournamentBot'],
+    map_configs: List[MapConfig],
+    games_per_side: int,
+    map_pool_mode: str = 'all',
+    completed_matches: Optional[Dict[str, List[CompletedMatchInfo]]] = None
+) -> Tuple[List[List[ScheduledGame]], int]:
+    """
+    Generate the complete round-robin schedule upfront, organized by map.
+
+    Returns:
+        Tuple of (schedule_by_map, skipped_games)
+        schedule_by_map: List of lists, where each inner list contains games for one map
+    """
+    # Generate all matchups (round-robin)
+    matchups = []
+    for i in range(len(bots)):
+        for j in range(i + 1, len(bots)):
+            matchups.append((bots[i], bots[j]))
+
+    schedule_by_map: List[List[ScheduledGame]] = []
+    game_id = 0
+    skipped_games = 0
+
+    if map_pool_mode == 'all' and len(map_configs) > 1:
+        # For 'all' mode, play each map for all matchups before moving to next map
+        for round_idx, map_config in enumerate(map_configs):
+            round_games = []
+            map_name = Path(map_config.path).name
+
+            for bot1, bot2 in matchups:
+                # Check how many games still need to be played for this map
+                if completed_matches:
+                    bot1_as_p1_needed, bot2_as_p1_needed = get_pending_games(
+                        bot1.name, bot2.name, map_name,
+                        games_per_side, completed_matches
+                    )
+                else:
+                    bot1_as_p1_needed = games_per_side
+                    bot2_as_p1_needed = games_per_side
+
+                # Track skipped games
+                skipped_games += (games_per_side - bot1_as_p1_needed)
+                skipped_games += (games_per_side - bot2_as_p1_needed)
+
+                # Add remaining games with bot1 as player 1
+                for game_in_round in range(bot1_as_p1_needed):
+                    round_games.append(ScheduledGame(
+                        game_id=game_id,
+                        p1_bot=bot1,
+                        p2_bot=bot2,
+                        map_config=map_config,
+                        round_index=round_idx,
+                        game_index_in_round=len(round_games)
+                    ))
+                    game_id += 1
+
+                # Add remaining games with bot2 as player 1
+                for game_in_round in range(bot2_as_p1_needed):
+                    round_games.append(ScheduledGame(
+                        game_id=game_id,
+                        p1_bot=bot2,
+                        p2_bot=bot1,
+                        map_config=map_config,
+                        round_index=round_idx,
+                        game_index_in_round=len(round_games)
+                    ))
+                    game_id += 1
+
+            if round_games:
+                schedule_by_map.append(round_games)
+    else:
+        # For 'cycle' or 'random' mode, or single map
+        # Group all games into a single round
+        round_games = []
+        map_idx = 0
+
+        for bot1, bot2 in matchups:
+            for _ in range(games_per_side):
+                if map_pool_mode == 'cycle':
+                    map_config = map_configs[map_idx % len(map_configs)]
+                    map_idx += 1
+                elif map_pool_mode == 'random':
+                    map_config = random.choice(map_configs)
+                else:
+                    map_config = map_configs[0]
+
+                round_games.append(ScheduledGame(
+                    game_id=game_id,
+                    p1_bot=bot1,
+                    p2_bot=bot2,
+                    map_config=map_config,
+                    round_index=0,
+                    game_index_in_round=len(round_games)
+                ))
+                game_id += 1
+
+            for _ in range(games_per_side):
+                if map_pool_mode == 'cycle':
+                    map_config = map_configs[map_idx % len(map_configs)]
+                    map_idx += 1
+                elif map_pool_mode == 'random':
+                    map_config = random.choice(map_configs)
+                else:
+                    map_config = map_configs[0]
+
+                round_games.append(ScheduledGame(
+                    game_id=game_id,
+                    p1_bot=bot2,
+                    p2_bot=bot1,
+                    map_config=map_config,
+                    round_index=0,
+                    game_index_in_round=len(round_games)
+                ))
+                game_id += 1
+
+        if round_games:
+            schedule_by_map.append(round_games)
+
+    return schedule_by_map, skipped_games
+
+
 def parse_maps_from_config(config: Dict[str, Any]) -> List[MapConfig]:
     """Parse maps from config, supporting both string and object format."""
     default_max_turns = config['tournament'].get('max_turns', 100)
@@ -528,10 +682,16 @@ def run_tournament(
     save_replays: bool = False,
     replay_dir: Optional[str] = None,
     completed_matches: Optional[Dict[str, List[CompletedMatchInfo]]] = None,
-    gcs_uploader: Optional[GCSUploader] = None
+    gcs_uploader: Optional[GCSUploader] = None,
+    concurrent_games: int = 1,
+    llm_api_delay: float = 1.0
 ) -> Dict[str, Any]:
     """
     Run a round-robin tournament between multiple bots with Elo ratings.
+
+    The tournament schedule is determined upfront, with games organized by map.
+    For each map, all matchups are executed in order. Games can run concurrently
+    with configurable parallelism.
 
     Args:
         bots: List of TournamentBot configurations
@@ -547,6 +707,8 @@ def run_tournament(
         replay_dir: Directory for replays
         completed_matches: Dictionary of already completed matches (for resume)
         gcs_uploader: Optional GCS uploader for cloud storage
+        concurrent_games: Number of games to run concurrently (default 1 = sequential)
+        llm_api_delay: Delay in seconds between LLM API calls to avoid rate limits
     """
     if len(bots) < 2:
         raise ValueError("Need at least 2 bots for a tournament")
@@ -629,199 +791,233 @@ def run_tournament(
         logger.info(f"GCS Upload: ENABLED (bucket: {gcs_uploader.bucket_name})")
     logger.info("=" * 70)
 
+    # Generate complete schedule upfront
+    logger.info("\nGenerating tournament schedule...")
+    schedule_by_map, skipped_games = generate_round_robin_schedule(
+        bots=bots,
+        map_configs=map_list,
+        games_per_side=games_per_matchup,
+        map_pool_mode=map_pool_mode,
+        completed_matches=completed_matches
+    )
+
+    total_games = sum(len(round_games) for round_games in schedule_by_map)
+    num_rounds = len(schedule_by_map)
+
+    logger.info(f"Schedule generated: {num_rounds} rounds, {total_games} games total")
+    if skipped_games > 0:
+        logger.info(f"  (Skipping {skipped_games} already completed games)")
+
+    # Log schedule summary per round
+    for round_idx, round_games in enumerate(schedule_by_map):
+        if round_games:
+            map_name = Path(round_games[0].map_config.path).name
+            logger.info(f"  Round {round_idx + 1}: {len(round_games)} games on {map_name}")
+
+    # Determine effective concurrency
+    effective_concurrent = concurrent_games
+    logger.info(f"Concurrent games: {effective_concurrent}")
+    if llm_api_delay > 0:
+        logger.info(f"LLM API delay: {llm_api_delay}s")
+    logger.info("=" * 70)
+
     # Initialize results tracking
     results = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0})
     per_map_stats = defaultdict(lambda: defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0}))
-    matchup_details = []
-    current_map_index = 0
-    skipped_games = 0
+    matchup_details_map = defaultdict(lambda: defaultdict(lambda: {'bot1_wins': 0, 'bot2_wins': 0, 'draws': 0}))
     new_games_played = 0
 
-    def select_map(game_num):
-        nonlocal current_map_index
-        if len(map_list) == 1:
-            return map_list[0]
-        if map_pool_mode == 'cycle':
-            selected = map_list[current_map_index % len(map_list)]
-            current_map_index += 1
-            return selected
-        elif map_pool_mode == 'random':
-            return random.choice(map_list)
-        else:
-            return map_list[(game_num - 1) % len(map_list)]
-
-    # Generate all matchups (round-robin)
-    matchups = []
-    for i in range(len(bots)):
-        for j in range(i + 1, len(bots)):
-            matchups.append((i, j))
-
-    total_games = len(matchups) * games_per_matchup_total
-    logger.info(f"Total matchups: {len(matchups)}")
-    logger.info(f"Total games: {total_games}")
-
-    game_num = 0
     known_llm_bots = ['OpenAIBot', 'ClaudeBot', 'GeminiBot']
 
-    # Run all matchups
-    for matchup_idx, (i, j) in enumerate(matchups, 1):
-        bot1 = bots[i]
-        bot2 = bots[j]
+    # Lock for thread-safe result updates
+    results_lock = Lock()
 
-        logger.info(f"\n{'='*70}")
-        logger.info(f"Matchup {matchup_idx}/{len(matchups)}: {bot1.name} vs {bot2.name}")
-        logger.info("=" * 70)
+    def check_is_llm_bot(bot: TournamentBot) -> bool:
+        """Check if a bot is an LLM bot."""
+        return not isinstance(bot.bot_class, str) and bot.bot_class.__name__ in known_llm_bots
 
-        has_llm_bot = False
-        bot1_is_llm = not isinstance(bot1.bot_class, str) and bot1.bot_class.__name__ in known_llm_bots
-        bot2_is_llm = not isinstance(bot2.bot_class, str) and bot2.bot_class.__name__ in known_llm_bots
-        has_llm_bot = bot1_is_llm or bot2_is_llm
+    def execute_game(scheduled_game: ScheduledGame) -> GameResult:
+        """Execute a single scheduled game and return the result."""
+        p1_bot = scheduled_game.p1_bot
+        p2_bot = scheduled_game.p2_bot
+        map_config = scheduled_game.map_config
+        map_path = map_config.path
+        map_name = Path(map_path).name
 
-        matchup_results = {
-            'bot1': bot1.name,
-            'bot2': bot2.name,
-            'bot1_wins': 0,
-            'bot2_wins': 0,
-            'draws': 0
-        }
-
-        # Determine game schedule with resume support
-        if map_pool_mode == 'all' and len(map_list) > 1:
-            game_schedule = []
-            for m in map_list:
-                map_name = Path(m.path).name
-
-                # Check how many games still need to be played for this map
-                if completed_matches:
-                    bot1_as_p1_needed, bot2_as_p1_needed = get_pending_games(
-                        bot1.name, bot2.name, map_name,
-                        games_per_matchup, completed_matches
-                    )
-                else:
-                    bot1_as_p1_needed = games_per_matchup
-                    bot2_as_p1_needed = games_per_matchup
-
-                # Add remaining games to schedule
-                for _ in range(bot1_as_p1_needed):
-                    game_schedule.append((bot1, bot2, 1, 2, m))
-                for _ in range(bot2_as_p1_needed):
-                    game_schedule.append((bot2, bot1, 1, 2, m))
-
-                # Track skipped games
-                skipped_games += (games_per_matchup - bot1_as_p1_needed)
-                skipped_games += (games_per_matchup - bot2_as_p1_needed)
-        else:
-            game_schedule = []
-            for g in range(games_per_matchup):
-                m = select_map(game_num + g + 1)
-                game_schedule.append((bot1, bot2, 1, 2, m))
-            for g in range(games_per_matchup):
-                m = select_map(game_num + games_per_matchup + g + 1)
-                game_schedule.append((bot2, bot1, 1, 2, m))
-
-        if not game_schedule:
-            logger.info(f"  All games already completed for this matchup, skipping...")
-            continue
-
-        # Run games
-        for game_idx, (p1_bot, p2_bot, p1_num, p2_num, map_config) in enumerate(game_schedule, 1):
-            game_num += 1
-            map_path = map_config.path
-            map_max_turns = map_config.max_turns
-            map_name = Path(map_path).name
-
-            logger.info(f"  Game {game_idx}/{len(game_schedule)}: "
-                       f"{p1_bot.name} (P1) vs {p2_bot.name} (P2) on {map_name} (max_turns: {map_max_turns})")
-
-            # Set up conversation logging directory for this matchup
-            matchup_log_dir = None
-            if log_conversations and abs_log_dir:
-                matchup_log_dir = os.path.join(
-                    abs_log_dir,
-                    map_name.replace('.csv', ''),
-                    f"{p1_bot.name}_vs_{p2_bot.name}"
-                )
-                os.makedirs(matchup_log_dir, exist_ok=True)
-
-            # Set up replay directory for this matchup
-            matchup_replay_dir = None
-            if save_replays and abs_replay_dir:
-                matchup_replay_dir = os.path.join(
-                    abs_replay_dir,
-                    map_name.replace('.csv', ''),
-                    f"{p1_bot.name}_vs_{p2_bot.name}"
-                )
-                os.makedirs(matchup_replay_dir, exist_ok=True)
-
-            # Run the game with per-map max_turns
-            result = run_single_game(
-                p1_bot, p2_bot, p1_num, p2_num, map_path,
-                max_turns=map_max_turns,
-                should_reason=should_reason,
-                log_conversations=log_conversations,
-                conversation_log_dir=matchup_log_dir,
-                save_replay=save_replays,
-                replay_dir=matchup_replay_dir
+        # Set up conversation logging directory for this matchup
+        matchup_log_dir = None
+        if log_conversations and abs_log_dir:
+            matchup_log_dir = os.path.join(
+                abs_log_dir,
+                map_name.replace('.csv', ''),
+                f"{p1_bot.name}_vs_{p2_bot.name}"
             )
+            os.makedirs(matchup_log_dir, exist_ok=True)
 
-            winner = result['winner']
-            winner_name = result['winner_name']
-            turns = result['turns']
+        # Set up replay directory for this matchup
+        matchup_replay_dir = None
+        if save_replays and abs_replay_dir:
+            matchup_replay_dir = os.path.join(
+                abs_replay_dir,
+                map_name.replace('.csv', ''),
+                f"{p1_bot.name}_vs_{p2_bot.name}"
+            )
+            os.makedirs(matchup_replay_dir, exist_ok=True)
+
+        # Check if this game involves LLM bots (for delay)
+        has_llm = check_is_llm_bot(p1_bot) or check_is_llm_bot(p2_bot)
+
+        # Run the game
+        result = run_single_game(
+            p1_bot, p2_bot, 1, 2, map_path,
+            max_turns=map_config.max_turns,
+            should_reason=should_reason,
+            log_conversations=log_conversations,
+            conversation_log_dir=matchup_log_dir,
+            save_replay=save_replays,
+            replay_dir=matchup_replay_dir
+        )
+
+        # Apply delay for LLM games to avoid rate limits
+        if has_llm and llm_api_delay > 0:
+            time.sleep(llm_api_delay)
+
+        return GameResult(
+            game_id=scheduled_game.game_id,
+            p1_bot_name=p1_bot.name,
+            p2_bot_name=p2_bot.name,
+            winner=result['winner'],
+            winner_name=result['winner_name'],
+            turns=result['turns'],
+            map_name=map_name,
+            replay_path=result.get('replay_path'),
+            error=result.get('error')
+        )
+
+    def process_game_result(game_result: GameResult, scheduled_game: ScheduledGame):
+        """Process a completed game result and update statistics."""
+        nonlocal new_games_played
+
+        p1_bot = scheduled_game.p1_bot
+        p2_bot = scheduled_game.p2_bot
+        map_name = game_result.map_name
+
+        with results_lock:
             new_games_played += 1
 
-            logger.info(f"    Result: {winner_name} (turns: {turns})")
+            # Create sorted key for matchup tracking
+            sorted_names = tuple(sorted([p1_bot.name, p2_bot.name]))
+            matchup_key = f"{sorted_names[0]}|{sorted_names[1]}"
+
+            # Update statistics based on winner
+            if game_result.winner == 1:  # P1 wins
+                results[p1_bot.name]['wins'] += 1
+                results[p2_bot.name]['losses'] += 1
+                per_map_stats[p1_bot.name][map_name]['wins'] += 1
+                per_map_stats[p2_bot.name][map_name]['losses'] += 1
+                if p1_bot.name == sorted_names[0]:
+                    matchup_details_map[matchup_key][map_name]['bot1_wins'] += 1
+                else:
+                    matchup_details_map[matchup_key][map_name]['bot2_wins'] += 1
+                elo_system.update_ratings(p1_bot.name, p2_bot.name, 1)
+            elif game_result.winner == 2:  # P2 wins
+                results[p2_bot.name]['wins'] += 1
+                results[p1_bot.name]['losses'] += 1
+                per_map_stats[p2_bot.name][map_name]['wins'] += 1
+                per_map_stats[p1_bot.name][map_name]['losses'] += 1
+                if p2_bot.name == sorted_names[0]:
+                    matchup_details_map[matchup_key][map_name]['bot1_wins'] += 1
+                else:
+                    matchup_details_map[matchup_key][map_name]['bot2_wins'] += 1
+                elo_system.update_ratings(p2_bot.name, p1_bot.name, 1)
+            else:  # Draw
+                results[p1_bot.name]['draws'] += 1
+                results[p2_bot.name]['draws'] += 1
+                per_map_stats[p1_bot.name][map_name]['draws'] += 1
+                per_map_stats[p2_bot.name][map_name]['draws'] += 1
+                matchup_details_map[matchup_key][map_name]['draws'] += 1
+                elo_system.update_ratings(p1_bot.name, p2_bot.name, 0)
 
             # Upload replay to GCS if configured
-            if gcs_uploader and result.get('replay_path'):
-                replay_path = result['replay_path']
-                # Create GCS path: replays/{map_name}/{matchup}/filename
-                gcs_replay_path = f"replays/{map_name.replace('.csv', '')}/{p1_bot.name}_vs_{p2_bot.name}/{os.path.basename(replay_path)}"
-                gcs_uploader.upload_file(replay_path, gcs_replay_path)
+            if gcs_uploader and game_result.replay_path:
+                gcs_replay_path = f"replays/{map_name.replace('.csv', '')}/{p1_bot.name}_vs_{p2_bot.name}/{os.path.basename(game_result.replay_path)}"
+                gcs_uploader.upload_file(game_result.replay_path, gcs_replay_path)
 
-            # Update statistics
-            if winner == p1_num:
-                if p1_bot.name == bot1.name:
-                    results[bot1.name]['wins'] += 1
-                    results[bot2.name]['losses'] += 1
-                    per_map_stats[bot1.name][map_name]['wins'] += 1
-                    per_map_stats[bot2.name][map_name]['losses'] += 1
-                    matchup_results['bot1_wins'] += 1
-                    elo_system.update_ratings(bot1.name, bot2.name, 1)
-                else:
-                    results[bot2.name]['wins'] += 1
-                    results[bot1.name]['losses'] += 1
-                    per_map_stats[bot2.name][map_name]['wins'] += 1
-                    per_map_stats[bot1.name][map_name]['losses'] += 1
-                    matchup_results['bot2_wins'] += 1
-                    elo_system.update_ratings(bot1.name, bot2.name, 2)
-            elif winner == p2_num:
-                if p2_bot.name == bot1.name:
-                    results[bot1.name]['wins'] += 1
-                    results[bot2.name]['losses'] += 1
-                    per_map_stats[bot1.name][map_name]['wins'] += 1
-                    per_map_stats[bot2.name][map_name]['losses'] += 1
-                    matchup_results['bot1_wins'] += 1
-                    elo_system.update_ratings(bot1.name, bot2.name, 1)
-                else:
-                    results[bot2.name]['wins'] += 1
-                    results[bot1.name]['losses'] += 1
-                    per_map_stats[bot2.name][map_name]['wins'] += 1
-                    per_map_stats[bot1.name][map_name]['losses'] += 1
-                    matchup_results['bot2_wins'] += 1
-                    elo_system.update_ratings(bot1.name, bot2.name, 2)
-            else:
-                results[bot1.name]['draws'] += 1
-                results[bot2.name]['draws'] += 1
-                per_map_stats[bot1.name][map_name]['draws'] += 1
-                per_map_stats[bot2.name][map_name]['draws'] += 1
-                matchup_results['draws'] += 1
-                elo_system.update_ratings(bot1.name, bot2.name, 0)
+    # Execute games round by round (map by map)
+    for round_idx, round_games in enumerate(schedule_by_map):
+        if not round_games:
+            continue
 
-            # Add delay between LLM games to avoid rate limits
-            if has_llm_bot and game_idx < len(game_schedule):
-                time.sleep(1)
+        map_name = Path(round_games[0].map_config.path).name
+        logger.info(f"\n{'='*70}")
+        logger.info(f"Round {round_idx + 1}/{num_rounds}: {map_name}")
+        logger.info(f"Games in round: {len(round_games)}")
+        logger.info("=" * 70)
 
-        matchup_details.append(matchup_results)
+        # Determine concurrency for this round (capped by round size)
+        round_concurrency = min(effective_concurrent, len(round_games))
+
+        if round_concurrency == 1:
+            # Sequential execution
+            for game_idx, scheduled_game in enumerate(round_games):
+                logger.info(f"  Game {game_idx + 1}/{len(round_games)}: "
+                           f"{scheduled_game.p1_bot.name} (P1) vs {scheduled_game.p2_bot.name} (P2)")
+                game_result = execute_game(scheduled_game)
+                logger.info(f"    Result: {game_result.winner_name} (turns: {game_result.turns})")
+                process_game_result(game_result, scheduled_game)
+        else:
+            # Concurrent execution
+            logger.info(f"  Running {len(round_games)} games with {round_concurrency} concurrent workers")
+
+            # Create a queue of games to execute
+            game_queue = list(enumerate(round_games))
+            completed_count = 0
+
+            with ThreadPoolExecutor(max_workers=round_concurrency) as executor:
+                # Submit initial batch of games
+                future_to_game = {}
+                for game_idx, scheduled_game in game_queue:
+                    future = executor.submit(execute_game, scheduled_game)
+                    future_to_game[future] = (game_idx, scheduled_game)
+
+                # Process results as they complete
+                for future in as_completed(future_to_game):
+                    game_idx, scheduled_game = future_to_game[future]
+                    try:
+                        game_result = future.result()
+                        completed_count += 1
+                        logger.info(f"  [{completed_count}/{len(round_games)}] "
+                                   f"{scheduled_game.p1_bot.name} vs {scheduled_game.p2_bot.name}: "
+                                   f"{game_result.winner_name} (turns: {game_result.turns})")
+                        process_game_result(game_result, scheduled_game)
+                    except Exception as e:
+                        completed_count += 1
+                        logger.error(f"  [{completed_count}/{len(round_games)}] "
+                                    f"{scheduled_game.p1_bot.name} vs {scheduled_game.p2_bot.name}: "
+                                    f"Error - {e}")
+
+        logger.info(f"  Round {round_idx + 1} complete")
+
+    # Aggregate matchup details from the map
+    matchup_details = []
+    seen_matchups = set()
+    for matchup_key, map_results in matchup_details_map.items():
+        if matchup_key in seen_matchups:
+            continue
+        seen_matchups.add(matchup_key)
+
+        bot1_name, bot2_name = matchup_key.split('|')
+        total_bot1_wins = sum(r['bot1_wins'] for r in map_results.values())
+        total_bot2_wins = sum(r['bot2_wins'] for r in map_results.values())
+        total_draws = sum(r['draws'] for r in map_results.values())
+
+        matchup_details.append({
+            'bot1': bot1_name,
+            'bot2': bot2_name,
+            'bot1_wins': total_bot1_wins,
+            'bot2_wins': total_bot2_wins,
+            'draws': total_draws
+        })
 
     # Generate final results
     standings = []
@@ -875,11 +1071,26 @@ def run_tournament(
     # Convert MapConfig to serializable format
     maps_info = [{'path': m.path, 'max_turns': m.max_turns} for m in map_list]
 
+    # Convert schedule to serializable format
+    schedule_info = []
+    for round_idx, round_games in enumerate(schedule_by_map):
+        for game in round_games:
+            schedule_info.append({
+                'game_id': game.game_id,
+                'round': round_idx + 1,
+                'map': Path(game.map_config.path).name,
+                'player1_bot': game.p1_bot.name,
+                'player2_bot': game.p2_bot.name
+            })
+
     result_data = {
         'timestamp': datetime.now().isoformat(),
         'maps_used': maps_info,
         'map_pool_mode': map_pool_mode,
         'games_per_matchup': games_per_matchup,
+        'concurrent_games': concurrent_games,
+        'llm_api_delay': llm_api_delay,
+        'schedule': schedule_info,
         'standings': standings,
         'matchups': matchup_details,
         'elo_history': {
@@ -1218,6 +1429,16 @@ def save_tournament_results(
                 f.write(f"{b1}," + ",".join(row) + "\n")
         logger.info(f"Matrix table saved to: {matrix_csv_path}")
 
+    # Save schedule CSV
+    if 'schedule' in results_data and results_data['schedule']:
+        schedule_csv_path = os.path.join(output_dir, f'tournament_schedule_{timestamp}.csv')
+        with open(schedule_csv_path, 'w') as f:
+            f.write("Game ID,Round,Map,Player 1 Bot,Player 2 Bot\n")
+            for game in results_data['schedule']:
+                f.write(f"{game['game_id']},{game['round']},{game['map']},"
+                       f"{game['player1_bot']},{game['player2_bot']}\n")
+        logger.info(f"Schedule saved to: {schedule_csv_path}")
+
 
 def main():
     """Main entry point."""
@@ -1303,7 +1524,9 @@ def main():
             save_replays=tournament_config.get('save_replays', False),
             replay_dir=output_config.get('replay_dir'),
             completed_matches=completed_matches,
-            gcs_uploader=gcs_uploader
+            gcs_uploader=gcs_uploader,
+            concurrent_games=tournament_config.get('concurrent_games', 1),
+            llm_api_delay=tournament_config.get('llm_api_delay', 1.0)
         )
 
         # Save results locally
