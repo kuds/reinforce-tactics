@@ -1071,11 +1071,26 @@ def run_tournament(
     # Convert MapConfig to serializable format
     maps_info = [{'path': m.path, 'max_turns': m.max_turns} for m in map_list]
 
+    # Convert schedule to serializable format
+    schedule_info = []
+    for round_idx, round_games in enumerate(schedule_by_map):
+        for game in round_games:
+            schedule_info.append({
+                'game_id': game.game_id,
+                'round': round_idx + 1,
+                'map': Path(game.map_config.path).name,
+                'player1_bot': game.p1_bot.name,
+                'player2_bot': game.p2_bot.name
+            })
+
     result_data = {
         'timestamp': datetime.now().isoformat(),
         'maps_used': maps_info,
         'map_pool_mode': map_pool_mode,
         'games_per_matchup': games_per_matchup,
+        'concurrent_games': concurrent_games,
+        'llm_api_delay': llm_api_delay,
+        'schedule': schedule_info,
         'standings': standings,
         'matchups': matchup_details,
         'elo_history': {
@@ -1413,6 +1428,16 @@ def save_tournament_results(
                 row = [matrix[b1][b2] for b2 in bots_list]
                 f.write(f"{b1}," + ",".join(row) + "\n")
         logger.info(f"Matrix table saved to: {matrix_csv_path}")
+
+    # Save schedule CSV
+    if 'schedule' in results_data and results_data['schedule']:
+        schedule_csv_path = os.path.join(output_dir, f'tournament_schedule_{timestamp}.csv')
+        with open(schedule_csv_path, 'w') as f:
+            f.write("Game ID,Round,Map,Player 1 Bot,Player 2 Bot\n")
+            for game in results_data['schedule']:
+                f.write(f"{game['game_id']},{game['round']},{game['map']},"
+                       f"{game['player1_bot']},{game['player2_bot']}\n")
+        logger.info(f"Schedule saved to: {schedule_csv_path}")
 
 
 def main():
