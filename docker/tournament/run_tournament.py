@@ -1198,7 +1198,11 @@ def run_single_game(
                 'winner': winner,
                 'winner_name': winner_name,
                 'turns': turn_count,
-                'map': map_file
+                'map': map_file,
+                'player_names': {
+                    str(player1): bot1.name,
+                    str(player2): bot2.name
+                }
             }
 
             FileIO.save_replay(

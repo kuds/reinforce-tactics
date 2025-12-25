@@ -763,7 +763,11 @@ class TournamentRunner:
                 'winner': winner,
                 'winner_name': winner_name,
                 'turns': turn_count,
-                'map': map_file
+                'map': map_file,
+                'player_names': {
+                    str(player1): bot1_desc.name,
+                    str(player2): bot2_desc.name
+                }
             }
 
             FileIO.save_replay(

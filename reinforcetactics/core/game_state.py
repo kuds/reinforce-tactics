@@ -784,6 +784,12 @@ class GameState:
         # Use original unpadded map if available, otherwise use initial_map_data
         map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
 
+        # Build player_names dict from player_configs
+        player_names = {}
+        for i, config in enumerate(self.player_configs):
+            player_num = i + 1
+            player_names[str(player_num)] = config.get('player_name', 'Unknown')
+
         game_info = {
             'num_players': self.num_players,
             'total_turns': self.turn_number,
@@ -793,7 +799,8 @@ class GameState:
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
             'initial_map': map_to_save,
-            'player_configs': self.player_configs
+            'player_configs': self.player_configs,
+            'player_names': player_names
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)

@@ -163,6 +163,51 @@ class TestPlayerConfigs:
             assert 'player_configs' in replay_data['game_info']
             assert len(replay_data['game_info']['player_configs']) == 2
 
+    def test_player_names_in_replay(self, simple_map):
+        """Test that player_names dictionary is included in replay."""
+        game = GameState(simple_map, num_players=2)
+        game.player_configs = [
+            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
+            {'type': 'computer', 'bot_type': 'SimpleBot', 'player_name': 'SimpleBot'}
+        ]
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+
+            assert 'game_info' in replay_data
+            assert 'player_names' in replay_data['game_info']
+            player_names = replay_data['game_info']['player_names']
+            assert player_names['1'] == 'Human'
+            assert player_names['2'] == 'SimpleBot'
+
+    def test_player_names_fallback_to_unknown(self, simple_map):
+        """Test that player_names falls back to 'Unknown' when not set."""
+        game = GameState(simple_map, num_players=2)
+        # player_configs without player_name set
+        game.player_configs = [
+            {'type': 'human', 'bot_type': None},
+            {'type': 'computer', 'bot_type': 'SimpleBot'}
+        ]
+        game.end_turn()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(
+                filepath=str(Path(tmpdir) / "test_replay.json")
+            )
+
+            replay_data = FileIO.load_replay(replay_path)
+
+            assert 'game_info' in replay_data
+            assert 'player_names' in replay_data['game_info']
+            player_names = replay_data['game_info']['player_names']
+            assert player_names['1'] == 'Unknown'
+            assert player_names['2'] == 'Unknown'
+
 
 class TestReplayActionHandlers:
     """Test that replay player handles all action types."""

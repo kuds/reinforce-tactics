@@ -5,6 +5,36 @@ This module provides factory functions for creating bot instances,
 eliminating duplication between start_new_game() and load_saved_game().
 """
 
+from pathlib import Path
+
+
+def get_player_name(bot, bot_type, model_path=None):
+    """
+    Get the player name for a bot.
+
+    Args:
+        bot: The bot instance
+        bot_type: String identifier for bot type ('SimpleBot', 'OpenAIBot', etc.)
+        model_path: Path to model file (for ModelBot)
+
+    Returns:
+        String name for the player
+    """
+    # For basic bots (SimpleBot, MediumBot, AdvancedBot), use the class name
+    if bot_type in ('SimpleBot', 'MediumBot', 'AdvancedBot'):
+        return bot_type
+
+    # For LLM bots (OpenAIBot, ClaudeBot, GeminiBot), use the model name
+    if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
+        return getattr(bot, 'model', bot_type)
+
+    # For ModelBot, use the base filename from model_path
+    if bot_type == 'ModelBot' and model_path:
+        return Path(model_path).stem
+
+    # Fallback to bot_type
+    return bot_type
+
 
 def create_bot(game, player_num, bot_type, settings, model_path=None):
     """
@@ -55,6 +85,12 @@ def create_bots_from_config(game, player_configs, settings):
     """
     Create bots based on player configurations.
 
+    Also updates player_configs with 'player_name' for each player:
+    - Human players: "Human"
+    - SimpleBot/MediumBot/AdvancedBot: Class name (e.g., "SimpleBot")
+    - LLM bots: Model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+    - ModelBot: Base filename from model_path (e.g., "agent_v1")
+
     Args:
         game: The GameState instance
         player_configs: List of player configuration dictionaries
@@ -74,15 +110,24 @@ def create_bots_from_config(game, player_configs, settings):
             bot_type = config.get('bot_type', 'SimpleBot')
             model_path = config.get('model_path', None)
             try:
-                bots[player_num] = create_bot(game, player_num, bot_type, settings, model_path)
+                bot = create_bot(game, player_num, bot_type, settings, model_path)
+                bots[player_num] = bot
+                config['player_name'] = get_player_name(bot, bot_type, model_path)
                 print(f"Bot created for Player {player_num} ({bot_type})")
             except ValueError as e:
                 print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
                 print("   Falling back to SimpleBot")
-                bots[player_num] = create_bot(game, player_num, 'SimpleBot', settings)
+                bot = create_bot(game, player_num, 'SimpleBot', settings)
+                bots[player_num] = bot
+                config['player_name'] = 'SimpleBot'
             except ImportError as e:
                 print(f"❌ Missing dependency for {bot_type}: {e}")
                 print("   Falling back to SimpleBot")
-                bots[player_num] = create_bot(game, player_num, 'SimpleBot', settings)
+                bot = create_bot(game, player_num, 'SimpleBot', settings)
+                bots[player_num] = bot
+                config['player_name'] = 'SimpleBot'
+        else:
+            # Human player
+            config['player_name'] = 'Human'
 
     return bots
