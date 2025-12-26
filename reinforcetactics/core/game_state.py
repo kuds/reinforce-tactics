@@ -779,6 +779,15 @@ class GameState:
 
         Uses tournament_metadata if available, otherwise creates basic defaults.
 
+        Expected tournament_metadata format:
+            {
+                'p1': 'Player1Name', 'p2': 'Player2Name',
+                'p1_model': 'model-name', 'p2_model': 'model-name',
+                'p1_temperature': 0.5, 'p2_temperature': 0.5,
+                'p1_max_tokens': 8000, 'p2_max_tokens': 8000,
+                'p1_type': 'human', 'p2_type': 'llm',  # optional explicit type
+            }
+
         Returns:
             List of player configuration dictionaries
         """
@@ -789,25 +798,32 @@ class GameState:
 
         for player_num in range(1, self.num_players + 1):
             config: Dict[str, Any] = {}
+            prefix = f'p{player_num}'
 
             if metadata:
                 # Extract info from tournament_metadata
-                if player_num == 1:
-                    config['player_name'] = metadata.get('p1', f'Player {player_num}')
-                    model = metadata.get('p1_model')
-                    if model:
-                        config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
-                                            'GeminiBot' if 'gemini' in str(model).lower() else \
-                                            'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
-                        config['model'] = model
-                elif player_num == 2:
-                    config['player_name'] = metadata.get('p2', f'Player {player_num}')
-                    model = metadata.get('p2_model')
-                    if model:
-                        config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
-                                            'GeminiBot' if 'gemini' in str(model).lower() else \
-                                            'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
-                        config['model'] = model
+                config['player_name'] = metadata.get(prefix, f'Player {player_num}')
+
+                # Check for explicit player type
+                player_type = metadata.get(f'{prefix}_type')
+                if player_type:
+                    config['type'] = player_type
+
+                model = metadata.get(f'{prefix}_model')
+                if model:
+                    config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
+                                        'GeminiBot' if 'gemini' in str(model).lower() else \
+                                        'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
+                    config['model'] = model
+
+                # Include temperature and max_tokens if provided
+                temperature = metadata.get(f'{prefix}_temperature')
+                if temperature is not None:
+                    config['temperature'] = temperature
+
+                max_tokens = metadata.get(f'{prefix}_max_tokens')
+                if max_tokens is not None:
+                    config['max_tokens'] = max_tokens
             else:
                 # Basic default
                 config['player_name'] = f'Player {player_num}'
