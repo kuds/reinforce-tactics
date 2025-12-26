@@ -773,6 +773,49 @@ class GameState:
         from reinforcetactics.utils.file_io import FileIO
         return FileIO.save_game(self, filepath)
 
+    def _generate_default_player_configs(self) -> List[Dict[str, Any]]:
+        """
+        Generate default player configs when none are set.
+
+        Uses tournament_metadata if available, otherwise creates basic defaults.
+
+        Returns:
+            List of player configuration dictionaries
+        """
+        configs = []
+
+        # Check if tournament_metadata was set (e.g., from notebook code)
+        metadata = getattr(self, 'tournament_metadata', None)
+
+        for player_num in range(1, self.num_players + 1):
+            config: Dict[str, Any] = {}
+
+            if metadata:
+                # Extract info from tournament_metadata
+                if player_num == 1:
+                    config['player_name'] = metadata.get('p1', f'Player {player_num}')
+                    model = metadata.get('p1_model')
+                    if model:
+                        config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
+                                            'GeminiBot' if 'gemini' in str(model).lower() else \
+                                            'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
+                        config['model'] = model
+                elif player_num == 2:
+                    config['player_name'] = metadata.get('p2', f'Player {player_num}')
+                    model = metadata.get('p2_model')
+                    if model:
+                        config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
+                                            'GeminiBot' if 'gemini' in str(model).lower() else \
+                                            'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
+                        config['model'] = model
+            else:
+                # Basic default
+                config['player_name'] = f'Player {player_num}'
+
+            configs.append(config)
+
+        return configs
+
     def _get_player_type(self, config: Dict[str, Any]) -> str:
         """
         Get the standardized player type for replay logs.
@@ -816,7 +859,13 @@ class GameState:
 
         # Build enhanced player_configs from player_configs
         enhanced_player_configs = []
-        for i, config in enumerate(self.player_configs):
+
+        # If player_configs is empty, generate defaults from tournament_metadata or num_players
+        configs_to_use = self.player_configs
+        if not configs_to_use:
+            configs_to_use = self._generate_default_player_configs()
+
+        for i, config in enumerate(configs_to_use):
             player_num = i + 1
             player_name = config.get('player_name', 'Unknown')
 
