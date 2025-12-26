@@ -773,65 +773,6 @@ class GameState:
         from reinforcetactics.utils.file_io import FileIO
         return FileIO.save_game(self, filepath)
 
-    def _generate_default_player_configs(self) -> List[Dict[str, Any]]:
-        """
-        Generate default player configs when none are set.
-
-        Uses tournament_metadata if available, otherwise creates basic defaults.
-
-        Expected tournament_metadata format:
-            {
-                'p1': 'Player1Name', 'p2': 'Player2Name',
-                'p1_model': 'model-name', 'p2_model': 'model-name',
-                'p1_temperature': 0.5, 'p2_temperature': 0.5,
-                'p1_max_tokens': 8000, 'p2_max_tokens': 8000,
-                'p1_type': 'human', 'p2_type': 'llm',  # optional explicit type
-            }
-
-        Returns:
-            List of player configuration dictionaries
-        """
-        configs = []
-
-        # Check if tournament_metadata was set (e.g., from notebook code)
-        metadata = getattr(self, 'tournament_metadata', None)
-
-        for player_num in range(1, self.num_players + 1):
-            config: Dict[str, Any] = {}
-            prefix = f'p{player_num}'
-
-            if metadata:
-                # Extract info from tournament_metadata
-                config['player_name'] = metadata.get(prefix, f'Player {player_num}')
-
-                # Check for explicit player type
-                player_type = metadata.get(f'{prefix}_type')
-                if player_type:
-                    config['type'] = player_type
-
-                model = metadata.get(f'{prefix}_model')
-                if model:
-                    config['bot_type'] = 'ClaudeBot' if 'claude' in str(model).lower() else \
-                                        'GeminiBot' if 'gemini' in str(model).lower() else \
-                                        'OpenAIBot' if 'gpt' in str(model).lower() else 'Bot'
-                    config['model'] = model
-
-                # Include temperature and max_tokens if provided
-                temperature = metadata.get(f'{prefix}_temperature')
-                if temperature is not None:
-                    config['temperature'] = temperature
-
-                max_tokens = metadata.get(f'{prefix}_max_tokens')
-                if max_tokens is not None:
-                    config['max_tokens'] = max_tokens
-            else:
-                # Basic default
-                config['player_name'] = f'Player {player_num}'
-
-            configs.append(config)
-
-        return configs
-
     def _get_player_type(self, config: Dict[str, Any]) -> str:
         """
         Get the standardized player type for replay logs.
@@ -858,6 +799,40 @@ class GameState:
         # Standard bots (SimpleBot, MediumBot, AdvancedBot)
         return 'bot'
 
+    @staticmethod
+    def build_player_config(
+        player_no: int,
+        name: str,
+        player_type: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Build a standardized player config for replay logs.
+
+        Args:
+            player_no: Player number (1, 2, etc.)
+            name: Display name for the player/bot
+            player_type: One of 'human', 'bot', 'llm', 'rl'
+            temperature: LLM temperature (only for llm type)
+            max_tokens: LLM max tokens (only for llm type)
+
+        Returns:
+            Standardized player config dictionary
+        """
+        config: Dict[str, Any] = {
+            'player_no': player_no,
+            'type': player_type,
+            'name': name
+        }
+
+        # Add LLM-specific fields
+        if player_type == 'llm':
+            config['temperature'] = temperature
+            config['max_tokens'] = max_tokens
+
+        return config
+
     def save_replay_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
         """
         Save replay to file.
@@ -873,31 +848,33 @@ class GameState:
         # Use original unpadded map if available, otherwise use initial_map_data
         map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
 
-        # Build enhanced player_configs from player_configs
+        # Build player_configs for replay
+        # If already in standardized format (has 'player_no'), use directly
+        # Otherwise, transform from old format for backward compatibility
         enhanced_player_configs = []
 
-        # If player_configs is empty, generate defaults from tournament_metadata or num_players
-        configs_to_use = self.player_configs
-        if not configs_to_use:
-            configs_to_use = self._generate_default_player_configs()
-
-        for i, config in enumerate(configs_to_use):
+        for i, config in enumerate(self.player_configs):
             player_num = i + 1
-            player_name = config.get('player_name', 'Unknown')
 
-            # Build enhanced config with standardized structure
-            enhanced_config = {
-                'player_no': player_num,
-                'type': config.get('player_type', self._get_player_type(config)),
-                'name': player_name
-            }
+            # Check if already in standardized format
+            if 'player_no' in config:
+                enhanced_player_configs.append(config)
+            else:
+                # Transform from old format (player_name, player_type, bot_type, etc.)
+                player_name = config.get('player_name', config.get('name', f'Player {player_num}'))
 
-            # Add LLM-specific fields if applicable
-            if enhanced_config['type'] == 'llm':
-                enhanced_config['temperature'] = config.get('temperature', None)
-                enhanced_config['max_tokens'] = config.get('max_tokens', None)
+                enhanced_config = {
+                    'player_no': player_num,
+                    'type': config.get('player_type', config.get('type', self._get_player_type(config))),
+                    'name': player_name
+                }
 
-            enhanced_player_configs.append(enhanced_config)
+                # Add LLM-specific fields if applicable
+                if enhanced_config['type'] == 'llm':
+                    enhanced_config['temperature'] = config.get('temperature', None)
+                    enhanced_config['max_tokens'] = config.get('max_tokens', None)
+
+                enhanced_player_configs.append(enhanced_config)
 
         game_info = {
             'num_players': self.num_players,
