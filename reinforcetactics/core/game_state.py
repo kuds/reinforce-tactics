@@ -22,13 +22,14 @@ logger = logging.getLogger(__name__)
 class GameState:
     """Manages the core game state without rendering."""
 
-    def __init__(self, map_data, num_players: int = 2) -> None:
+    def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None) -> None:
         """
         Initialize the game state.
 
         Args:
             map_data: 2D array containing map information
             num_players: Number of players (default 2)
+            max_turns: Maximum turns for the game (None = unlimited)
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
@@ -67,7 +68,7 @@ class GameState:
         self.player_configs: List[Dict[str, Any]] = []
 
         # Maximum turns for the game (None = unlimited)
-        self.max_turns: Optional[int] = None
+        self.max_turns: Optional[int] = max_turns
 
         # Action history for replay
         self.action_history: List[Dict[str, Any]] = []
@@ -79,7 +80,7 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players)
+        self.__init__(map_data, self.num_players, self.max_turns)
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
