@@ -22,13 +22,14 @@ logger = logging.getLogger(__name__)
 class GameState:
     """Manages the core game state without rendering."""
 
-    def __init__(self, map_data, num_players: int = 2) -> None:
+    def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None) -> None:
         """
         Initialize the game state.
 
         Args:
             map_data: 2D array containing map information
             num_players: Number of players (default 2)
+            max_turns: Maximum turns for the game (None = unlimited)
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
@@ -67,7 +68,7 @@ class GameState:
         self.player_configs: List[Dict[str, Any]] = []
 
         # Maximum turns for the game (None = unlimited)
-        self.max_turns: Optional[int] = None
+        self.max_turns: Optional[int] = max_turns
 
         # Action history for replay
         self.action_history: List[Dict[str, Any]] = []
@@ -79,7 +80,7 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players)
+        self.__init__(map_data, self.num_players, self.max_turns)
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
@@ -798,6 +799,40 @@ class GameState:
         # Standard bots (SimpleBot, MediumBot, AdvancedBot)
         return 'bot'
 
+    @staticmethod
+    def build_player_config(
+        player_no: int,
+        name: str,
+        player_type: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Build a standardized player config for replay logs.
+
+        Args:
+            player_no: Player number (1, 2, etc.)
+            name: Display name for the player/bot
+            player_type: One of 'human', 'bot', 'llm', 'rl'
+            temperature: LLM temperature (only for llm type)
+            max_tokens: LLM max tokens (only for llm type)
+
+        Returns:
+            Standardized player config dictionary
+        """
+        config: Dict[str, Any] = {
+            'player_no': player_no,
+            'type': player_type,
+            'name': name
+        }
+
+        # Add LLM-specific fields
+        if player_type == 'llm':
+            config['temperature'] = temperature
+            config['max_tokens'] = max_tokens
+
+        return config
+
     def save_replay_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
         """
         Save replay to file.
@@ -813,25 +848,36 @@ class GameState:
         # Use original unpadded map if available, otherwise use initial_map_data
         map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
 
-        # Build enhanced player_configs from player_configs
+        # Build player_configs for replay
+        # If already in standardized format (has 'player_no'), use directly
+        # Otherwise, transform from old format for backward compatibility
         enhanced_player_configs = []
+
         for i, config in enumerate(self.player_configs):
             player_num = i + 1
-            player_name = config.get('player_name', 'Unknown')
 
-            # Build enhanced config with standardized structure
-            enhanced_config = {
-                'player_no': player_num,
-                'type': config.get('player_type', self._get_player_type(config)),
-                'name': player_name
-            }
+            # Check if already in standardized format
+            if 'player_no' in config:
+                enhanced_player_configs.append(config)
+            else:
+                # Transform from old format (player_name, player_type, bot_type, etc.)
+                player_name = config.get('player_name', config.get('name', 'Unknown'))
 
-            # Add LLM-specific fields if applicable
-            if enhanced_config['type'] == 'llm':
-                enhanced_config['temperature'] = config.get('temperature', None)
-                enhanced_config['max_tokens'] = config.get('max_tokens', None)
+                # Always use _get_player_type to map old format types (e.g., 'computer' -> 'bot')
+                player_type = self._get_player_type(config)
 
-            enhanced_player_configs.append(enhanced_config)
+                enhanced_config = {
+                    'player_no': player_num,
+                    'type': player_type,
+                    'name': player_name
+                }
+
+                # Add LLM-specific fields if applicable
+                if player_type == 'llm':
+                    enhanced_config['temperature'] = config.get('temperature', None)
+                    enhanced_config['max_tokens'] = config.get('max_tokens', None)
+
+                enhanced_player_configs.append(enhanced_config)
 
         game_info = {
             'num_players': self.num_players,

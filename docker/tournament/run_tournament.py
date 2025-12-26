@@ -1191,29 +1191,13 @@ def run_single_game(
             )
             replay_path = os.path.join(replay_dir, replay_filename)
 
-            # Build player_configs in standardized format
-            def build_player_config(bot: TournamentBot, player_no: int):
-                """Build player config from TournamentBot."""
-                # Determine player type
+            # Helper to determine player type from TournamentBot
+            def get_player_type(bot: TournamentBot) -> str:
                 if bot.bot_class in ('simple', 'medium', 'advanced'):
-                    player_type = 'bot'
+                    return 'bot'
                 elif isinstance(bot.bot_class, type):
-                    player_type = 'llm'
-                else:
-                    player_type = 'bot'
-
-                config = {
-                    'player_no': player_no,
-                    'type': player_type,
-                    'name': bot.name
-                }
-
-                # Add LLM-specific fields
-                if player_type == 'llm':
-                    config['temperature'] = bot.temperature
-                    config['max_tokens'] = bot.max_tokens
-
-                return config
+                    return 'llm'
+                return 'bot'
 
             game_info = {
                 'bot1': bot1.name,
@@ -1226,8 +1210,20 @@ def run_single_game(
                 'max_turns': max_turns,
                 'map': map_file,
                 'player_configs': [
-                    build_player_config(bot1, player1),
-                    build_player_config(bot2, player2)
+                    GameState.build_player_config(
+                        player_no=player1,
+                        name=bot1.name,
+                        player_type=get_player_type(bot1),
+                        temperature=bot1.temperature,
+                        max_tokens=bot1.max_tokens
+                    ),
+                    GameState.build_player_config(
+                        player_no=player2,
+                        name=bot2.name,
+                        player_type=get_player_type(bot2),
+                        temperature=bot2.temperature,
+                        max_tokens=bot2.max_tokens
+                    )
                 ]
             }
 
