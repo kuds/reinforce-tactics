@@ -861,16 +861,19 @@ class GameState:
                 enhanced_player_configs.append(config)
             else:
                 # Transform from old format (player_name, player_type, bot_type, etc.)
-                player_name = config.get('player_name', config.get('name', f'Player {player_num}'))
+                player_name = config.get('player_name', config.get('name', 'Unknown'))
+
+                # Always use _get_player_type to map old format types (e.g., 'computer' -> 'bot')
+                player_type = self._get_player_type(config)
 
                 enhanced_config = {
                     'player_no': player_num,
-                    'type': config.get('player_type', config.get('type', self._get_player_type(config))),
+                    'type': player_type,
                     'name': player_name
                 }
 
                 # Add LLM-specific fields if applicable
-                if enhanced_config['type'] == 'llm':
+                if player_type == 'llm':
                     enhanced_config['temperature'] = config.get('temperature', None)
                     enhanced_config['max_tokens'] = config.get('max_tokens', None)
 
