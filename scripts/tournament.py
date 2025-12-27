@@ -716,17 +716,13 @@ class TournamentRunner:
         bots = {player1: bot1, player2: bot2}
 
         # Play the game
-        turn_count = 0
-
         try:
-            while not game_state.game_over and turn_count < max_turns:
+            while not game_state.game_over and game_state.turn_number < max_turns:
                 current_player = game_state.current_player
                 current_bot = bots[current_player]
 
                 # Bot takes turn
                 current_bot.take_turn()
-
-                turn_count += 1
 
                 # Check for game over conditions
                 if game_state.game_over:
@@ -736,19 +732,20 @@ class TournamentRunner:
             if game_state.game_over and game_state.winner:
                 winner = game_state.winner
                 winner_name = bot1_desc.name if winner == player1 else bot2_desc.name
-            elif turn_count >= max_turns:
-                # Draw due to turn limit
+            elif game_state.turn_number >= max_turns:
+                # Draw due to turn limit - mark game as over
+                game_state.game_over = True
                 winner = 0
                 winner_name = "Draw"
             else:
                 winner = 0
                 winner_name = "Draw"
 
-            logger.info(f"    Result: {winner_name} (turns: {turn_count})")
+            logger.info(f"    Result: {winner_name} (turns: {game_state.turn_number})")
 
             # Track game length for map statistics
             map_name = Path(map_file).name
-            self.map_game_lengths[map_name].append(turn_count)
+            self.map_game_lengths[map_name].append(game_state.turn_number)
 
             # Save replay with map name in filename
             map_basename = Path(map_file).stem
@@ -774,7 +771,7 @@ class TournamentRunner:
                 'bot2_player': player2,
                 'winner': winner,
                 'winner_name': winner_name,
-                'turns': turn_count,
+                'turns': game_state.turn_number,
                 'max_turns': max_turns,
                 'map': map_file,
                 'player_configs': [
@@ -804,7 +801,7 @@ class TournamentRunner:
             return {
                 'winner': winner,
                 'winner_name': winner_name,
-                'turns': turn_count,
+                'turns': game_state.turn_number,
                 'map': map_file,
                 'replay': str(replay_path)
             }
@@ -814,7 +811,7 @@ class TournamentRunner:
             return {
                 'winner': 0,
                 'winner_name': "Error",
-                'turns': turn_count,
+                'turns': game_state.turn_number,
                 'error': str(e)
             }
 

@@ -1162,13 +1162,11 @@ def run_single_game(
     bots = {player1: bot1_instance, player2: bot2_instance}
 
     # Play the game
-    turn_count = 0
     try:
-        while not game_state.game_over and turn_count < max_turns:
+        while not game_state.game_over and game_state.turn_number < max_turns:
             current_player = game_state.current_player
             current_bot = bots[current_player]
             current_bot.take_turn()
-            turn_count += 1
 
         # Determine winner
         if game_state.game_over and game_state.winner:
@@ -1177,6 +1175,11 @@ def run_single_game(
                 winner_name = bot1.name
             else:
                 winner_name = bot2.name
+        elif game_state.turn_number >= max_turns:
+            # Draw due to turn limit - mark game as over
+            game_state.game_over = True
+            winner = 0
+            winner_name = "Draw"
         else:
             winner = 0
             winner_name = "Draw"
@@ -1206,7 +1209,7 @@ def run_single_game(
                 'bot2_player': player2,
                 'winner': winner,
                 'winner_name': winner_name,
-                'turns': turn_count,
+                'turns': game_state.turn_number,
                 'max_turns': max_turns,
                 'map': map_file,
                 'player_configs': [
@@ -1236,7 +1239,7 @@ def run_single_game(
         return {
             'winner': winner,
             'winner_name': winner_name,
-            'turns': turn_count,
+            'turns': game_state.turn_number,
             'replay_path': replay_path,
             'conversation_log_dir': conversation_log_dir
         }
@@ -1246,7 +1249,7 @@ def run_single_game(
         return {
             'winner': 0,
             'winner_name': "Error",
-            'turns': turn_count,
+            'turns': game_state.turn_number,
             'error': str(e)
         }
 
