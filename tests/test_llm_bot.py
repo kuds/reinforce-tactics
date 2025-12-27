@@ -1075,9 +1075,115 @@ class TestMapCoordinateConversion:
         """Test that action history works correctly when there's no padding."""
         # Create a unit at position [5, 5] (no padding, so original = padded)
         unit = simple_game.create_unit('W', 5, 5, player=1)
-        
+
         # Check the create_unit action
         create_action = simple_game.action_history[-1]
         assert create_action['type'] == 'create_unit'
         assert create_action['x'] == 5  # Same as input since no padding
         assert create_action['y'] == 5
+
+
+class TestResignAction:
+    """Test RESIGN action functionality."""
+
+    @pytest.fixture
+    def test_bot_class(self):
+        """Create a test bot class for testing."""
+        class TestBot(LLMBot):
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                return '{"reasoning": "Position is hopeless", "actions": [{"type": "RESIGN"}]}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
+
+        return TestBot
+
+    def test_resign_action_ends_game(self, simple_game, test_bot_class):
+        """Test that RESIGN action ends the game."""
+        # End player 1's turn so it's player 2's turn
+        simple_game.end_turn()
+        assert simple_game.current_player == 2
+        assert simple_game.game_over is False
+
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        bot.take_turn()
+
+        # Game should be over after resignation
+        assert simple_game.game_over is True
+
+    def test_resign_action_sets_winner(self, simple_game, test_bot_class):
+        """Test that RESIGN action sets the correct winner."""
+        # End player 1's turn so it's player 2's turn
+        simple_game.end_turn()
+
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        bot.take_turn()
+
+        # Player 1 should win when player 2 resigns
+        assert simple_game.winner == 1
+
+    def test_resign_action_skips_end_turn(self, simple_game, test_bot_class):
+        """Test that end_turn() is not called after resignation."""
+        # End player 1's turn so it's player 2's turn
+        simple_game.end_turn()
+        initial_turn = simple_game.turn_number
+
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        bot.take_turn()
+
+        # Turn number should not advance since end_turn() is skipped
+        assert simple_game.turn_number == initial_turn
+
+    def test_resign_action_records_in_history(self, simple_game, test_bot_class):
+        """Test that RESIGN action is recorded in action history."""
+        simple_game.end_turn()
+
+        bot = test_bot_class(simple_game, player=2, api_key="test-key")
+        bot.take_turn()
+
+        # Find the resign action in history
+        resign_actions = [a for a in simple_game.action_history if a['type'] == 'resign']
+        assert len(resign_actions) == 1
+        assert resign_actions[0]['player'] == 2
+
+    def test_resign_with_other_actions(self, simple_game):
+        """Test that RESIGN stops action execution immediately."""
+        class TestBot(LLMBot):
+            def _get_api_key_from_env(self):
+                return "test-key"
+
+            def _get_env_var_name(self):
+                return 'TEST_API_KEY'
+
+            def _get_default_model(self):
+                return 'test-model'
+
+            def _get_supported_models(self):
+                return ['test-model']
+
+            def _call_llm(self, messages):
+                # RESIGN followed by other actions - those should not execute
+                return '{"actions": [{"type": "RESIGN"}, {"type": "END_TURN"}]}'
+
+            def _get_llm_sdk_version(self):
+                return 'test-sdk-1.0.0'
+
+        simple_game.end_turn()
+        bot = TestBot(simple_game, player=2, api_key="test-key")
+        bot.take_turn()
+
+        # Game should still be over (RESIGN was processed)
+        assert simple_game.game_over is True
+        assert simple_game.winner == 1
