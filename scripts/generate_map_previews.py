@@ -146,13 +146,27 @@ def extract_metadata(map_path: str) -> dict:
 
 
 def main():
-    """Generate map preview images for tournament maps."""
-    # Maps used in tournaments
-    tournament_maps = [
+    """Generate map preview images for all maps."""
+    # All maps organized by category
+    all_maps = [
+        # 1v1 Maps
         'maps/1v1/beginner.csv',
-        'maps/1v1/funnel_point.csv',
         'maps/1v1/center_mountains.csv',
         'maps/1v1/corner_points.csv',
+        'maps/1v1/crossroads.csv',
+        'maps/1v1/demo_map_editor.csv',
+        'maps/1v1/difficult_terrain.csv',
+        'maps/1v1/funnel_point.csv',
+        'maps/1v1/island_fortress.csv',
+        'maps/1v1/the_narrows.csv',
+        'maps/1v1/tower_rush.csv',
+        # 1v1v1 Maps
+        'maps/1v1v1/triangle_arena.csv',
+        'maps/1v1v1/three_islands.csv',
+        'maps/1v1v1/the_trident.csv',
+        'maps/1v1v1/disputed_crossroads.csv',
+        # 2v2 Maps
+        'maps/2v2/beginner.csv',
     ]
 
     # Output directory
@@ -161,7 +175,7 @@ def main():
 
     print(f"Generating map previews in {output_dir}")
 
-    for map_path in tournament_maps:
+    for map_path in all_maps:
         full_path = project_root / map_path
         if not full_path.exists():
             print(f"Map not found: {full_path}")
@@ -176,9 +190,15 @@ def main():
         # Extract metadata
         metadata = extract_metadata(str(full_path))
 
-        # Save image
+        # Save image - include category prefix for maps with potential name conflicts
         map_name = Path(map_path).stem
-        output_path = output_dir / f"{map_name}.png"
+        category = Path(map_path).parent.name  # e.g., "1v1", "1v1v1", "2v2"
+        # Use category prefix for non-1v1 maps to avoid conflicts
+        if category != "1v1":
+            output_name = f"{category}_{map_name}"
+        else:
+            output_name = map_name
+        output_path = output_dir / f"{output_name}.png"
         preview.save(str(output_path), 'PNG')
 
         print(f"Generated: {output_path}")
