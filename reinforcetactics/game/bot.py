@@ -1008,3 +1008,167 @@ class AdvancedBot(MediumBot):
         target = min(attackable, key=lambda e: e.health)
         self.game_state.attack(unit, target)
         return True
+
+
+class MasterBot(AdvancedBot):
+    """
+    Master AI bot extending AdvancedBot with minimal, targeted improvements:
+    - Focus-fire kills before other attacks
+    - Enhanced attack value calculation for better trades
+    - Aggressive HQ capture when enemy HQ is vulnerable
+
+    Uses AdvancedBot's proven logic as the foundation.
+    """
+
+    def __init__(self, game_state, player=2):
+        """Initialize the MasterBot."""
+        super().__init__(game_state, player)
+        self.enemy_hq_pos = None
+        self.our_hq_pos = None
+
+    def take_turn(self):
+        """Execute turn using parent's logic with focus-fire enhancement."""
+        self.turn_count += 1
+
+        # Analyze map on first turn
+        if not self.map_analyzed:
+            self.analyze_map()
+            self._find_hq_positions()
+            self.map_analyzed = True
+
+        # Use parent's purchase strategy
+        self.purchase_units_enhanced()
+
+        # Get units that can act
+        bot_units = [
+            u for u in self.game_state.units
+            if u.player == self.bot_player and (u.can_move or u.can_attack)
+            and not u.is_paralyzed()
+        ]
+
+        # ENHANCEMENT 1: Focus-fire kills first
+        self._execute_focus_fire_kills(bot_units)
+
+        # ENHANCEMENT 2: Check if we can rush HQ
+        self._try_hq_rush(bot_units)
+
+        # Use parent's coordinate attacks
+        self.coordinate_attacks(bot_units)
+
+        # Use parent's individual unit actions
+        for unit in bot_units:
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit)
+
+        # End turn
+        self.game_state.end_turn()
+
+    def _find_hq_positions(self):
+        """Find HQ positions for both players."""
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if tile.type == 'h':
+                    if tile.player == self.bot_player:
+                        self.our_hq_pos = (tile.x, tile.y)
+                    elif tile.player and tile.player != self.bot_player:
+                        self.enemy_hq_pos = (tile.x, tile.y)
+
+    def _try_hq_rush(self, bot_units):
+        """Rush HQ if it's vulnerable."""
+        if not self.enemy_hq_pos:
+            return
+
+        enemy_hq_tile = self.game_state.grid.get_tile(self.enemy_hq_pos[0], self.enemy_hq_pos[1])
+        if not enemy_hq_tile:
+            return
+
+        # Check if HQ is weak
+        if enemy_hq_tile.health > 30:
+            return
+
+        # Find warriors close to HQ
+        for unit in bot_units:
+            if unit.type != 'W':
+                continue
+            if not (unit.can_move or unit.can_attack):
+                continue
+
+            dist = self.manhattan_distance(unit.x, unit.y,
+                                          self.enemy_hq_pos[0], self.enemy_hq_pos[1])
+
+            # If already on HQ, seize it
+            if unit.x == self.enemy_hq_pos[0] and unit.y == self.enemy_hq_pos[1]:
+                if unit.can_attack:
+                    self.game_state.seize(unit)
+            # If very close and HQ is weak, prioritize capture
+            elif dist <= 4 and enemy_hq_tile.health <= 20:
+                if unit.can_move:
+                    target = self.find_best_move_position(unit, self.enemy_hq_pos[0], self.enemy_hq_pos[1])
+                    if target:
+                        self.game_state.move_unit(unit, target[0], target[1])
+                        if unit.x == self.enemy_hq_pos[0] and unit.y == self.enemy_hq_pos[1]:
+                            if unit.can_attack:
+                                self.game_state.seize(unit)
+
+    def _execute_focus_fire_kills(self, bot_units):
+        """Focus-fire to eliminate weak enemies before other attacks."""
+        enemy_units = [u for u in self.game_state.units
+                      if u.player != self.bot_player and u.health > 0]
+
+        # Sort enemies by health (lowest first)
+        for enemy in sorted(enemy_units, key=lambda e: e.health):
+            if enemy.health <= 0:
+                continue
+
+            # Calculate total damage we can deal to this enemy
+            potential_attackers = []
+            for unit in bot_units:
+                if not unit.can_attack:
+                    continue
+
+                attackable = self.game_state.mechanics.get_attackable_enemies(
+                    unit, [enemy], self.game_state.grid
+                )
+
+                if enemy in attackable:
+                    tile = self.game_state.grid.get_tile(unit.x, unit.y)
+                    damage = unit.get_attack_damage(enemy.x, enemy.y, tile.type == 'm')
+                    potential_attackers.append((unit, damage))
+
+            # Check if we can kill this enemy
+            total_damage = sum(d for _, d in potential_attackers)
+            if total_damage >= enemy.health:
+                # Execute the kill
+                potential_attackers.sort(key=lambda x: -x[1])  # Highest damage first
+                damage_dealt = 0
+                for attacker, damage in potential_attackers:
+                    if damage_dealt >= enemy.health or enemy.health <= 0:
+                        break
+                    if attacker.can_attack:
+                        self.game_state.attack(attacker, enemy)
+                        damage_dealt += damage
+
+    def calculate_attack_value(self, attacker, target):
+        """Enhanced attack value - more aggressive for kills and safe attacks."""
+        base_value = super().calculate_attack_value(attacker, target)
+
+        tile = self.game_state.grid.get_tile(attacker.x, attacker.y)
+        on_mountain = tile.type == 'm'
+        damage = attacker.get_attack_damage(target.x, target.y, on_mountain)
+
+        # Big bonus for kills (no counter-attack + removes enemy action)
+        if damage >= target.health:
+            base_value += 300
+
+        # Bonus for low-health targets
+        if target.health <= 5:
+            base_value += 100
+        elif target.health <= 10:
+            base_value += 50
+
+        # Bonus for safe archer attacks
+        if attacker.type == 'A' and target.type in ['W', 'B', 'C']:
+            base_value += 50  # Melee units can't counter archers
+
+        return base_value
+
