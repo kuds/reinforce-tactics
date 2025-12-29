@@ -229,27 +229,226 @@ Below are the results from official tournaments run on the Reinforce Tactics pla
 
 ---
 
+## Version 0.1.1
+
+### Tournament #1 - December 29, 2025
+
+**Configuration:**
+- **Games per matchup:** 8 games per bot pair (1 per side per map)
+- **Map pool mode:** All maps played
+- **Starting ELO:** 1500
+- **Bots:** 8 participants (3 rule-based, 5 LLM-powered)
+
+**Maps Used:**
+
+<div style={{display: 'flex', flexWrap: 'wrap', gap: '20px', justifyContent: 'center', marginBottom: '20px'}}>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/beginner.png" alt="Beginner Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>beginner.csv</strong><br/>6×6 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/funnel_point.png" alt="Funnel Point Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>funnel_point.csv</strong><br/>13×11 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/center_mountains.png" alt="Center Mountains Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>center_mountains.csv</strong><br/>18×18 • 2 Players</p>
+  </div>
+  <div style={{textAlign: 'center'}}>
+    <img src="/img/maps/corner_points.png" alt="Corner Points Map" style={{width: '150px', height: '150px', borderRadius: '8px', border: '2px solid #444'}} />
+    <p><strong>corner_points.csv</strong><br/>12×10 • 2 Players</p>
+  </div>
+</div>
+
+**Participants:**
+- SimpleBot (rule-based)
+- MediumBot (rule-based)
+- AdvancedBot (rule-based)
+- Claude Haiku 4.5 (claude-haiku-4-5-20251001)
+- Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
+- ChatGPT 5 Mini (gpt-5-mini-2025-08-07)
+- Gemini 2.0 Flash (gemini-2.0-flash)
+- Gemini 3.0 Flash (gemini-3-flash-preview)
+
+#### Final Standings
+
+| Rank | Bot Name | Wins | Losses | Draws | Total Games | Win Rate | ELO | ELO Change |
+|------|----------|------|--------|-------|-------------|----------|-----|------------|
+| 🥇 1 | AdvancedBot | 34 | 1 | 21 | 56 | 60.7% | 1702 | +202 |
+| 🥈 2 | Gemini 3.0 Flash | 33 | 4 | 19 | 56 | 58.9% | 1646 | +146 |
+| 🥉 3 | MediumBot | 26 | 8 | 22 | 56 | 46.4% | 1618 | +118 |
+| 4 | Claude Sonnet 4.5 | 19 | 13 | 24 | 56 | 33.9% | 1508 | +8 |
+| 5 | SimpleBot | 1 | 20 | 35 | 56 | 1.8% | 1410 | -90 |
+| 6 | Claude Haiku 4.5 | 3 | 22 | 31 | 56 | 5.4% | 1389 | -111 |
+| 7 | ChatGPT 5 Mini | 2 | 22 | 32 | 56 | 3.6% | 1386 | -114 |
+| 8 | Gemini 2.0 Flash | 0 | 28 | 28 | 56 | 0.0% | 1341 | -159 |
+
+#### Head-to-Head Results
+
+| Matchup | Wins | Losses | Draws | Notes |
+|---------|------|--------|-------|-------|
+| AdvancedBot vs Gemini 3.0 Flash | 4 | 0 | 4 | AdvancedBot undefeated |
+| AdvancedBot vs MediumBot | 5 | 1 | 2 | AdvancedBot dominant |
+| AdvancedBot vs Claude Sonnet 4.5 | 5 | 0 | 3 | Complete domination |
+| Gemini 3.0 Flash vs MediumBot | 3 | 0 | 5 | Gemini edges out |
+| Gemini 3.0 Flash vs Claude Sonnet 4.5 | 4 | 0 | 4 | Gemini superior |
+| MediumBot vs Claude Sonnet 4.5 | 4 | 0 | 4 | MediumBot perfect |
+| Claude Sonnet 4.5 vs Claude Haiku 4.5 | 5 | 0 | 3 | Sonnet dominates Haiku |
+| Claude Sonnet 4.5 vs ChatGPT 5 Mini | 4 | 0 | 4 | Sonnet edges GPT |
+| Claude Sonnet 4.5 vs Gemini 2.0 Flash | 6 | 0 | 2 | Sonnet sweeps |
+| Claude Haiku 4.5 vs ChatGPT 5 Mini | 0 | 0 | 8 | Complete stalemate |
+| Gemini 2.0 Flash vs SimpleBot | 0 | 0 | 8 | All draws |
+
+#### Per-Map Performance
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/beginner.png" alt="Beginner Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### beginner.csv (6×6)
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 14 | 0 | 0 |
+| Gemini 3.0 Flash | 12 | 2 | 0 |
+| Claude Sonnet 4.5 | 7 | 5 | 2 |
+| MediumBot | 6 | 4 | 4 |
+| ChatGPT 5 Mini | 2 | 8 | 4 |
+| Claude Haiku 4.5 | 2 | 8 | 4 |
+| SimpleBot | 1 | 8 | 5 |
+| Gemini 2.0 Flash | 0 | 9 | 5 |
+
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/funnel_point.png" alt="Funnel Point Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### funnel_point.csv (13×11)
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| Gemini 3.0 Flash | 11 | 1 | 2 |
+| MediumBot | 9 | 1 | 4 |
+| Claude Sonnet 4.5 | 8 | 5 | 1 |
+| AdvancedBot | 4 | 1 | 9 |
+| Claude Haiku 4.5 | 1 | 6 | 7 |
+| SimpleBot | 0 | 6 | 8 |
+| ChatGPT 5 Mini | 0 | 6 | 8 |
+| Gemini 2.0 Flash | 0 | 7 | 7 |
+
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/center_mountains.png" alt="Center Mountains Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### center_mountains.csv (18×18)
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 4 | 0 | 10 |
+| Claude Sonnet 4.5 | 3 | 0 | 11 |
+| Gemini 3.0 Flash | 2 | 0 | 12 |
+| MediumBot | 2 | 1 | 11 |
+| SimpleBot | 0 | 1 | 13 |
+| ChatGPT 5 Mini | 0 | 2 | 12 |
+| Claude Haiku 4.5 | 0 | 2 | 12 |
+| Gemini 2.0 Flash | 0 | 5 | 9 |
+
+</div>
+</div>
+
+<div style={{display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'flex-start'}}>
+<img src="/img/maps/corner_points.png" alt="Corner Points Map" style={{width: '80px', height: '80px', borderRadius: '4px', border: '1px solid #444'}} />
+<div>
+
+##### corner_points.csv (12×10)
+
+| Bot | Wins | Losses | Draws |
+|-----|------|--------|-------|
+| AdvancedBot | 12 | 0 | 2 |
+| MediumBot | 9 | 2 | 3 |
+| Gemini 3.0 Flash | 8 | 1 | 5 |
+| Claude Sonnet 4.5 | 1 | 3 | 10 |
+| SimpleBot | 0 | 5 | 9 |
+| ChatGPT 5 Mini | 0 | 6 | 8 |
+| Claude Haiku 4.5 | 0 | 6 | 8 |
+| Gemini 2.0 Flash | 0 | 7 | 7 |
+
+</div>
+</div>
+
+#### LLM Token Usage
+
+| Model | Input Tokens | Output Tokens | Total Tokens | Games |
+|-------|-------------|---------------|--------------|-------|
+| Gemini 3.0 Flash | 24,174,240 | 1,295,618 | 25,469,858 | 58 |
+| ChatGPT 5 Mini | 13,899,718 | 4,508,521 | 18,408,239 | 57 |
+| Claude Sonnet 4.5 | 16,585,568 | 695,199 | 17,280,767 | 56 |
+| Claude Haiku 4.5 | 16,116,414 | 552,455 | 16,668,869 | 56 |
+| Gemini 2.0 Flash | 12,057,436 | 402,555 | 12,459,991 | 56 |
+
+#### Analysis
+
+**Key Findings:**
+
+1. **AdvancedBot maintains dominance**: With a 60.7% win rate and +202 ELO, AdvancedBot proves its sophisticated strategies remain effective even against a larger, more diverse field of competitors.
+
+2. **Gemini 3.0 Flash emerges as top LLM**: Gemini 3.0 Flash achieved an impressive 58.9% win rate (+146 ELO), becoming the first LLM bot to finish in the top 3. It went undefeated against all other LLM bots.
+
+3. **Claude Sonnet 4.5 shows promise**: With a 33.9% win rate, Claude Sonnet significantly outperformed other Claude and OpenAI models, demonstrating improved tactical reasoning over Haiku.
+
+4. **LLM tier separation**: Clear performance tiers emerged among LLMs: Gemini 3.0 Flash (top tier), Claude Sonnet 4.5 (mid tier), and Claude Haiku/ChatGPT 5 Mini/Gemini 2.0 Flash (bottom tier).
+
+5. **Map-specific patterns**:
+   - **beginner.csv**: Decisive outcomes with few draws - fast-paced combat favors aggressive bots
+   - **center_mountains.csv**: Extremely high draw rate (75%+ for most bots) - defensive terrain creates stalemates
+   - **funnel_point.csv**: Gemini 3.0 Flash and MediumBot excelled with 11 and 9 wins respectively
+
+**Notable Observations:**
+- AdvancedBot's only loss came from MediumBot (1 game out of 56)
+- Gemini 2.0 Flash won 0 games across all matchups - the only bot with no wins
+- Claude Haiku 4.5 vs ChatGPT 5 Mini resulted in 8 draws - complete stalemate
+- Token efficiency: Claude models used ~300K tokens per game vs ChatGPT's ~323K per game
+
+---
+
 ## Historical Statistics
 
 ### Overall Performance (All Tournaments)
 
-| Bot Type | Total Wins | Total Losses | Total Draws | Overall Win Rate | Current ELO |
-|----------|------------|--------------|-------------|------------------|-------------|
-| AdvancedBot | 36 | 2 | 10 | 75.0% | 1693 |
-| MediumBot | 19 | 10 | 19 | 39.6% | 1575 |
-| SimpleBot | 1 | 20 | 27 | 2.1% | 1405 |
-| Claude Haiku 4.5 | 2 | 26 | 20 | 4.2% | 1327 |
+| Bot Type | Total Wins | Total Losses | Total Draws | Total Games | Overall Win Rate | Current ELO |
+|----------|------------|--------------|-------------|-------------|------------------|-------------|
+| AdvancedBot | 70 | 3 | 31 | 104 | 67.3% | 1702 |
+| Gemini 3.0 Flash | 33 | 4 | 19 | 56 | 58.9% | 1646 |
+| MediumBot | 45 | 18 | 41 | 104 | 43.3% | 1618 |
+| Claude Sonnet 4.5 | 19 | 13 | 24 | 56 | 33.9% | 1508 |
+| SimpleBot | 2 | 40 | 62 | 104 | 1.9% | 1410 |
+| Claude Haiku 4.5 | 5 | 48 | 51 | 104 | 4.8% | 1389 |
+| ChatGPT 5 Mini | 2 | 22 | 32 | 56 | 3.6% | 1386 |
+| Gemini 2.0 Flash | 0 | 28 | 28 | 56 | 0.0% | 1341 |
 
-### Head-to-Head Records
+### Head-to-Head Records (All-Time)
 
-| Bot A | Bot B | A Wins | B Wins | Draws | A Win % |
-|-------|-------|--------|--------|-------|---------|
-| AdvancedBot | MediumBot | 10 | 2 | 4 | 62.5% |
-| AdvancedBot | SimpleBot | 12 | 0 | 4 | 75.0% |
-| AdvancedBot | Claude Haiku 4.5 | 14 | 0 | 2 | 87.5% |
-| MediumBot | SimpleBot | 6 | 0 | 10 | 37.5% |
-| MediumBot | Claude Haiku 4.5 | 11 | 0 | 5 | 68.8% |
-| SimpleBot | Claude Haiku 4.5 | 1 | 2 | 13 | 6.3% |
+| Bot A | Bot B | A Wins | B Wins | Draws | Total | A Win % |
+|-------|-------|--------|--------|-------|-------|---------|
+| AdvancedBot | MediumBot | 15 | 3 | 6 | 24 | 62.5% |
+| AdvancedBot | SimpleBot | 18 | 0 | 6 | 24 | 75.0% |
+| AdvancedBot | Claude Haiku 4.5 | 18 | 0 | 6 | 24 | 75.0% |
+| AdvancedBot | Gemini 3.0 Flash | 4 | 0 | 4 | 8 | 50.0% |
+| AdvancedBot | Claude Sonnet 4.5 | 5 | 0 | 3 | 8 | 62.5% |
+| AdvancedBot | ChatGPT 5 Mini | 5 | 0 | 3 | 8 | 62.5% |
+| AdvancedBot | Gemini 2.0 Flash | 5 | 0 | 3 | 8 | 62.5% |
+| Gemini 3.0 Flash | MediumBot | 3 | 0 | 5 | 8 | 37.5% |
+| Gemini 3.0 Flash | Claude Sonnet 4.5 | 4 | 0 | 4 | 8 | 50.0% |
+| Gemini 3.0 Flash | SimpleBot | 6 | 0 | 2 | 8 | 75.0% |
+| MediumBot | SimpleBot | 9 | 0 | 15 | 24 | 37.5% |
+| MediumBot | Claude Haiku 4.5 | 18 | 0 | 6 | 24 | 75.0% |
+| Claude Sonnet 4.5 | Claude Haiku 4.5 | 5 | 0 | 3 | 8 | 62.5% |
+| SimpleBot | Claude Haiku 4.5 | 1 | 3 | 20 | 24 | 4.2% |
 
 ## How to Contribute Results
 
