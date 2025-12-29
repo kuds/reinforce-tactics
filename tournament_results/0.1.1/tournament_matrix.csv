@@ -1,0 +1,9 @@
+,AdvancedBot,ChatGPT 5 Mini,Claude Haiku 4.5,Claude Sonnet 4.5,Gemini 2.0 Flash,Gemini 3.0 Flash,MediumBot,SimpleBot
+AdvancedBot,X,5-0-3,4-0-4,5-0-3,5-0-3,4-0-4,5-1-2,6-0-2
+ChatGPT 5 Mini,0-5-3,X,0-0-8,0-4-4,2-0-6,0-7-1,0-5-3,0-1-7
+Claude Haiku 4.5,0-4-4,0-0-8,X,0-5-3,2-0-6,0-6-2,0-7-1,1-0-7
+Claude Sonnet 4.5,0-5-3,4-0-4,5-0-3,X,6-0-2,0-4-4,0-4-4,4-0-4
+Gemini 2.0 Flash,0-5-3,0-2-6,0-2-6,0-6-2,X,0-7-1,0-6-2,0-0-8
+Gemini 3.0 Flash,0-4-4,7-0-1,6-0-2,4-0-4,7-0-1,X,3-0-5,6-0-2
+MediumBot,1-5-2,5-0-3,7-0-1,4-0-4,6-0-2,0-3-5,X,3-0-5
+SimpleBot,0-6-2,1-0-7,0-1-7,0-4-4,0-0-8,0-6-2,0-3-5,X
