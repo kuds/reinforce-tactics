@@ -1,0 +1,6199 @@
+{
+  "timestamp": "2025-12-29T11:35:51.695915",
+  "game_info": {
+    "num_players": 2,
+    "max_turns": 100,
+    "total_turns": 30,
+    "winner": 1,
+    "game_over": true,
+    "start_time": "2025-12-29T10:43:40.863065",
+    "end_time": "2025-12-29T11:35:51.693354",
+    "map_file": "maps/1v1/corner_points.csv",
+    "initial_map": [
+      [
+        "h_1",
+        "b_1",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "f",
+        "b"
+      ],
+      [
+        "b_1",
+        "f",
+        "p",
+        "t",
+        "p",
+        "p",
+        "m",
+        "p",
+        "p",
+        "p",
+        "f",
+        "f"
+      ],
+      [
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "f",
+        "p",
+        "b",
+        "p",
+        "p"
+      ],
+      [
+        "p",
+        "t",
+        "p",
+        "p",
+        "o",
+        "p",
+        "p",
+        "f",
+        "f",
+        "p",
+        "p",
+        "p"
+      ],
+      [
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "t",
+        "t",
+        "p",
+        "p",
+        "m",
+        "p",
+        "p"
+      ],
+      [
+        "p",
+        "p",
+        "m",
+        "p",
+        "p",
+        "t",
+        "t",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p"
+      ],
+      [
+        "p",
+        "p",
+        "p",
+        "f",
+        "f",
+        "p",
+        "p",
+        "o",
+        "p",
+        "p",
+        "t",
+        "p"
+      ],
+      [
+        "p",
+        "p",
+        "b",
+        "p",
+        "f",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p"
+      ],
+      [
+        "f",
+        "f",
+        "p",
+        "p",
+        "p",
+        "m",
+        "p",
+        "p",
+        "t",
+        "p",
+        "f",
+        "b_2"
+      ],
+      [
+        "b",
+        "f",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "p",
+        "b_2",
+        "h_2"
+      ]
+    ],
+    "player_configs": [
+      {
+        "player_no": 1,
+        "type": "llm",
+        "name": "Gemini 3.0 Flash",
+        "temperature": 0.5,
+        "max_tokens": 65536
+      },
+      {
+        "player_no": 2,
+        "type": "llm",
+        "name": "ChatGPT 5 Mini",
+        "temperature": null,
+        "max_tokens": 128000
+      }
+    ]
+  },
+  "actions": [
+    {
+      "turn": 0,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:43:47.450715",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 0,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:43:47.450746"
+    },
+    {
+      "turn": 0,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:44:00.676805",
+      "unit_type": "A",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 0,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:44:00.676863",
+      "unit_type": "M",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 0,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:44:00.676875"
+    },
+    {
+      "turn": 1,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:44:09.369375",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 1,
+      "to_y": 3
+    },
+    {
+      "turn": 1,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:44:09.369583",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 1,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:44:09.369604"
+    },
+    {
+      "turn": 1,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:44:22.887890",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 1,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:44:22.887935",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 1,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:44:22.887946"
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:44:54.713724",
+      "unit_type": "A",
+      "position": [
+        1,
+        3
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:44:54.713804",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:44:54.713924",
+      "unit_type": "W",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:44:54.713937"
+    },
+    {
+      "turn": 2,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:45:38.720349",
+      "unit_type": "A",
+      "position": [
+        10,
+        6
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 2,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:45:38.720517",
+      "unit_type": "M",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 2,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:45:38.720580",
+      "unit_type": "W",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 2,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:45:38.720619",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 2,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:45:38.720630"
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:46:44.101203",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 1,
+      "to_x": 3,
+      "to_y": 1
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:46:44.101283",
+      "unit_type": "W",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 3,
+      "to_y": 0
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:46:44.101308",
+      "unit_type": "A",
+      "position": [
+        1,
+        3
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:46:44.101533",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:46:44.101551"
+    },
+    {
+      "turn": 3,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:12.700201",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 8,
+      "to_y": 8
+    },
+    {
+      "turn": 3,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:12.700252",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 3,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:12.700283",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 3,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:47:12.700301",
+      "unit_type": "A",
+      "position": [
+        10,
+        6
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 3,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:47:12.700311"
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:47:43.782699",
+      "unit_type": "M",
+      "position": [
+        3,
+        1
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:43.782839",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 3,
+      "to_x": 3,
+      "to_y": 3
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:43.782908",
+      "unit_type": "W",
+      "from_x": 3,
+      "from_y": 0,
+      "to_x": 6,
+      "to_y": 0
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:47:43.782947",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 0,
+      "to_y": 2
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:47:43.783239",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:47:43.783260"
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:48:22.296296",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:48:22.296438",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 6,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:48:22.296499",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:48:22.296541",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 8,
+      "to_y": 9
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:48:22.296757",
+      "unit_type": "W",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:48:22.296937",
+      "unit_type": "M",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 4,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:48:22.296963"
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:49:14.596933",
+      "unit_type": "M",
+      "position": [
+        3,
+        1
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:14.597061",
+      "unit_type": "A",
+      "from_x": 3,
+      "from_y": 3,
+      "to_x": 5,
+      "to_y": 4
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:14.597132",
+      "unit_type": "W",
+      "from_x": 6,
+      "from_y": 0,
+      "to_x": 9,
+      "to_y": 0
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:14.597168",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 2,
+      "to_x": 0,
+      "to_y": 3
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:14.597198",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 2,
+      "to_y": 0
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:49:14.597528",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 5,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:49:14.597554"
+    },
+    {
+      "turn": 5,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:49:37.571496",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 5,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:37.571589",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 5,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:37.571643",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 5,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:49:37.571680",
+      "unit_type": "W",
+      "from_x": 8,
+      "from_y": 9,
+      "to_x": 7,
+      "to_y": 9
+    },
+    {
+      "turn": 5,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:49:37.571697"
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:50:13.665846",
+      "unit_type": "A",
+      "position": [
+        5,
+        4
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:50:13.665875",
+      "unit_type": "M",
+      "position": [
+        3,
+        1
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:13.665943",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 0,
+      "to_x": 11,
+      "to_y": 0
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:13.665977",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 3,
+      "to_x": 2,
+      "to_y": 3
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:13.666015",
+      "unit_type": "A",
+      "from_x": 2,
+      "from_y": 0,
+      "to_x": 4,
+      "to_y": 0
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:13.666037",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:50:13.666254",
+      "unit_type": "W",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:50:13.666271"
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:50:49.828727",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:49.828830",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:49.828925",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 6,
+      "to_x": 9,
+      "to_y": 7
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:49.828985",
+      "unit_type": "W",
+      "from_x": 7,
+      "from_y": 9,
+      "to_x": 6,
+      "to_y": 9
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:50:49.829027",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:50:49.829411",
+      "unit_type": "C",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 6,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:50:49.829446"
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:52:15.647339",
+      "unit_type": "A",
+      "position": [
+        5,
+        4
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:52:15.647371",
+      "unit_type": "W",
+      "position": [
+        11,
+        0
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:15.647446",
+      "unit_type": "W",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 3,
+      "to_y": 0
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:52:15.647654",
+      "unit_type": "A",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:15.647691",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 1,
+      "to_x": 5,
+      "to_y": 1
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:15.647727",
+      "unit_type": "A",
+      "from_x": 4,
+      "from_y": 0,
+      "to_x": 7,
+      "to_y": 0
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:15.647755",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 3,
+      "to_x": 3,
+      "to_y": 4
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:15.647783",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 1,
+      "to_x": 3,
+      "to_y": 2
+    },
+    {
+      "turn": 7,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:52:15.647792"
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:52:58.366877",
+      "unit_type": "W",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.366966",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.366999",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 7
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.367152",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 6
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.367197",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 8,
+      "to_x": 7,
+      "to_y": 8
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.367233",
+      "unit_type": "W",
+      "from_x": 6,
+      "from_y": 9,
+      "to_x": 5,
+      "to_y": 8
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.367262",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:52:58.367303",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 8,
+      "to_y": 9
+    },
+    {
+      "turn": 7,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:52:58.367322"
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:54:23.906737",
+      "unit_type": "W",
+      "position": [
+        11,
+        0
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.906881",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 4,
+      "to_x": 7,
+      "to_y": 4
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.906922",
+      "unit_type": "M",
+      "from_x": 5,
+      "from_y": 1,
+      "to_x": 7,
+      "to_y": 1
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.906955",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 4,
+      "to_x": 4,
+      "to_y": 4
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.907005",
+      "unit_type": "A",
+      "from_x": 7,
+      "from_y": 0,
+      "to_x": 9,
+      "to_y": 0
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.907054",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 2,
+      "to_x": 5,
+      "to_y": 2
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.907091",
+      "unit_type": "W",
+      "from_x": 3,
+      "from_y": 0,
+      "to_x": 5,
+      "to_y": 0
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:23.907160",
+      "unit_type": "A",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:54:23.907538",
+      "unit_type": "M",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:54:23.907562"
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:54:58.851127",
+      "unit_type": "W",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851230",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 6,
+      "to_x": 9,
+      "to_y": 4
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851267",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 8,
+      "to_x": 8,
+      "to_y": 7
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851296",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851340",
+      "unit_type": "W",
+      "from_x": 5,
+      "from_y": 8,
+      "to_x": 3,
+      "to_y": 8
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851377",
+      "unit_type": "W",
+      "from_x": 8,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851402",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 7
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851428",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 6,
+      "to_x": 11,
+      "to_y": 5
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:54:58.851458",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 8,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:54:58.851473"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:56:28.507832",
+      "unit_type": "W",
+      "position": [
+        11,
+        0
+      ],
+      "structure_type": "b",
+      "captured": true
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T10:56:28.507895",
+      "attacker_type": "A",
+      "attacker_pos": [
+        7,
+        4
+      ],
+      "target_type": "A",
+      "target_pos": [
+        9,
+        4
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.507973",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 0,
+      "to_x": 9,
+      "to_y": 2
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508011",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 4,
+      "to_x": 5,
+      "to_y": 5
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508043",
+      "unit_type": "M",
+      "from_x": 5,
+      "from_y": 2,
+      "to_x": 6,
+      "to_y": 2
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508080",
+      "unit_type": "W",
+      "from_x": 5,
+      "from_y": 0,
+      "to_x": 7,
+      "to_y": 0
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508145",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 1,
+      "to_x": 8,
+      "to_y": 1
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508198",
+      "unit_type": "A",
+      "from_x": 2,
+      "from_y": 1,
+      "to_x": 3,
+      "to_y": 1
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:56:28.508220",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 1,
+      "to_y": 1
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:56:28.508542",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:56:28.508564"
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:57:36.838388",
+      "unit_type": "W",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T10:57:36.838455",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        4
+      ],
+      "target_type": "A",
+      "target_pos": [
+        7,
+        4
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:57:36.838503",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 7,
+      "to_x": 9,
+      "to_y": 6
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:57:36.838556",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 7
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:57:36.838590",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 7,
+      "to_x": 11,
+      "to_y": 7
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:57:36.838616",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 5,
+      "to_x": 11,
+      "to_y": 4
+    },
+    {
+      "turn": 9,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:57:36.838628"
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T10:59:02.610891",
+      "attacker_type": "A",
+      "attacker_pos": [
+        7,
+        4
+      ],
+      "target_type": "A",
+      "target_pos": [
+        9,
+        4
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:59:02.610993",
+      "unit_type": "A",
+      "position": [
+        9,
+        2
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T10:59:02.611015",
+      "unit_type": "M",
+      "position": [
+        5,
+        5
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611153",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 1
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611218",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 11,
+      "to_y": 1
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611278",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 2,
+      "to_x": 8,
+      "to_y": 2
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611340",
+      "unit_type": "W",
+      "from_x": 7,
+      "from_y": 0,
+      "to_x": 9,
+      "to_y": 0
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611487",
+      "unit_type": "A",
+      "from_x": 3,
+      "from_y": 1,
+      "to_x": 5,
+      "to_y": 2
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611567",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 1,
+      "to_x": 1,
+      "to_y": 2
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:02.611613",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 0,
+      "to_y": 2
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T10:59:02.612094",
+      "unit_type": "M",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 10,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:59:02.612156"
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T10:59:55.133475",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        4
+      ],
+      "target_type": "A",
+      "target_pos": [
+        7,
+        4
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133573",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 6,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133612",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 10,
+      "to_y": 7
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133667",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 7,
+      "to_x": 8,
+      "to_y": 8
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133694",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 7,
+      "to_x": 11,
+      "to_y": 6
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133720",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 4,
+      "to_x": 10,
+      "to_y": 4
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133752",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T10:59:55.133798",
+      "unit_type": "W",
+      "from_x": 3,
+      "from_y": 8,
+      "to_x": 2,
+      "to_y": 7
+    },
+    {
+      "turn": 10,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T10:59:55.133808"
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:00:34.516600",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        2
+      ],
+      "target_type": "A",
+      "target_pos": [
+        9,
+        4
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:00:34.516652",
+      "unit_type": "M",
+      "position": [
+        5,
+        5
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.516741",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.516805",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 1,
+      "to_x": 11,
+      "to_y": 4
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.516858",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 2,
+      "to_x": 8,
+      "to_y": 4
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.516919",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 0,
+      "to_x": 10,
+      "to_y": 0
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.517008",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 2,
+      "to_x": 6,
+      "to_y": 4
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.517057",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 2,
+      "to_x": 3,
+      "to_y": 2
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.517099",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 2,
+      "to_x": 0,
+      "to_y": 4
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:00:34.517874",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 3,
+      "to_y": 0
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:00:34.518429",
+      "unit_type": "A",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:00:34.518871",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 11,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:00:34.518899"
+    },
+    {
+      "turn": 11,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:01:26.303288",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        4
+      ]
+    },
+    {
+      "turn": 11,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:01:26.303372",
+      "attacker_type": "C",
+      "attacker_pos": [
+        10,
+        4
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        3
+      ],
+      "damage": 2,
+      "target_killed": false
+    },
+    {
+      "turn": 11,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:01:26.303398",
+      "unit_type": "W",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 11,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:01:26.303749",
+      "unit_type": "W",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 11,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:01:26.303770"
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:02:22.871754",
+      "unit_type": "M",
+      "position": [
+        5,
+        5
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:02:22.871792",
+      "unit_type": "A",
+      "position": [
+        9,
+        2
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:02:22.871802",
+      "unit_type": "A",
+      "position": [
+        6,
+        4
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:02:22.871829",
+      "attacker_type": "M",
+      "attacker_pos": [
+        8,
+        4
+      ],
+      "target_type": "C",
+      "target_pos": [
+        10,
+        4
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.871918",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 11,
+      "to_y": 2
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.871982",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 0,
+      "to_x": 10,
+      "to_y": 1
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.872012",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 11,
+      "to_y": 1
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.872039",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 0,
+      "to_x": 3,
+      "to_y": 1
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.872067",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 4,
+      "to_x": 1,
+      "to_y": 4
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.872100",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 2,
+      "to_x": 3,
+      "to_y": 3
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:22.872155",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 0,
+      "to_y": 2
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:02:22.872580",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 12,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:02:22.872622"
+    },
+    {
+      "turn": 12,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:02:52.018814",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        4
+      ]
+    },
+    {
+      "turn": 12,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:52.018945",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 6,
+      "to_x": 10,
+      "to_y": 4
+    },
+    {
+      "turn": 12,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:02:52.019040",
+      "unit_type": "W",
+      "from_x": 8,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 6
+    },
+    {
+      "turn": 12,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:02:52.019072",
+      "unit_type": "W",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 12,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:02:52.019086"
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:04:17.675886",
+      "attacker_type": "M",
+      "attacker_pos": [
+        8,
+        4
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        4
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:04:17.675986",
+      "unit_type": "A",
+      "position": [
+        9,
+        2
+      ],
+      "structure_type": "b",
+      "captured": true
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:04:17.676006",
+      "unit_type": "A",
+      "position": [
+        6,
+        4
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676154",
+      "unit_type": "M",
+      "from_x": 5,
+      "from_y": 5,
+      "to_x": 6,
+      "to_y": 5
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676237",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676275",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 3
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676323",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 0
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676375",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 1,
+      "to_x": 4,
+      "to_y": 1
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676418",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 3,
+      "to_x": 4,
+      "to_y": 2
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676467",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 4,
+      "to_x": 2,
+      "to_y": 4
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676511",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 2,
+      "to_x": 1,
+      "to_y": 2
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:04:17.676569",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 2,
+      "to_y": 0
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:04:17.677236",
+      "unit_type": "C",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:04:17.677781",
+      "unit_type": "M",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 13,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:04:17.677822"
+    },
+    {
+      "turn": 13,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:04:40.171921",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        4
+      ]
+    },
+    {
+      "turn": 13,
+      "player": 2,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:04:40.171961",
+      "unit_type": "W",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": true
+    },
+    {
+      "turn": 13,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:04:40.171971"
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:05:03.283838",
+      "unit_type": "M",
+      "position": [
+        6,
+        5
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.283965",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 9,
+      "to_y": 5
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284010",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 4,
+      "to_x": 8,
+      "to_y": 6
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284062",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284159",
+      "unit_type": "A",
+      "from_x": 6,
+      "from_y": 4,
+      "to_x": 8,
+      "to_y": 5
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284189",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 3,
+      "to_x": 11,
+      "to_y": 2
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284219",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 2,
+      "to_x": 6,
+      "to_y": 2
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284251",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 4,
+      "to_x": 4,
+      "to_y": 4
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284280",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 1,
+      "to_x": 6,
+      "to_y": 1
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284314",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 0,
+      "to_x": 11,
+      "to_y": 1
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284345",
+      "unit_type": "M",
+      "from_x": 1,
+      "from_y": 2,
+      "to_x": 3,
+      "to_y": 2
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284381",
+      "unit_type": "A",
+      "from_x": 2,
+      "from_y": 0,
+      "to_x": 5,
+      "to_y": 0
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284401",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 10,
+      "to_y": 1
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:03.284424",
+      "unit_type": "M",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:05:03.284867",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 14,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:05:03.284907"
+    },
+    {
+      "turn": 14,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:05:41.276358",
+      "paralyzer_pos": [
+        10,
+        7
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 14,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:05:41.276408",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        10,
+        6
+      ],
+      "damage": 8,
+      "target_killed": false
+    },
+    {
+      "turn": 14,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:05:41.276423",
+      "attacker_type": "W",
+      "attacker_pos": [
+        9,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        10,
+        6
+      ],
+      "damage": 10,
+      "target_killed": true
+    },
+    {
+      "turn": 14,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:05:41.276439"
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:05:59.339149",
+      "unit_type": "M",
+      "position": [
+        6,
+        5
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:05:59.339194",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        9,
+        6
+      ]
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:05:59.339217",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:05:59.339239",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "M",
+      "target_pos": [
+        11,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.339328",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 3
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.339517",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 2,
+      "to_x": 6,
+      "to_y": 4
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340062",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 4,
+      "to_x": 4,
+      "to_y": 6
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340151",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 2,
+      "to_x": 3,
+      "to_y": 4
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340205",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 1,
+      "to_y": 3
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340238",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 3
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340279",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 0,
+      "to_x": 5,
+      "to_y": 3
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:05:59.340313",
+      "unit_type": "C",
+      "from_x": 10,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 2
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:05:59.340777",
+      "unit_type": "A",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:05:59.341478",
+      "unit_type": "A",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:05:59.341907",
+      "unit_type": "W",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 15,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:05:59.341936"
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:06:47.477236",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:06:47.477339",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:06:47.477414",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 7
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:06:47.477476",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:06:47.477523",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 6,
+      "to_x": 11,
+      "to_y": 5
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:06:47.477547",
+      "paralyzer_pos": [
+        11,
+        5
+      ],
+      "target_pos": [
+        11,
+        4
+      ]
+    },
+    {
+      "turn": 15,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:06:47.477564"
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:08:31.043241",
+      "unit_type": "M",
+      "position": [
+        6,
+        5
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:08:31.043280",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:08:31.043304",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        3
+      ],
+      "target_type": "M",
+      "target_pos": [
+        11,
+        5
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:08:31.043325",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:08:31.043335",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:08:31.043418",
+      "unit_type": "C",
+      "from_x": 10,
+      "from_y": 2,
+      "to_x": 10,
+      "to_y": 4
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:08:31.043484",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:08:31.043524",
+      "unit_type": "W",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:08:31.043557",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 3,
+      "to_x": 2,
+      "to_y": 4
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:08:31.043604",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 3,
+      "to_x": 2,
+      "to_y": 2
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:08:31.044079",
+      "unit_type": "W",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 16,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:08:31.044101"
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:09:13.605351",
+      "unit_type": "W",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:09:13.605754",
+      "unit_type": "W",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:13.605831",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:13.605905",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 7,
+      "to_x": 11,
+      "to_y": 6
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:13.605992",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 7
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:13.606069",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 8,
+      "to_y": 9
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:13.607436",
+      "unit_type": "W",
+      "from_x": 2,
+      "from_y": 7,
+      "to_x": 3,
+      "to_y": 7
+    },
+    {
+      "turn": 16,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:09:13.607486"
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "cure",
+      "timestamp": "2025-12-29T11:09:34.771589",
+      "curer_pos": [
+        10,
+        4
+      ],
+      "target_pos": [
+        11,
+        4
+      ]
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:09:34.771648",
+      "attacker_type": "M",
+      "attacker_pos": [
+        8,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 8,
+      "target_killed": true
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:09:34.771673",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:09:34.771685",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        3
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        6
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:09:34.771700",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:09:34.771717",
+      "paralyzer_pos": [
+        4,
+        6
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:34.771793",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 5,
+      "to_x": 6,
+      "to_y": 6
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:09:34.771836",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 1,
+      "to_x": 8,
+      "to_y": 1
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:09:34.772390",
+      "unit_type": "W",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:09:34.772812",
+      "unit_type": "W",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 17,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:09:34.772832"
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:10:03.287912",
+      "unit_type": "C",
+      "x": 2,
+      "y": 7
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.287990",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.288031",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 6,
+      "to_x": 10,
+      "to_y": 5
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.288090",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 7,
+      "to_x": 9,
+      "to_y": 6
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.288181",
+      "unit_type": "W",
+      "from_x": 8,
+      "from_y": 9,
+      "to_x": 8,
+      "to_y": 8
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.288221",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 7
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:10:03.288257",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 17,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:10:03.288268"
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:11:45.489646",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        9,
+        6
+      ]
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:11:45.489683",
+      "paralyzer_pos": [
+        4,
+        6
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:11:45.489720",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        10,
+        5
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:11:45.489736",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        3
+      ],
+      "target_type": "W",
+      "target_pos": [
+        10,
+        5
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:11:45.489746",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.489848",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 4,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.489896",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 6,
+      "to_x": 6,
+      "to_y": 7
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.489935",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 4,
+      "to_x": 2,
+      "to_y": 6
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.489973",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 4,
+      "to_x": 3,
+      "to_y": 6
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490037",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 4,
+      "to_x": 6,
+      "to_y": 5
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490156",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 3,
+      "to_x": 5,
+      "to_y": 5
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490205",
+      "unit_type": "W",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 1,
+      "to_y": 1
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490296",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 10,
+      "to_y": 0
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490334",
+      "unit_type": "W",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 0,
+      "to_y": 2
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490391",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 9,
+      "to_y": 1
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490438",
+      "unit_type": "W",
+      "from_x": 2,
+      "from_y": 1,
+      "to_x": 3,
+      "to_y": 1
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490468",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 1,
+      "to_x": 8,
+      "to_y": 3
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490495",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 3,
+      "to_x": 11,
+      "to_y": 2
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490546",
+      "unit_type": "A",
+      "from_x": 2,
+      "from_y": 2,
+      "to_x": 3,
+      "to_y": 3
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490575",
+      "unit_type": "C",
+      "from_x": 10,
+      "from_y": 4,
+      "to_x": 9,
+      "to_y": 4
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:11:45.490609",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 1
+    },
+    {
+      "turn": 18,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:11:45.490629"
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:12:27.482862",
+      "unit_type": "M",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "cure",
+      "timestamp": "2025-12-29T11:12:27.482929",
+      "curer_pos": [
+        2,
+        7
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:12:27.482966",
+      "attacker_type": "W",
+      "attacker_pos": [
+        10,
+        5
+      ],
+      "target_type": "A",
+      "target_pos": [
+        9,
+        5
+      ],
+      "damage": 10,
+      "target_killed": false
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:12:27.483065",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 7
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:12:27.483178",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 18,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:12:27.483200"
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:14:03.005021",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        3
+      ],
+      "target_type": "W",
+      "target_pos": [
+        10,
+        5
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:14:03.005086",
+      "unit_type": "W",
+      "position": [
+        10,
+        6
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:14:03.005134",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        8,
+        8
+      ]
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "heal",
+      "timestamp": "2025-12-29T11:14:03.005160",
+      "healer_pos": [
+        9,
+        4
+      ],
+      "target_pos": [
+        9,
+        5
+      ],
+      "amount": 5
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:14:03.005170",
+      "paralyzer_pos": [
+        3,
+        6
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:14:03.005180",
+      "paralyzer_pos": [
+        2,
+        6
+      ],
+      "target_pos": [
+        2,
+        7
+      ]
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:14:03.005197",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:14:03.005213",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005328",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 4
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005430",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 2
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005504",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 5,
+      "to_x": 5,
+      "to_y": 7
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005542",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 7,
+      "to_x": 8,
+      "to_y": 7
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005577",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 6,
+      "to_x": 6,
+      "to_y": 6
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005611",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 3,
+      "to_x": 9,
+      "to_y": 3
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005642",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 5,
+      "to_x": 7,
+      "to_y": 5
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:03.005709",
+      "unit_type": "A",
+      "from_x": 3,
+      "from_y": 3,
+      "to_x": 4,
+      "to_y": 5
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:14:03.006408",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:14:03.006917",
+      "unit_type": "A",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:14:03.007718",
+      "unit_type": "A",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:14:03.008580",
+      "unit_type": "A",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 19,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:14:03.008647"
+    },
+    {
+      "turn": 19,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:14:37.286511",
+      "unit_type": "C",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 19,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:37.286593",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 7,
+      "to_x": 11,
+      "to_y": 6
+    },
+    {
+      "turn": 19,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:14:37.286625",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 19,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:14:37.286653",
+      "attacker_type": "W",
+      "attacker_pos": [
+        9,
+        7
+      ],
+      "target_type": "M",
+      "target_pos": [
+        8,
+        7
+      ],
+      "damage": 10,
+      "target_killed": true
+    },
+    {
+      "turn": 19,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:14:37.286669"
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "heal",
+      "timestamp": "2025-12-29T11:16:13.894551",
+      "healer_pos": [
+        9,
+        4
+      ],
+      "target_pos": [
+        9,
+        5
+      ],
+      "amount": 5
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:16:13.894616",
+      "unit_type": "W",
+      "position": [
+        10,
+        6
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:16:13.894647",
+      "attacker_type": "M",
+      "attacker_pos": [
+        8,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 8,
+      "target_killed": true
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:16:13.894673",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        7
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:16:13.894704",
+      "paralyzer_pos": [
+        11,
+        4
+      ],
+      "target_pos": [
+        11,
+        6
+      ]
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:16:13.894713",
+      "paralyzer_pos": [
+        3,
+        6
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:16:13.894724",
+      "attacker_type": "A",
+      "attacker_pos": [
+        5,
+        7
+      ],
+      "target_type": "C",
+      "target_pos": [
+        2,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:16:13.894736",
+      "attacker_type": "M",
+      "attacker_pos": [
+        2,
+        6
+      ],
+      "target_type": "C",
+      "target_pos": [
+        2,
+        7
+      ],
+      "damage": 8,
+      "target_killed": true
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.894865",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 3
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.894936",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 10,
+      "to_y": 4
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.895004",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 8,
+      "to_y": 3
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.895035",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 11,
+      "to_y": 2
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.895079",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 1,
+      "to_x": 11,
+      "to_y": 1
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.895156",
+      "unit_type": "A",
+      "from_x": 1,
+      "from_y": 0,
+      "to_x": 2,
+      "to_y": 0
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:16:13.895218",
+      "unit_type": "A",
+      "from_x": 0,
+      "from_y": 1,
+      "to_x": 0,
+      "to_y": 0
+    },
+    {
+      "turn": 20,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:16:13.895239"
+    },
+    {
+      "turn": 20,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:17:07.600017",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 20,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:17:07.600081",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 7
+    },
+    {
+      "turn": 20,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:17:07.600101",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 20,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:17:07.600373",
+      "unit_type": "M",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 20,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:17:07.600394"
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:18:44.889721",
+      "paralyzer_pos": [
+        3,
+        6
+      ],
+      "target_pos": [
+        3,
+        7
+      ]
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:18:44.889774",
+      "attacker_type": "A",
+      "attacker_pos": [
+        5,
+        7
+      ],
+      "target_type": "W",
+      "target_pos": [
+        3,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:18:44.889789",
+      "attacker_type": "A",
+      "attacker_pos": [
+        4,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        3,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:18:44.889799",
+      "paralyzer_pos": [
+        11,
+        4
+      ],
+      "target_pos": [
+        11,
+        6
+      ]
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:18:44.889810",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:18:44.889820",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        4
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:18:44.889827",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        8,
+        8
+      ]
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:18:44.889836",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        8,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.889911",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 6,
+      "to_x": 6,
+      "to_y": 7
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.889957",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 6,
+      "to_x": 2,
+      "to_y": 7
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.889991",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 5,
+      "to_x": 5,
+      "to_y": 5
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.890030",
+      "unit_type": "C",
+      "from_x": 9,
+      "from_y": 4,
+      "to_x": 8,
+      "to_y": 4
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.890100",
+      "unit_type": "A",
+      "from_x": 8,
+      "from_y": 3,
+      "to_x": 7,
+      "to_y": 3
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.890177",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 3,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.890218",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 1
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:18:44.890254",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 0,
+      "to_x": 9,
+      "to_y": 0
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:18:44.890872",
+      "unit_type": "A",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:18:44.891518",
+      "unit_type": "A",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:18:44.892055",
+      "unit_type": "A",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:18:44.893232",
+      "unit_type": "A",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 21,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:18:44.893303"
+    },
+    {
+      "turn": 21,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:19:21.675070",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 21,
+      "player": 2,
+      "type": "cure",
+      "timestamp": "2025-12-29T11:19:21.675152",
+      "curer_pos": [
+        11,
+        7
+      ],
+      "target_pos": [
+        11,
+        6
+      ]
+    },
+    {
+      "turn": 21,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:19:21.675453",
+      "unit_type": "W",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 21,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:19:21.675477"
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:21:25.042313",
+      "attacker_type": "A",
+      "attacker_pos": [
+        4,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        3,
+        7
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:21:25.042390",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        4
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        6
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:21:25.042421",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        8,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:21:25.042436",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        8,
+        8
+      ]
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:21:25.042455",
+      "unit_type": "M",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042547",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 7,
+      "to_x": 7,
+      "to_y": 7
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042595",
+      "unit_type": "M",
+      "from_x": 5,
+      "from_y": 5,
+      "to_x": 6,
+      "to_y": 6
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042641",
+      "unit_type": "C",
+      "from_x": 8,
+      "from_y": 4,
+      "to_x": 9,
+      "to_y": 4
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042683",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 9,
+      "to_y": 3
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042736",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 1,
+      "to_x": 10,
+      "to_y": 2
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042801",
+      "unit_type": "A",
+      "from_x": 7,
+      "from_y": 3,
+      "to_x": 7,
+      "to_y": 4
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:21:25.042858",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 8,
+      "to_y": 2
+    },
+    {
+      "turn": 22,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:21:25.042875"
+    },
+    {
+      "turn": 22,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:22:03.072764",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 22,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:22:03.072874",
+      "unit_type": "C",
+      "from_x": 11,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 7
+    },
+    {
+      "turn": 22,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:22:03.072934",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 8
+    },
+    {
+      "turn": 22,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:22:03.072974",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 8,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 22,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:22:03.072983"
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:23:09.307838",
+      "unit_type": "M",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:23:09.307900",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        8,
+        8
+      ]
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:23:09.307935",
+      "attacker_type": "M",
+      "attacker_pos": [
+        7,
+        7
+      ],
+      "target_type": "W",
+      "target_pos": [
+        8,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:23:09.307981",
+      "attacker_type": "A",
+      "attacker_pos": [
+        9,
+        5
+      ],
+      "target_type": "C",
+      "target_pos": [
+        10,
+        7
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:23:09.308000",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        4
+      ],
+      "target_type": "C",
+      "target_pos": [
+        10,
+        7
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:23:09.308127",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 4,
+      "to_x": 11,
+      "to_y": 6
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:23:09.308239",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 3,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:23:09.308305",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 3,
+      "to_x": 8,
+      "to_y": 3
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:23:09.311954",
+      "unit_type": "M",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 23,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:23:09.312048"
+    },
+    {
+      "turn": 23,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:23:35.363746",
+      "unit_type": "C",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 23,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:23:35.363806",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 23,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:23:35.363906",
+      "unit_type": "W",
+      "from_x": 9,
+      "from_y": 8,
+      "to_x": 9,
+      "to_y": 6
+    },
+    {
+      "turn": 23,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:23:35.363956",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 9,
+      "to_y": 9
+    },
+    {
+      "turn": 23,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:23:35.363970"
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:25:22.397030",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        6
+      ],
+      "target_type": "C",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:25:22.397092",
+      "paralyzer_pos": [
+        8,
+        6
+      ],
+      "target_pos": [
+        9,
+        6
+      ]
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:25:22.397146",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:25:22.397166",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        4
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:25:22.397191",
+      "unit_type": "M",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397308",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 7,
+      "to_x": 8,
+      "to_y": 8
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397435",
+      "unit_type": "A",
+      "from_x": 5,
+      "from_y": 7,
+      "to_x": 6,
+      "to_y": 9
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397495",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 6,
+      "to_x": 6,
+      "to_y": 8
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397600",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 5,
+      "to_x": 11,
+      "to_y": 5
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397705",
+      "unit_type": "A",
+      "from_x": 4,
+      "from_y": 5,
+      "to_x": 4,
+      "to_y": 7
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397772",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 6,
+      "to_x": 3,
+      "to_y": 8
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397838",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 9,
+      "to_y": 3
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397898",
+      "unit_type": "C",
+      "from_x": 9,
+      "from_y": 4,
+      "to_x": 8,
+      "to_y": 4
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.397953",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 3,
+      "to_x": 7,
+      "to_y": 3
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.398043",
+      "unit_type": "A",
+      "from_x": 7,
+      "from_y": 4,
+      "to_x": 6,
+      "to_y": 4
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.398442",
+      "unit_type": "A",
+      "from_x": 8,
+      "from_y": 2,
+      "to_x": 7,
+      "to_y": 2
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.398590",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 11,
+      "to_y": 3
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:22.398670",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 4
+    },
+    {
+      "turn": 24,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:25:22.398707"
+    },
+    {
+      "turn": 24,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:25:49.868538",
+      "attacker_type": "M",
+      "attacker_pos": [
+        9,
+        9
+      ],
+      "target_type": "M",
+      "target_pos": [
+        8,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 24,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:25:49.868591",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 24,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:25:49.868680",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 8
+    },
+    {
+      "turn": 24,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:25:49.868700"
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:27:11.397776",
+      "unit_type": "M",
+      "position": [
+        2,
+        7
+      ],
+      "structure_type": "b",
+      "captured": true
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:27:11.397819",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        8
+      ]
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:27:11.397841",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        9,
+        6
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:27:11.397878",
+      "attacker_type": "A",
+      "attacker_pos": [
+        6,
+        9
+      ],
+      "target_type": "M",
+      "target_pos": [
+        9,
+        9
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:27:11.397948",
+      "unit_type": "M",
+      "from_x": 6,
+      "from_y": 8,
+      "to_x": 8,
+      "to_y": 8
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:27:11.397997",
+      "unit_type": "C",
+      "from_x": 8,
+      "from_y": 4,
+      "to_x": 9,
+      "to_y": 5
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:27:11.398034",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 3,
+      "to_x": 9,
+      "to_y": 4
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:27:11.398100",
+      "unit_type": "A",
+      "from_x": 4,
+      "from_y": 7,
+      "to_x": 6,
+      "to_y": 7
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:27:11.398889",
+      "unit_type": "A",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 25,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:27:11.398918"
+    },
+    {
+      "turn": 25,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:27:49.350726",
+      "unit_type": "A",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 25,
+      "player": 2,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:27:49.350777",
+      "paralyzer_pos": [
+        10,
+        8
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 25,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:27:49.350820",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 25,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:27:49.350831"
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:28:25.598477",
+      "paralyzer_pos": [
+        8,
+        8
+      ],
+      "target_pos": [
+        10,
+        8
+      ]
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:28:25.598507",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        8
+      ]
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:28:25.598532",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598603",
+      "unit_type": "M",
+      "from_x": 8,
+      "from_y": 6,
+      "to_x": 9,
+      "to_y": 7
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598650",
+      "unit_type": "C",
+      "from_x": 9,
+      "from_y": 5,
+      "to_x": 9,
+      "to_y": 6
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598716",
+      "unit_type": "A",
+      "from_x": 6,
+      "from_y": 7,
+      "to_x": 7,
+      "to_y": 7
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598755",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 3,
+      "to_x": 7,
+      "to_y": 5
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598790",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 4,
+      "to_x": 10,
+      "to_y": 3
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598831",
+      "unit_type": "A",
+      "from_x": 6,
+      "from_y": 9,
+      "to_x": 7,
+      "to_y": 9
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:25.598863",
+      "unit_type": "M",
+      "from_x": 3,
+      "from_y": 8,
+      "to_x": 4,
+      "to_y": 8
+    },
+    {
+      "turn": 26,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:28:25.598872"
+    },
+    {
+      "turn": 26,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:28:55.837203",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 8,
+      "to_y": 9
+    },
+    {
+      "turn": 26,
+      "player": 2,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:28:55.837287",
+      "attacker_type": "A",
+      "attacker_pos": [
+        8,
+        9
+      ],
+      "target_type": "M",
+      "target_pos": [
+        8,
+        8
+      ],
+      "damage": 0,
+      "target_killed": false
+    },
+    {
+      "turn": 26,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:28:55.837305"
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "cure",
+      "timestamp": "2025-12-29T11:30:52.550826",
+      "curer_pos": [
+        9,
+        6
+      ],
+      "target_pos": [
+        10,
+        6
+      ]
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:30:52.550874",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:30:52.550892",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:30:52.550918",
+      "paralyzer_pos": [
+        9,
+        7
+      ],
+      "target_pos": [
+        10,
+        8
+      ]
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:30:52.550939",
+      "attacker_type": "A",
+      "attacker_pos": [
+        7,
+        7
+      ],
+      "target_type": "A",
+      "target_pos": [
+        8,
+        9
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:30:52.550953",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551075",
+      "unit_type": "A",
+      "from_x": 8,
+      "from_y": 5,
+      "to_x": 8,
+      "to_y": 6
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551148",
+      "unit_type": "M",
+      "from_x": 7,
+      "from_y": 5,
+      "to_x": 7,
+      "to_y": 4
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551215",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 2,
+      "to_x": 11,
+      "to_y": 2
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551261",
+      "unit_type": "M",
+      "from_x": 4,
+      "from_y": 8,
+      "to_x": 5,
+      "to_y": 8
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551302",
+      "unit_type": "A",
+      "from_x": 7,
+      "from_y": 9,
+      "to_x": 6,
+      "to_y": 9
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551355",
+      "unit_type": "M",
+      "from_x": 2,
+      "from_y": 7,
+      "to_x": 3,
+      "to_y": 7
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551403",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 0,
+      "to_x": 8,
+      "to_y": 0
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551456",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 4,
+      "to_x": 10,
+      "to_y": 5
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551510",
+      "unit_type": "W",
+      "from_x": 3,
+      "from_y": 1,
+      "to_x": 4,
+      "to_y": 1
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551554",
+      "unit_type": "W",
+      "from_x": 1,
+      "from_y": 1,
+      "to_x": 2,
+      "to_y": 1
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551595",
+      "unit_type": "W",
+      "from_x": 11,
+      "from_y": 3,
+      "to_x": 11,
+      "to_y": 1
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551633",
+      "unit_type": "W",
+      "from_x": 0,
+      "from_y": 2,
+      "to_x": 1,
+      "to_y": 2
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551671",
+      "unit_type": "A",
+      "from_x": 2,
+      "from_y": 0,
+      "to_x": 3,
+      "to_y": 0
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551727",
+      "unit_type": "A",
+      "from_x": 6,
+      "from_y": 4,
+      "to_x": 6,
+      "to_y": 5
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551756",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 0,
+      "to_x": 10,
+      "to_y": 0
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551810",
+      "unit_type": "A",
+      "from_x": 7,
+      "from_y": 2,
+      "to_x": 8,
+      "to_y": 2
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551842",
+      "unit_type": "M",
+      "from_x": 10,
+      "from_y": 3,
+      "to_x": 9,
+      "to_y": 3
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:30:52.551897",
+      "unit_type": "A",
+      "from_x": 9,
+      "from_y": 2,
+      "to_x": 9,
+      "to_y": 1
+    },
+    {
+      "turn": 27,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:30:52.551920"
+    },
+    {
+      "turn": 27,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:31:44.815810",
+      "unit_type": "C",
+      "x": 10,
+      "y": 9
+    },
+    {
+      "turn": 27,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:31:44.815896",
+      "unit_type": "M",
+      "from_x": 11,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 8
+    },
+    {
+      "turn": 27,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:31:44.815961",
+      "unit_type": "A",
+      "from_x": 8,
+      "from_y": 9,
+      "to_x": 7,
+      "to_y": 9
+    },
+    {
+      "turn": 27,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:31:44.815976"
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:32:57.997234",
+      "attacker_type": "A",
+      "attacker_pos": [
+        7,
+        7
+      ],
+      "target_type": "A",
+      "target_pos": [
+        7,
+        9
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:32:57.997292",
+      "attacker_type": "A",
+      "attacker_pos": [
+        10,
+        5
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:32:57.997312",
+      "attacker_type": "M",
+      "attacker_pos": [
+        9,
+        7
+      ],
+      "target_type": "M",
+      "target_pos": [
+        10,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:32:57.997345",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "M",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:32:57.997363",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        6
+      ],
+      "target_type": "M",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:32:57.997507",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 6,
+      "to_x": 10,
+      "to_y": 7
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:32:57.997536",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": false
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:32:57.998921",
+      "unit_type": "W",
+      "x": 11,
+      "y": 0
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:32:58.001795",
+      "unit_type": "W",
+      "x": 9,
+      "y": 2
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:32:58.003387",
+      "unit_type": "W",
+      "x": 2,
+      "y": 7
+    },
+    {
+      "turn": 28,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:32:58.003480"
+    },
+    {
+      "turn": 28,
+      "player": 2,
+      "type": "create_unit",
+      "timestamp": "2025-12-29T11:33:10.310040",
+      "unit_type": "W",
+      "x": 11,
+      "y": 8
+    },
+    {
+      "turn": 28,
+      "player": 2,
+      "type": "move",
+      "timestamp": "2025-12-29T11:33:10.310152",
+      "unit_type": "C",
+      "from_x": 10,
+      "from_y": 9,
+      "to_x": 11,
+      "to_y": 9
+    },
+    {
+      "turn": 28,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:33:10.310171"
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:34:35.843355",
+      "unit_type": "M",
+      "position": [
+        8,
+        8
+      ],
+      "structure_type": "t",
+      "captured": true
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:34:35.843437",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 5,
+      "target_killed": false
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "paralyze",
+      "timestamp": "2025-12-29T11:34:35.843462",
+      "paralyzer_pos": [
+        11,
+        6
+      ],
+      "target_pos": [
+        11,
+        8
+      ]
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:34:35.843600",
+      "unit_type": "W",
+      "from_x": 10,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 9
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:34:35.843672",
+      "unit_type": "M",
+      "from_x": 9,
+      "from_y": 7,
+      "to_x": 10,
+      "to_y": 8
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:34:35.843732",
+      "unit_type": "C",
+      "from_x": 9,
+      "from_y": 6,
+      "to_x": 10,
+      "to_y": 6
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:34:35.843831",
+      "unit_type": "A",
+      "from_x": 10,
+      "from_y": 5,
+      "to_x": 10,
+      "to_y": 4
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "move",
+      "timestamp": "2025-12-29T11:34:35.843907",
+      "unit_type": "A",
+      "from_x": 11,
+      "from_y": 4,
+      "to_x": 11,
+      "to_y": 3
+    },
+    {
+      "turn": 29,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:34:35.843925"
+    },
+    {
+      "turn": 29,
+      "player": 2,
+      "type": "cure",
+      "timestamp": "2025-12-29T11:34:52.799583",
+      "curer_pos": [
+        11,
+        9
+      ],
+      "target_pos": [
+        11,
+        8
+      ]
+    },
+    {
+      "turn": 29,
+      "player": 2,
+      "type": "heal",
+      "timestamp": "2025-12-29T11:34:52.799629",
+      "healer_pos": [
+        11,
+        9
+      ],
+      "target_pos": [
+        11,
+        8
+      ],
+      "amount": 3
+    },
+    {
+      "turn": 29,
+      "player": 2,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:34:52.799641"
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:35:51.091935",
+      "attacker_type": "M",
+      "attacker_pos": [
+        10,
+        8
+      ],
+      "target_type": "C",
+      "target_pos": [
+        11,
+        9
+      ],
+      "damage": 12,
+      "target_killed": true
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:35:51.092006",
+      "attacker_type": "M",
+      "attacker_pos": [
+        11,
+        6
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 12,
+      "target_killed": false
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "attack",
+      "timestamp": "2025-12-29T11:35:51.092027",
+      "attacker_type": "A",
+      "attacker_pos": [
+        11,
+        5
+      ],
+      "target_type": "W",
+      "target_pos": [
+        11,
+        8
+      ],
+      "damage": 5,
+      "target_killed": true
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "seize",
+      "timestamp": "2025-12-29T11:35:51.092067",
+      "unit_type": "W",
+      "position": [
+        10,
+        9
+      ],
+      "structure_type": "b",
+      "captured": false
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "heal",
+      "timestamp": "2025-12-29T11:35:51.092092",
+      "healer_pos": [
+        10,
+        6
+      ],
+      "target_pos": [
+        11,
+        6
+      ],
+      "amount": 2
+    },
+    {
+      "turn": 30,
+      "player": 1,
+      "type": "end_turn",
+      "timestamp": "2025-12-29T11:35:51.092124"
+    }
+  ]
+}

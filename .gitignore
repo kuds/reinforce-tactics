@@ -2,7 +2,6 @@
 /.idea
 /__pycache__
 /videos
-*.json
 !docker/tournament/*.json
 /reinforcetactics/ui/__pycache__
 /reinforcetactics/utils/__pycache__
@@ -18,3 +17,6 @@
 /test_map_editor_components.py
 /test_map_editor_save.py
 /map_editor_demo.py
+/replays
+/saves
+settings.json
