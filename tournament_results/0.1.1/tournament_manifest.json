@@ -1,0 +1,486 @@
+{
+  "metadata": {
+    "timestamp": "20251229_171854",
+    "reinforcetactics_version": "0.1.1",
+    "total_bots": 8,
+    "total_maps": 4
+  },
+  "configuration": {
+    "bots": [
+      "SimpleBot",
+      "MediumBot",
+      "AdvancedBot",
+      "Claude Haiku 4.5",
+      "Claude Sonnet 4.5",
+      "Gemini 2.0 Flash",
+      "Gemini 3.0 Flash",
+      "ChatGPT 5 Mini"
+    ],
+    "maps": [
+      "maps/1v1/beginner.csv",
+      "maps/1v1/funnel_point.csv",
+      "maps/1v1/center_mountains.csv",
+      "maps/1v1/corner_points.csv"
+    ]
+  },
+  "results": {
+    "standings": [
+      {
+        "name": "AdvancedBot",
+        "wins": 34,
+        "losses": 1,
+        "draws": 21,
+        "total": 56,
+        "win_rate": 0.6071428571428571,
+        "elo": 1702.0,
+        "elo_change": 202.0
+      },
+      {
+        "name": "Gemini 3.0 Flash",
+        "wins": 33,
+        "losses": 4,
+        "draws": 19,
+        "total": 56,
+        "win_rate": 0.5892857142857143,
+        "elo": 1646.0,
+        "elo_change": 146.0
+      },
+      {
+        "name": "MediumBot",
+        "wins": 26,
+        "losses": 8,
+        "draws": 22,
+        "total": 56,
+        "win_rate": 0.4642857142857143,
+        "elo": 1618.0,
+        "elo_change": 118.0
+      },
+      {
+        "name": "Claude Sonnet 4.5",
+        "wins": 19,
+        "losses": 13,
+        "draws": 24,
+        "total": 56,
+        "win_rate": 0.3392857142857143,
+        "elo": 1508.0,
+        "elo_change": 8.0
+      },
+      {
+        "name": "SimpleBot",
+        "wins": 1,
+        "losses": 20,
+        "draws": 35,
+        "total": 56,
+        "win_rate": 0.017857142857142856,
+        "elo": 1410.0,
+        "elo_change": -90.0
+      },
+      {
+        "name": "Claude Haiku 4.5",
+        "wins": 3,
+        "losses": 22,
+        "draws": 31,
+        "total": 56,
+        "win_rate": 0.05357142857142857,
+        "elo": 1389.0,
+        "elo_change": -111.0
+      },
+      {
+        "name": "ChatGPT 5 Mini",
+        "wins": 2,
+        "losses": 22,
+        "draws": 32,
+        "total": 56,
+        "win_rate": 0.03571428571428571,
+        "elo": 1386.0,
+        "elo_change": -114.0
+      },
+      {
+        "name": "Gemini 2.0 Flash",
+        "wins": 0,
+        "losses": 28,
+        "draws": 28,
+        "total": 56,
+        "win_rate": 0.0,
+        "elo": 1341.0,
+        "elo_change": -159.0
+      }
+    ],
+    "matchups": [
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "SimpleBot",
+        "bot1_wins": 0,
+        "bot2_wins": 1,
+        "draws": 7
+      },
+      {
+        "bot1": "Gemini 3.0 Flash",
+        "bot2": "MediumBot",
+        "bot1_wins": 3,
+        "bot2_wins": 0,
+        "draws": 5
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "Gemini 2.0 Flash",
+        "bot1_wins": 5,
+        "bot2_wins": 0,
+        "draws": 3
+      },
+      {
+        "bot1": "Claude Haiku 4.5",
+        "bot2": "Claude Sonnet 4.5",
+        "bot1_wins": 0,
+        "bot2_wins": 5,
+        "draws": 3
+      },
+      {
+        "bot1": "Gemini 3.0 Flash",
+        "bot2": "SimpleBot",
+        "bot1_wins": 6,
+        "bot2_wins": 0,
+        "draws": 2
+      },
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "Gemini 2.0 Flash",
+        "bot1_wins": 2,
+        "bot2_wins": 0,
+        "draws": 6
+      },
+      {
+        "bot1": "Claude Sonnet 4.5",
+        "bot2": "MediumBot",
+        "bot1_wins": 0,
+        "bot2_wins": 4,
+        "draws": 4
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "Claude Haiku 4.5",
+        "bot1_wins": 4,
+        "bot2_wins": 0,
+        "draws": 4
+      },
+      {
+        "bot1": "Gemini 2.0 Flash",
+        "bot2": "SimpleBot",
+        "bot1_wins": 0,
+        "bot2_wins": 0,
+        "draws": 8
+      },
+      {
+        "bot1": "Claude Sonnet 4.5",
+        "bot2": "Gemini 3.0 Flash",
+        "bot1_wins": 0,
+        "bot2_wins": 4,
+        "draws": 4
+      },
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "Claude Haiku 4.5",
+        "bot1_wins": 0,
+        "bot2_wins": 0,
+        "draws": 8
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "MediumBot",
+        "bot1_wins": 5,
+        "bot2_wins": 1,
+        "draws": 2
+      },
+      {
+        "bot1": "Claude Sonnet 4.5",
+        "bot2": "SimpleBot",
+        "bot1_wins": 4,
+        "bot2_wins": 0,
+        "draws": 4
+      },
+      {
+        "bot1": "Claude Haiku 4.5",
+        "bot2": "Gemini 2.0 Flash",
+        "bot1_wins": 2,
+        "bot2_wins": 0,
+        "draws": 6
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "Gemini 3.0 Flash",
+        "bot1_wins": 4,
+        "bot2_wins": 0,
+        "draws": 4
+      },
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "MediumBot",
+        "bot1_wins": 0,
+        "bot2_wins": 5,
+        "draws": 3
+      },
+      {
+        "bot1": "Claude Haiku 4.5",
+        "bot2": "SimpleBot",
+        "bot1_wins": 1,
+        "bot2_wins": 0,
+        "draws": 7
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "Claude Sonnet 4.5",
+        "bot1_wins": 5,
+        "bot2_wins": 0,
+        "draws": 3
+      },
+      {
+        "bot1": "Gemini 2.0 Flash",
+        "bot2": "MediumBot",
+        "bot1_wins": 0,
+        "bot2_wins": 6,
+        "draws": 2
+      },
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "Gemini 3.0 Flash",
+        "bot1_wins": 0,
+        "bot2_wins": 7,
+        "draws": 1
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "SimpleBot",
+        "bot1_wins": 6,
+        "bot2_wins": 0,
+        "draws": 2
+      },
+      {
+        "bot1": "Claude Haiku 4.5",
+        "bot2": "MediumBot",
+        "bot1_wins": 0,
+        "bot2_wins": 7,
+        "draws": 1
+      },
+      {
+        "bot1": "ChatGPT 5 Mini",
+        "bot2": "Claude Sonnet 4.5",
+        "bot1_wins": 0,
+        "bot2_wins": 4,
+        "draws": 4
+      },
+      {
+        "bot1": "Gemini 2.0 Flash",
+        "bot2": "Gemini 3.0 Flash",
+        "bot1_wins": 0,
+        "bot2_wins": 7,
+        "draws": 1
+      },
+      {
+        "bot1": "MediumBot",
+        "bot2": "SimpleBot",
+        "bot1_wins": 3,
+        "bot2_wins": 0,
+        "draws": 5
+      },
+      {
+        "bot1": "AdvancedBot",
+        "bot2": "ChatGPT 5 Mini",
+        "bot1_wins": 5,
+        "bot2_wins": 0,
+        "draws": 3
+      },
+      {
+        "bot1": "Claude Haiku 4.5",
+        "bot2": "Gemini 3.0 Flash",
+        "bot1_wins": 0,
+        "bot2_wins": 6,
+        "draws": 2
+      },
+      {
+        "bot1": "Claude Sonnet 4.5",
+        "bot2": "Gemini 2.0 Flash",
+        "bot1_wins": 6,
+        "bot2_wins": 0,
+        "draws": 2
+      }
+    ],
+    "per_map_stats": {
+      "SimpleBot": {
+        "beginner.csv": {
+          "wins": 1,
+          "losses": 8,
+          "draws": 5
+        },
+        "funnel_point.csv": {
+          "wins": 0,
+          "losses": 6,
+          "draws": 8
+        },
+        "center_mountains.csv": {
+          "wins": 0,
+          "losses": 1,
+          "draws": 13
+        },
+        "corner_points.csv": {
+          "wins": 0,
+          "losses": 5,
+          "draws": 9
+        }
+      },
+      "ChatGPT 5 Mini": {
+        "beginner.csv": {
+          "wins": 2,
+          "losses": 8,
+          "draws": 4
+        },
+        "funnel_point.csv": {
+          "wins": 0,
+          "losses": 6,
+          "draws": 8
+        },
+        "center_mountains.csv": {
+          "wins": 0,
+          "losses": 2,
+          "draws": 12
+        },
+        "corner_points.csv": {
+          "wins": 0,
+          "losses": 6,
+          "draws": 8
+        }
+      },
+      "Gemini 3.0 Flash": {
+        "beginner.csv": {
+          "wins": 12,
+          "losses": 2,
+          "draws": 0
+        },
+        "funnel_point.csv": {
+          "wins": 11,
+          "losses": 1,
+          "draws": 2
+        },
+        "center_mountains.csv": {
+          "wins": 2,
+          "losses": 0,
+          "draws": 12
+        },
+        "corner_points.csv": {
+          "wins": 8,
+          "losses": 1,
+          "draws": 5
+        }
+      },
+      "MediumBot": {
+        "beginner.csv": {
+          "wins": 6,
+          "losses": 4,
+          "draws": 4
+        },
+        "funnel_point.csv": {
+          "wins": 9,
+          "losses": 1,
+          "draws": 4
+        },
+        "center_mountains.csv": {
+          "wins": 2,
+          "losses": 1,
+          "draws": 11
+        },
+        "corner_points.csv": {
+          "wins": 9,
+          "losses": 2,
+          "draws": 3
+        }
+      },
+      "AdvancedBot": {
+        "beginner.csv": {
+          "wins": 14,
+          "losses": 0,
+          "draws": 0
+        },
+        "funnel_point.csv": {
+          "wins": 4,
+          "losses": 1,
+          "draws": 9
+        },
+        "center_mountains.csv": {
+          "wins": 4,
+          "losses": 0,
+          "draws": 10
+        },
+        "corner_points.csv": {
+          "wins": 12,
+          "losses": 0,
+          "draws": 2
+        }
+      },
+      "Gemini 2.0 Flash": {
+        "beginner.csv": {
+          "wins": 0,
+          "losses": 9,
+          "draws": 5
+        },
+        "funnel_point.csv": {
+          "wins": 0,
+          "losses": 7,
+          "draws": 7
+        },
+        "center_mountains.csv": {
+          "wins": 0,
+          "losses": 5,
+          "draws": 9
+        },
+        "corner_points.csv": {
+          "wins": 0,
+          "losses": 7,
+          "draws": 7
+        }
+      },
+      "Claude Sonnet 4.5": {
+        "beginner.csv": {
+          "wins": 7,
+          "losses": 5,
+          "draws": 2
+        },
+        "funnel_point.csv": {
+          "wins": 8,
+          "losses": 5,
+          "draws": 1
+        },
+        "center_mountains.csv": {
+          "wins": 3,
+          "losses": 0,
+          "draws": 11
+        },
+        "corner_points.csv": {
+          "wins": 1,
+          "losses": 3,
+          "draws": 10
+        }
+      },
+      "Claude Haiku 4.5": {
+        "beginner.csv": {
+          "wins": 2,
+          "losses": 8,
+          "draws": 4
+        },
+        "funnel_point.csv": {
+          "wins": 1,
+          "losses": 6,
+          "draws": 7
+        },
+        "center_mountains.csv": {
+          "wins": 0,
+          "losses": 2,
+          "draws": 12
+        },
+        "corner_points.csv": {
+          "wins": 0,
+          "losses": 6,
+          "draws": 8
+        }
+      }
+    }
+  }
+}
