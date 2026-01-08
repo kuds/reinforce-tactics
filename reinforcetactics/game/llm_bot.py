@@ -130,6 +130,7 @@ AVAILABLE ACTIONS:
 6. CURE: (Cleric only) Remove paralysis from an adjacent ally
 7. SEIZE: Capture a neutral/enemy structure by standing on it
 8. END_TURN: Finish your turn
+9. RESIGN: Concede the game (use only as last resort when victory is impossible)
 
 COMBAT RULES:
 - Most units can only attack adjacent enemies (orthogonally, not diagonally)
@@ -151,6 +152,13 @@ STRATEGY TIPS:
 - Clerics keep your army healthy and mobile
 - Archers are excellent for safe ranged attacks, especially from mountains
 - Position units to protect each other
+
+WHEN TO RESIGN:
+Consider resigning ONLY when ALL of these conditions are true:
+- You have no units left AND cannot afford to create any
+- OR enemy units are about to capture your HQ and you cannot stop them
+- OR you are vastly outnumbered with no realistic path to victory
+Do NOT resign if you still have units, gold, or any chance of a comeback.
 
 CRITICAL CONSTRAINTS:
 - Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
@@ -490,7 +498,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self._execute_actions(response_text)
 
         # End turn (advance game state to next player, collect income, etc.)
-        self.game_state.end_turn()
+        # Skip if game is already over (e.g., due to resignation)
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
 
     def _serialize_game_state(self) -> Dict[str, Any]:
         """
@@ -700,12 +710,14 @@ Respond with a JSON object in the following format:
         {{"type": "HEAL", "unit_id": 0, "target_position": [x, y]}},
         {{"type": "CURE", "unit_id": 0, "target_position": [x, y]}},
         {{"type": "SEIZE", "unit_id": 0}},
-        {{"type": "END_TURN"}}
+        {{"type": "END_TURN"}},
+        {{"type": "RESIGN"}}
     ]
 }}
 
 Only include actions that are legal based on the legal_actions provided.
-You can take multiple actions in one turn."""
+You can take multiple actions in one turn.
+Use RESIGN only as a last resort when victory is impossible."""
 
     def _execute_actions(self, response_text: str):
         """Parse LLM response and execute the actions."""
@@ -755,6 +767,9 @@ You can take multiple actions in one turn."""
                     elif action_type == 'END_TURN':
                         logger.info("Bot chose to end turn")
                         break
+                    elif action_type == 'RESIGN':
+                        self._execute_resign()
+                        return  # Exit immediately after resignation
                     else:
                         logger.warning("Unknown action type: %s", action_type)
                 except Exception as e:
@@ -979,6 +994,11 @@ You can take multiple actions in one turn."""
         unit = unit_map[unit_id]
         self.game_state.seize(unit)
         logger.info("Unit %s is seizing structure at (%s, %s)", unit_id, unit.x, unit.y)
+
+    def _execute_resign(self):
+        """Execute a RESIGN action - the bot concedes the game."""
+        logger.info("LLM Bot (Player %s) has decided to resign.", self.bot_player)
+        self.game_state.resign(self.bot_player)
 
 
 class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
