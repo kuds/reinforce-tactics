@@ -49,7 +49,7 @@ class InputHandler:
         self.target_selection_mode = False
         self.target_selection_action = None
         self.target_selection_unit = None
-        
+
         # Right-click preview state
         self.right_click_preview_active = False
         self.preview_unit = None
@@ -65,8 +65,6 @@ class InputHandler:
         Returns:
             'quit' if game should quit, 'save' if save requested, None otherwise
         """
-        current_time = pygame.time.get_ticks()
-
         if event.key == pygame.K_ESCAPE:
             if self.target_selection_mode:
                 # Cancel target selection and return to menu
@@ -200,18 +198,18 @@ class InputHandler:
 
         # Find unit at clicked position
         clicked_unit = self.game.get_unit_at_position(grid_x, grid_y)
-        
+
         if clicked_unit:
             # Activate preview for this unit
             self.right_click_preview_active = True
             self.preview_unit = clicked_unit
-            
+
             # Get all attackable positions (enemy unit positions)
             from reinforcetactics.game.mechanics import GameMechanics
             attackable_enemies = GameMechanics.get_attackable_enemies(
                 clicked_unit, self.game.units, self.game.grid
             )
-            
+
             # Convert to positions list
             self.preview_positions = [(enemy.x, enemy.y) for enemy in attackable_enemies]
 

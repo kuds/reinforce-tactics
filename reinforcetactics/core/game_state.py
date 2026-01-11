@@ -5,7 +5,7 @@ Fixed version: removed duplicate methods, added type hints, controlled logging.
 from __future__ import annotations
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -158,7 +158,7 @@ class GameState:
     def record_action(self, action_type: str, **kwargs) -> None:
         """
         Record an action for replay purposes.
-        
+
         Automatically converts any coordinate parameters from padded to original coordinates.
 
         Args:
@@ -203,7 +203,7 @@ class GameState:
             else:
                 # Non-coordinate parameter, keep as-is
                 converted_kwargs[key] = value
-        
+
         action_record = {
             'turn': self.turn_number,
             'player': self.current_player,

@@ -1,10 +1,8 @@
 """Main map editor class that coordinates all components."""
-import sys
 from typing import Optional, Dict, Any
 from pathlib import Path
 import pygame
 import pandas as pd
-import numpy as np
 
 from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
@@ -250,8 +248,6 @@ class MapEditor:
         Returns:
             True if saved successfully, False otherwise
         """
-        lang = get_language()
-
         # Validate map before saving
         validation_errors = self._validate_map()
         if validation_errors:

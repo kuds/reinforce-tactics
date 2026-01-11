@@ -1,10 +1,8 @@
 """
 Simple AI bot for computer opponents.
 """
-import random
-import copy
 from reinforcetactics.constants import (
-    UNIT_DATA, COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT
+    UNIT_DATA, COUNTER_ATTACK_MULTIPLIER
 )
 
 
@@ -565,7 +563,7 @@ class MediumBot:
             # Sort by capture progress (higher progress = higher priority)
             contested.sort(key=lambda x: x[2], reverse=True)
 
-            for structure, enemy_unit, progress in contested:
+            for _, enemy_unit, __ in contested:
                 # Check if we can attack this enemy
                 attackable = self.game_state.mechanics.get_attackable_enemies(
                     unit, [enemy_unit], self.game_state.grid
@@ -902,7 +900,7 @@ class AdvancedBot(MediumBot):
         contested = self.find_contested_structures()
         if contested:
             contested.sort(key=lambda x: x[2], reverse=True)
-            for structure, enemy_unit, progress in contested:
+            for _, enemy_unit, __ in contested:
                 target_pos = self.find_best_move_position(unit, enemy_unit.x, enemy_unit.y)
                 if target_pos:
                     self.game_state.move_unit(unit, target_pos[0], target_pos[1])

@@ -9,7 +9,6 @@ import numpy as np
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.constants import UNIT_DATA
 
 
 class StrategyGameEnv(gym.Env):
@@ -349,7 +348,7 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type == 'C':
                     # Priority: Cure if paralyzed, otherwise Heal
                     # Or check what's possible
-                    
+
                     # Try to cure first if target is paralyzed
                     action_performed = False
                     if target.is_paralyzed():
@@ -357,14 +356,14 @@ class StrategyGameEnv(gym.Env):
                         if result:
                             reward += 5.0 # Reward for curing
                             action_performed = True
-                    
+
                     # If not cured (or not paralyzed), try to heal
                     if not action_performed:
                         heal_amount = self.game_state.heal(unit, target)
                         if heal_amount > 0:
                             reward += heal_amount / 2.0
                             action_performed = True
-                    
+
                     if not action_performed:
                         # If neither worked (e.g. full health and not paralyzed), action failed
                         is_valid = False

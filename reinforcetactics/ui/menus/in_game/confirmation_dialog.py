@@ -1,5 +1,5 @@
 """Confirmation dialog for critical actions."""
-from typing import Optional, Tuple
+from typing import Optional
 
 import pygame
 

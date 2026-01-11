@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
 import pygame
-import pandas as pd
 
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
@@ -52,7 +51,7 @@ class ReplaySelectionMenu(Menu):
         for search_dir in search_dirs:
             if os.path.exists(search_dir):
                 # Walk through directory tree to find all .json replay files
-                for root, dirs, files in os.walk(search_dir):
+                for root, _, files in os.walk(search_dir):
                     for f in files:
                         if f.endswith('.json') and ('replay' in f.lower() or 'game_' in f.lower()):
                             filepath = os.path.join(root, f)
@@ -122,7 +121,7 @@ class ReplaySelectionMenu(Menu):
                 'max_turns': game_info.get('max_turns'),
             }
 
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, IOError):
             # Store minimal metadata for failed loads
             self.replay_metadata[filepath] = {
                 'date': self._extract_date_from_filename(os.path.basename(filepath)),
@@ -195,11 +194,6 @@ class ReplaySelectionMenu(Menu):
             p2 = p2[:max_name_len-2] + ".."
 
         return f"{date} - {p1} vs {p2}"
-
-            # Pre-load replay info for all files
-            for replay_file in self.replay_files:
-                filepath = os.path.join(self.replays_dir, replay_file)
-                self.replay_info_cache[filepath] = self._load_replay_info(filepath)
 
     def _load_replay_info(self, filepath: str) -> Dict[str, Any]:
         """Load replay info from a file without loading full action history."""

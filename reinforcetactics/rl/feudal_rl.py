@@ -4,8 +4,7 @@ Manager-Worker hierarchy for strategy games
 """
 from typing import Tuple, Dict, Optional
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
 import numpy as np
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
@@ -431,7 +430,7 @@ def compute_intrinsic_reward(
     Returns:
         Intrinsic reward
     """
-    goal_x, goal_y, goal_type = int(goal[0]), int(goal[1]), int(goal[2])
+    goal_x, goal_y, _ = int(goal[0]), int(goal[1]), int(goal[2])
 
     # Goal types: 0=attack, 1=defend, 2=capture, 3=expand
 

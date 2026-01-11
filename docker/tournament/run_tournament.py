@@ -18,17 +18,15 @@ import json
 import logging
 import os
 import random
-import re
 import sys
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from queue import Queue
 from threading import Lock
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Add parent directory to path for imports
 sys.path.insert(0, '/app')
@@ -506,7 +504,7 @@ def generate_round_robin_schedule(
                 skipped_games += (games_per_side - bot2_as_p1_needed)
 
                 # Add remaining games with bot1 as player 1
-                for game_in_round in range(bot1_as_p1_needed):
+                for _ in range(bot1_as_p1_needed):
                     round_games.append(ScheduledGame(
                         game_id=game_id,
                         p1_bot=bot1,
@@ -518,7 +516,7 @@ def generate_round_robin_schedule(
                     game_id += 1
 
                 # Add remaining games with bot2 as player 1
-                for game_in_round in range(bot2_as_p1_needed):
+                for _ in range(bot2_as_p1_needed):
                     round_games.append(ScheduledGame(
                         game_id=game_id,
                         p1_bot=bot2,

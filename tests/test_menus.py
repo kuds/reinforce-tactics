@@ -202,7 +202,7 @@ class TestMapSelectionMenu:
 
         # Check that display names don't include the folder prefix
         for text, _ in menu.options:
-            if text != "Random Map" and text != "Back":
+            if text not in ("Random Map", "Back"):
                 # Display name should not contain "1v1/"
                 assert "1v1" not in text, f"Display name '{text}' should not contain '1v1'"
                 assert "/" not in text, f"Display name '{text}' should not contain '/'"
@@ -601,7 +601,6 @@ class TestPlayerConfigMenu:
             )
 
             # Should eventually reach ModelBot
-            initial_bot = menu.player_configs[1]['bot_type']
             for _ in range(10):  # Max 10 clicks to find ModelBot
                 menu.handle_input(event)
                 menu.draw()  # Redraw to update elements
