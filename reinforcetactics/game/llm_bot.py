@@ -138,7 +138,7 @@ COMBAT RULES:
 - Archers cannot attack at distance 0 (adjacent)
 - Attacked units counter-attack if they can, except melee units cannot counter Archers
 - Paralyzed units cannot move or attack
-- Units can move first, then attack or capture, but cannot attack/capture first then move
+- Units can move first, then perform one action (attack, capture, heal, cure, paralyze), but cannot act first then move
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
