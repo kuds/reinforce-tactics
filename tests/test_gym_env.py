@@ -210,7 +210,7 @@ class TestObservationSpace:
 
     def test_observations_from_reset_match_space(self, env_default):
         """Test that observations returned by reset() match the observation space."""
-        obs, info = env_default.reset()
+        obs, _ = env_default.reset()
 
         # Check that observation is in the observation space
         assert 'grid' in obs
@@ -238,7 +238,7 @@ class TestObservationSpace:
 
         # Take a step with end_turn action
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        obs, _, _, _, _ = env_default.step(action)
 
         # Check that observation is in the observation space
         assert 'grid' in obs
@@ -415,7 +415,7 @@ class TestStepFunction:
         env_default.reset()
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
 
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, reward, _, _, info = env_default.step(action)
 
         # end_turn should be valid and apply turn penalty
         assert info['valid_action'] is True
@@ -430,7 +430,7 @@ class TestStepFunction:
         # Try to move a non-existent unit
         action = np.array([1, 0, 0, 0, 1, 1])  # move from (0,0) to (1,1)
 
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, reward, _, _, info = env_default.step(action)
 
         # Should be marked as invalid
         assert info['valid_action'] is False
@@ -448,7 +448,7 @@ class TestStepFunction:
         env_default.game_state.winner = 1
 
         action = np.array([5, 0, 0, 0, 0, 0])
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, _, terminated, _, info = env_default.step(action)
 
         assert terminated is True
         assert info['game_over'] is True
@@ -463,7 +463,7 @@ class TestStepFunction:
         env_default.current_step = env_default.max_steps - 1
 
         action = np.array([5, 0, 0, 0, 0, 0])
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, _, _, truncated, _ = env_default.step(action)
 
         assert truncated is True
 
@@ -474,7 +474,7 @@ class TestStepFunction:
         env_default.reset()
         action = np.array([5, 0, 0, 0, 0, 0])
 
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, _, _, _, info = env_default.step(action)
 
         # Check required keys
         assert 'episode_stats' in info
@@ -513,7 +513,7 @@ class TestResetFunction:
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))  # end_turn
 
         # Now reset
-        obs, info = env_default.reset()
+        env_default.reset()
 
         # Check that game state is reset
         assert env_default.game_state.turn_number == 0
@@ -603,7 +603,7 @@ class TestRewardCalculation:
         env.game_state.winner = 1
 
         action = np.array([5, 0, 0, 0, 0, 0])
-        obs, reward, terminated, truncated, info = env.step(action)
+        _, reward, terminated, _, _ = env.step(action)
 
         # Should receive win reward
         assert reward > 0
@@ -621,7 +621,7 @@ class TestRewardCalculation:
         env.game_state.winner = 2
 
         action = np.array([5, 0, 0, 0, 0, 0])
-        obs, reward, terminated, truncated, info = env.step(action)
+        _, reward, terminated, _, _ = env.step(action)
 
         # Should receive loss penalty
         assert reward < 0
@@ -633,11 +633,9 @@ class TestRewardCalculation:
         """Test turn_penalty on end_turn action."""
         env_default.reset()
 
-        initial_reward = env_default.episode_stats['reward']
-
         # End turn action should apply turn penalty
         action = np.array([5, 0, 0, 0, 0, 0])
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, reward, _, _, _ = env_default.step(action)
 
         # Reward should include turn penalty (negative)
         assert reward <= 0
@@ -650,7 +648,7 @@ class TestRewardCalculation:
 
         # Try invalid action (move non-existent unit)
         action = np.array([1, 0, 0, 0, 1, 1])
-        obs, reward, terminated, truncated, info = env_default.step(action)
+        _, reward, _, _, info = env_default.step(action)
 
         # Should apply invalid action penalty
         assert info['valid_action'] is False
@@ -667,7 +665,7 @@ class TestRewardCalculation:
         # Take multiple steps
         for _ in range(3):
             action = np.array([5, 0, 0, 0, 0, 0])
-            obs, reward, terminated, truncated, info = env_default.step(action)
+            env_default.step(action)
 
         # Cumulative reward should be tracked
         assert env_default.episode_stats['reward'] != 0.0

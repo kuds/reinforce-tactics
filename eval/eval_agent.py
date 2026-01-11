@@ -54,7 +54,7 @@ def evaluate_agent(
 
     # Run episodes
     print(f"Running {n_episodes} evaluation episodes...")
-    for ep in tqdm(range(n_episodes)):
+    for _ in tqdm(range(n_episodes)):
         obs, info = env.reset()
         done = False
         episode_reward = 0

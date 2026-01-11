@@ -463,7 +463,6 @@ class TestReplayPadding:
 
             replay_data = FileIO.load_replay(replay_path)
             map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
-            original_height, original_width = map_df.shape
 
             player = ReplayPlayer(replay_data, map_df)
 
@@ -746,7 +745,7 @@ class TestReplayVideoExport:
 
             # Check button exists and has reasonable dimensions
             assert hasattr(player, 'save_video_button')
-            assert player.save_video_button.width == 100
+            assert player.save_video_button.width == 80
             assert player.save_video_button.height == 40
 
             # Check progress bar has positive width

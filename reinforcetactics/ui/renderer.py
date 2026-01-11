@@ -4,7 +4,7 @@ Pygame rendering for the strategy game.
 import pygame
 import numpy as np
 from reinforcetactics.constants import (
-    TILE_SIZE, TILE_COLORS, TILE_TYPES, TILE_IMAGES,
+    TILE_SIZE, TILE_TYPES, TILE_IMAGES,
     PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
 )
 from reinforcetactics.utils.fonts import get_font

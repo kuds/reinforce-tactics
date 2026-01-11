@@ -2,11 +2,11 @@
 Tests for the map editor functionality.
 """
 import os
-import pytest
-import pygame
-import pandas as pd
+
 import numpy as np
-from pathlib import Path
+import pandas as pd
+import pygame
+import pytest
 
 from reinforcetactics.ui.menus.map_editor.new_map_dialog import NewMapDialog
 from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette

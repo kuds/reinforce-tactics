@@ -103,7 +103,7 @@ class NewMapDialog(Menu):
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
+        _ = self.screen.get_height()  # Reserved for future use
         lang = get_language()
 
         # Draw title

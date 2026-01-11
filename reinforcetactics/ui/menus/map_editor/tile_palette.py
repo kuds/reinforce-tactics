@@ -1,7 +1,7 @@
 """Tile palette component for the map editor."""
-from typing import Optional, Tuple
+from typing import Tuple
 import pygame
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS, TileType
+from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
 

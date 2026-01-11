@@ -643,7 +643,6 @@ class TestArcherCounterAttack:
 
     def test_archer_on_mountain_attacks_at_distance_3(self):
         """Test archer on mountain can attack at distance 3."""
-        import numpy as np
         # Create a grid with a mountain
         map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
         map_data[5][5] = 'm'  # Mountain at archer position

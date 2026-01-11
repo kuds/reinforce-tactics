@@ -1,6 +1,5 @@
 """Map editor menu - entry point for creating or editing maps."""
 from typing import Optional, Dict, Any
-from pathlib import Path
 import pygame
 import pandas as pd
 import numpy as np
@@ -11,7 +10,6 @@ from reinforcetactics.ui.menus.map_editor.map_editor import MapEditor
 from reinforcetactics.ui.menus.game_setup.map_selection_menu import MapSelectionMenu
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.constants import MIN_MAP_SIZE
 
 
 class MapEditorMenu(Menu):

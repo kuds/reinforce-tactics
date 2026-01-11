@@ -1,5 +1,5 @@
 """Map editing canvas component."""
-from typing import Optional, Tuple
+from typing import Tuple
 import pygame
 import pandas as pd
 from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS

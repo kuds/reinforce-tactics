@@ -3,8 +3,7 @@ import pytest
 import numpy as np
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import AdvancedBot, MediumBot, SimpleBot
-from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.game.bot import AdvancedBot, MediumBot
 from game.bot_factory import create_bot
 from scripts.tournament import BotDescriptor
 

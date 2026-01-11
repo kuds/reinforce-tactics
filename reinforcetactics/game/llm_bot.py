@@ -75,10 +75,10 @@ GEMINI_MODELS = [
     # Gemini 3.0 (latest generation)
     'gemini-3-pro-preview',
     'gemini-3-flash-preview',
-    # Gemini 2.5 
+    # Gemini 2.5
     'gemini-2.5-pro',
     'gemini-2.5-flash',
-    # Gemini 2.0 
+    # Gemini 2.0
     'gemini-2.0-flash',
     'gemini-2.0-flash-001',
     'gemini-2.0-flash-lite',
@@ -376,11 +376,6 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     }
             else:
                 # Create new log file with metadata
-                # Extract map name from file path
-                map_name = "unknown"
-                if self.game_state.map_file_used:
-                    map_name = Path(self.game_state.map_file_used).stem
-
                 log_data = {
                     "game_session_id": self.game_session_id,
                     "version": {
@@ -836,12 +831,12 @@ Use RESIGN only as a last resort when victory is impossible."""
         )
 
         if not is_legal:
-            logger.warning("Illegal CREATE_UNIT action: %s (converted to padded: [%s, %s])", 
+            logger.warning("Illegal CREATE_UNIT action: %s (converted to padded: [%s, %s])",
                          action, x, y)
             return
 
         self.game_state.create_unit(unit_type, x, y, self.bot_player)
-        logger.info("Created %s at original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Created %s at original coords (%s, %s) / padded coords (%s, %s)",
                    unit_type, orig_x, orig_y, x, y)
 
     def _execute_move(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
@@ -864,7 +859,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return
 
         self.game_state.move_unit(unit, to_x, to_y)
-        logger.info("Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)",
                    unit_id, orig_to_x, orig_to_y, to_x, to_y)
 
     def _execute_attack(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
@@ -890,7 +885,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return
 
         self.game_state.attack(unit, target)
-        logger.info("Unit %s attacked enemy at original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Unit %s attacked enemy at original coords (%s, %s) / padded coords (%s, %s)",
                    unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_paralyze(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
@@ -920,7 +915,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return
 
         self.game_state.paralyze(unit, target)
-        logger.info("Unit %s paralyzed enemy at original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Unit %s paralyzed enemy at original coords (%s, %s) / padded coords (%s, %s)",
                    unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_heal(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
@@ -950,7 +945,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return
 
         self.game_state.heal(unit, target)
-        logger.info("Unit %s healed ally at original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Unit %s healed ally at original coords (%s, %s) / padded coords (%s, %s)",
                    unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_cure(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
@@ -980,7 +975,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return
 
         self.game_state.cure(unit, target)
-        logger.info("Unit %s cured ally at original coords (%s, %s) / padded coords (%s, %s)", 
+        logger.info("Unit %s cured ally at original coords (%s, %s) / padded coords (%s, %s)",
                    unit_id, orig_target_x, orig_target_y, target_x, target_y)
 
     def _execute_seize(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
