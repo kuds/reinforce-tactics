@@ -77,7 +77,7 @@ class ReplaySelectionMenu(Menu):
             # Parse timestamp
             try:
                 timestamp = datetime.fromisoformat(timestamp_str)
-                date_str = timestamp.strftime("%Y-%m-%d %H:%M")
+                date_str = timestamp.strftime("%Y-%m-%d")
             except (ValueError, TypeError):
                 # Try to extract date from filename
                 filename = os.path.basename(filepath)
@@ -147,7 +147,7 @@ class ReplaySelectionMenu(Menu):
             time_part = match.group(2)
             try:
                 dt = datetime.strptime(f"{date_part}_{time_part}", "%Y%m%d_%H%M%S")
-                return dt.strftime("%Y-%m-%d %H:%M")
+                return dt.strftime("%Y-%m-%d")
             except ValueError:
                 pass
         return "Unknown Date"
@@ -163,19 +163,21 @@ class ReplaySelectionMenu(Menu):
 
         if player_type == 'human':
             return "Human"
-        elif bot_type:
-            # Shorten bot names for display
-            bot_name = bot_type.replace('Bot', '').strip()
+        elif player_type == 'llm':
+            # LLM players have a nice name field with model name
+            name = config.get('name', '')
+            if name:
+                return name
+            # Fallback to model if name not available
             model = config.get('model', '')
             if model:
-                # Extract just the model name part
-                model_parts = model.split('-')
-                if len(model_parts) >= 2:
-                    model_short = '-'.join(model_parts[:2])
-                else:
-                    model_short = model
-                return f"{bot_name} ({model_short})"
-            return bot_name if bot_name else bot_type
+                return model
+            return "LLM"
+        elif player_type == 'computer' or bot_type:
+            # Bot players - use bot_type directly (AdvancedBot or SimpleBot)
+            if bot_type:
+                return bot_type
+            return "Bot"
         else:
             return player_type.title()
 
@@ -219,9 +221,9 @@ class ReplaySelectionMenu(Menu):
             if timestamp:
                 try:
                     dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    date_str = dt.strftime('%Y-%m-%d %H:%M')
+                    date_str = dt.strftime('%Y-%m-%d')
                 except (ValueError, TypeError):
-                    date_str = timestamp[:16] if len(timestamp) >= 16 else timestamp
+                    date_str = timestamp[:10] if len(timestamp) >= 10 else timestamp
 
             return {
                 'p1_name': p1_name,
@@ -420,27 +422,6 @@ class ReplaySelectionMenu(Menu):
 
             self.screen.blit(text_surface, text_rect)
 
-            # Draw result indicator on the right
-            if i < len(self.replay_files):
-                metadata = self.replay_metadata.get(self.replay_files[i], {})
-                result = metadata.get('result', '')
-                if result:
-                    result_font = get_font(18)
-                    if 'P1' in result:
-                        result_color = PLAYER_COLORS.get(1, (255, 100, 100))
-                    elif 'P2' in result:
-                        result_color = PLAYER_COLORS.get(2, (100, 100, 255))
-                    elif result == 'Draw':
-                        result_color = (200, 200, 100)
-                    else:
-                        result_color = (150, 150, 150)
-
-                    result_surface = result_font.render(result, True, result_color)
-                    result_rect = result_surface.get_rect(
-                        midright=(item_rect.right - 10, item_rect.centery)
-                    )
-                    self.screen.blit(result_surface, result_rect)
-
             # Store rect for click detection
             self.option_rects.append(item_rect)
 
@@ -449,7 +430,7 @@ class ReplaySelectionMenu(Menu):
             indicator_font = get_font(20)
 
             if self.scroll_offset > 0:
-                up_text = indicator_font.render("▲", True, self.hover_color)
+                up_text = indicator_font.render("^", True, self.hover_color)
                 up_rect = up_text.get_rect(
                     centerx=panel_rect.centerx,
                     y=panel_rect.y + 2
@@ -457,7 +438,7 @@ class ReplaySelectionMenu(Menu):
                 self.screen.blit(up_text, up_rect)
 
             if end_idx < len(self.options):
-                down_text = indicator_font.render("▼", True, self.hover_color)
+                down_text = indicator_font.render("v", True, self.hover_color)
                 down_rect = down_text.get_rect(
                     centerx=panel_rect.centerx,
                     bottom=panel_rect.bottom - 2
