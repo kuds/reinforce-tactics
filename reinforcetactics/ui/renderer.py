@@ -263,6 +263,18 @@ class Renderer:
         pygame.draw.rect(self.screen, (255, 215, 0), bg_rect, 2)
         self.screen.blit(text_surface, text_rect)
 
+        # Draw turn counter
+        turn_text = f"Turn: {self.game_state.turn_number + 1}"
+        if self.game_state.max_turns:
+            turn_text += f" / {self.game_state.max_turns}"
+        turn_surface = font.render(turn_text, True, (255, 255, 255))
+        turn_rect = turn_surface.get_rect(topleft=(10, bg_rect.bottom + 5))
+        turn_bg_rect = turn_rect.inflate(10, 5)
+
+        pygame.draw.rect(self.screen, (50, 50, 65), turn_bg_rect)
+        pygame.draw.rect(self.screen, (100, 150, 200), turn_bg_rect, 2)
+        self.screen.blit(turn_surface, turn_rect)
+
         # Draw End Turn button
         mouse_pos = pygame.mouse.get_pos()
         button_color = (100, 150, 100) if self.end_turn_button.collidepoint(mouse_pos) else (70, 120, 70)
@@ -344,6 +356,100 @@ class Renderer:
             # Draw border around position
             rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
             pygame.draw.rect(self.screen, (255, 100, 0), rect, 2)
+
+    def draw_unit_tooltip(self, mouse_pos):
+        """
+        Draw a tooltip showing unit stats when hovering over a unit.
+
+        Args:
+            mouse_pos: Tuple of (x, y) mouse position
+        """
+        # Convert mouse position to grid coordinates
+        grid_x = mouse_pos[0] // TILE_SIZE
+        grid_y = mouse_pos[1] // TILE_SIZE
+
+        # Check bounds
+        if not (0 <= grid_x < self.game_state.grid.width and
+                0 <= grid_y < self.game_state.grid.height):
+            return
+
+        # Find unit at position
+        unit = self.game_state.get_unit_at_position(grid_x, grid_y)
+        if not unit:
+            return
+
+        # Get unit data
+        unit_data = UNIT_DATA.get(unit.type, {})
+        unit_name = unit_data.get('name', unit.type)
+
+        # Build tooltip lines
+        lines = [
+            f"{unit_name} (P{unit.player})",
+            f"HP: {unit.health}/{unit.max_health}",
+            f"ATK: {unit.attack}  DEF: {unit.defence}",
+            f"MOV: {unit.movement_left}/{unit.movement}",
+        ]
+
+        # Add status indicators
+        status_parts = []
+        if unit.can_move:
+            status_parts.append("Can Move")
+        if unit.can_attack:
+            status_parts.append("Can Act")
+        if unit.is_paralyzed():
+            status_parts.append(f"Paralyzed ({unit.paralyzed_turns})")
+
+        if status_parts:
+            lines.append(" | ".join(status_parts))
+
+        # Calculate tooltip dimensions
+        font = get_font(20)
+        padding = 8
+        line_height = 22
+        max_width = 0
+
+        for line in lines:
+            text_surface = font.render(line, True, (255, 255, 255))
+            max_width = max(max_width, text_surface.get_width())
+
+        tooltip_width = max_width + 2 * padding
+        tooltip_height = len(lines) * line_height + 2 * padding
+
+        # Position tooltip near mouse but avoid going off-screen
+        tooltip_x = mouse_pos[0] + 15
+        tooltip_y = mouse_pos[1] + 15
+
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+
+        if tooltip_x + tooltip_width > screen_width:
+            tooltip_x = mouse_pos[0] - tooltip_width - 5
+        if tooltip_y + tooltip_height > screen_height:
+            tooltip_y = mouse_pos[1] - tooltip_height - 5
+
+        # Ensure tooltip stays on screen
+        tooltip_x = max(5, tooltip_x)
+        tooltip_y = max(5, tooltip_y)
+
+        # Draw tooltip background
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+        pygame.draw.rect(self.screen, (30, 30, 45), tooltip_rect, border_radius=6)
+
+        # Draw player-colored border
+        player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
+        pygame.draw.rect(self.screen, player_color, tooltip_rect, width=2, border_radius=6)
+
+        # Draw text lines
+        for i, line in enumerate(lines):
+            # First line (unit name) uses player color
+            if i == 0:
+                text_color = player_color
+            else:
+                text_color = (220, 220, 220)
+
+            text_surface = font.render(line, True, text_color)
+            text_y = tooltip_y + padding + i * line_height
+            self.screen.blit(text_surface, (tooltip_x + padding, text_y))
 
     def get_rgb_array(self):
         """Get the current screen as RGB array."""

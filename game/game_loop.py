@@ -138,6 +138,11 @@ class GameSession:  # pylint: disable=too-few-public-methods
                 self.input_handler.target_selection_action['targets']
             )
 
+        # Draw unit tooltip when hovering (only if no menu is open)
+        if not self.input_handler.active_menu:
+            mouse_pos = pygame.mouse.get_pos()
+            self.renderer.draw_unit_tooltip(mouse_pos)
+
         # Draw active menu last (on top)
         if self.input_handler.active_menu:
             self.input_handler.active_menu.draw(self.renderer.screen)

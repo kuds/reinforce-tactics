@@ -6,7 +6,7 @@ This module manages user input state and event handling for the game loop.
 
 import pygame
 from reinforcetactics.constants import TILE_SIZE
-from reinforcetactics.ui.menus import UnitActionMenu, UnitPurchaseMenu
+from reinforcetactics.ui.menus import UnitActionMenu, UnitPurchaseMenu, ConfirmationDialog
 from game.action_executor import handle_action_menu_result
 
 
@@ -158,8 +158,17 @@ class InputHandler:
             return 'continue'
 
         if self.renderer.resign_button.collidepoint(mouse_pos):
-            print(f"\nPlayer {self.game.current_player} resigned")
-            self.game.resign()
+            # Show confirmation dialog before resigning
+            dialog = ConfirmationDialog(
+                self.renderer.screen,
+                "Resign Game",
+                f"Player {self.game.current_player}, are you sure you want to resign?",
+                confirm_text="Resign",
+                cancel_text="Cancel"
+            )
+            if dialog.run():
+                print(f"\nPlayer {self.game.current_player} resigned")
+                self.game.resign()
             return 'continue'
 
         # Priority 3: Handle grid clicks
