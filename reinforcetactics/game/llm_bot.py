@@ -589,6 +589,105 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             'legal_actions': formatted_legal_actions
         }
 
+    def _compute_move_then_actions(self, unit, unit_id: int,
+                                     reachable_positions: List[tuple]
+                                     ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Compute actions that become available after moving to reachable positions.
+
+        Args:
+            unit: The unit to check
+            unit_id: The unit's ID for the LLM
+            reachable_positions: List of (x, y) positions the unit can move to
+
+        Returns:
+            Dict with move_then_attack, move_then_seize, etc. combinations
+        """
+        result = {
+            'move_then_attack': [],
+            'move_then_seize': [],
+            'move_then_heal': [],
+            'move_then_cure': [],
+            'move_then_paralyze': []
+        }
+
+        # Get enemy units for attack calculations
+        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player]
+
+        # Get ally units for heal/cure calculations (Cleric only)
+        ally_units = [u for u in self.game_state.units
+                      if u.player == self.bot_player and u != unit]
+
+        for to_x, to_y in reachable_positions:
+            # Convert to original coords for output
+            orig_to_x, orig_to_y = self.game_state.padded_to_original_coords(to_x, to_y)
+
+            # Check if moving here allows attacking enemies
+            # Temporarily calculate what would be in range from this position
+            tile = self.game_state.grid.get_tile(to_x, to_y)
+            on_mountain = tile.type == 'm' if tile else False
+
+            for enemy in enemy_units:
+                # Calculate distance from potential new position
+                distance = abs(to_x - enemy.x) + abs(to_y - enemy.y)
+
+                # Check if enemy would be in attack range from new position
+                min_range, max_range = unit.get_attack_range(on_mountain)
+                if min_range <= distance <= max_range:
+                    orig_enemy_x, orig_enemy_y = self.game_state.padded_to_original_coords(
+                        enemy.x, enemy.y
+                    )
+                    result['move_then_attack'].append({
+                        'unit_id': unit_id,
+                        'move_to': [orig_to_x, orig_to_y],
+                        'then_attack': [orig_enemy_x, orig_enemy_y]
+                    })
+
+                    # Mage can also paralyze (adjacent only, distance <= 2)
+                    if unit.type == 'M' and distance <= 2:
+                        result['move_then_paralyze'].append({
+                            'unit_id': unit_id,
+                            'move_to': [orig_to_x, orig_to_y],
+                            'then_paralyze': [orig_enemy_x, orig_enemy_y]
+                        })
+
+            # Check if moving here allows seizing a structure
+            if tile and tile.is_capturable() and tile.player != self.bot_player:
+                result['move_then_seize'].append({
+                    'unit_id': unit_id,
+                    'move_to': [orig_to_x, orig_to_y],
+                    'then_seize': True
+                })
+
+            # Cleric-specific: check for heal/cure opportunities
+            if unit.type == 'C':
+                adjacent_positions = [
+                    (to_x, to_y - 1), (to_x, to_y + 1),
+                    (to_x - 1, to_y), (to_x + 1, to_y)
+                ]
+
+                for ally in ally_units:
+                    if (ally.x, ally.y) in adjacent_positions:
+                        orig_ally_x, orig_ally_y = self.game_state.padded_to_original_coords(
+                            ally.x, ally.y
+                        )
+                        # Heal if damaged
+                        if ally.health < ally.max_health:
+                            result['move_then_heal'].append({
+                                'unit_id': unit_id,
+                                'move_to': [orig_to_x, orig_to_y],
+                                'then_heal': [orig_ally_x, orig_ally_y]
+                            })
+                        # Cure if paralyzed
+                        if ally.is_paralyzed():
+                            result['move_then_cure'].append({
+                                'unit_id': unit_id,
+                                'move_to': [orig_to_x, orig_to_y],
+                                'then_cure': [orig_ally_x, orig_ally_y]
+                            })
+
+        return result
+
     def _format_legal_actions(self, legal_actions: Dict[str, List[Any]],
                               unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
         """Format legal actions for LLM consumption with original map coordinates."""
@@ -599,7 +698,13 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             'paralyze': [],
             'heal': [],
             'cure': [],
-            'seize': []
+            'seize': [],
+            # Move-then-action combinations
+            'move_then_attack': [],
+            'move_then_seize': [],
+            'move_then_heal': [],
+            'move_then_cure': [],
+            'move_then_paralyze': []
         }
 
         # Create unit actions (convert coordinates)
@@ -682,6 +787,26 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     'unit_id': unit_id_map[action['unit']],
                     'position': [tile_x, tile_y]
                 })
+
+        # Compute move-then-action combinations for units that can move
+        # Group move actions by unit to get all reachable positions per unit
+        unit_reachable_positions: Dict[Any, List[tuple]] = {}
+        for action in legal_actions['move']:
+            unit = action['unit']
+            if unit not in unit_reachable_positions:
+                unit_reachable_positions[unit] = []
+            unit_reachable_positions[unit].append((action['to_x'], action['to_y']))
+
+        # For each movable unit, compute what actions become available after moving
+        for unit, positions in unit_reachable_positions.items():
+            if unit in unit_id_map:
+                unit_id = unit_id_map[unit]
+                move_then_actions = self._compute_move_then_actions(unit, unit_id, positions)
+
+                # Merge results into formatted output
+                for key in ['move_then_attack', 'move_then_seize', 'move_then_heal',
+                           'move_then_cure', 'move_then_paralyze']:
+                    formatted[key].extend(move_then_actions[key])
 
         return formatted
 
