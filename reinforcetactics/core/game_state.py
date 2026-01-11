@@ -76,6 +76,7 @@ class GameState:
 
         # Cached values for performance
         self._unit_count_cache: Dict[int, int] = {}
+        self._legal_actions_cache: Dict[int, Dict[str, List[Any]]] = {}
         self._cache_valid: bool = False
 
     def reset(self, map_data) -> None:
@@ -136,6 +137,7 @@ class GameState:
         """Invalidate cached values."""
         self._cache_valid = False
         self._unit_count_cache.clear()
+        self._legal_actions_cache.clear()
 
     def get_unit_count(self, player: int) -> int:
         """Get cached unit count for a player."""
@@ -290,12 +292,14 @@ class GameState:
 
         # Execute move
         unit.move_to(to_x, to_y)
+        unit.can_move = False  # Consume move action
 
         # Record action
         self.record_action('move', unit_type=unit.type, from_x=from_x, from_y=from_y,
                           to_x=to_x, to_y=to_y, player=unit.player)
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
+        self._invalidate_cache()
         return True
 
     def attack(self, attacker: Unit, target: Unit) -> Dict[str, Any]:
@@ -360,6 +364,7 @@ class GameState:
 
         attacker.can_move = False
         attacker.can_attack = False
+        self._invalidate_cache()
 
         return result
 
@@ -373,6 +378,7 @@ class GameState:
                               paralyzer_pos=(paralyzer.x, paralyzer.y),
                               target_pos=(target.x, target.y),
                               player=paralyzer.player)
+            self._invalidate_cache()
         return result
 
     def heal(self, healer: Unit, target: Unit) -> int:
@@ -386,6 +392,7 @@ class GameState:
                               target_pos=(target.x, target.y),
                               amount=amount,
                               player=healer.player)
+            self._invalidate_cache()
         return amount
 
     def cure(self, curer: Unit, target: Unit) -> bool:
@@ -398,6 +405,7 @@ class GameState:
                               curer_pos=(curer.x, curer.y),
                               target_pos=(target.x, target.y),
                               player=curer.player)
+            self._invalidate_cache()
         return result
 
     def seize(self, unit: Unit) -> Dict[str, Any]:
@@ -419,6 +427,7 @@ class GameState:
 
         unit.can_move = False
         unit.can_attack = False
+        self._invalidate_cache()
 
         return result
 
@@ -615,6 +624,10 @@ class GameState:
         if player is None:
             player = self.current_player
 
+        # Return cached actions if available and cache is valid
+        if self._cache_valid and player in self._legal_actions_cache:
+            return self._legal_actions_cache[player]
+
         legal_actions = {
             'create_unit': [],
             'move': [],
@@ -713,6 +726,10 @@ class GameState:
                             'unit': unit,
                             'tile': tile
                         })
+
+        # Cache the result
+        if self._cache_valid:
+            self._legal_actions_cache[player] = legal_actions
 
         return legal_actions
 

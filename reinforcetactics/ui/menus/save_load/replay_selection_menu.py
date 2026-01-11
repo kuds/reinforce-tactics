@@ -196,6 +196,59 @@ class ReplaySelectionMenu(Menu):
 
         return f"{date} - {p1} vs {p2}"
 
+            # Pre-load replay info for all files
+            for replay_file in self.replay_files:
+                filepath = os.path.join(self.replays_dir, replay_file)
+                self.replay_info_cache[filepath] = self._load_replay_info(filepath)
+
+    def _load_replay_info(self, filepath: str) -> Dict[str, Any]:
+        """Load replay info from a file without loading full action history."""
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+
+            game_info = data.get('game_info', {})
+            player_configs = game_info.get('player_configs', [])
+
+            # Get player names
+            p1_name = 'P1'
+            p2_name = 'P2'
+            if player_configs:
+                if len(player_configs) > 0:
+                    p1_name = player_configs[0].get('name', 'P1')
+                if len(player_configs) > 1:
+                    p2_name = player_configs[1].get('name', 'P2')
+
+            # Parse timestamp
+            timestamp = data.get('timestamp', '')
+            date_str = ''
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    date_str = dt.strftime('%Y-%m-%d %H:%M')
+                except (ValueError, TypeError):
+                    date_str = timestamp[:16] if len(timestamp) >= 16 else timestamp
+
+            return {
+                'p1_name': p1_name,
+                'p2_name': p2_name,
+                'winner': game_info.get('winner'),
+                'total_turns': game_info.get('total_turns', '?'),
+                'num_actions': len(data.get('actions', [])),
+                'date': date_str,
+                'map_file': game_info.get('map_file', ''),
+            }
+        except (json.JSONDecodeError, IOError, KeyError):
+            return {
+                'p1_name': 'Unknown',
+                'p2_name': 'Unknown',
+                'winner': None,
+                'total_turns': '?',
+                'num_actions': 0,
+                'date': '',
+                'map_file': '',
+            }
+
     def _setup_options(self) -> None:
         """Setup menu options for available replay files."""
         if not self.replay_files:

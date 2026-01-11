@@ -53,6 +53,14 @@ class ReplayPlayer:
         self.recording = False
         self.recorded_frames = []
 
+        # On-screen notification state
+        self.notification_text = ""
+        self.notification_time = 0
+        self.notification_duration = 2.0  # seconds
+
+        # Current action description for display
+        self.current_action_description = ""
+
         # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
         self.game_state = GameState(padded_map,
@@ -152,16 +160,47 @@ class ReplayPlayer:
         # Control panel at bottom
         self.control_y = screen_height - 60
 
-        self.play_pause_button = pygame.Rect(10, self.control_y + 10, 80, 40)
-        self.restart_button = pygame.Rect(100, self.control_y + 10, 80, 40)
-        self.speed_up_button = pygame.Rect(190, self.control_y + 10, 40, 40)
-        self.speed_down_button = pygame.Rect(240, self.control_y + 10, 40, 40)
-        self.save_video_button = pygame.Rect(290, self.control_y + 10, 100, 40)
-        self.exit_button = pygame.Rect(screen_width - 90, self.control_y + 10, 80, 40)
+        # Layout buttons with proper spacing
+        btn_y = self.control_y + 10
+        btn_height = 40
 
-        # Progress bar
-        self.progress_bar_rect = pygame.Rect(400, self.control_y + 20,
-                                             max(screen_width - 510, 100), 20)
+        # Row 1: Playback controls
+        x_pos = 10
+        self.step_back_button = pygame.Rect(x_pos, btn_y, 40, btn_height)
+        x_pos += 50
+        self.play_pause_button = pygame.Rect(x_pos, btn_y, 60, btn_height)
+        x_pos += 70
+        self.step_forward_button = pygame.Rect(x_pos, btn_y, 40, btn_height)
+        x_pos += 50
+        self.restart_button = pygame.Rect(x_pos, btn_y, 40, btn_height)
+
+        # Skip turn buttons
+        x_pos += 50
+        self.prev_turn_button = pygame.Rect(x_pos, btn_y, 40, btn_height)
+        x_pos += 50
+        self.next_turn_button = pygame.Rect(x_pos, btn_y, 40, btn_height)
+
+        # Speed controls
+        x_pos += 60
+        self.speed_down_button = pygame.Rect(x_pos, btn_y, 35, btn_height)
+        x_pos += 40
+        self.speed_display_x = x_pos + 25  # Center of speed display area
+        x_pos += 55
+        self.speed_up_button = pygame.Rect(x_pos, btn_y, 35, btn_height)
+
+        # Save video button
+        x_pos += 50
+        self.save_video_button = pygame.Rect(x_pos, btn_y, 80, btn_height)
+
+        # Exit button at the right
+        self.exit_button = pygame.Rect(screen_width - 70, btn_y, 60, btn_height)
+
+        # Progress bar - positioned after the buttons
+        progress_start = x_pos + 90
+        progress_end = screen_width - 80
+        progress_width = max(progress_end - progress_start, 100)
+        self.progress_bar_rect = pygame.Rect(progress_start, self.control_y + 20,
+                                             progress_width, 20)
 
     def execute_action(self, action):
         """
@@ -270,18 +309,20 @@ class ReplayPlayer:
 
             if current_time - self.last_action_time >= time_per_action:
                 action = self.actions[self.current_action_index]
+                self.current_action_description = self._get_action_description(action)
                 self.execute_action(action)
                 self.current_action_index += 1
                 self.last_action_time = current_time
 
                 if self.current_action_index >= len(self.actions):
                     self.paused = True
-                    print("✅ Replay finished!")
+                    self.show_notification("Replay finished!")
 
     def restart(self):
         """Restart the replay from the beginning."""
         self.current_action_index = 0
         self.paused = True
+        self.current_action_description = ""
 
         # Recreate game state
         from reinforcetactics.core.game_state import GameState
@@ -293,7 +334,7 @@ class ReplayPlayer:
         self.renderer = Renderer(self.game_state)
         self.setup_ui()
 
-        print("🔄 Replay restarted")
+        self.show_notification("Replay restarted")
 
     def toggle_pause(self):
         """Toggle pause/play."""
@@ -303,35 +344,147 @@ class ReplayPlayer:
 
     def change_speed(self, delta):
         """Change playback speed."""
-        speeds = [0.25, 0.5, 1.0, 2.0, 4.0]
+        speeds = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
         try:
             current_idx = speeds.index(self.playback_speed)
             new_idx = max(0, min(len(speeds) - 1, current_idx + delta))
             self.playback_speed = speeds[new_idx]
-            print(f"⏩ Playback speed: {self.playback_speed}x")
+            self.show_notification(f"Speed: {self.playback_speed}x")
         except ValueError:
             self.playback_speed = 1.0
+
+    def show_notification(self, text):
+        """Show an on-screen notification."""
+        self.notification_text = text
+        self.notification_time = time.time()
+
+    def step_forward(self):
+        """Step forward one action."""
+        if self.current_action_index < len(self.actions):
+            action = self.actions[self.current_action_index]
+            self.execute_action(action)
+            self.current_action_index += 1
+            self.paused = True
+            if self.current_action_index >= len(self.actions):
+                self.show_notification("Replay finished!")
+
+    def step_backward(self):
+        """Step backward one action by replaying from start."""
+        if self.current_action_index > 0:
+            target = self.current_action_index - 1
+            self._replay_to_action(target)
+            self.paused = True
+
+    def _replay_to_action(self, target_index):
+        """Replay from beginning to target action index."""
+        # Reset game state
+        from reinforcetactics.core.game_state import GameState
+        self.game_state = GameState(self.initial_map_data,
+                                    num_players=self.game_info.get('num_players', 2))
+
+        # Recreate renderer
+        from reinforcetactics.ui.renderer import Renderer
+        self.renderer = Renderer(self.game_state)
+        self.setup_ui()
+
+        # Replay to target
+        for i in range(target_index):
+            if i < len(self.actions):
+                self.execute_action(self.actions[i])
+        self.current_action_index = target_index
+
+    def skip_to_next_turn(self):
+        """Skip to the next turn's first action."""
+        if self.current_action_index >= len(self.actions):
+            return
+
+        current_turn = self._get_action_turn(self.current_action_index)
+
+        # Find next turn's first action
+        for i in range(self.current_action_index + 1, len(self.actions)):
+            if self._get_action_turn(i) > current_turn:
+                self._replay_to_action(i)
+                self.show_notification(f"Turn {self._get_action_turn(i)}")
+                return
+
+        # No next turn found, go to end
+        self._replay_to_action(len(self.actions))
+        self.show_notification("Replay finished!")
+
+    def skip_to_prev_turn(self):
+        """Skip to the previous turn's first action."""
+        if self.current_action_index <= 0:
+            return
+
+        current_turn = self._get_action_turn(max(0, self.current_action_index - 1))
+
+        # Find the start of the previous turn
+        target_turn = max(1, current_turn - 1)
+
+        # Find the first action of the target turn
+        for i in range(len(self.actions)):
+            if self._get_action_turn(i) >= target_turn:
+                self._replay_to_action(i)
+                self.show_notification(f"Turn {self._get_action_turn(i)}")
+                return
+
+        # Fallback to beginning
+        self._replay_to_action(0)
+        self.show_notification("Turn 1")
+
+    def _get_action_turn(self, action_index):
+        """Get the turn number for an action index."""
+        if action_index < 0 or action_index >= len(self.actions):
+            return 0
+        return self.actions[action_index].get('turn', 0)
+
+    def _get_action_description(self, action):
+        """Get a human-readable description of an action."""
+        action_type = action.get('type', 'unknown')
+        player = action.get('player', '?')
+
+        if action_type == 'create_unit':
+            unit_type = action.get('unit_type', 'unit')
+            return f"P{player} creates {unit_type}"
+        elif action_type == 'move':
+            return f"P{player} moves unit"
+        elif action_type == 'attack':
+            return f"P{player} attacks"
+        elif action_type == 'paralyze':
+            return f"P{player} paralyzes target"
+        elif action_type == 'heal':
+            return f"P{player} heals unit"
+        elif action_type == 'cure':
+            return f"P{player} cures unit"
+        elif action_type == 'seize':
+            return f"P{player} seizes structure"
+        elif action_type == 'resign':
+            return f"P{player} resigns"
+        elif action_type == 'end_turn':
+            return f"P{player} ends turn"
+        else:
+            return f"P{player}: {action_type}"
 
     def start_recording(self):
         """Start recording video frames."""
         self.recording = True
         self.recorded_frames = []
-        print("🔴 Started recording video...")
+        self.show_notification("Recording started...")
 
     def stop_recording(self):
         """Stop recording and prompt to save."""
         if self.recording:
             self.recording = False
-            print(f"⏹️  Stopped recording. Captured {len(self.recorded_frames)} frames.")
+            self.show_notification(f"Recording stopped ({len(self.recorded_frames)} frames)")
 
     def save_video(self):
         """Save recorded frames to video file."""
         if not self.recorded_frames:
-            print("⚠️  No frames recorded. Start recording first.")
+            self.show_notification("No frames recorded!")
             return None
 
         if not CV2_AVAILABLE:
-            print("❌ opencv-python not installed. Install with: pip install opencv-python")
+            self.show_notification("OpenCV not installed!")
             return None
 
         try:
@@ -358,19 +511,15 @@ class ReplayPlayer:
                 writer.write(bgr_frame)
 
             writer.release()
-            print(f"✅ Video saved: {output_path}")
-            print(f"   Duration: {len(self.recorded_frames) / fps:.1f} seconds")
-            print(f"   Resolution: {width}x{height}")
-            print(f"   Frames: {len(self.recorded_frames)}")
+            duration = len(self.recorded_frames) / fps
+            self.show_notification(f"Video saved! ({duration:.1f}s)")
 
             # Clear recorded frames to free memory
             self.recorded_frames = []
             return str(output_path)
 
         except Exception as e:
-            print(f"❌ Error saving video: {e}")
-            import traceback
-            traceback.print_exc()
+            self.show_notification(f"Error: {e}")
             return None
 
     def run(self):
@@ -378,16 +527,12 @@ class ReplayPlayer:
         clock = pygame.time.Clock()
         running = True
 
-        print("\n🎬 Starting replay playback")
-        print(f"Total actions: {len(self.actions)}")
-        print(f"Game info: {self.game_info}")
-        print("\nControls:")
-        print("  SPACE - Play/Pause")
-        print("  R - Restart")
-        print("  V - Start/Stop video recording")
-        print("  + - Speed up")
-        print("  - - Slow down")
-        print("  ESC - Exit\n")
+        # Show initial notification with game info
+        player_configs = self.game_info.get('player_configs', [])
+        if player_configs:
+            p1_name = player_configs[0].get('name', 'P1') if len(player_configs) > 0 else 'P1'
+            p2_name = player_configs[1].get('name', 'P2') if len(player_configs) > 1 else 'P2'
+            self.show_notification(f"{p1_name} vs {p2_name}")
 
         while running:
             mouse_pos = pygame.mouse.get_pos()
@@ -413,6 +558,15 @@ class ReplayPlayer:
                         self.change_speed(1)
                     elif event.key == pygame.K_MINUS:
                         self.change_speed(-1)
+                    # New keyboard shortcuts
+                    elif event.key == pygame.K_LEFT:
+                        self.step_backward()
+                    elif event.key == pygame.K_RIGHT:
+                        self.step_forward()
+                    elif event.key == pygame.K_PAGEUP:
+                        self.skip_to_prev_turn()
+                    elif event.key == pygame.K_PAGEDOWN:
+                        self.skip_to_next_turn()
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
@@ -420,6 +574,14 @@ class ReplayPlayer:
                             self.toggle_pause()
                         elif self.restart_button.collidepoint(mouse_pos):
                             self.restart()
+                        elif self.step_back_button.collidepoint(mouse_pos):
+                            self.step_backward()
+                        elif self.step_forward_button.collidepoint(mouse_pos):
+                            self.step_forward()
+                        elif self.prev_turn_button.collidepoint(mouse_pos):
+                            self.skip_to_prev_turn()
+                        elif self.next_turn_button.collidepoint(mouse_pos):
+                            self.skip_to_next_turn()
                         elif self.speed_up_button.collidepoint(mouse_pos):
                             self.change_speed(1)
                         elif self.speed_down_button.collidepoint(mouse_pos):
@@ -437,13 +599,7 @@ class ReplayPlayer:
                             relative_x = mouse_pos[0] - self.progress_bar_rect.x
                             progress = relative_x / self.progress_bar_rect.width
                             target_action = int(progress * len(self.actions))
-
-                            # Reset and play to target
-                            self.restart()
-                            for i in range(target_action):
-                                if i < len(self.actions):
-                                    self.execute_action(self.actions[i])
-                            self.current_action_index = target_action
+                            self._replay_to_action(target_action)
 
             # Update replay
             self.update()
@@ -454,77 +610,182 @@ class ReplayPlayer:
             pygame.display.flip()
             clock.tick(60)
 
-        print("👋 Exiting replay player")
-
     def draw(self, mouse_pos):
         """Draw the replay player."""
         # Draw game state
         self.renderer.render()
 
+        screen = self.renderer.screen
+        screen_width = screen.get_width()
+
+        # Draw info panel at top
+        self._draw_info_panel(screen, screen_width)
+
         # Draw control panel background
-        panel_rect = pygame.Rect(0, self.control_y,
-                                 self.renderer.screen.get_width(), 60)
-        pygame.draw.rect(self.renderer.screen, (40, 40, 50), panel_rect)
-        pygame.draw.line(self.renderer.screen, (200, 200, 220),
+        panel_rect = pygame.Rect(0, self.control_y, screen_width, 60)
+        pygame.draw.rect(screen, (40, 40, 50), panel_rect)
+        pygame.draw.line(screen, (200, 200, 220),
                         (0, self.control_y),
-                        (self.renderer.screen.get_width(), self.control_y), 2)
+                        (screen_width, self.control_y), 2)
 
         # Draw buttons
-        font = get_font(28)
+        font = get_font(24)
+        small_font = get_font(20)
+        symbol_font = get_font(28)
+
+        # Step back button
+        self._draw_button(self.step_back_button, "◀", mouse_pos, (80, 80, 120), symbol_font)
 
         # Play/Pause button
         play_text = "▶" if self.paused else "⏸"
-        self._draw_button(self.play_pause_button, play_text, mouse_pos, (100, 150, 100), font)
+        self._draw_button(self.play_pause_button, play_text, mouse_pos, (100, 150, 100), symbol_font)
+
+        # Step forward button
+        self._draw_button(self.step_forward_button, "▶", mouse_pos, (80, 80, 120), symbol_font)
 
         # Restart button
-        self._draw_button(self.restart_button, "⟲", mouse_pos, (150, 100, 100), font)
+        self._draw_button(self.restart_button, "⟲", mouse_pos, (150, 100, 100), symbol_font)
 
-        # Speed buttons
-        speed_font = get_font(32)
-        self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), speed_font)
-        self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), speed_font)
+        # Skip to previous turn button
+        self._draw_button(self.prev_turn_button, "⏮", mouse_pos, (100, 100, 130), symbol_font)
+
+        # Skip to next turn button
+        self._draw_button(self.next_turn_button, "⏭", mouse_pos, (100, 100, 130), symbol_font)
+
+        # Speed down button
+        self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), symbol_font)
+
+        # Speed display (between speed buttons)
+        speed_text = f"{self.playback_speed}x"
+        speed_surface = small_font.render(speed_text, True, (200, 200, 255))
+        speed_rect = speed_surface.get_rect(center=(self.speed_display_x, self.control_y + 30))
+        screen.blit(speed_surface, speed_rect)
+
+        # Speed up button
+        self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), symbol_font)
 
         # Save Video button
-        save_video_text = "⏺ Rec" if not self.recording else "⏹ Save"
+        save_video_text = "Rec" if not self.recording else "Save"
         save_video_color = (200, 50, 50) if self.recording else (70, 70, 150)
-        small_font = get_font(22)
         self._draw_button(self.save_video_button, save_video_text, mouse_pos,
                          save_video_color, small_font)
 
-        # Progress bar
-        pygame.draw.rect(self.renderer.screen, (60, 60, 70), self.progress_bar_rect)
-        if len(self.actions) > 0:
-            progress = self.current_action_index / len(self.actions)
-            progress_width = int(self.progress_bar_rect.width * progress)
-            progress_rect = pygame.Rect(self.progress_bar_rect.x, self.progress_bar_rect.y,
-                                        progress_width, self.progress_bar_rect.height)
-            pygame.draw.rect(self.renderer.screen, (100, 200, 100), progress_rect)
-        pygame.draw.rect(self.renderer.screen, (200, 200, 220), self.progress_bar_rect, 2)
-
-        # Progress text
-        progress_text = f"{self.current_action_index} / {len(self.actions)}"
-        progress_surface = get_font(20).render(progress_text, True, (255, 255, 255))
-        progress_text_rect = progress_surface.get_rect(
-            midleft=(self.progress_bar_rect.right + 10, self.progress_bar_rect.centery)
-        )
-        self.renderer.screen.blit(progress_surface, progress_text_rect)
+        # Progress bar (only if there's space)
+        if self.progress_bar_rect.width > 50:
+            pygame.draw.rect(screen, (60, 60, 70), self.progress_bar_rect)
+            if len(self.actions) > 0:
+                progress = self.current_action_index / len(self.actions)
+                progress_width = int(self.progress_bar_rect.width * progress)
+                progress_rect = pygame.Rect(self.progress_bar_rect.x, self.progress_bar_rect.y,
+                                            progress_width, self.progress_bar_rect.height)
+                pygame.draw.rect(screen, (100, 200, 100), progress_rect)
+            pygame.draw.rect(screen, (200, 200, 220), self.progress_bar_rect, 2)
 
         # Exit button
-        self._draw_button(self.exit_button, "Exit", mouse_pos, (150, 70, 70), font)
+        self._draw_button(self.exit_button, "X", mouse_pos, (150, 70, 70), font)
 
         # Recording indicator
         if self.recording:
-            rec_text = f"🔴 REC ({len(self.recorded_frames)} frames)"
-            rec_surface = get_font(20).render(rec_text, True, (255, 50, 50))
-            self.renderer.screen.blit(rec_surface, (10, 10))
+            rec_text = f"REC ({len(self.recorded_frames)})"
+            rec_surface = get_font(18).render(rec_text, True, (255, 50, 50))
+            rec_x = screen_width - rec_surface.get_width() - 10
+            screen.blit(rec_surface, (rec_x, 10))
+
+        # Draw on-screen notification
+        self._draw_notification(screen, screen_width)
 
         # Capture frame if recording
         if self.recording:
             # Get the pygame surface as a numpy array
-            frame_data = pygame.surfarray.array3d(self.renderer.screen)
+            frame_data = pygame.surfarray.array3d(screen)
             # Transpose from (width, height, channels) to (height, width, channels)
             frame_data = np.transpose(frame_data, (1, 0, 2))
             self.recorded_frames.append(frame_data.copy())
+
+    def _draw_info_panel(self, screen, screen_width):
+        """Draw the info panel at the top of the screen."""
+        # Semi-transparent background
+        info_panel = pygame.Surface((screen_width, 50), pygame.SRCALPHA)
+        info_panel.fill((0, 0, 0, 150))
+        screen.blit(info_panel, (0, 0))
+
+        font = get_font(18)
+        small_font = get_font(16)
+
+        # Get current turn
+        current_turn = 0
+        if self.current_action_index > 0 and self.current_action_index <= len(self.actions):
+            current_turn = self._get_action_turn(self.current_action_index - 1)
+        elif self.current_action_index == 0 and len(self.actions) > 0:
+            current_turn = self._get_action_turn(0)
+
+        total_turns = self.game_info.get('total_turns', '?')
+
+        # Turn info on left
+        turn_text = f"Turn: {current_turn} / {total_turns}"
+        turn_surface = font.render(turn_text, True, (255, 255, 255))
+        screen.blit(turn_surface, (10, 8))
+
+        # Action counter
+        action_text = f"Action: {self.current_action_index} / {len(self.actions)}"
+        action_surface = small_font.render(action_text, True, (200, 200, 200))
+        screen.blit(action_surface, (10, 28))
+
+        # Current action description in center
+        if self.current_action_description:
+            desc_surface = font.render(self.current_action_description, True, (255, 220, 100))
+            desc_rect = desc_surface.get_rect(center=(screen_width // 2, 25))
+            screen.blit(desc_surface, desc_rect)
+
+        # Player info on right
+        player_configs = self.game_info.get('player_configs', [])
+        winner = self.game_info.get('winner', None)
+
+        if player_configs:
+            p1_name = player_configs[0].get('name', 'P1')[:15] if len(player_configs) > 0 else 'P1'
+            p2_name = player_configs[1].get('name', 'P2')[:15] if len(player_configs) > 1 else 'P2'
+
+            # Color based on winner
+            p1_color = (100, 255, 100) if winner == 1 else (255, 255, 255)
+            p2_color = (100, 255, 100) if winner == 2 else (255, 255, 255)
+
+            p1_surface = small_font.render(f"P1: {p1_name}", True, p1_color)
+            p2_surface = small_font.render(f"P2: {p2_name}", True, p2_color)
+
+            screen.blit(p1_surface, (screen_width - 160, 8))
+            screen.blit(p2_surface, (screen_width - 160, 28))
+
+    def _draw_notification(self, screen, screen_width):
+        """Draw on-screen notification if active."""
+        if self.notification_text:
+            elapsed = time.time() - self.notification_time
+            if elapsed < self.notification_duration:
+                # Fade out effect
+                alpha = 255
+                if elapsed > self.notification_duration - 0.5:
+                    alpha = int(255 * (self.notification_duration - elapsed) / 0.5)
+
+                font = get_font(24)
+                text_surface = font.render(self.notification_text, True, (255, 255, 255))
+
+                # Create background
+                padding = 15
+                bg_width = text_surface.get_width() + 2 * padding
+                bg_height = text_surface.get_height() + 2 * padding
+                bg_surface = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
+                bg_surface.fill((0, 0, 0, min(180, alpha)))
+
+                # Position at center-bottom (above control panel)
+                x = (screen_width - bg_width) // 2
+                y = self.control_y - bg_height - 20
+
+                screen.blit(bg_surface, (x, y))
+
+                # Draw text with alpha
+                text_surface.set_alpha(alpha)
+                screen.blit(text_surface, (x + padding, y + padding))
+            else:
+                self.notification_text = ""
 
     def _draw_button(self, rect, text, mouse_pos, color, font):
         """Draw a button."""
