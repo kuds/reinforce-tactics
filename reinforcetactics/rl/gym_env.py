@@ -184,22 +184,81 @@ class StrategyGameEnv(gym.Env):
 
     def _get_action_mask(self) -> np.ndarray:
         """
-        Get binary mask of valid actions.
+        Get binary mask of valid actions for the current player.
 
-        Returns:
-            Binary array of shape (action_space_size,)
+        The action mask corresponds to the flattened action space of size 6 * W * H.
+        Segments:
+        0: Create Unit (at pos) - Valid if pos is a building and we can afford unit
+        1: Move (to pos) - Valid if ANY unit can move to pos
+        2: Attack (target at pos) - Valid if ANY unit can attack unit at pos
+        3: Seize (at pos) - Valid if unit at pos can seize
+        4: Heal (target at pos) - Valid if ANY unit can heal unit at pos
+        5: End Turn (any pos) - Always valid (usually just mapped to one index or all)
+
+        Note: This is a "valid target" mask. It tells the agent *where* something can happen,
+        but implies *someone* can do it. The agent then picks (ActionType, UnitType, From, To).
+        Strictly speaking, for a MultiDiscrete space, masking is complex.
+        Here we map to the flattened intention: "Can I perform Action X at Target Y?".
         """
-        # Get legal actions from game state
-        # TODO: Re-enable legal action filtering once get_legal_actions is implemented
-        # legal_actions = self.game_state.get_legal_actions(player=1)
+        # Get legal actions from game state (uses cache)
+        # Note: gym env manages current player, but game_state also knows it.
+        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         # Create mask (all zeros initially)
+        # Size: 6 * W * H
         mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
 
-        # TODO: Implement proper action encoding and masking
-        # For now, return all 1s (no masking)
-        # This is a known limitation that will be addressed
-        mask[:] = 1.0
+        width = self.grid_width
+        height = self.grid_height
+        area = width * height
+
+        # Helper to set mask bit
+        def set_mask(action_type_idx, x, y):
+            idx = (action_type_idx * area) + (y * width + x)
+            if 0 <= idx < mask.size:
+                mask[idx] = 1.0
+
+        # 0: Create Unit
+        # legal_actions['create_unit'] contains list of dicts: {unit_type, x, y}
+        for action in legal_actions.get('create_unit', []):
+            set_mask(0, action['x'], action['y'])
+
+        # 1: Move
+        # legal_actions['move'] contains list of dicts: {unit, from_x, from_y, to_x, to_y}
+        for action in legal_actions.get('move', []):
+            set_mask(1, action['to_x'], action['to_y'])
+
+        # 2: Attack
+        # legal_actions['attack'] contains list of dicts: {attacker, target}
+        for action in legal_actions.get('attack', []):
+            target = action['target']
+            set_mask(2, target.x, target.y)
+
+        # 3: Seize
+        # legal_actions['seize'] contains list of dicts: {unit, tile}
+        for action in legal_actions.get('seize', []):
+            tile = action['tile']
+            set_mask(3, tile.x, tile.y)
+
+        # 4: Heal (includes Cure)
+        for action in legal_actions.get('heal', []):
+            target = action['target']
+            set_mask(4, target.x, target.y)
+
+        # Map 'cure' to the same action type as 'heal' (4)
+        # If a cleric selects action type 4 on a target, they will Heal OR Cure depending on condition
+        for action in legal_actions.get('cure', []):
+            target = action['target']
+            set_mask(4, target.x, target.y)
+
+        # 5: End Turn
+        # Always allow end turn. We can map it to (0,0) or everywhere.
+        # Usually EndTurn doesn't need parameters.
+        # Let's enable it everywhere to be safe, or just index 0.
+        # Enabling everywhere allows the agent to easier "find" the action.
+        start_idx = 5 * area
+        end_idx = 6 * area
+        mask[start_idx:end_idx] = 1.0
 
         return mask
 
@@ -284,14 +343,30 @@ class StrategyGameEnv(gym.Env):
                 else:
                     is_valid = False
 
-            elif action_type == 4:  # Heal (if Cleric)
+            elif action_type == 4:  # Heal/Cure (Cleric)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == 'C':
-                    heal_amount = self.game_state.heal(unit, target)
-                    if heal_amount > 0:
-                        reward += heal_amount / 2.0
-                    else:
+                    # Priority: Cure if paralyzed, otherwise Heal
+                    # Or check what's possible
+                    
+                    # Try to cure first if target is paralyzed
+                    action_performed = False
+                    if target.is_paralyzed():
+                        result = self.game_state.cure(unit, target)
+                        if result:
+                            reward += 5.0 # Reward for curing
+                            action_performed = True
+                    
+                    # If not cured (or not paralyzed), try to heal
+                    if not action_performed:
+                        heal_amount = self.game_state.heal(unit, target)
+                        if heal_amount > 0:
+                            reward += heal_amount / 2.0
+                            action_performed = True
+                    
+                    if not action_performed:
+                        # If neither worked (e.g. full health and not paralyzed), action failed
                         is_valid = False
                 else:
                     is_valid = False
