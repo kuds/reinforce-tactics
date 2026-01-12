@@ -1,9 +1,55 @@
 """Pytest configuration and shared fixtures for testing."""
+import os
 import pytest
 import numpy as np
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.tile import Tile
 from reinforcetactics.core.grid import TileGrid
+
+
+# ==============================================================================
+# PYTEST HOOKS - Marker registration and configuration
+# ==============================================================================
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "unit: Fast unit tests (< 100ms)")
+    config.addinivalue_line("markers", "integration: Integration tests (100ms - 2s)")
+    config.addinivalue_line("markers", "slow: Long-running tests (> 2s)")
+    config.addinivalue_line("markers", "gpu: Tests requiring GPU acceleration")
+    config.addinivalue_line("markers", "external: Tests requiring external services")
+    config.addinivalue_line("markers", "ui: Tests requiring pygame display")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Automatically mark tests based on naming conventions and skip slow tests if requested."""
+    skip_slow = config.getoption("--skip-slow", default=False) if hasattr(config.option, 'skip_slow') else False
+    run_external = os.environ.get("RUN_EXTERNAL_TESTS", "").lower() == "true"
+
+    for item in items:
+        # Skip slow tests if --skip-slow is passed
+        if skip_slow and "slow" in item.keywords:
+            item.add_marker(pytest.mark.skip(reason="Skipping slow test (--skip-slow)"))
+
+        # Skip external tests unless explicitly enabled
+        if "external" in item.keywords and not run_external:
+            item.add_marker(pytest.mark.skip(reason="External tests disabled (set RUN_EXTERNAL_TESTS=true)"))
+
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--skip-slow",
+        action="store_true",
+        default=False,
+        help="Skip tests marked as slow"
+    )
+    parser.addoption(
+        "--run-external",
+        action="store_true",
+        default=False,
+        help="Run tests that require external services"
+    )
 
 
 @pytest.fixture

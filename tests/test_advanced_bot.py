@@ -207,6 +207,8 @@ class TestBotFactoryAdvancedBot:
         assert bot.bot_player == 2
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 class TestTournamentAdvancedBot:
     """Test tournament integration."""
 

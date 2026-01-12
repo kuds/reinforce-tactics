@@ -435,6 +435,8 @@ class TestFullSaveLoadCycle:
             assert restored_game.player_configs == game_with_actions.player_configs
 
 
+@pytest.mark.slow
+@pytest.mark.ui
 class TestReplayPadding:
     """Test replay padding functionality."""
 
@@ -580,6 +582,8 @@ class TestReplayPadding:
             assert player.padding_offset_y == original_offset_y
 
 
+@pytest.mark.slow
+@pytest.mark.ui
 class TestReplayVideoExport:
     """Test replay video export functionality."""
 

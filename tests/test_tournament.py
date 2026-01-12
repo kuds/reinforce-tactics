@@ -79,6 +79,8 @@ class TestModelBot:
             assert mock_model.predict.called
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 class TestTournamentSystem:
     """Tests for tournament system."""
 

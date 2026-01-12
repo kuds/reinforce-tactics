@@ -234,6 +234,8 @@ class TestBotFactoryMediumBot:
         assert bot.bot_player == 2
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 class TestTournamentMediumBot:
     """Test tournament system integration."""
 

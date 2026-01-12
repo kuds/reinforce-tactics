@@ -8,10 +8,24 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  schedule:
+    # Run full tests nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      run_slow_tests:
+        description: 'Run slow tests'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
-  build:
-
+  # Fast tests - runs on every push/PR, excludes slow tests
+  fast-tests:
+    name: Fast Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,21 +34,57 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
+        python -m pip install flake8 pytest pytest-timeout
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
+
+    - name: Run fast tests (excluding slow tests)
       run: |
-        pytest
+        pytest -m "not slow" --timeout=60 -v
+
+  # Full tests - runs on schedule, manual dispatch, or when explicitly requested
+  full-tests:
+    name: Full Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    # Run on schedule, manual dispatch with slow tests enabled, or on PRs labeled 'full-tests'
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_slow_tests == 'true') ||
+      contains(github.event.pull_request.labels.*.name, 'full-tests')
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install flake8 pytest pytest-timeout
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Run all tests (including slow tests)
+      run: |
+        pytest --timeout=120 -v

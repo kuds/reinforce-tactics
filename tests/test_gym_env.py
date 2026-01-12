@@ -740,6 +740,7 @@ class TestRenderAndClose:
 # 8. EPISODE STATISTICS TESTS
 # ==============================================================================
 
+@pytest.mark.slow
 class TestEpisodeStatistics:
     """Test episode statistics tracking."""
 
