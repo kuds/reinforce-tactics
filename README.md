@@ -130,7 +130,7 @@ Contributions welcome! See the [documentation](https://reinforcetactics.com) for
 
 ## License
 
-MIT License
+Apache License 2.0
 
 ## Citation
 
