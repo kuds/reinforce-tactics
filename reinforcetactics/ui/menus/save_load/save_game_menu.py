@@ -7,6 +7,7 @@ import pygame
 
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.language import get_language
+from reinforcetactics.utils.clipboard import get_clipboard_text
 
 
 class SaveGameMenu(Menu):
@@ -35,18 +36,12 @@ class SaveGameMenu(Menu):
                 self.running = False
             elif event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
                 # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
-                try:
-                    clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
-                    if clipboard_text:
-                        # Decode bytes to string and strip null characters
-                        pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
-                        # Filter to only include printable characters and respect max length
-                        remaining = 50 - len(self.input_text)
-                        filtered = ''.join(c for c in pasted_text[:remaining] if c.isprintable())
-                        self.input_text += filtered
-                except (pygame.error, UnicodeDecodeError, AttributeError):
-                    # Clipboard operation failed or clipboard not available
-                    pass
+                clipboard_text = get_clipboard_text()
+                if clipboard_text:
+                    # Filter to only include printable characters and respect max length
+                    remaining = 50 - len(self.input_text)
+                    filtered = ''.join(c for c in clipboard_text[:remaining] if c.isprintable())
+                    self.input_text += filtered
             elif event.key == pygame.K_BACKSPACE:
                 self.input_text = self.input_text[:-1]
             else:
