@@ -101,8 +101,77 @@ GEMINI_MODELS = [
 ]
 
 
-# For backwards compatibility, re-export DEFAULT_PROMPT as SYSTEM_PROMPT
-SYSTEM_PROMPT = DEFAULT_PROMPT
+# System prompt explaining the game rules
+SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
+
+GAME OBJECTIVE:
+- Win by capturing the enemy HQ or eliminating all enemy units
+- Build units, move strategically, attack enemies, and capture structures
+
+UNIT TYPES:
+1. Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
+   - Strong melee fighter, attacks adjacent enemies only
+2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
+   - Can attack at range (1-2 spaces)
+   - Can PARALYZE enemies (disable them for turns)
+3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
+   - Can HEAL allies and CURE paralyzed units
+4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
+   - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
+   - Cannot attack adjacent enemies (distance 0)
+   - Indirect unit: melee units cannot counter-attack when hit by Archer
+   - Other Archers and Mages CAN counter-attack if Archer is within their range
+
+BUILDING TYPES:
+- HQ (h): Generates 150 gold/turn, losing it means defeat
+- Building (b): Generates 100 gold/turn, used to recruit units
+- Tower (t): Generates 50 gold/turn, defensive structure
+
+AVAILABLE ACTIONS:
+1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
+2. MOVE: Move a unit to a reachable position (up to movement range)
+3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer)
+4. PARALYZE: (Mage only) Paralyze an adjacent enemy unit
+5. HEAL: (Cleric only) Heal an adjacent ally unit
+6. CURE: (Cleric only) Remove paralysis from an adjacent ally
+7. SEIZE: Capture a neutral/enemy structure by standing on it
+8. END_TURN: Finish your turn
+9. RESIGN: Concede the game (use only as last resort when victory is impossible)
+
+COMBAT RULES:
+- Most units can only attack adjacent enemies (orthogonally, not diagonally)
+- Mages can attack at range 1-2, Archers at range 1-2 (or 1-3 on mountains)
+- Archers cannot attack at distance 0 (adjacent)
+- Attacked units counter-attack if they can, except melee units cannot counter Archers
+- Paralyzed units cannot move or attack
+- Units can move first, then perform one action (attack, capture, heal, cure, paralyze), but cannot act first then move
+
+ECONOMY:
+- You earn gold from buildings you control at the start of each turn
+- Spend gold to create units at buildings
+- Control more structures to generate more income
+
+STRATEGY TIPS:
+- Balance economy (capturing buildings) with military (building units)
+- Protect your HQ at all costs
+- Mages can disable key enemy units with paralyze
+- Clerics keep your army healthy and mobile
+- Archers are excellent for safe ranged attacks, especially from mountains
+- Position units to protect each other
+
+WHEN TO RESIGN:
+Consider resigning ONLY when ALL of these conditions are true:
+- You have no units left AND cannot afford to create any
+- OR enemy units are about to capture your HQ and you cannot stop them
+- OR you are vastly outnumbered with no realistic path to victory
+Do NOT resign if you still have units, gold, or any chance of a comeback.
+
+CRITICAL CONSTRAINTS:
+- Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
+- Each action in your list is executed sequentially - plan accordingly.
+- If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
+
+Respond with ONLY the JSON object below. No extra text before or after."""
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods
@@ -636,6 +705,105 @@ Respond with your strategic plan in JSON format."""
             'legal_actions': formatted_legal_actions
         }
 
+    def _compute_move_then_actions(self, unit, unit_id: int,
+                                     reachable_positions: List[tuple]
+                                     ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Compute actions that become available after moving to reachable positions.
+
+        Args:
+            unit: The unit to check
+            unit_id: The unit's ID for the LLM
+            reachable_positions: List of (x, y) positions the unit can move to
+
+        Returns:
+            Dict with move_then_attack, move_then_seize, etc. combinations
+        """
+        result = {
+            'move_then_attack': [],
+            'move_then_seize': [],
+            'move_then_heal': [],
+            'move_then_cure': [],
+            'move_then_paralyze': []
+        }
+
+        # Get enemy units for attack calculations
+        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player]
+
+        # Get ally units for heal/cure calculations (Cleric only)
+        ally_units = [u for u in self.game_state.units
+                      if u.player == self.bot_player and u != unit]
+
+        for to_x, to_y in reachable_positions:
+            # Convert to original coords for output
+            orig_to_x, orig_to_y = self.game_state.padded_to_original_coords(to_x, to_y)
+
+            # Check if moving here allows attacking enemies
+            # Temporarily calculate what would be in range from this position
+            tile = self.game_state.grid.get_tile(to_x, to_y)
+            on_mountain = tile.type == 'm' if tile else False
+
+            for enemy in enemy_units:
+                # Calculate distance from potential new position
+                distance = abs(to_x - enemy.x) + abs(to_y - enemy.y)
+
+                # Check if enemy would be in attack range from new position
+                min_range, max_range = unit.get_attack_range(on_mountain)
+                if min_range <= distance <= max_range:
+                    orig_enemy_x, orig_enemy_y = self.game_state.padded_to_original_coords(
+                        enemy.x, enemy.y
+                    )
+                    result['move_then_attack'].append({
+                        'unit_id': unit_id,
+                        'move_to': [orig_to_x, orig_to_y],
+                        'then_attack': [orig_enemy_x, orig_enemy_y]
+                    })
+
+                    # Mage can also paralyze when the target is within its valid range
+                    if unit.type == 'M' and min_range <= distance <= max_range:
+                        result['move_then_paralyze'].append({
+                            'unit_id': unit_id,
+                            'move_to': [orig_to_x, orig_to_y],
+                            'then_paralyze': [orig_enemy_x, orig_enemy_y]
+                        })
+
+            # Check if moving here allows seizing a structure
+            if tile and tile.is_capturable() and tile.player != self.bot_player:
+                result['move_then_seize'].append({
+                    'unit_id': unit_id,
+                    'move_to': [orig_to_x, orig_to_y],
+                    'then_seize': True
+                })
+
+            # Cleric-specific: check for heal/cure opportunities
+            if unit.type == 'C':
+                adjacent_positions = [
+                    (to_x, to_y - 1), (to_x, to_y + 1),
+                    (to_x - 1, to_y), (to_x + 1, to_y)
+                ]
+
+                for ally in ally_units:
+                    if (ally.x, ally.y) in adjacent_positions:
+                        orig_ally_x, orig_ally_y = self.game_state.padded_to_original_coords(
+                            ally.x, ally.y
+                        )
+                        # Heal if damaged
+                        if ally.health < ally.max_health:
+                            result['move_then_heal'].append({
+                                'unit_id': unit_id,
+                                'move_to': [orig_to_x, orig_to_y],
+                                'then_heal': [orig_ally_x, orig_ally_y]
+                            })
+                        # Cure if paralyzed
+                        if ally.is_paralyzed():
+                            result['move_then_cure'].append({
+                                'unit_id': unit_id,
+                                'move_to': [orig_to_x, orig_to_y],
+                                'then_cure': [orig_ally_x, orig_ally_y]
+                            })
+
+        return result
+
     def _format_legal_actions(self, legal_actions: Dict[str, List[Any]],
                               unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
         """Format legal actions for LLM consumption with original map coordinates."""
@@ -646,7 +814,13 @@ Respond with your strategic plan in JSON format."""
             'paralyze': [],
             'heal': [],
             'cure': [],
-            'seize': []
+            'seize': [],
+            # Move-then-action combinations
+            'move_then_attack': [],
+            'move_then_seize': [],
+            'move_then_heal': [],
+            'move_then_cure': [],
+            'move_then_paralyze': []
         }
 
         # Create unit actions (convert coordinates)
@@ -729,6 +903,26 @@ Respond with your strategic plan in JSON format."""
                     'unit_id': unit_id_map[action['unit']],
                     'position': [tile_x, tile_y]
                 })
+
+        # Compute move-then-action combinations for units that can move
+        # Group move actions by unit to get all reachable positions per unit
+        unit_reachable_positions: Dict[Any, List[tuple]] = {}
+        for action in legal_actions['move']:
+            unit = action['unit']
+            if unit not in unit_reachable_positions:
+                unit_reachable_positions[unit] = []
+            unit_reachable_positions[unit].append((action['to_x'], action['to_y']))
+
+        # For each movable unit, compute what actions become available after moving
+        for unit, positions in unit_reachable_positions.items():
+            if unit in unit_id_map:
+                unit_id = unit_id_map[unit]
+                move_then_actions = self._compute_move_then_actions(unit, unit_id, positions)
+
+                # Merge results into formatted output
+                for key in ['move_then_attack', 'move_then_seize', 'move_then_heal',
+                           'move_then_cure', 'move_then_paralyze']:
+                    formatted[key].extend(move_then_actions[key])
 
         return formatted
 
