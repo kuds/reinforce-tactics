@@ -653,7 +653,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                         'then_attack': [orig_enemy_x, orig_enemy_y]
                     })
 
-                    # Mage can also paralyze (within range 1-2)
+                    # Mage can also paralyze (at attack range 1-2)
                     if unit.type == 'M' and distance <= 2:
                         result['move_then_paralyze'].append({
                             'unit_id': unit_id,
