@@ -15,7 +15,7 @@ const config: Config = {
       tagName: 'meta',
       attributes: {
         name: 'keywords',
-        content: 'LLM evaluation, LLM benchmark, GPT-4 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning, model evaluation',
+        content: 'LLM evaluation, LLM benchmark, GPT-4 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment',
       },
     },
     {
@@ -186,7 +186,7 @@ const config: Config = {
               href: 'https://github.com/kuds/reinforce-tactics#readme',
             },
             {
-              label: 'License (MIT)',
+              label: 'License (Apache 2.0)',
               href: 'https://github.com/kuds/reinforce-tactics/blob/main/LICENSE',
             },
           ],
