@@ -14,6 +14,12 @@ from pathlib import Path
 
 from reinforcetactics.constants import UNIT_DATA
 from reinforcetactics import __version__
+from reinforcetactics.game.llm_prompts import (
+    DEFAULT_PROMPT,
+    PROMPT_TWO_PHASE_PLAN,
+    PROMPT_TWO_PHASE_EXECUTE,
+    get_prompt,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -189,7 +195,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                  stateful: bool = False,
                  should_reason: bool = False,
                  max_tokens: Optional[int] = 8_000,
-                 temperature: Optional[float] = None):
+                 temperature: Optional[float] = None,
+                 system_prompt: Optional[str] = None,
+                 two_phase_planning: bool = False):
         """
         Initialize the LLM bot.
 
@@ -213,6 +221,13 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             temperature: Temperature for LLM response (default None).
                 Set to None to use the LLM provider's default temperature.
                 Set to a value (e.g., 0, 0.5, 1.0) to override the default.
+            system_prompt: Custom system prompt to use (default None uses DEFAULT_PROMPT).
+                Can be a prompt string or a prompt name from llm_prompts (e.g., "strategic").
+                See reinforcetactics.game.llm_prompts for available prompts.
+            two_phase_planning: Enable two-phase planning mode (default False).
+                When True, the bot first generates a strategic plan, then executes it.
+                This encourages deeper strategic thinking about action sequences.
+                Note: This doubles the number of API calls per turn.
         """
         self.game_state = game_state
         self.bot_player = player
@@ -226,6 +241,21 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         self.should_reason = should_reason
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.two_phase_planning = two_phase_planning
+
+        # Resolve system prompt - can be a name or a full prompt string
+        if system_prompt is None:
+            self.system_prompt = DEFAULT_PROMPT
+        elif len(system_prompt) < 100 and '\n' not in system_prompt:
+            # Looks like a prompt name, try to resolve it
+            try:
+                self.system_prompt = get_prompt(system_prompt)
+            except ValueError:
+                # Not a known name, treat as custom prompt
+                self.system_prompt = system_prompt
+        else:
+            # Full prompt string
+            self.system_prompt = system_prompt
 
         # Initialize conversation history for stateful mode
         self.conversation_history = []
@@ -422,9 +452,10 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         This method orchestrates the entire turn-taking process:
         1. Serializes the current game state into JSON
-        2. Calls the LLM API with retry logic (including conversation history if stateful)
-        3. Parses the LLM response
-        4. Validates and executes the suggested actions
+        2. Optionally runs a planning phase (if two_phase_planning is enabled)
+        3. Calls the LLM API with retry logic (including conversation history if stateful)
+        4. Parses the LLM response
+        5. Validates and executes the suggested actions
 
         The method handles errors gracefully and will fall back to ending
         the turn if the LLM fails to respond or provides invalid actions.
@@ -434,23 +465,79 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Serialize game state
         game_state_json = self._serialize_game_state()
 
-        # Format the user prompt
-        user_prompt = self._format_prompt(game_state_json)
+        # Two-phase planning: first get a strategic plan, then execute
+        strategic_plan = None
+        if self.two_phase_planning:
+            strategic_plan = self._run_planning_phase(game_state_json)
+            if strategic_plan:
+                logger.info("Strategic plan generated: %s",
+                           strategic_plan.get('primary_objective', 'No objective'))
+
+        # Format the user prompt (include plan if two-phase mode)
+        user_prompt = self._format_prompt(game_state_json, strategic_plan=strategic_plan)
+
+        # Determine which system prompt to use for execution
+        if self.two_phase_planning and strategic_plan:
+            # Use the execution prompt for phase 2
+            execution_system_prompt = PROMPT_TWO_PHASE_EXECUTE.format(
+                plan=json.dumps(strategic_plan, indent=2)
+            )
+        else:
+            execution_system_prompt = self.system_prompt
 
         # Get LLM response with retries
+        response_text = self._call_llm_with_retry(execution_system_prompt, user_prompt)
+
+        if not response_text:
+            logger.error("No response from LLM. Ending turn.")
+            self.game_state.end_turn()
+            return
+
+        # Store conversation in history if stateful mode is enabled
+        if self.stateful:
+            self.conversation_history.append({"role": "user", "content": user_prompt})
+            self.conversation_history.append({"role": "assistant", "content": response_text})
+
+        # Log the conversation if enabled (include token usage and stop reason)
+        self._log_conversation_to_json(
+            execution_system_prompt, user_prompt, response_text,
+            input_tokens=self._last_input_tokens,
+            output_tokens=self._last_output_tokens,
+            stop_reason=self._last_stop_reason
+        )
+
+        # Parse and execute actions
+        self._execute_actions(response_text)
+
+        # End turn (advance game state to next player, collect income, etc.)
+        # Skip if game is already over (e.g., due to resignation)
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
+
+    def _call_llm_with_retry(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """
+        Call LLM with retry logic and exponential backoff.
+
+        Args:
+            system_prompt: The system prompt to use
+            user_prompt: The user prompt with game state
+
+        Returns:
+            The LLM response text, or None if all retries failed
+        """
         response_text = None
         for attempt in range(self.max_retries):
             try:
                 # Build messages list
                 if self.stateful and self.conversation_history:
                     # In stateful mode, include full conversation history
-                    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                    messages = [{"role": "system", "content": system_prompt}]
                     messages.extend(self.conversation_history)
                     messages.append({"role": "user", "content": user_prompt})
                 else:
                     # In stateless mode, only send current turn
                     messages = [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ]
 
@@ -467,35 +554,64 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     logger.info("Retrying in %s seconds...", wait_time)
                     time.sleep(wait_time)
                 else:
-                    logger.error("Max retries reached. Ending turn.")
-                    self.game_state.end_turn()
-                    return
+                    logger.error("Max retries reached.")
+                    return None
+
+        return response_text
+
+    def _run_planning_phase(self, game_state_json: Dict[str, Any]) -> Optional[Dict]:
+        """
+        Run the planning phase for two-phase planning mode.
+
+        This phase asks the LLM to analyze the situation and create a strategic
+        plan before deciding on specific actions. This encourages deeper thinking
+        about multi-step tactical sequences.
+
+        Args:
+            game_state_json: The serialized game state
+
+        Returns:
+            The strategic plan as a dictionary, or None if planning failed
+        """
+        logger.info("Running planning phase...")
+
+        # Format the planning prompt
+        planning_prompt = f"""Analyze this game state and create a strategic plan:
+
+{json.dumps(game_state_json, indent=2)}
+
+Consider:
+1. What buildings can be captured this turn?
+2. Which enemies need to be killed to enable captures?
+3. What order should units act?
+4. Are there any threats to address?
+
+Respond with your strategic plan in JSON format."""
+
+        # Call LLM for planning (use planning prompt)
+        response_text = self._call_llm_with_retry(PROMPT_TWO_PHASE_PLAN, planning_prompt)
 
         if not response_text:
-            logger.error("No response from LLM. Ending turn.")
-            self.game_state.end_turn()
-            return
+            logger.warning("Planning phase failed, falling back to single-phase")
+            return None
 
-        # Store conversation in history if stateful mode is enabled
-        if self.stateful:
-            self.conversation_history.append({"role": "user", "content": user_prompt})
-            self.conversation_history.append({"role": "assistant", "content": response_text})
-
-        # Log the conversation if enabled (include token usage and stop reason)
+        # Log the planning conversation if enabled
         self._log_conversation_to_json(
-            SYSTEM_PROMPT, user_prompt, response_text,
+            PROMPT_TWO_PHASE_PLAN, planning_prompt, response_text,
             input_tokens=self._last_input_tokens,
             output_tokens=self._last_output_tokens,
             stop_reason=self._last_stop_reason
         )
 
-        # Parse and execute actions
-        self._execute_actions(response_text)
+        # Parse the plan
+        try:
+            plan = self._extract_json(response_text)
+            if plan:
+                return plan
+        except Exception as e:
+            logger.warning("Failed to parse strategic plan: %s", e)
 
-        # End turn (advance game state to next player, collect income, etc.)
-        # Skip if game is already over (e.g., due to resignation)
-        if not self.game_state.game_over:
-            self.game_state.end_turn()
+        return None
 
     def _serialize_game_state(self) -> Dict[str, Any]:
         """
@@ -810,16 +926,38 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
 
         return formatted
 
-    def _format_prompt(self, game_state_json: Dict[str, Any]) -> str:
-        """Format the game state into a prompt for the LLM."""
+    def _format_prompt(self, game_state_json: Dict[str, Any],
+                       strategic_plan: Optional[Dict] = None) -> str:
+        """
+        Format the game state into a prompt for the LLM.
+
+        Args:
+            game_state_json: The serialized game state
+            strategic_plan: Optional strategic plan from two-phase planning mode
+
+        Returns:
+            The formatted user prompt string
+        """
         reasoning_line = (
             '    "reasoning": "Brief explanation of your strategy (1-2 sentences)",\n'
-            if self.should_reason
+            if self.should_reason or strategic_plan
             else ""
         )
+
+        # Include strategic plan context if provided
+        plan_context = ""
+        if strategic_plan:
+            plan_context = f"""
+STRATEGIC PLAN TO EXECUTE:
+{json.dumps(strategic_plan, indent=2)}
+
+Execute the actions according to this plan.
+
+"""
+
         return f"""Current Game State:
 {json.dumps(game_state_json, indent=2)}
-
+{plan_context}
 Respond with a JSON object in the following format:
 {{
 {reasoning_line}    "actions": [
