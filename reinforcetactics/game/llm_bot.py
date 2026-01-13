@@ -171,6 +171,16 @@ CRITICAL CONSTRAINTS:
 - Each action in your list is executed sequentially - plan accordingly.
 - If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
 
+UNDERSTANDING LEGAL_ACTIONS:
+The game state includes a "legal_actions" object showing what actions are available this turn.
+- Standard action fields (create_unit, move, attack, heal, cure, paralyze, seize) list immediately available actions.
+- The move_then_* fields (move_then_attack, move_then_seize, move_then_heal, move_then_cure, move_then_paralyze) 
+  are INFORMATIONAL ONLY. They show what action combinations become possible after moving.
+- These are NOT action types you can use directly. Instead, they help you plan sequences.
+- Example: If move_then_attack shows {"unit_id": 0, "move_to": [3,4], "then_attack": [4,4]},
+  you would execute this as TWO separate actions: MOVE unit 0 to [3,4], then ATTACK from [3,4] to [4,4].
+- Use these fields to identify good tactical opportunities, then break them into individual MOVE and action steps.
+
 Respond with ONLY the JSON object below. No extra text before or after."""
 
 
@@ -759,8 +769,8 @@ Respond with your strategic plan in JSON format."""
                         'then_attack': [orig_enemy_x, orig_enemy_y]
                     })
 
-                    # Mage can also paralyze when the target is within its valid range
-                    if unit.type == 'M' and min_range <= distance <= max_range:
+                    # Mage can also paralyze (at attack range 1-2)
+                    if unit.type == 'M' and distance <= 2:
                         result['move_then_paralyze'].append({
                             'unit_id': unit_id,
                             'move_to': [orig_to_x, orig_to_y],
