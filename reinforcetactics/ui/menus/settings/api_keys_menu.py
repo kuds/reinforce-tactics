@@ -5,6 +5,7 @@ import pygame
 
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.clipboard import get_clipboard_text
 
 
 class APIKeysMenu:
@@ -104,17 +105,11 @@ class APIKeysMenu:
                 # Check for paste first (before other key handlers)
                 if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
                     # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
-                    try:
-                        clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
-                        if clipboard_text:
-                            # Decode bytes to string and strip null characters
-                            pasted_text = clipboard_text.decode('utf-8').rstrip('\x00')
-                            # Filter to only include printable characters
-                            filtered = ''.join(c for c in pasted_text if c.isprintable())
-                            self.api_keys[self.active_input] += filtered
-                    except (pygame.error, UnicodeDecodeError, AttributeError):
-                        # Clipboard operation failed or clipboard not available
-                        pass
+                    clipboard_text = get_clipboard_text()
+                    if clipboard_text:
+                        # Filter to only include printable characters
+                        filtered = ''.join(c for c in clipboard_text if c.isprintable())
+                        self.api_keys[self.active_input] += filtered
                 elif event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
                     # Move to next field or finish
                     self.active_input = None
