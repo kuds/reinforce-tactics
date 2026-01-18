@@ -2,6 +2,7 @@
 Pygame rendering for the strategy game.
 """
 import os
+import time
 import pygame
 import numpy as np
 from reinforcetactics.constants import (
@@ -10,6 +11,7 @@ from reinforcetactics.constants import (
 )
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.settings import get_settings
+from reinforcetactics.ui.sprite_animator import SpriteAnimator
 
 
 class Renderer:
@@ -52,6 +54,13 @@ class Renderer:
         # Load unit images
         self.unit_images = self._load_unit_images()
 
+        # Initialize sprite animator for animations
+        self.animator = self._init_animator()
+
+        # Animation timing
+        self.last_frame_time = time.time()
+        self.delta_time = 0.0
+
         # UI elements
         self._setup_ui_elements()
 
@@ -81,11 +90,6 @@ class Renderer:
         """Load unit images from configured sprites path."""
         unit_images = {}
 
-        # Check if unit sprites are enabled
-        use_unit_sprites = self.settings.get('graphics.use_unit_sprites', False)
-        if not use_unit_sprites:
-            return unit_images
-
         # Get the configured unit sprites path
         unit_sprites_path = self.settings.get('graphics.unit_sprites_path', '')
         if not unit_sprites_path:
@@ -101,16 +105,28 @@ class Renderer:
                     # Scale to fit within tile, leaving room for health bar
                     sprite_size = TILE_SIZE - 4  # Slightly smaller than tile
                     unit_images[unit_type] = pygame.transform.scale(image, (sprite_size, sprite_size))
-                except (pygame.error, FileNotFoundError) as e:
-                    print(f"Could not load sprite for {unit_type} from {full_path}: {e}")
+                except (pygame.error, FileNotFoundError):
                     unit_images[unit_type] = None
 
         return unit_images
+
+    def _init_animator(self):
+        """Initialize the sprite animator for unit animations."""
+        # Try animation sprites path first, fall back to unit sprites path
+        animation_path = self.settings.get('graphics.animation_sprites_path', '')
+        if not animation_path:
+            animation_path = self.settings.get('graphics.unit_sprites_path', '')
+
+        if not animation_path:
+            return None
+
+        return SpriteAnimator(animation_path)
 
     def reload_sprites(self):
         """Reload sprites after settings change."""
         self.tile_images = self._load_tile_images()
         self.unit_images = self._load_unit_images()
+        self.animator = self._init_animator()
 
     def _setup_ui_elements(self):
         """Setup UI elements like buttons."""
@@ -121,6 +137,11 @@ class Renderer:
 
     def render(self):
         """Render the entire game state."""
+        # Update animation timing
+        current_time = time.time()
+        self.delta_time = current_time - self.last_frame_time
+        self.last_frame_time = current_time
+
         self.screen.fill((0, 0, 0))
 
         # Draw grid
@@ -232,33 +253,60 @@ class Renderer:
             self._draw_unit(unit)
 
     def _draw_unit(self, unit):
-        """Draw a single unit."""
-        # Check if we have a sprite for this unit type
-        unit_sprite = self.unit_images.get(unit.type)
+        """
+        Draw a single unit.
 
-        if unit_sprite:
-            self._draw_unit_sprite(unit, unit_sprite)
-        else:
-            self._draw_unit_letter(unit)
+        Rendering priority (cascading fallback):
+        1. Animated sprite sheet (if available and not disabled)
+        2. Static sprite image (if available and not disabled)
+        3. Letter representation (always available as fallback)
+        """
+        # Check settings for what's disabled
+        animations_disabled = self.settings.get('graphics.disable_animations', False)
+        static_sprites_disabled = self.settings.get('graphics.disable_unit_sprites', False)
 
-        # Draw paralysis indicator
-        if unit.is_paralyzed():
-            tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            pygame.draw.rect(self.screen, (148, 0, 211), tile_rect, 3)
+        # Try animated sprite first (if not disabled)
+        if not animations_disabled:
+            if self.animator and self.animator.has_animations(unit.type):
+                animated_frame = self.animator.get_frame(unit, self.delta_time)
+                if animated_frame:
+                    self._draw_unit_sprite(unit, animated_frame)
+                    self._draw_paralysis_indicator(unit)
+                    self._draw_unit_health_bar(unit)
+                    return
 
-            indicator_font = get_font(24)
-            indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
-            indicator_rect = indicator_text.get_rect(topright=(
-                unit.x * TILE_SIZE + TILE_SIZE - 2,
-                unit.y * TILE_SIZE + 2
-            ))
-            bg_rect = indicator_rect.inflate(4, 2)
-            pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
-            pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
-            self.screen.blit(indicator_text, indicator_rect)
+        # Fall back to static sprite (if not disabled)
+        if not static_sprites_disabled:
+            static_sprite = self.unit_images.get(unit.type)
+            if static_sprite:
+                self._draw_unit_sprite(unit, static_sprite)
+                self._draw_paralysis_indicator(unit)
+                self._draw_unit_health_bar(unit)
+                return
 
-        # Draw health bar
+        # Fall back to letter representation
+        self._draw_unit_letter(unit)
+        self._draw_paralysis_indicator(unit)
         self._draw_unit_health_bar(unit)
+
+    def _draw_paralysis_indicator(self, unit):
+        """Draw paralysis indicator if unit is paralyzed."""
+        if not unit.is_paralyzed():
+            return
+
+        tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        pygame.draw.rect(self.screen, (148, 0, 211), tile_rect, 3)
+
+        indicator_font = get_font(24)
+        indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
+        indicator_rect = indicator_text.get_rect(topright=(
+            unit.x * TILE_SIZE + TILE_SIZE - 2,
+            unit.y * TILE_SIZE + 2
+        ))
+        bg_rect = indicator_rect.inflate(4, 2)
+        pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
+        pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
+        self.screen.blit(indicator_text, indicator_rect)
 
     def _draw_unit_sprite(self, unit, sprite):
         """Draw a unit using its sprite image."""
@@ -571,6 +619,40 @@ class Renderer:
             np.array(pygame.surfarray.pixels3d(self.screen)),
             axes=(1, 0, 2)
         )
+
+    def set_unit_animation_state(self, unit, state):
+        """
+        Set the animation state for a unit.
+
+        Args:
+            unit: Unit object
+            state: Animation state ('idle', 'move_down', 'move_up',
+                   'move_left', 'move_right')
+        """
+        if self.animator:
+            self.animator.set_unit_state(unit, state)
+
+    def update_unit_animation_from_movement(self, unit, from_pos, to_pos):
+        """
+        Update unit animation based on movement direction.
+
+        Args:
+            unit: Unit object
+            from_pos: Tuple (x, y) of starting position
+            to_pos: Tuple (x, y) of ending position
+        """
+        if self.animator:
+            self.animator.update_unit_state_from_movement(unit, from_pos, to_pos)
+
+    def set_unit_idle(self, unit):
+        """Set a unit to idle animation state."""
+        if self.animator:
+            self.animator.set_idle(unit)
+
+    def cleanup_unit_animation(self, unit):
+        """Clean up animation data for a removed unit."""
+        if self.animator:
+            self.animator.cleanup_unit(unit)
 
     def close(self):
         """Close the renderer."""
