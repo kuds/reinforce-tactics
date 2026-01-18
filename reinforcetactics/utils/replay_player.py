@@ -348,7 +348,7 @@ class ReplayPlayer:
 
     def change_speed(self, delta):
         """Change playback speed."""
-        speeds = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+        speeds = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 10.0]
         try:
             current_idx = speeds.index(self.playback_speed)
             new_idx = max(0, min(len(speeds) - 1, current_idx + delta))
@@ -717,11 +717,15 @@ class ReplayPlayer:
             self.recorded_frames.append(frame_data.copy())
 
     def _draw_info_panel(self, screen, screen_width):
-        """Draw the info panel at the top of the screen."""
+        """Draw the info panel above the control panel at the bottom."""
+        # Panel height and position (above the control panel)
+        panel_height = 40
+        panel_y = self.control_y - panel_height
+
         # Semi-transparent background
-        info_panel = pygame.Surface((screen_width, 50), pygame.SRCALPHA)
+        info_panel = pygame.Surface((screen_width, panel_height), pygame.SRCALPHA)
         info_panel.fill((0, 0, 0, 150))
-        screen.blit(info_panel, (0, 0))
+        screen.blit(info_panel, (0, panel_y))
 
         font = get_font(18)
         small_font = get_font(16)
@@ -735,20 +739,20 @@ class ReplayPlayer:
 
         total_turns = self.game_info.get('total_turns', '?')
 
-        # Turn info on left
-        turn_text = f"Turn: {current_turn} / {total_turns}"
-        turn_surface = font.render(turn_text, True, (255, 255, 255))
-        screen.blit(turn_surface, (10, 8))
+        # Layout: Turn/Action on left, Action description in center, Player info on right
+        # All on a single row for compact display
 
-        # Action counter
-        action_text = f"Action: {self.current_action_index} / {len(self.actions)}"
-        action_surface = small_font.render(action_text, True, (200, 200, 200))
-        screen.blit(action_surface, (10, 28))
+        # Turn and action info on left
+        turn_text = f"Turn {current_turn}/{total_turns}"
+        action_text = f"Action {self.current_action_index}/{len(self.actions)}"
+        combined_left = f"{turn_text}  |  {action_text}"
+        left_surface = small_font.render(combined_left, True, (200, 200, 220))
+        screen.blit(left_surface, (10, panel_y + (panel_height - left_surface.get_height()) // 2))
 
         # Current action description in center
         if self.current_action_description:
             desc_surface = font.render(self.current_action_description, True, (255, 220, 100))
-            desc_rect = desc_surface.get_rect(center=(screen_width // 2, 25))
+            desc_rect = desc_surface.get_rect(center=(screen_width // 2, panel_y + panel_height // 2))
             screen.blit(desc_surface, desc_rect)
 
         # Player info on right
@@ -756,18 +760,17 @@ class ReplayPlayer:
         winner = self.game_info.get('winner', None)
 
         if player_configs:
-            p1_name = player_configs[0].get('name', 'P1')[:15] if len(player_configs) > 0 else 'P1'
-            p2_name = player_configs[1].get('name', 'P2')[:15] if len(player_configs) > 1 else 'P2'
+            p1_name = player_configs[0].get('name', 'P1')[:12] if len(player_configs) > 0 else 'P1'
+            p2_name = player_configs[1].get('name', 'P2')[:12] if len(player_configs) > 1 else 'P2'
 
             # Color based on winner
-            p1_color = (100, 255, 100) if winner == 1 else (255, 255, 255)
-            p2_color = (100, 255, 100) if winner == 2 else (255, 255, 255)
+            p1_color = (100, 255, 100) if winner == 1 else (200, 200, 255)
+            p2_color = (100, 255, 100) if winner == 2 else (255, 200, 200)
 
-            p1_surface = small_font.render(f"P1: {p1_name}", True, p1_color)
-            p2_surface = small_font.render(f"P2: {p2_name}", True, p2_color)
-
-            screen.blit(p1_surface, (screen_width - 160, 8))
-            screen.blit(p2_surface, (screen_width - 160, 28))
+            player_text = f"{p1_name} vs {p2_name}"
+            player_surface = small_font.render(player_text, True, (255, 255, 255))
+            screen.blit(player_surface, (screen_width - player_surface.get_width() - 10,
+                                         panel_y + (panel_height - player_surface.get_height()) // 2))
 
     def _draw_notification(self, screen, screen_width):
         """Draw on-screen notification if active."""
@@ -789,9 +792,10 @@ class ReplayPlayer:
                 bg_surface = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
                 bg_surface.fill((0, 0, 0, min(180, alpha)))
 
-                # Position at center-bottom (above control panel)
+                # Position at center (above info panel which is above control panel)
+                info_panel_height = 40
                 x = (screen_width - bg_width) // 2
-                y = self.control_y - bg_height - 20
+                y = self.control_y - info_panel_height - bg_height - 15
 
                 screen.blit(bg_surface, (x, y))
 
