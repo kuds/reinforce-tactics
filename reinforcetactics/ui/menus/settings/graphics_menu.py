@@ -21,7 +21,7 @@ class GraphicsMenu(Menu):
         """
         super().__init__(screen, get_language().get('graphics.title', 'Graphics Settings'))
         self.settings = get_settings()
-        self.editing_path = None  # Which path is being edited ('unit' or 'tile')
+        self.editing_path = None  # Which path is being edited ('unit', 'tile', or 'animation')
         self.input_text = ""
         self.cursor_visible = True
         self.cursor_timer = 0
@@ -32,33 +32,48 @@ class GraphicsMenu(Menu):
         lang = get_language()
 
         # Get current settings
-        use_unit_sprites = self.settings.get('graphics.use_unit_sprites', False)
+        disable_animations = self.settings.get('graphics.disable_animations', False)
+        disable_unit_sprites = self.settings.get('graphics.disable_unit_sprites', False)
         use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
+        animation_path = self.settings.get('graphics.animation_sprites_path', '')
         unit_path = self.settings.get('graphics.unit_sprites_path', '')
         tile_path = self.settings.get('graphics.tile_sprites_path', '')
 
-        # Toggle for unit sprites
-        unit_status = "ON" if use_unit_sprites else "OFF"
+        # --- Unit Animations (sprite sheets) ---
+        # Animation sprites path
+        anim_path_display = animation_path if animation_path else lang.get('graphics.not_set', '(not set)')
         self.add_option(
-            lang.get('graphics.use_unit_sprites', f'Use Unit Sprites: {unit_status}').replace(
-                '{status}', unit_status
-            ) if '{status}' in lang.get('graphics.use_unit_sprites', '') else f'Use Unit Sprites: {unit_status}',
-            self._toggle_unit_sprites
+            f"{lang.get('graphics.animation_path', 'Animation Sheets Path')}: {anim_path_display}",
+            self._edit_animation_path
         )
 
+        # Toggle to disable animations
+        anim_status = "YES" if disable_animations else "NO"
+        self.add_option(
+            f"Disable Animations: {anim_status}",
+            self._toggle_animations
+        )
+
+        # --- Static Unit Sprites ---
         # Unit sprites path
         unit_path_display = unit_path if unit_path else lang.get('graphics.not_set', '(not set)')
         self.add_option(
-            f"{lang.get('graphics.unit_path', 'Unit Sprites Path')}: {unit_path_display}",
+            f"{lang.get('graphics.unit_path', 'Static Sprites Path')}: {unit_path_display}",
             self._edit_unit_path
         )
 
+        # Toggle to disable static sprites
+        static_status = "YES" if disable_unit_sprites else "NO"
+        self.add_option(
+            f"Disable Static Sprites: {static_status}",
+            self._toggle_unit_sprites
+        )
+
+        # --- Tile Sprites ---
         # Toggle for tile sprites
         tile_status = "ON" if use_tile_sprites else "OFF"
         self.add_option(
-            lang.get('graphics.use_tile_sprites', f'Use Tile Sprites: {tile_status}').replace(
-                '{status}', tile_status
-            ) if '{status}' in lang.get('graphics.use_tile_sprites', '') else f'Use Tile Sprites: {tile_status}',
+            f'Use Tile Sprites: {tile_status}',
             self._toggle_tile_sprites
         )
 
@@ -78,9 +93,9 @@ class GraphicsMenu(Menu):
         self._setup_options()
 
     def _toggle_unit_sprites(self) -> str:
-        """Toggle unit sprites on/off."""
-        current = self.settings.get('graphics.use_unit_sprites', False)
-        self.settings.set('graphics.use_unit_sprites', not current)
+        """Toggle disabling static unit sprites."""
+        current = self.settings.get('graphics.disable_unit_sprites', False)
+        self.settings.set('graphics.disable_unit_sprites', not current)
         self._refresh_options()
         return 'toggled'
 
@@ -103,12 +118,27 @@ class GraphicsMenu(Menu):
         self.input_text = self.settings.get('graphics.tile_sprites_path', '')
         return 'editing'
 
+    def _toggle_animations(self) -> str:
+        """Toggle disabling animations."""
+        current = self.settings.get('graphics.disable_animations', False)
+        self.settings.set('graphics.disable_animations', not current)
+        self._refresh_options()
+        return 'toggled'
+
+    def _edit_animation_path(self) -> str:
+        """Start editing animation sprites path."""
+        self.editing_path = 'animation'
+        self.input_text = self.settings.get('graphics.animation_sprites_path', '')
+        return 'editing'
+
     def _save_path(self) -> None:
         """Save the currently edited path."""
         if self.editing_path == 'unit':
             self.settings.set('graphics.unit_sprites_path', self.input_text)
         elif self.editing_path == 'tile':
             self.settings.set('graphics.tile_sprites_path', self.input_text)
+        elif self.editing_path == 'animation':
+            self.settings.set('graphics.animation_sprites_path', self.input_text)
         self.editing_path = None
         self.input_text = ""
         self._refresh_options()
@@ -173,6 +203,8 @@ class GraphicsMenu(Menu):
         # Draw title
         if self.editing_path == 'unit':
             title = lang.get('graphics.edit_unit_path', 'Edit Unit Sprites Path')
+        elif self.editing_path == 'animation':
+            title = lang.get('graphics.edit_animation_path', 'Edit Animation Sprites Path')
         else:
             title = lang.get('graphics.edit_tile_path', 'Edit Tile Sprites Path')
 
