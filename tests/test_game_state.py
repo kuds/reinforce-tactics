@@ -101,6 +101,11 @@ class TestUnitEliminationWinCondition:
         attacker = simple_game.create_unit('C', 5, 5, player=1)  # Cleric has 8 HP, 2 attack
         defender = simple_game.create_unit('W', 6, 5, player=2)  # Warrior has 15 HP, 10 attack
 
+        # Pre-damage the Cleric so it will die from counter-attack
+        # Warrior counter does 6 damage (10 * 0.8 counter * 0.8 defense reduction)
+        # Cleric needs <= 6 HP to die from counter
+        attacker.health = 5
+
         # Verify initial state
         assert simple_game.game_over is False
         assert simple_game.winner is None

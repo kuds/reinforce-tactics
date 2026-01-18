@@ -389,10 +389,17 @@ class Renderer:
         unit_name = unit_data.get('name', unit.type)
 
         # Build tooltip lines
+        # Handle attack display - can be int or dict (for ranged units like Mage/Sorcerer)
+        attack_data = unit.attack_data
+        if isinstance(attack_data, dict):
+            attack_str = f"{attack_data.get('adjacent', 0)}/{attack_data.get('range', 0)}"
+        else:
+            attack_str = str(attack_data)
+
         lines = [
             f"{unit_name} (P{unit.player})",
             f"HP: {unit.health}/{unit.max_health}",
-            f"ATK: {unit.attack}  DEF: {unit.defence}",
+            f"ATK: {attack_str}  DEF: {unit.defence}",
             f"MOV: {unit.movement_left}/{unit.movement}",
         ]
 
