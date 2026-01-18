@@ -235,6 +235,39 @@ class LoadGameMenu(Menu):
 
         self.add_option(get_language().get('common.back', 'Back'), lambda: None)
 
+    def _populate_option_rects(self) -> None:
+        """Populate option_rects for click detection matching split-panel layout."""
+        screen_width = self.screen.get_width()
+        screen_height = self.screen.get_height()
+
+        # Must match the layout in draw() and _draw_save_list()
+        panel_top = 80
+        panel_height = screen_height - panel_top - 20
+        left_panel_width = int(screen_width * 0.55)
+        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
+
+        # Calculate visible area for scrolling (same as _draw_save_list)
+        list_padding = 10
+        item_height = 50
+        list_y = left_panel_rect.y + list_padding
+        max_visible = (left_panel_rect.height - 2 * list_padding) // item_height
+
+        # Determine which items to show based on scroll
+        start_idx = self.scroll_offset
+        end_idx = min(start_idx + max_visible, len(self.options))
+
+        self.option_rects = []
+        for i in range(start_idx, end_idx):
+            display_idx = i - start_idx
+            item_y = list_y + display_idx * item_height
+            item_rect = pygame.Rect(
+                left_panel_rect.x + list_padding,
+                item_y,
+                left_panel_rect.width - 2 * list_padding,
+                item_height - 5
+            )
+            self.option_rects.append(item_rect)
+
     def _generate_save_map_preview(self, filepath: str, width: int, height: int) -> Optional[pygame.Surface]:
         """Generate a map preview from save's tile data."""
         cache_key = f"{filepath}_{width}_{height}"
@@ -335,11 +368,11 @@ class LoadGameMenu(Menu):
         panel_top = 80
         panel_height = screen_height - panel_top - 20
 
-        # Left panel for save list (45% of width)
-        left_panel_width = int(screen_width * 0.45)
+        # Left panel for save list (55% of width)
+        left_panel_width = int(screen_width * 0.55)
         left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
 
-        # Right panel for preview and details (55% of width)
+        # Right panel for preview and details (45% of width)
         right_panel_x = left_panel_width
         right_panel_width = screen_width - left_panel_width - 10
         right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
