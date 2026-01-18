@@ -199,6 +199,7 @@ DEFENCE_REDUCTION_PER_POINT = 0.05  # Each defence point reduces damage by 5%
 CHARGE_BONUS = 0.5  # Knight: +50% damage if moved 3+ tiles
 CHARGE_MIN_DISTANCE = 3  # Minimum tiles moved to trigger Charge
 FLANK_BONUS = 0.5  # Rogue: +50% damage if enemy is adjacent to a friendly unit
+ROGUE_EVADE_CHANCE = 0.25  # Rogue: 25% chance to dodge counter-attacks
 
 # Status effects
 PARALYZE_DURATION = 3

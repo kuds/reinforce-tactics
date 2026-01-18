@@ -1,11 +1,13 @@
 """
 Core game mechanics including combat, movement, income, and structure capture.
 """
+import random
+
 from reinforcetactics.constants import (
     COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT,
     STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME,
     DEFENCE_REDUCTION_PER_POINT, CHARGE_BONUS, CHARGE_MIN_DISTANCE, FLANK_BONUS,
-    HASTE_COOLDOWN
+    HASTE_COOLDOWN, ROGUE_EVADE_CHANCE
 )
 
 
@@ -261,6 +263,7 @@ class GameMechanics:
         # Apply special ability bonuses
         charge_applied = False
         flank_applied = False
+        evade_applied = False
 
         # Knight's Charge: +50% damage if moved 3+ tiles
         if attacker.type == 'K' and attacker.distance_moved >= CHARGE_MIN_DISTANCE:
@@ -290,6 +293,12 @@ class GameMechanics:
                 if target.type not in ['A', 'M', 'S']:
                     can_counter = False
 
+            # Rogue's Evade: 25% chance to dodge counter-attacks
+            if can_counter and attacker.type == 'R':
+                if random.random() < ROGUE_EVADE_CHANCE:
+                    can_counter = False
+                    evade_applied = True
+
             if can_counter:
                 # Calculate base counter damage
                 base_counter_damage = GameMechanics._calculate_counter_damage(
@@ -302,9 +311,9 @@ class GameMechanics:
                 if counter_damage > 0:
                     attacker_alive = attacker.take_damage(counter_damage)
 
-        # Calculate counter damage for response (even if 0)
+        # Calculate counter damage for response (even if 0, or if evaded)
         counter_damage_for_response = 0
-        if target_alive and not target.is_paralyzed():
+        if target_alive and not target.is_paralyzed() and not evade_applied:
             # Adjust counter_damage if Archer attacked melee unit
             if attacker.type == 'A' and target.type not in ['A', 'M', 'S']:
                 counter_damage_for_response = 0
@@ -322,7 +331,8 @@ class GameMechanics:
             'damage': attack_damage,
             'counter_damage': counter_damage_for_response,
             'charge_bonus': charge_applied,
-            'flank_bonus': flank_applied
+            'flank_bonus': flank_applied,
+            'evade': evade_applied
         }
 
     @staticmethod
