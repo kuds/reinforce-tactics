@@ -10,6 +10,7 @@ import pygame
 
 from reinforcetactics.utils.language import get_language, TRANSLATIONS
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.ui.icons import get_arrow_up_icon, get_arrow_down_icon
 
 
 # Cache all "Back" button translations from the language system
@@ -310,16 +311,27 @@ class Menu:
         if total_options > self.max_visible_options:
             # Show up arrow if not at top
             if self.scroll_offset > 0:
-                up_text = self.indicator_font.render("▲ Scroll Up", True, self.hover_color)
-                up_rect = up_text.get_rect(centerx=screen_width // 2, y=start_y - 30)
-                self.screen.blit(up_text, up_rect)
+                up_icon = get_arrow_up_icon(size=20, color=self.hover_color)
+                up_text = self.indicator_font.render(" Scroll Up", True, self.hover_color)
+                # Calculate total width for centering
+                total_width = up_icon.get_width() + up_text.get_width()
+                icon_x = (screen_width - total_width) // 2
+                text_x = icon_x + up_icon.get_width()
+                icon_y = start_y - 30
+                self.screen.blit(up_icon, (icon_x, icon_y))
+                self.screen.blit(up_text, (text_x, icon_y))
 
             # Show down arrow if not at bottom
             if end_index < total_options:
-                down_text = self.indicator_font.render("▼ Scroll Down", True, self.hover_color)
+                down_icon = get_arrow_down_icon(size=20, color=self.hover_color)
+                down_text = self.indicator_font.render(" Scroll Down", True, self.hover_color)
+                # Calculate total width for centering
+                total_width = down_icon.get_width() + down_text.get_width()
+                icon_x = (screen_width - total_width) // 2
+                text_x = icon_x + down_icon.get_width()
                 down_y = start_y + self.max_visible_options * spacing + 10
-                down_rect = down_text.get_rect(centerx=screen_width // 2, y=down_y)
-                self.screen.blit(down_text, down_rect)
+                self.screen.blit(down_icon, (icon_x, down_y))
+                self.screen.blit(down_text, (text_x, down_y))
 
             # Show position indicator (e.g., "3 / 15")
             pos_text = self.indicator_font.render(
