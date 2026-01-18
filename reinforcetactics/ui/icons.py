@@ -190,6 +190,318 @@ def get_x_icon(
     return surface
 
 
+def get_play_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a play icon (right-pointing triangle).
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Icon color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the play icon
+    """
+    cache_key = f"play_{size}_{color}_{bg_color}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    # Calculate triangle points for right-pointing arrow
+    padding = size // 5
+    left_top = (padding, padding)
+    left_bottom = (padding, size - padding)
+    right_point = (size - padding, size // 2)
+
+    pygame.draw.polygon(surface, color, [left_top, left_bottom, right_point])
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
+def get_pause_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a pause icon (two vertical bars).
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Icon color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the pause icon
+    """
+    cache_key = f"pause_{size}_{color}_{bg_color}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    # Calculate bar dimensions
+    padding = size // 5
+    bar_width = size // 5
+    bar_height = size - 2 * padding
+    gap = size // 5
+
+    # Left bar
+    left_bar_x = (size - 2 * bar_width - gap) // 2
+    left_bar = pygame.Rect(left_bar_x, padding, bar_width, bar_height)
+    pygame.draw.rect(surface, color, left_bar)
+
+    # Right bar
+    right_bar_x = left_bar_x + bar_width + gap
+    right_bar = pygame.Rect(right_bar_x, padding, bar_width, bar_height)
+    pygame.draw.rect(surface, color, right_bar)
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
+def get_arrow_left_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a left-pointing arrow icon.
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Arrow color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the arrow icon
+    """
+    cache_key = f"arrow_left_{size}_{color}_{bg_color}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    # Calculate triangle points for left-pointing arrow
+    padding = size // 5
+    right_top = (size - padding, padding)
+    right_bottom = (size - padding, size - padding)
+    left_point = (padding, size // 2)
+
+    pygame.draw.polygon(surface, color, [right_top, right_bottom, left_point])
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
+def get_arrow_right_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a right-pointing arrow icon.
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Arrow color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the arrow icon
+    """
+    # Same as play icon
+    return get_play_icon(size, color, bg_color)
+
+
+def get_restart_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
+    thickness: int = 0
+) -> pygame.Surface:
+    """
+    Generate a restart/refresh icon (circular arrow).
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Icon color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+        thickness: Line thickness (0 = auto based on size)
+
+    Returns:
+        pygame.Surface with the restart icon
+    """
+    cache_key = f"restart_{size}_{color}_{bg_color}_{thickness}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    line_thickness = thickness if thickness > 0 else max(2, size // 8)
+    padding = size // 5
+    center = (size // 2, size // 2)
+    radius = size // 2 - padding
+
+    # Draw arc (270 degrees, leaving gap at top)
+    import math
+    start_angle = math.radians(45)
+    end_angle = math.radians(315)
+
+    rect = pygame.Rect(padding, padding, radius * 2, radius * 2)
+    pygame.draw.arc(surface, color, rect, start_angle, end_angle, line_thickness)
+
+    # Draw arrowhead at the end of the arc
+    arrow_size = size // 4
+    # Arrow at top-right of circle
+    arrow_x = center[0] + int(radius * math.cos(start_angle))
+    arrow_y = center[1] - int(radius * math.sin(start_angle))
+
+    # Draw small triangle pointing clockwise
+    arrow_points = [
+        (arrow_x, arrow_y - arrow_size // 2),
+        (arrow_x + arrow_size, arrow_y),
+        (arrow_x, arrow_y + arrow_size // 2)
+    ]
+    pygame.draw.polygon(surface, color, arrow_points)
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
+def get_skip_back_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a skip back icon (vertical bar + two left triangles).
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Icon color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the skip back icon
+    """
+    cache_key = f"skip_back_{size}_{color}_{bg_color}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    padding = size // 6
+    bar_width = max(2, size // 8)
+    triangle_width = (size - 2 * padding - bar_width) // 2
+
+    # Vertical bar on the left
+    bar_rect = pygame.Rect(padding, padding, bar_width, size - 2 * padding)
+    pygame.draw.rect(surface, color, bar_rect)
+
+    # First triangle (left)
+    t1_left = padding + bar_width + 2
+    t1_right = t1_left + triangle_width
+    triangle1 = [
+        (t1_right, padding),
+        (t1_right, size - padding),
+        (t1_left, size // 2)
+    ]
+    pygame.draw.polygon(surface, color, triangle1)
+
+    # Second triangle (right)
+    t2_left = t1_right
+    t2_right = t2_left + triangle_width
+    triangle2 = [
+        (t2_right, padding),
+        (t2_right, size - padding),
+        (t2_left, size // 2)
+    ]
+    pygame.draw.polygon(surface, color, triangle2)
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
+def get_skip_forward_icon(
+    size: int = 16,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+) -> pygame.Surface:
+    """
+    Generate a skip forward icon (two right triangles + vertical bar).
+
+    Args:
+        size: Icon size in pixels (square)
+        color: Icon color as RGB tuple
+        bg_color: Background color as RGBA tuple (transparent by default)
+
+    Returns:
+        pygame.Surface with the skip forward icon
+    """
+    cache_key = f"skip_forward_{size}_{color}_{bg_color}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    _ensure_pygame_init()
+
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    surface.fill(bg_color)
+
+    padding = size // 6
+    bar_width = max(2, size // 8)
+    triangle_width = (size - 2 * padding - bar_width) // 2
+
+    # First triangle (left)
+    t1_left = padding
+    t1_right = t1_left + triangle_width
+    triangle1 = [
+        (t1_left, padding),
+        (t1_left, size - padding),
+        (t1_right, size // 2)
+    ]
+    pygame.draw.polygon(surface, color, triangle1)
+
+    # Second triangle (right)
+    t2_left = t1_right
+    t2_right = t2_left + triangle_width
+    triangle2 = [
+        (t2_left, padding),
+        (t2_left, size - padding),
+        (t2_right, size // 2)
+    ]
+    pygame.draw.polygon(surface, color, triangle2)
+
+    # Vertical bar on the right
+    bar_x = size - padding - bar_width
+    bar_rect = pygame.Rect(bar_x, padding, bar_width, size - 2 * padding)
+    pygame.draw.rect(surface, color, bar_rect)
+
+    _icon_cache[cache_key] = surface
+    return surface
+
+
 def clear_icon_cache() -> None:
     """Clear the icon cache to free memory."""
     global _icon_cache
