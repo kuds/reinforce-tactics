@@ -266,7 +266,7 @@ class ReplaySelectionMenu(Menu):
         # Must match the layout in draw() and _draw_replay_list()
         panel_top = 80
         panel_height = screen_height - panel_top - 20
-        left_panel_width = int(screen_width * 0.45)
+        left_panel_width = int(screen_width * 0.55)
         left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
 
         # Calculate visible area for scrolling (same as _draw_replay_list)
@@ -367,11 +367,11 @@ class ReplaySelectionMenu(Menu):
         panel_top = 80
         panel_height = screen_height - panel_top - 20
 
-        # Left panel for replay list (45% of width)
-        left_panel_width = int(screen_width * 0.45)
+        # Left panel for replay list (55% of width)
+        left_panel_width = int(screen_width * 0.55)
         left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
 
-        # Right panel for preview and details (55% of width)
+        # Right panel for preview and details (45% of width)
         right_panel_x = left_panel_width
         right_panel_width = screen_width - left_panel_width - 10
         right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
