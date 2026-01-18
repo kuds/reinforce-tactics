@@ -13,14 +13,16 @@ from reinforcetactics.utils.fonts import get_font
 class Renderer:
     """Handles all Pygame rendering."""
 
-    def __init__(self, game_state):
+    def __init__(self, game_state, replay_mode=False):
         """
         Initialize the renderer.
 
         Args:
             game_state: GameState instance to render
+            replay_mode: If True, skip rendering gameplay controls (End Turn, Resign)
         """
         self.game_state = game_state
+        self.replay_mode = replay_mode
 
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
@@ -274,6 +276,10 @@ class Renderer:
         pygame.draw.rect(self.screen, (50, 50, 65), turn_bg_rect)
         pygame.draw.rect(self.screen, (100, 150, 200), turn_bg_rect, 2)
         self.screen.blit(turn_surface, turn_rect)
+
+        # Skip End Turn and Resign buttons in replay mode
+        if self.replay_mode:
+            return
 
         # Draw End Turn button
         mouse_pos = pygame.mouse.get_pos()
