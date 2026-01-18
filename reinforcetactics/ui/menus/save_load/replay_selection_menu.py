@@ -8,6 +8,7 @@ import pygame
 
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
+from reinforcetactics.ui.icons import get_arrow_up_icon, get_arrow_down_icon
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
@@ -427,23 +428,21 @@ class ReplaySelectionMenu(Menu):
 
         # Draw scroll indicators if needed
         if len(self.options) > max_visible:
-            indicator_font = get_font(20)
-
             if self.scroll_offset > 0:
-                up_text = indicator_font.render("^", True, self.hover_color)
-                up_rect = up_text.get_rect(
+                up_icon = get_arrow_up_icon(size=16, color=self.hover_color)
+                up_rect = up_icon.get_rect(
                     centerx=panel_rect.centerx,
                     y=panel_rect.y + 2
                 )
-                self.screen.blit(up_text, up_rect)
+                self.screen.blit(up_icon, up_rect)
 
             if end_idx < len(self.options):
-                down_text = indicator_font.render("v", True, self.hover_color)
-                down_rect = down_text.get_rect(
+                down_icon = get_arrow_down_icon(size=16, color=self.hover_color)
+                down_rect = down_icon.get_rect(
                     centerx=panel_rect.centerx,
                     bottom=panel_rect.bottom - 2
                 )
-                self.screen.blit(down_text, down_rect)
+                self.screen.blit(down_icon, down_rect)
 
     def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
         """Draw the preview and details panel."""

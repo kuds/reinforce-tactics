@@ -10,6 +10,10 @@ import pygame
 
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.ui.icons import (
+    get_play_icon, get_pause_icon, get_arrow_left_icon, get_arrow_right_icon,
+    get_restart_icon, get_skip_back_icon, get_skip_forward_icon, get_x_icon
+)
 
 # Optional OpenCV import for video export
 try:
@@ -631,29 +635,38 @@ class ReplayPlayer:
         # Draw buttons
         font = get_font(24)
         small_font = get_font(20)
-        symbol_font = get_font(28)
+        icon_size = 24
+        icon_color = (255, 255, 255)
 
         # Step back button
-        self._draw_button(self.step_back_button, "◀", mouse_pos, (80, 80, 120), symbol_font)
+        step_back_icon = get_arrow_left_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.step_back_button, step_back_icon, mouse_pos, (80, 80, 120))
 
         # Play/Pause button
-        play_text = "▶" if self.paused else "⏸"
-        self._draw_button(self.play_pause_button, play_text, mouse_pos, (100, 150, 100), symbol_font)
+        if self.paused:
+            play_pause_icon = get_play_icon(size=icon_size, color=icon_color)
+        else:
+            play_pause_icon = get_pause_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.play_pause_button, play_pause_icon, mouse_pos, (100, 150, 100))
 
         # Step forward button
-        self._draw_button(self.step_forward_button, "▶", mouse_pos, (80, 80, 120), symbol_font)
+        step_forward_icon = get_arrow_right_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.step_forward_button, step_forward_icon, mouse_pos, (80, 80, 120))
 
         # Restart button
-        self._draw_button(self.restart_button, "⟲", mouse_pos, (150, 100, 100), symbol_font)
+        restart_icon = get_restart_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.restart_button, restart_icon, mouse_pos, (150, 100, 100))
 
         # Skip to previous turn button
-        self._draw_button(self.prev_turn_button, "⏮", mouse_pos, (100, 100, 130), symbol_font)
+        skip_back_icon = get_skip_back_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.prev_turn_button, skip_back_icon, mouse_pos, (100, 100, 130))
 
         # Skip to next turn button
-        self._draw_button(self.next_turn_button, "⏭", mouse_pos, (100, 100, 130), symbol_font)
+        skip_forward_icon = get_skip_forward_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.next_turn_button, skip_forward_icon, mouse_pos, (100, 100, 130))
 
         # Speed down button
-        self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), symbol_font)
+        self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), font)
 
         # Speed display (between speed buttons)
         speed_text = f"{self.playback_speed}x"
@@ -662,7 +675,7 @@ class ReplayPlayer:
         screen.blit(speed_surface, speed_rect)
 
         # Speed up button
-        self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), symbol_font)
+        self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), font)
 
         # Save Video button
         save_video_text = "Rec" if not self.recording else "Save"
@@ -682,7 +695,8 @@ class ReplayPlayer:
             pygame.draw.rect(screen, (200, 200, 220), self.progress_bar_rect, 2)
 
         # Exit button
-        self._draw_button(self.exit_button, "X", mouse_pos, (150, 70, 70), font)
+        exit_icon = get_x_icon(size=icon_size, color=icon_color)
+        self._draw_icon_button(self.exit_button, exit_icon, mouse_pos, (150, 70, 70))
 
         # Recording indicator
         if self.recording:
@@ -788,7 +802,7 @@ class ReplayPlayer:
                 self.notification_text = ""
 
     def _draw_button(self, rect, text, mouse_pos, color, font):
-        """Draw a button."""
+        """Draw a button with text."""
         is_hover = rect.collidepoint(mouse_pos)
         button_color = tuple(min(c + 30, 255) for c in color) if is_hover else color
 
@@ -798,3 +812,14 @@ class ReplayPlayer:
         text_surface = font.render(text, True, (255, 255, 255))
         text_rect = text_surface.get_rect(center=rect.center)
         self.renderer.screen.blit(text_surface, text_rect)
+
+    def _draw_icon_button(self, rect, icon, mouse_pos, color):
+        """Draw a button with an icon surface."""
+        is_hover = rect.collidepoint(mouse_pos)
+        button_color = tuple(min(c + 30, 255) for c in color) if is_hover else color
+
+        pygame.draw.rect(self.renderer.screen, button_color, rect)
+        pygame.draw.rect(self.renderer.screen, (200, 200, 220), rect, 2)
+
+        icon_rect = icon.get_rect(center=rect.center)
+        self.renderer.screen.blit(icon, icon_rect)

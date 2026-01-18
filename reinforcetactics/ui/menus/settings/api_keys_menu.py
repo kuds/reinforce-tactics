@@ -6,6 +6,7 @@ import pygame
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.clipboard import get_clipboard_text
+from reinforcetactics.ui.icons import get_checkmark_icon, get_x_icon
 
 
 class APIKeysMenu:
@@ -249,23 +250,26 @@ class APIKeysMenu:
             test_button_y = input_y + input_height + 5
             test_button_key = f'test_{provider_key}'
 
-            # Determine button text and color based on test status
+            # Determine button text, color, and icon based on test status
             status = self.test_status[provider_key]
+            test_icon = None
             if status == 'testing':
                 test_text = 'Testing...'
                 test_color = (150, 150, 150)
             elif status == 'success':
-                test_text = '✓ Test'
+                test_text = 'Test'
                 test_color = (50, 150, 50)
+                test_icon = get_checkmark_icon(size=16, color=(255, 255, 255))
             elif status == 'failed':
-                test_text = '✗ Test'
+                test_text = 'Test'
                 test_color = (150, 50, 50)
+                test_icon = get_x_icon(size=16, color=(255, 255, 255))
             else:
                 test_text = 'Test'
                 test_color = self.button_color
 
             # Draw test button
-            test_rect = self._draw_test_button(test_button_x, test_button_y, test_text, test_button_key, test_color)
+            test_rect = self._draw_test_button(test_button_x, test_button_y, test_text, test_button_key, test_color, test_icon)
             self.button_rects[test_button_key] = test_rect
 
             # Draw status message if available
@@ -313,15 +317,19 @@ class APIKeysMenu:
 
         return button_rect
 
-    def _draw_test_button(self, x: int, y: int, text: str, button_name: str, bg_color: tuple) -> pygame.Rect:
-        """Draw a test button with custom color and return its rect."""
+    def _draw_test_button(self, x: int, y: int, text: str, button_name: str, bg_color: tuple,
+                          icon: pygame.Surface = None) -> pygame.Rect:
+        """Draw a test button with custom color and optional icon, return its rect."""
         padding_x = 15
         padding_y = 8
+        icon_spacing = 4
 
         text_surface = self.input_font.render(text, True, self.text_color)
         text_rect = text_surface.get_rect()
 
-        button_width = text_rect.width + 2 * padding_x
+        # Calculate button width including icon if present
+        icon_width = icon.get_width() + icon_spacing if icon else 0
+        button_width = text_rect.width + icon_width + 2 * padding_x
         button_height = text_rect.height + 2 * padding_y
         button_rect = pygame.Rect(x, y, button_width, button_height)
 
@@ -333,8 +341,18 @@ class APIKeysMenu:
 
         pygame.draw.rect(self.screen, final_color, button_rect, border_radius=5)
 
-        # Draw text
-        text_rect.center = button_rect.center
+        # Draw icon and text
+        if icon:
+            # Calculate positions for icon + text centered in button
+            total_content_width = icon.get_width() + icon_spacing + text_rect.width
+            content_start_x = button_rect.centerx - total_content_width // 2
+            icon_rect = icon.get_rect(x=content_start_x, centery=button_rect.centery)
+            self.screen.blit(icon, icon_rect)
+            text_rect.x = content_start_x + icon.get_width() + icon_spacing
+            text_rect.centery = button_rect.centery
+        else:
+            text_rect.center = button_rect.center
+
         self.screen.blit(text_surface, text_rect)
 
         return button_rect
