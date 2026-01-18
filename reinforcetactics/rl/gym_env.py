@@ -24,8 +24,9 @@ class StrategyGameEnv(gym.Env):
 
     Action Space:
         MultiDiscrete with 6 dimensions:
-        - action_type: [0=create_unit, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn]
-        - unit_type: [0=W, 1=M, 2=C] (for create_unit)
+        - action_type: [0=create_unit, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn,
+                        6=paralyze, 7=haste]
+        - unit_type: [0=W, 1=M, 2=C, 3=A, 4=K, 5=R, 6=S, 7=B] (for create_unit)
         - from_x: [0, grid_width)
         - from_y: [0, grid_height)
         - to_x: [0, grid_width)
@@ -118,8 +119,8 @@ class StrategyGameEnv(gym.Env):
             self.action_space = spaces.Dict({
                 'goal': spaces.Discrete(goal_space_size),  # Manager action
                 'primitive': spaces.MultiDiscrete([
-                    6,  # action_type
-                    3,  # unit_type (for create)
+                    8,  # action_type (0-7)
+                    8,  # unit_type (for create): W, M, C, A, K, R, S, B
                     self.grid_width,  # from_x
                     self.grid_height,  # from_y
                     self.grid_width,  # to_x
@@ -129,8 +130,8 @@ class StrategyGameEnv(gym.Env):
         else:
             # Flat RL: Direct primitive actions
             self.action_space = spaces.MultiDiscrete([
-                6,  # action_type
-                3,  # unit_type (for create)
+                8,  # action_type (0-7)
+                8,  # unit_type (for create): W, M, C, A, K, R, S, B
                 self.grid_width,  # from_x
                 self.grid_height,  # from_y
                 self.grid_width,  # to_x
@@ -155,7 +156,8 @@ class StrategyGameEnv(gym.Env):
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
         # Simplified: num_action_types * grid_size^2 (approximate)
-        return 6 * self.grid_width * self.grid_height
+        # 8 action types: create, move, attack, seize, heal, end_turn, paralyze, haste
+        return 8 * self.grid_width * self.grid_height
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
         """Get current observation."""
@@ -185,7 +187,7 @@ class StrategyGameEnv(gym.Env):
         """
         Get binary mask of valid actions for the current player.
 
-        The action mask corresponds to the flattened action space of size 6 * W * H.
+        The action mask corresponds to the flattened action space of size 8 * W * H.
         Segments:
         0: Create Unit (at pos) - Valid if pos is a building and we can afford unit
         1: Move (to pos) - Valid if ANY unit can move to pos
@@ -193,6 +195,8 @@ class StrategyGameEnv(gym.Env):
         3: Seize (at pos) - Valid if unit at pos can seize
         4: Heal (target at pos) - Valid if ANY unit can heal unit at pos
         5: End Turn (any pos) - Always valid (usually just mapped to one index or all)
+        6: Paralyze (target at pos) - Valid if Mage/Sorcerer can paralyze enemy at pos
+        7: Haste (target at pos) - Valid if Sorcerer can grant haste to ally at pos
 
         Note: This is a "valid target" mask. It tells the agent *where* something can happen,
         but implies *someone* can do it. The agent then picks (ActionType, UnitType, From, To).
@@ -204,7 +208,7 @@ class StrategyGameEnv(gym.Env):
         legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         # Create mask (all zeros initially)
-        # Size: 6 * W * H
+        # Size: 8 * W * H
         mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
 
         width = self.grid_width
@@ -259,6 +263,18 @@ class StrategyGameEnv(gym.Env):
         end_idx = 6 * area
         mask[start_idx:end_idx] = 1.0
 
+        # 6: Paralyze (Mage/Sorcerer ability)
+        # legal_actions['paralyze'] contains list of dicts: {paralyzer, target}
+        for action in legal_actions.get('paralyze', []):
+            target = action['target']
+            set_mask(6, target.x, target.y)
+
+        # 7: Haste (Sorcerer ability)
+        # legal_actions['haste'] contains list of dicts: {sorcerer, target}
+        for action in legal_actions.get('haste', []):
+            target = action['target']
+            set_mask(7, target.x, target.y)
+
         return mask
 
     def _encode_action(self, action: np.ndarray) -> Dict[str, Any]:
@@ -276,8 +292,8 @@ class StrategyGameEnv(gym.Env):
         from_x, from_y = int(action[2]), int(action[3])
         to_x, to_y = int(action[4]), int(action[5])
 
-        unit_types = ['W', 'M', 'C']
-        unit_type = unit_types[unit_type_idx % 3]
+        unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        unit_type = unit_types[unit_type_idx % 8]
 
         return {
             'action_type': action_type,
@@ -377,6 +393,30 @@ class StrategyGameEnv(gym.Env):
                 if self.opponent:
                     self._opponent_turn()
                     self.game_state.end_turn()
+
+            elif action_type == 6:  # Paralyze (Mage/Sorcerer)
+                unit = self.game_state.get_unit_at_position(*from_pos)
+                target = self.game_state.get_unit_at_position(*to_pos)
+                if unit and target and unit.type in ['M', 'S'] and target.player != 1:
+                    result = self.game_state.paralyze(unit, target)
+                    if result:
+                        reward += 8.0  # Paralyze is very valuable
+                    else:
+                        is_valid = False
+                else:
+                    is_valid = False
+
+            elif action_type == 7:  # Haste (Sorcerer only)
+                unit = self.game_state.get_unit_at_position(*from_pos)
+                target = self.game_state.get_unit_at_position(*to_pos)
+                if unit and target and unit.type == 'S' and target.player == 1:
+                    result = self.game_state.haste(unit, target)
+                    if result:
+                        reward += 6.0  # Haste is valuable for granting extra actions
+                    else:
+                        is_valid = False
+                else:
+                    is_valid = False
 
         except Exception as e:
             print(f"Error executing action: {e}")

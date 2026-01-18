@@ -40,9 +40,8 @@ class UnitPurchaseMenu:
 
         # Unit types to display
         # Basic: Warrior, Mage, Cleric, Archer
-        # Advanced: Knight, Rogue, Sorcerer
-        # Barbarian is excluded as a special unit (costs 400g)
-        self.unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S']
+        # Advanced: Knight, Rogue, Sorcerer, Barbarian
+        self.unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []
