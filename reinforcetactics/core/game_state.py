@@ -313,7 +313,7 @@ class GameState:
         Returns:
             dict: Attack results
         """
-        result = self.mechanics.attack_unit(attacker, target, self.grid)
+        result = self.mechanics.attack_unit(attacker, target, self.grid, self.units)
 
         # Record action
         self.record_action('attack',
@@ -405,6 +405,29 @@ class GameState:
                               curer_pos=(curer.x, curer.y),
                               target_pos=(target.x, target.y),
                               player=curer.player)
+            self._invalidate_cache()
+        return result
+
+    def haste(self, sorcerer: Unit, target: Unit) -> bool:
+        """
+        Sorcerer grants Haste to a target unit.
+
+        Args:
+            sorcerer: The Sorcerer unit using Haste
+            target: The target friendly unit
+
+        Returns:
+            bool: True if Haste was successfully applied
+        """
+        result = self.mechanics.haste_unit(sorcerer, target)
+        if result:
+            sorcerer.can_move = False
+            sorcerer.can_attack = False
+            self.record_action('haste',
+                              sorcerer_pos=(sorcerer.x, sorcerer.y),
+                              target_pos=(target.x, target.y),
+                              target_type=target.type,
+                              player=sorcerer.player)
             self._invalidate_cache()
         return result
 
@@ -576,6 +599,9 @@ class GameState:
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
 
+        # Decrement Sorcerer haste cooldowns
+        self.mechanics.decrement_haste_cooldowns(self.units, self.current_player)
+
         for unit in self.units:
             if unit.player == self.current_player:
                 if not unit.is_paralyzed():
@@ -588,6 +614,8 @@ class GameState:
                 unit.original_x = unit.x
                 unit.original_y = unit.y
                 unit.has_moved = False
+                unit.distance_moved = 0
+                unit.is_hasted = False
             unit.selected = False
 
         # Calculate and apply income
@@ -635,14 +663,16 @@ class GameState:
             'paralyze': [],
             'heal': [],
             'cure': [],
+            'haste': [],
             'seize': [],
             'end_turn': True
         }
 
         # Building units (only at Buildings, not HQ)
+        # Available units: W, M, C, A (basic) + K, R, S (advanced)
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in ['W', 'M', 'C', 'A']:
+                for unit_type in ['W', 'M', 'C', 'A', 'K', 'R', 'S']:
                     if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
                         legal_actions['create_unit'].append({
                             'unit_type': unit_type,
@@ -671,8 +701,8 @@ class GameState:
 
                 # Combat actions
                 if unit.can_attack:
-                    # For Archers and Mages, find enemies within range (not just adjacent)
-                    if unit.type in ['M', 'A']:
+                    # For Archers, Mages, and Sorcerers, find enemies within range (not just adjacent)
+                    if unit.type in ['M', 'A', 'S']:
                         # Check if unit is on mountain (for Archer range bonus)
                         unit_tile = self.grid.get_tile(unit.x, unit.y)
                         on_mountain = (unit_tile.type == 'm')
@@ -716,6 +746,15 @@ class GameState:
                         for ally in adjacent_paralyzed:
                             legal_actions['cure'].append({
                                 'curer': unit,
+                                'target': ally
+                            })
+
+                    # Haste (Sorcerer only)
+                    if unit.type == 'S' and unit.can_use_haste():
+                        hasteable_allies = self.mechanics.get_hasteable_allies(unit, self.units)
+                        for ally in hasteable_allies:
+                            legal_actions['haste'].append({
+                                'sorcerer': unit,
                                 'target': ally
                             })
 

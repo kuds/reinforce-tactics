@@ -107,6 +107,19 @@ class UnitActionMenu:
                     'targets': adjacent_paralyzed
                 })
 
+        # Haste - only for Sorcerers with ability off cooldown
+        if self.unit.type == 'S' and self.unit.can_use_haste():
+            hasteable_allies = GameMechanics.get_hasteable_allies(
+                self.unit, self.game_state.units
+            )
+            if hasteable_allies:
+                actions.append({
+                    'name': 'Haste (T)',
+                    'key': 't',
+                    'type': 'haste',
+                    'targets': hasteable_allies
+                })
+
         # Capture - only if on a capturable structure
         tile = self.game_state.grid.get_tile(self.unit.x, self.unit.y)
         if tile.is_capturable() and tile.player != self.unit.player:

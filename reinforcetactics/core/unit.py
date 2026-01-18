@@ -32,7 +32,17 @@ class Unit:
         self.max_health = UNIT_DATA[unit_type]['health']
         self.health = self.max_health
         self.attack_data = UNIT_DATA[unit_type]['attack']
+        self.defence = UNIT_DATA[unit_type]['defence']
         self.paralyzed_turns = 0
+
+        # Knight charge tracking
+        self.distance_moved = 0
+
+        # Sorcerer haste ability tracking
+        self.haste_cooldown = 0  # Turns remaining before can use Haste again
+
+        # Haste buff tracking (for any unit that receives Haste)
+        self.is_hasted = False  # True if unit has extra action this turn
 
     def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
@@ -48,7 +58,8 @@ class Unit:
         """
         distance = abs(self.x - target_x) + abs(self.y - target_y)
 
-        if self.type == 'M':
+        if self.type in ['M', 'S']:
+            # Mage and Sorcerer have ranged attacks
             if distance == 1:
                 return self.attack_data['adjacent']
             elif distance == 2:
@@ -78,15 +89,15 @@ class Unit:
         Returns:
             Tuple of (min_range, max_range)
         """
-        if self.type == 'M':
-            # Mage: distance 1-2
+        if self.type in ['M', 'S']:
+            # Mage and Sorcerer: distance 1-2
             return (1, 2)
         elif self.type == 'A':
             # Archer: distance 2-3, or 2-4 on mountain
             max_range = 4 if on_mountain else 3
             return (2, max_range)
         else:
-            # Warrior, Cleric, Berserker: distance 1 only
+            # Warrior, Cleric, Barbarian, Knight, Rogue: distance 1 only
             return (1, 1)
 
     def take_damage(self, damage):
@@ -149,6 +160,8 @@ class Unit:
 
     def move_to(self, x, y):
         """Move the unit to a new position."""
+        # Calculate Manhattan distance moved (for Knight's Charge ability)
+        self.distance_moved = abs(x - self.original_x) + abs(y - self.original_y)
         self.x = x
         self.y = y
         self.has_moved = True
@@ -171,6 +184,12 @@ class Unit:
         self.has_moved = False
         self.original_x = self.x
         self.original_y = self.y
+        self.distance_moved = 0
+        self.is_hasted = False
+
+    def can_use_haste(self):
+        """Check if this Sorcerer can use Haste ability."""
+        return self.type == 'S' and self.haste_cooldown == 0
 
     def to_dict(self):
         """Convert unit to dictionary for serialization."""
@@ -182,7 +201,10 @@ class Unit:
             'health': self.health,
             'paralyzed_turns': self.paralyzed_turns,
             'can_move': self.can_move,
-            'can_attack': self.can_attack
+            'can_attack': self.can_attack,
+            'haste_cooldown': self.haste_cooldown,
+            'is_hasted': self.is_hasted,
+            'distance_moved': self.distance_moved
         }
 
     @classmethod
@@ -193,6 +215,9 @@ class Unit:
         unit.paralyzed_turns = data.get('paralyzed_turns', 0)
         unit.can_move = data.get('can_move', True)
         unit.can_attack = data.get('can_attack', True)
+        unit.haste_cooldown = data.get('haste_cooldown', 0)
+        unit.is_hasted = data.get('is_hasted', False)
+        unit.distance_moved = data.get('distance_moved', 0)
         unit.original_x = unit.x
         unit.original_y = unit.y
         return unit

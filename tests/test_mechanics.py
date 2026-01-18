@@ -311,13 +311,14 @@ class TestCombat:
     def test_attack_kills_target(self):
         """Test attacker kills target."""
         attacker = Unit('W', 5, 5, 1)
-        target = Unit('C', 6, 5, 2)  # Cleric with 8 HP
+        target = Unit('C', 6, 5, 2)  # Cleric with 8 HP, 4 defence
 
         result = GameMechanics.attack_unit(attacker, target)
 
         assert result['attacker_alive'] is True
         assert result['target_alive'] is False
-        assert result['damage'] == 10
+        # Warrior (10 attack) vs Cleric (4 defence) = 10 * (1 - 0.20) = 8 damage
+        assert result['damage'] == 8
         assert target.health == 0
 
     def test_attack_target_survives_and_counters(self):
@@ -329,10 +330,11 @@ class TestCombat:
         result = GameMechanics.attack_unit(attacker, target)
 
         assert result['target_alive'] is True
-        assert target.health == 5  # 15 - 10 damage
+        # Warrior (10 attack) vs Warrior (6 defence) = 10 * (1 - 0.30) = 7 damage
+        assert target.health == 8  # 15 - 7 damage
         # Counter attack should happen
         assert result['counter_damage'] > 0
-        # Attacker should take counter damage (10 * 0.9 = 9)
+        # Attacker should take counter damage (10 * 0.8 counter mult * 0.7 defence = 5.6 → 5)
         assert attacker.health < 15
 
     def test_paralyzed_target_no_counter(self):
@@ -552,10 +554,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, simple_grid)
 
-        # Archer should deal damage
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
+        assert result['damage'] == 3
         assert result['target_alive'] is True
-        assert warrior.health == 10  # 15 - 5 damage
+        assert warrior.health == 12  # 15 - 3 damage
 
         # Warrior should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
@@ -568,10 +570,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, cleric, simple_grid)
 
-        # Archer should deal damage but cleric survives (8 - 5 = 3 HP)
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Cleric (4 defence) = 5 * 0.8 = 4 damage
+        assert result['damage'] == 4
         assert result['target_alive'] is True
-        assert cleric.health == 3
+        assert cleric.health == 4  # 8 - 4 damage
 
         # Cleric should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
@@ -584,10 +586,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, barbarian, simple_grid)
 
-        # Archer should deal damage
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Barbarian (2 defence) = 5 * 0.9 = 4.5 → 4 damage
+        assert result['damage'] == 4
         assert result['target_alive'] is True
-        assert barbarian.health == 15  # 20 - 5 damage
+        assert barbarian.health == 16  # 20 - 4 damage
 
         # Barbarian should not counter-attack (can't reach distance 2)
         assert result['counter_damage'] == 0
@@ -600,14 +602,14 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer1, archer2, simple_grid)
 
-        # Archer1 should deal damage
-        assert result['damage'] == 5
+        # Archer1 (5 attack) vs Archer2 (1 defence) = 5 * 0.95 = 4.75 → 4 damage
+        assert result['damage'] == 4
         assert result['target_alive'] is True
-        assert archer2.health == 10  # 15 - 5 damage
+        assert archer2.health == 11  # 15 - 4 damage
 
-        # Archer2 should counter-attack at distance 2 (5 * 0.9 = 4.5, int = 4)
-        assert result['counter_damage'] == 4
-        assert archer1.health == 11  # 15 - 4 damage
+        # Archer2 counter-attack: 5 * 0.8 counter mult = 4, then 4 * 0.95 defence = 3.8 → 3
+        assert result['counter_damage'] == 3
+        assert archer1.health == 12  # 15 - 3 damage
 
     def test_archer_attacks_mage_gets_counter(self, simple_grid):
         """Test archer attacking mage gets counter-attack if in range."""
@@ -616,14 +618,14 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer should deal damage
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
+        assert result['damage'] == 4
         assert result['target_alive'] is True
-        assert mage.health == 5  # 10 - 5 damage
+        assert mage.health == 6  # 10 - 4 damage
 
-        # Mage should counter-attack at distance 2 (12 * 0.8 = 9.6, int = 9)
-        assert result['counter_damage'] == 9
-        assert archer.health == 6  # 15 - 9 damage
+        # Mage counter: 12 ranged * 0.8 = 9.6 → 9, then 9 * 0.95 (1 defence) = 8.55 → 8
+        assert result['counter_damage'] == 8
+        assert archer.health == 7  # 15 - 8 damage
 
     def test_archer_attacks_mage_at_distance_2_gets_counter(self, simple_grid):
         """Test archer attacking mage at distance 2 gets counter-attack."""
@@ -632,14 +634,14 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer should deal damage at distance 2
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
+        assert result['damage'] == 4
         assert result['target_alive'] is True
-        assert mage.health == 5  # 10 - 5 damage
+        assert mage.health == 6  # 10 - 4 damage
 
-        # Mage should counter-attack at distance 2 (12 * 0.8 = 9.6, int = 9)
-        assert result['counter_damage'] == 9
-        assert archer.health == 6  # 15 - 9 damage
+        # Mage counter: 12 * 0.8 = 9.6 → 9, then 9 * 0.95 = 8.55 → 8
+        assert result['counter_damage'] == 8
+        assert archer.health == 7  # 15 - 8 damage
 
     def test_archer_on_mountain_attacks_at_distance_3(self):
         """Test archer on mountain can attack at distance 3."""
@@ -653,11 +655,295 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, grid)
 
-        # Archer should deal damage at distance 3 from mountain
-        assert result['damage'] == 5
+        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
+        assert result['damage'] == 3
         assert result['target_alive'] is True
-        assert warrior.health == 10
+        assert warrior.health == 12  # 15 - 3 damage
 
         # Warrior cannot counter from distance 3
         assert result['counter_damage'] == 0
         assert archer.health == 15
+
+
+class TestDefenceSystem:
+    """Test the new defence damage reduction system."""
+
+    def test_defence_reduces_damage(self, simple_grid):
+        """Test that defence reduces incoming damage by 5% per point."""
+        # Warrior (10 attack) vs Warrior (6 defence)
+        # 6 defence = 30% reduction, so 10 * 0.7 = 7 damage
+        attacker = Unit('W', 5, 5, 1)
+        defender = Unit('W', 6, 5, 2)
+
+        result = GameMechanics.attack_unit(attacker, defender, simple_grid)
+
+        assert result['damage'] == 7
+
+    def test_defence_minimum_damage_is_one(self, simple_grid):
+        """Test that minimum damage is always at least 1."""
+        # Create a low-attack unit vs high-defence
+        attacker = Unit('C', 5, 5, 1)  # Cleric: 2 attack
+        defender = Unit('W', 6, 5, 2)  # Warrior: 6 defence (30% reduction)
+        # 2 * 0.7 = 1.4 → 1 (minimum)
+
+        result = GameMechanics.attack_unit(attacker, defender, simple_grid)
+
+        assert result['damage'] >= 1
+
+
+class TestKnightChargeAbility:
+    """Test Knight's Charge ability."""
+
+    def test_knight_charge_bonus_with_3_tiles_moved(self, simple_grid):
+        """Test Knight gets +50% damage when moving 3+ tiles."""
+        knight = Unit('K', 2, 2, 1)
+        knight.original_x = 2
+        knight.original_y = 2
+
+        # Simulate moving 3 tiles
+        knight.move_to(5, 2)  # Moved 3 tiles right
+
+        enemy = Unit('W', 6, 2, 2)  # Adjacent to knight after move
+
+        # Knight (8 attack) with charge (+50%) = 12 base
+        # vs Warrior (6 defence, 30% reduction) = 12 * 0.7 = 8.4 → 8 damage
+        result = GameMechanics.attack_unit(knight, enemy, simple_grid)
+
+        assert result['charge_bonus'] is True
+        assert result['damage'] == 8
+
+    def test_knight_no_charge_bonus_with_2_tiles_moved(self, simple_grid):
+        """Test Knight doesn't get charge bonus when moving less than 3 tiles."""
+        knight = Unit('K', 3, 2, 1)
+        knight.original_x = 3
+        knight.original_y = 2
+
+        # Simulate moving only 2 tiles
+        knight.move_to(5, 2)  # Moved 2 tiles right
+
+        enemy = Unit('W', 6, 2, 2)
+
+        # Knight (8 attack) without charge
+        # vs Warrior (6 defence) = 8 * 0.7 = 5.6 → 5 damage
+        result = GameMechanics.attack_unit(knight, enemy, simple_grid)
+
+        assert result['charge_bonus'] is False
+        assert result['damage'] == 5
+
+
+class TestRogueFlankAbility:
+    """Test Rogue's Flank ability."""
+
+    def test_rogue_flank_bonus_when_enemy_adjacent_to_ally(self, simple_grid):
+        """Test Rogue gets +50% damage when enemy is adjacent to another ally."""
+        rogue = Unit('R', 5, 5, 1)
+        ally = Unit('W', 7, 5, 1)  # Ally adjacent to target
+        target = Unit('W', 6, 5, 2)  # Target between rogue and ally
+
+        units = [rogue, ally, target]
+
+        # Rogue (9 attack) with flank (+50%) = 13.5 → 13 base
+        # vs Warrior (6 defence, 30% reduction) = 13 * 0.7 = 9.1 → 9 damage
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, units)
+
+        assert result['flank_bonus'] is True
+        assert result['damage'] == 9
+
+    def test_rogue_no_flank_bonus_when_alone(self, simple_grid):
+        """Test Rogue doesn't get flank bonus when no allies adjacent to enemy."""
+        rogue = Unit('R', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)
+
+        units = [rogue, target]
+
+        # Rogue (9 attack) without flank
+        # vs Warrior (6 defence) = 9 * 0.7 = 6.3 → 6 damage
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, units)
+
+        assert result['flank_bonus'] is False
+        assert result['damage'] == 6
+
+
+class TestRogueEvadeAbility:
+    """Test Rogue's Evade ability (25% dodge counter-attacks)."""
+
+    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid, mocker):
+        """Test Rogue evades counter-attack when random roll is below 0.25."""
+        # Mock random.random to return a value below 0.25
+        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.1)
+
+        rogue = Unit('R', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)  # Warrior can counter-attack
+
+        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+
+        assert result['evade'] is True
+        assert result['counter_damage'] == 0
+        assert rogue.health == 12  # Full health, no counter damage taken
+
+    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid, mocker):
+        """Test Rogue doesn't evade when random roll is above 0.25."""
+        # Mock random.random to return a value above 0.25
+        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.5)
+
+        rogue = Unit('R', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)  # Warrior can counter-attack
+
+        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+
+        assert result['evade'] is False
+        assert result['counter_damage'] > 0
+        assert rogue.health < 12  # Took counter damage
+
+    def test_non_rogue_cannot_evade(self, simple_grid, mocker):
+        """Test non-Rogue units cannot evade counter-attacks."""
+        # Even with favorable random roll, non-Rogues shouldn't evade
+        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.1)
+
+        warrior = Unit('W', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)
+
+        result = GameMechanics.attack_unit(warrior, target, simple_grid)
+
+        assert result['evade'] is False
+        # Warrior should take counter damage
+        assert warrior.health < 15
+
+
+class TestSorcererHasteAbility:
+    """Test Sorcerer's Haste ability."""
+
+    def test_sorcerer_can_haste_ally(self, simple_grid):
+        """Test Sorcerer can grant Haste to nearby ally."""
+        sorcerer = Unit('S', 5, 5, 1)
+        ally = Unit('W', 6, 5, 1)  # Adjacent ally
+
+        result = GameMechanics.haste_unit(sorcerer, ally)
+
+        assert result is True
+        assert ally.is_hasted is True
+        assert ally.can_move is True
+        assert ally.can_attack is True
+        assert sorcerer.haste_cooldown == 3
+
+    def test_sorcerer_cannot_haste_when_on_cooldown(self, simple_grid):
+        """Test Sorcerer cannot use Haste when on cooldown."""
+        sorcerer = Unit('S', 5, 5, 1)
+        sorcerer.haste_cooldown = 2
+        ally = Unit('W', 6, 5, 1)
+
+        result = GameMechanics.haste_unit(sorcerer, ally)
+
+        assert result is False
+        assert ally.is_hasted is False
+
+    def test_sorcerer_cannot_haste_enemy(self, simple_grid):
+        """Test Sorcerer cannot Haste enemy units."""
+        sorcerer = Unit('S', 5, 5, 1)
+        enemy = Unit('W', 6, 5, 2)
+
+        result = GameMechanics.haste_unit(sorcerer, enemy)
+
+        assert result is False
+
+    def test_sorcerer_cannot_haste_self(self, simple_grid):
+        """Test Sorcerer cannot Haste itself."""
+        sorcerer = Unit('S', 5, 5, 1)
+
+        result = GameMechanics.haste_unit(sorcerer, sorcerer)
+
+        assert result is False
+
+    def test_sorcerer_haste_range_limit(self, simple_grid):
+        """Test Sorcerer Haste has range 1-2."""
+        sorcerer = Unit('S', 5, 5, 1)
+        ally_far = Unit('W', 8, 5, 1)  # Distance 3, out of range
+
+        result = GameMechanics.haste_unit(sorcerer, ally_far)
+
+        assert result is False
+
+    def test_haste_cooldown_decrements(self, simple_grid):
+        """Test Haste cooldown decrements each turn."""
+        sorcerer = Unit('S', 5, 5, 1)
+        sorcerer.haste_cooldown = 2
+
+        units = [sorcerer]
+        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+
+        assert sorcerer.haste_cooldown == 1
+        assert len(ready) == 0
+
+        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+
+        assert sorcerer.haste_cooldown == 0
+        assert len(ready) == 1
+        assert sorcerer in ready
+
+
+class TestSorcererAttacks:
+    """Test Sorcerer attack mechanics."""
+
+    def test_sorcerer_adjacent_damage(self, simple_grid):
+        """Test Sorcerer deals 6 damage at distance 1."""
+        sorcerer = Unit('S', 5, 5, 1)
+        enemy = Unit('A', 6, 5, 2)  # Archer: 1 defence
+
+        # Sorcerer adjacent (6 attack) vs Archer (1 defence, 5% reduction)
+        # 6 * 0.95 = 5.7 → 5 damage
+        result = GameMechanics.attack_unit(sorcerer, enemy, simple_grid)
+
+        assert result['damage'] == 5
+
+    def test_sorcerer_range_damage(self, simple_grid):
+        """Test Sorcerer deals 8 damage at distance 2."""
+        sorcerer = Unit('S', 5, 5, 1)
+        enemy = Unit('A', 7, 5, 2)  # Archer: 1 defence, distance 2
+
+        # Sorcerer ranged (8 attack) vs Archer (1 defence)
+        # 8 * 0.95 = 7.6 → 7 damage
+        result = GameMechanics.attack_unit(sorcerer, enemy, simple_grid)
+
+        assert result['damage'] == 7
+
+    def test_sorcerer_cannot_attack_at_distance_3(self, simple_grid):
+        """Test Sorcerer cannot attack at distance 3."""
+        sorcerer = Unit('S', 5, 5, 1)
+        enemy = Unit('W', 8, 5, 2)  # Distance 3
+
+        damage = sorcerer.get_attack_damage(enemy.x, enemy.y)
+
+        assert damage == 0
+
+
+class TestIsEnemyFlanked:
+    """Test the flanking detection helper."""
+
+    def test_enemy_flanked_when_ally_adjacent(self, simple_grid):
+        """Test enemy is flanked when attacker's ally is adjacent to target."""
+        attacker = Unit('R', 5, 5, 1)
+        ally = Unit('W', 7, 5, 1)
+        target = Unit('W', 6, 5, 2)
+
+        units = [attacker, ally, target]
+
+        assert GameMechanics.is_enemy_flanked(attacker, target, units) is True
+
+    def test_enemy_not_flanked_when_only_attacker(self, simple_grid):
+        """Test enemy is not flanked when only attacker is nearby."""
+        attacker = Unit('R', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)
+
+        units = [attacker, target]
+
+        assert GameMechanics.is_enemy_flanked(attacker, target, units) is False
+
+    def test_enemy_not_flanked_by_enemy_units(self, simple_grid):
+        """Test enemy is not flanked by its own allies."""
+        attacker = Unit('R', 5, 5, 1)
+        target = Unit('W', 6, 5, 2)
+        enemy_ally = Unit('M', 7, 5, 2)  # Same team as target
+
+        units = [attacker, target, enemy_ally]
+
+        assert GameMechanics.is_enemy_flanked(attacker, target, units) is False
