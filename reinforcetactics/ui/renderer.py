@@ -1,6 +1,7 @@
 """
 Pygame rendering for the strategy game.
 """
+import os
 import pygame
 import numpy as np
 from reinforcetactics.constants import (
@@ -8,6 +9,7 @@ from reinforcetactics.constants import (
     PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
 )
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.settings import get_settings
 
 
 class Renderer:
@@ -41,8 +43,14 @@ class Renderer:
             # Clipboard not available on this platform
             pass
 
+        # Load settings
+        self.settings = get_settings()
+
         # Load tile images
         self.tile_images = self._load_tile_images()
+
+        # Load unit images
+        self.unit_images = self._load_unit_images()
 
         # UI elements
         self._setup_ui_elements()
@@ -50,13 +58,59 @@ class Renderer:
     def _load_tile_images(self):
         """Load tile images from files."""
         tile_images = {}
+
+        # Check if tile sprites are enabled and path is set
+        use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
+        tile_sprites_path = self.settings.get('graphics.tile_sprites_path', '')
+
         for tile_type, filename in TILE_IMAGES.items():
             try:
-                image = pygame.image.load(filename)
+                # Build full path if sprites are enabled and path is configured
+                if use_tile_sprites and tile_sprites_path:
+                    full_path = os.path.join(tile_sprites_path, filename)
+                else:
+                    full_path = filename
+
+                image = pygame.image.load(full_path)
                 tile_images[tile_type] = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
             except (pygame.error, FileNotFoundError):
                 tile_images[tile_type] = None
         return tile_images
+
+    def _load_unit_images(self):
+        """Load unit images from configured sprites path."""
+        unit_images = {}
+
+        # Check if unit sprites are enabled
+        use_unit_sprites = self.settings.get('graphics.use_unit_sprites', False)
+        if not use_unit_sprites:
+            return unit_images
+
+        # Get the configured unit sprites path
+        unit_sprites_path = self.settings.get('graphics.unit_sprites_path', '')
+        if not unit_sprites_path:
+            return unit_images
+
+        # Load sprite for each unit type
+        for unit_type, unit_data in UNIT_DATA.items():
+            static_path = unit_data.get('static_path', '')
+            if static_path:
+                try:
+                    full_path = os.path.join(unit_sprites_path, static_path)
+                    image = pygame.image.load(full_path)
+                    # Scale to fit within tile, leaving room for health bar
+                    sprite_size = TILE_SIZE - 4  # Slightly smaller than tile
+                    unit_images[unit_type] = pygame.transform.scale(image, (sprite_size, sprite_size))
+                except (pygame.error, FileNotFoundError) as e:
+                    print(f"Could not load sprite for {unit_type} from {full_path}: {e}")
+                    unit_images[unit_type] = None
+
+        return unit_images
+
+    def reload_sprites(self):
+        """Reload sprites after settings change."""
+        self.tile_images = self._load_tile_images()
+        self.unit_images = self._load_unit_images()
 
     def _setup_ui_elements(self):
         """Setup UI elements like buttons."""
@@ -179,6 +233,71 @@ class Renderer:
 
     def _draw_unit(self, unit):
         """Draw a single unit."""
+        # Check if we have a sprite for this unit type
+        unit_sprite = self.unit_images.get(unit.type)
+
+        if unit_sprite:
+            self._draw_unit_sprite(unit, unit_sprite)
+        else:
+            self._draw_unit_letter(unit)
+
+        # Draw paralysis indicator
+        if unit.is_paralyzed():
+            tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            pygame.draw.rect(self.screen, (148, 0, 211), tile_rect, 3)
+
+            indicator_font = get_font(24)
+            indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
+            indicator_rect = indicator_text.get_rect(topright=(
+                unit.x * TILE_SIZE + TILE_SIZE - 2,
+                unit.y * TILE_SIZE + 2
+            ))
+            bg_rect = indicator_rect.inflate(4, 2)
+            pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
+            pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
+            self.screen.blit(indicator_text, indicator_rect)
+
+        # Draw health bar
+        self._draw_unit_health_bar(unit)
+
+    def _draw_unit_sprite(self, unit, sprite):
+        """Draw a unit using its sprite image."""
+        # Create a copy of the sprite for modifications
+        display_sprite = sprite.copy()
+
+        # Apply visual effects
+        # Gray out if can't act
+        if not unit.can_move and not unit.can_attack:
+            # Create a darkened version
+            dark_surface = pygame.Surface(display_sprite.get_size())
+            dark_surface.fill((128, 128, 128))
+            display_sprite.blit(dark_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+
+        # Purple tint for paralyzed
+        if unit.is_paralyzed():
+            purple_surface = pygame.Surface(display_sprite.get_size())
+            purple_surface.fill((200, 150, 255))
+            display_sprite.blit(purple_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+
+        # Draw player-colored border around sprite
+        player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
+        border_rect = pygame.Rect(
+            unit.x * TILE_SIZE + 1,
+            unit.y * TILE_SIZE + 1,
+            TILE_SIZE - 2,
+            TILE_SIZE - 2
+        )
+        pygame.draw.rect(self.screen, player_color, border_rect, 2)
+
+        # Center the sprite in the tile
+        sprite_rect = display_sprite.get_rect(center=(
+            unit.x * TILE_SIZE + TILE_SIZE // 2,
+            unit.y * TILE_SIZE + TILE_SIZE // 2
+        ))
+        self.screen.blit(display_sprite, sprite_rect)
+
+    def _draw_unit_letter(self, unit):
+        """Draw a unit using its letter representation (fallback)."""
         font = get_font(28)
         color = UNIT_COLORS[unit.type]
 
@@ -206,25 +325,6 @@ class Renderer:
             self.screen.blit(outline_text, outline_rect)
 
         self.screen.blit(text, text_rect)
-
-        # Draw paralysis indicator
-        if unit.is_paralyzed():
-            tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            pygame.draw.rect(self.screen, (148, 0, 211), tile_rect, 3)
-
-            indicator_font = get_font(24)
-            indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
-            indicator_rect = indicator_text.get_rect(topright=(
-                unit.x * TILE_SIZE + TILE_SIZE - 2,
-                unit.y * TILE_SIZE + 2
-            ))
-            bg_rect = indicator_rect.inflate(4, 2)
-            pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
-            pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
-            self.screen.blit(indicator_text, indicator_rect)
-
-        # Draw health bar
-        self._draw_unit_health_bar(unit)
 
     def _draw_unit_health_bar(self, unit):
         """Draw health bar for a unit."""
