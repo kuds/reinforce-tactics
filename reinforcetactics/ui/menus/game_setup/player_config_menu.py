@@ -1,5 +1,4 @@
 """Menu for configuring players."""
-import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -540,8 +539,8 @@ class PlayerConfigMenu:
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+                    self.running = False
+                    return None
 
                 result = self.handle_input(event)
                 if result is not None or not self.running:

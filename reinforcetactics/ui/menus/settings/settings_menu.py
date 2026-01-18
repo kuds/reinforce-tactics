@@ -1,5 +1,4 @@
 """Settings menu."""
-import sys
 from typing import Optional, Any
 
 import pygame
@@ -66,8 +65,8 @@ class SettingsMenu(Menu):
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+                    self.running = False
+                    return None
 
                 result = self.handle_input(event)
                 if result is not None:
