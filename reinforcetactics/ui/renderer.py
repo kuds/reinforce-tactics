@@ -400,7 +400,7 @@ class Renderer:
             f"{unit_name} (P{unit.player})",
             f"HP: {unit.health}/{unit.max_health}",
             f"ATK: {attack_str}  DEF: {unit.defence}",
-            f"MOV: {unit.movement_left}/{unit.movement}",
+            f"MOV: {unit.movement_range}",
         ]
 
         # Add status indicators
