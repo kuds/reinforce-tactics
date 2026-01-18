@@ -210,7 +210,6 @@ class LoadGameMenu(Menu):
         """Get user-friendly display name for a save."""
         metadata = self.save_metadata.get(filepath, {})
         date = metadata.get('date', 'Unknown')
-        turn = metadata.get('turn_number', 0)
         p1 = metadata.get('player1', 'P1')
         p2 = metadata.get('player2', 'P2')
 
@@ -221,7 +220,7 @@ class LoadGameMenu(Menu):
         if len(p2) > max_name_len:
             p2 = p2[:max_name_len-2] + ".."
 
-        return f"{date} - Turn {turn} - {p1} vs {p2}"
+        return f"{date} - {p1} vs {p2}"
 
     def _setup_options(self) -> None:
         """Setup menu options for available save files."""
@@ -440,7 +439,7 @@ class LoadGameMenu(Menu):
                 pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
 
             # Draw text
-            text_font = get_font(20)
+            text_font = get_font(24)
             text_surface = text_font.render(text, True, text_color)
             text_rect = text_surface.get_rect(
                 midleft=(item_rect.x + 10, item_rect.centery)
