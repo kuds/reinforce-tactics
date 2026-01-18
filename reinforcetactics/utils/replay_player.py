@@ -70,9 +70,9 @@ class ReplayPlayer:
         self.game_state = GameState(padded_map,
                                     num_players=self.game_info.get('num_players', 2))
 
-        # Create renderer
+        # Create renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
-        self.renderer = Renderer(self.game_state)
+        self.renderer = Renderer(self.game_state, replay_mode=True)
 
         # UI elements
         self.setup_ui()
@@ -333,9 +333,9 @@ class ReplayPlayer:
         self.game_state = GameState(self.initial_map_data,
                                     num_players=self.game_info.get('num_players', 2))
 
-        # Recreate renderer
+        # Recreate renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
-        self.renderer = Renderer(self.game_state)
+        self.renderer = Renderer(self.game_state, replay_mode=True)
         self.setup_ui()
 
         self.show_notification("Replay restarted")
@@ -386,9 +386,9 @@ class ReplayPlayer:
         self.game_state = GameState(self.initial_map_data,
                                     num_players=self.game_info.get('num_players', 2))
 
-        # Recreate renderer
+        # Recreate renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
-        self.renderer = Renderer(self.game_state)
+        self.renderer = Renderer(self.game_state, replay_mode=True)
         self.setup_ui()
 
         # Replay to target
