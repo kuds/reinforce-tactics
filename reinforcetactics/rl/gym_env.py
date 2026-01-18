@@ -277,6 +277,134 @@ class StrategyGameEnv(gym.Env):
 
         return mask
 
+    def action_masks(self) -> Tuple[np.ndarray, ...]:
+        """
+        Get action masks for MaskablePPO (sb3-contrib).
+
+        For MultiDiscrete action space [action_type, unit_type, from_x, from_y, to_x, to_y],
+        returns a tuple of boolean arrays, one per dimension.
+
+        Since action dimensions are interdependent (e.g., valid to_x/to_y depends on
+        action_type and from_x/from_y), we compute the UNION of all valid values
+        for each dimension. This is an over-approximation that still helps training
+        by eliminating clearly invalid options.
+
+        Returns:
+            Tuple of 6 boolean numpy arrays for each action dimension
+        """
+        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+
+        # Initialize masks for each dimension
+        action_type_mask = np.zeros(8, dtype=bool)
+        unit_type_mask = np.zeros(8, dtype=bool)
+        from_x_mask = np.zeros(self.grid_width, dtype=bool)
+        from_y_mask = np.zeros(self.grid_height, dtype=bool)
+        to_x_mask = np.zeros(self.grid_width, dtype=bool)
+        to_y_mask = np.zeros(self.grid_height, dtype=bool)
+
+        unit_type_to_idx = {'W': 0, 'M': 1, 'C': 2, 'A': 3, 'K': 4, 'R': 5, 'S': 6, 'B': 7}
+
+        # 0: Create Unit
+        for action in legal_actions.get('create_unit', []):
+            action_type_mask[0] = True
+            unit_type_mask[unit_type_to_idx.get(action['unit_type'], 0)] = True
+            to_x_mask[action['x']] = True
+            to_y_mask[action['y']] = True
+            # from_x/from_y not used for create, but mark building positions
+            from_x_mask[action['x']] = True
+            from_y_mask[action['y']] = True
+
+        # 1: Move
+        for action in legal_actions.get('move', []):
+            action_type_mask[1] = True
+            from_x_mask[action['from_x']] = True
+            from_y_mask[action['from_y']] = True
+            to_x_mask[action['to_x']] = True
+            to_y_mask[action['to_y']] = True
+
+        # 2: Attack
+        for action in legal_actions.get('attack', []):
+            action_type_mask[2] = True
+            attacker = action['attacker']
+            target = action['target']
+            from_x_mask[attacker.x] = True
+            from_y_mask[attacker.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # 3: Seize
+        for action in legal_actions.get('seize', []):
+            action_type_mask[3] = True
+            unit = action['unit']
+            tile = action['tile']
+            from_x_mask[unit.x] = True
+            from_y_mask[unit.y] = True
+            to_x_mask[tile.x] = True
+            to_y_mask[tile.y] = True
+
+        # 4: Heal/Cure
+        for action in legal_actions.get('heal', []):
+            action_type_mask[4] = True
+            healer = action['healer']
+            target = action['target']
+            from_x_mask[healer.x] = True
+            from_y_mask[healer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        for action in legal_actions.get('cure', []):
+            action_type_mask[4] = True
+            healer = action['healer']
+            target = action['target']
+            from_x_mask[healer.x] = True
+            from_y_mask[healer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # 5: End Turn - always valid
+        action_type_mask[5] = True
+        # For end turn, any position is fine (we just need at least one valid combo)
+        # Mark (0,0) as valid for from/to to ensure the action can be taken
+        from_x_mask[0] = True
+        from_y_mask[0] = True
+        to_x_mask[0] = True
+        to_y_mask[0] = True
+
+        # 6: Paralyze
+        for action in legal_actions.get('paralyze', []):
+            action_type_mask[6] = True
+            paralyzer = action['paralyzer']
+            target = action['target']
+            from_x_mask[paralyzer.x] = True
+            from_y_mask[paralyzer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # 7: Haste
+        for action in legal_actions.get('haste', []):
+            action_type_mask[7] = True
+            sorcerer = action['sorcerer']
+            target = action['target']
+            from_x_mask[sorcerer.x] = True
+            from_y_mask[sorcerer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # Ensure unit_type mask has at least one valid option for non-create actions
+        # (unit_type is only meaningful for create, but we need valid values for masking)
+        if not unit_type_mask.any():
+            unit_type_mask[0] = True  # Default to Warrior if no creates available
+
+        return (action_type_mask, unit_type_mask, from_x_mask, from_y_mask, to_x_mask, to_y_mask)
+
+    def get_action_mask_flat(self) -> np.ndarray:
+        """
+        Get flattened action mask for compatibility with some algorithms.
+
+        Returns the original target-based mask of size (8 * W * H,).
+        """
+        return self._get_action_mask()
+
     def _encode_action(self, action: np.ndarray) -> Dict[str, Any]:
         """
         Encode action array into game action.

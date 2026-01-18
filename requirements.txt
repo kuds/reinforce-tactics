@@ -3,6 +3,7 @@ pytest
 pettingzoo
 pygame-ce
 stable-baselines3
+sb3-contrib
 argparse
 numpy
 opencv-python
