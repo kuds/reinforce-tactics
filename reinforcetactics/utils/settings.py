@@ -31,8 +31,8 @@ class Settings:
         'graphics': {
             'unit_sprites_path': '',
             'tile_sprites_path': '',
-            'use_unit_sprites': False,
-            'use_tile_sprites': False
+            'use_unit_sprites': True,
+            'use_tile_sprites': True
         },
         'llm_api_keys': {
             'openai': '',
