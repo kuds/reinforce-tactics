@@ -77,7 +77,10 @@ UNIT_COLORS = {
     'M': (138, 43, 226),     # Purple (Mage)
     'C': (255, 215, 0),      # Gold (Cleric)
     'B': (0, 215, 0),        # Barbarian (Green)
-    'A': (34, 139, 34)       # Archer (Forest Green)
+    'A': (34, 139, 34),      # Archer (Forest Green)
+    'K': (192, 192, 192),    # Knight (Silver)
+    'R': (64, 64, 64),       # Rogue (Dark Gray)
+    'S': (0, 191, 255)       # Sorcerer (Deep Sky Blue)
 }
 
 # Unit costs and properties
@@ -136,6 +139,39 @@ UNIT_DATA = {
         'health': 15,
         'attack': 5,
         'defence': 1
+    },
+    'K': {
+        'static_path': 'knight.png',
+        'animation_path': 'knight',
+        'name': 'Knight',
+        'cost': 350,
+        'color': (192, 192, 192),
+        'movement': 4,
+        'health': 18,
+        'attack': 8,
+        'defence': 5
+    },
+    'R': {
+        'static_path': 'rogue.png',
+        'animation_path': 'rogue',
+        'name': 'Rogue',
+        'cost': 300,
+        'color': (64, 64, 64),
+        'movement': 4,
+        'health': 12,
+        'attack': 9,
+        'defence': 3
+    },
+    'S': {
+        'static_path': 'sorcerer.png',
+        'animation_path': 'sorcerer',
+        'name': 'Sorcerer',
+        'cost': 300,
+        'color': (0, 191, 255),
+        'movement': 2,
+        'health': 10,
+        'attack': {'adjacent': 6, 'range': 8},
+        'defence': 3
     }
 }
 
@@ -157,10 +193,17 @@ STRUCTURE_REGEN_RATE = 0.5
 
 # Combat
 COUNTER_ATTACK_MULTIPLIER = 0.8
+DEFENCE_REDUCTION_PER_POINT = 0.05  # Each defence point reduces damage by 5%
+
+# Special ability bonuses
+CHARGE_BONUS = 0.5  # Knight: +50% damage if moved 3+ tiles
+CHARGE_MIN_DISTANCE = 3  # Minimum tiles moved to trigger Charge
+FLANK_BONUS = 0.5  # Rogue: +50% damage if enemy is adjacent to a friendly unit
 
 # Status effects
 PARALYZE_DURATION = 3
 HEAL_AMOUNT = 5
+HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
 
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility

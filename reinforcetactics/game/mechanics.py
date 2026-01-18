@@ -3,7 +3,9 @@ Core game mechanics including combat, movement, income, and structure capture.
 """
 from reinforcetactics.constants import (
     COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT,
-    STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME
+    STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME,
+    DEFENCE_REDUCTION_PER_POINT, CHARGE_BONUS, CHARGE_MIN_DISTANCE, FLANK_BONUS,
+    HASTE_COOLDOWN
 )
 
 
@@ -140,6 +142,76 @@ class GameMechanics:
         return adjacent_paralyzed
 
     @staticmethod
+    def is_enemy_flanked(attacker, target, units):
+        """
+        Check if the target enemy is flanked (adjacent to at least one of attacker's allies).
+
+        Args:
+            attacker: The attacking unit
+            target: The target enemy unit
+            units: List of all units
+
+        Returns:
+            True if target is adjacent to at least one of attacker's allies (excluding attacker)
+        """
+        adjacent_positions = [
+            (target.x, target.y - 1),
+            (target.x, target.y + 1),
+            (target.x - 1, target.y),
+            (target.x + 1, target.y)
+        ]
+
+        for unit in units:
+            if unit.player == attacker.player and unit != attacker and unit.health > 0:
+                if (unit.x, unit.y) in adjacent_positions:
+                    return True
+
+        return False
+
+    @staticmethod
+    def apply_defence_reduction(base_damage, target_defence):
+        """
+        Apply defence reduction to damage using percentage reduction.
+
+        Each point of defence reduces damage by 5%.
+
+        Args:
+            base_damage: The raw damage before defence
+            target_defence: The target's defence stat
+
+        Returns:
+            Reduced damage as integer (minimum 1)
+        """
+        reduction = target_defence * DEFENCE_REDUCTION_PER_POINT
+        # Cap reduction at 90% to ensure some damage always gets through
+        reduction = min(reduction, 0.9)
+        reduced_damage = base_damage * (1 - reduction)
+        return max(1, int(reduced_damage))
+
+    @staticmethod
+    def get_hasteable_allies(sorcerer, units):
+        """
+        Get list of friendly units that can receive Haste from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units (excluding sorcerer) within range 1-2 that haven't been hasted
+        """
+        hasteable = []
+
+        for unit in units:
+            if unit.player == sorcerer.player and unit != sorcerer and unit.health > 0:
+                # Haste range is 1-2 tiles
+                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+                if 1 <= distance <= 2 and not unit.is_hasted:
+                    hasteable.append(unit)
+
+        return hasteable
+
+    @staticmethod
     def _calculate_counter_damage(unit, target_x, target_y, grid):
         """
         Calculate counter-attack damage for a unit.
@@ -163,7 +235,7 @@ class GameMechanics:
         )
 
     @staticmethod
-    def attack_unit(attacker, target, grid=None):
+    def attack_unit(attacker, target, grid=None, units=None):
         """
         Execute an attack from attacker to target.
 
@@ -171,9 +243,11 @@ class GameMechanics:
             attacker: The attacking unit
             target: The target unit
             grid: TileGrid instance (optional, for checking mountain tiles)
+            units: List of all units (optional, for flanking checks)
 
         Returns:
-            dict with 'attacker_alive' and 'target_alive' booleans
+            dict with 'attacker_alive', 'target_alive', 'damage', 'counter_damage',
+            and bonus info ('charge_bonus', 'flank_bonus')
         """
         # Check if attacker is on mountain for range calculation
         attacker_on_mountain = False
@@ -181,7 +255,26 @@ class GameMechanics:
             attacker_tile = grid.get_tile(attacker.x, attacker.y)
             attacker_on_mountain = attacker_tile.type == 'm'
 
-        attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
+        # Calculate base attack damage
+        base_attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
+
+        # Apply special ability bonuses
+        charge_applied = False
+        flank_applied = False
+
+        # Knight's Charge: +50% damage if moved 3+ tiles
+        if attacker.type == 'K' and attacker.distance_moved >= CHARGE_MIN_DISTANCE:
+            base_attack_damage = int(base_attack_damage * (1 + CHARGE_BONUS))
+            charge_applied = True
+
+        # Rogue's Flank: +50% damage if enemy is adjacent to another friendly unit
+        if attacker.type == 'R' and units:
+            if GameMechanics.is_enemy_flanked(attacker, target, units):
+                base_attack_damage = int(base_attack_damage * (1 + FLANK_BONUS))
+                flank_applied = True
+
+        # Apply defence reduction to attack damage
+        attack_damage = GameMechanics.apply_defence_reduction(base_attack_damage, target.defence)
         target_alive = target.take_damage(attack_damage)
 
         attacker_alive = True
@@ -192,14 +285,19 @@ class GameMechanics:
             # Determine if counter-attack is allowed
             can_counter = True
 
-            # If attacker is an Archer, only Archers and Mages can counter
+            # If attacker is an Archer, only Archers, Mages, and Sorcerers can counter
             if attacker.type == 'A':
-                if target.type not in ['A', 'M']:
+                if target.type not in ['A', 'M', 'S']:
                     can_counter = False
 
             if can_counter:
-                counter_damage = GameMechanics._calculate_counter_damage(
+                # Calculate base counter damage
+                base_counter_damage = GameMechanics._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
+                )
+                # Apply defence reduction to counter damage
+                counter_damage = GameMechanics.apply_defence_reduction(
+                    base_counter_damage, attacker.defence
                 )
                 if counter_damage > 0:
                     attacker_alive = attacker.take_damage(counter_damage)
@@ -208,18 +306,23 @@ class GameMechanics:
         counter_damage_for_response = 0
         if target_alive and not target.is_paralyzed():
             # Adjust counter_damage if Archer attacked melee unit
-            if attacker.type == 'A' and target.type not in ['A', 'M']:
+            if attacker.type == 'A' and target.type not in ['A', 'M', 'S']:
                 counter_damage_for_response = 0
             else:
-                counter_damage_for_response = GameMechanics._calculate_counter_damage(
+                base_counter = GameMechanics._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
+                )
+                counter_damage_for_response = GameMechanics.apply_defence_reduction(
+                    base_counter, attacker.defence
                 )
 
         return {
             'attacker_alive': attacker_alive,
             'target_alive': target_alive,
             'damage': attack_damage,
-            'counter_damage': counter_damage_for_response
+            'counter_damage': counter_damage_for_response,
+            'charge_bonus': charge_applied,
+            'flank_bonus': flank_applied
         }
 
     @staticmethod
@@ -275,6 +378,68 @@ class GameMechanics:
         target.can_move = True
         target.can_attack = True
         return True
+
+    @staticmethod
+    def haste_unit(sorcerer, target):
+        """
+        Sorcerer grants Haste to target unit, allowing an extra action.
+
+        Args:
+            sorcerer: The Sorcerer unit using Haste
+            target: The target friendly unit to receive Haste
+
+        Returns:
+            bool: True if Haste was successfully applied
+        """
+        if sorcerer.type != 'S':
+            return False
+
+        if sorcerer.haste_cooldown > 0:
+            return False
+
+        if target.player != sorcerer.player:
+            return False
+
+        if target == sorcerer:
+            return False
+
+        if target.is_hasted:
+            return False
+
+        # Check distance (range 1-2)
+        distance = abs(sorcerer.x - target.x) + abs(sorcerer.y - target.y)
+        if distance < 1 or distance > 2:
+            return False
+
+        # Apply haste to target
+        target.is_hasted = True
+        target.can_move = True
+        target.can_attack = True
+
+        # Set cooldown on sorcerer
+        sorcerer.haste_cooldown = HASTE_COOLDOWN
+
+        return True
+
+    @staticmethod
+    def decrement_haste_cooldowns(units, player):
+        """
+        Decrement haste cooldowns for a player's Sorcerers at turn start.
+
+        Args:
+            units: List of all units
+            player: Player number whose turn is starting
+
+        Returns:
+            List of Sorcerers that came off cooldown
+        """
+        ready = []
+        for unit in units:
+            if unit.player == player and unit.type == 'S' and unit.haste_cooldown > 0:
+                unit.haste_cooldown -= 1
+                if unit.haste_cooldown == 0:
+                    ready.append(unit)
+        return ready
 
     @staticmethod
     def seize_structure(unit, tile):

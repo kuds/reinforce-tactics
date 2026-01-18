@@ -38,9 +38,11 @@ class UnitPurchaseMenu:
         self.title_font = get_font(28)
         self.option_font = get_font(24)
 
-        # Unit types to display (basic units only: Warrior, Mage, Cleric, Archer)
-        # Barbarian is excluded as it costs 400g vs 200-250g for basic units
-        self.unit_types = ['W', 'M', 'C', 'A']
+        # Unit types to display
+        # Basic: Warrior, Mage, Cleric, Archer
+        # Advanced: Knight, Rogue, Sorcerer
+        # Barbarian is excluded as a special unit (costs 400g)
+        self.unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S']
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []
@@ -51,9 +53,9 @@ class UnitPurchaseMenu:
 
     def _calculate_menu_rect(self) -> None:
         """Calculate the menu rectangle position and size."""
-        # Menu dimensions
+        # Menu dimensions - adjust height for number of units
         menu_width = 220
-        menu_height = 180
+        menu_height = 50 + len(self.unit_types) * 35 + 20  # header + units + padding
 
         # Convert building position to screen coordinates
         building_screen_x = self.building_pos[0] * TILE_SIZE
