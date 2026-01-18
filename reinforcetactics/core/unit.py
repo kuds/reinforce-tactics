@@ -13,7 +13,8 @@ class Unit:
         Initialize a unit.
 
         Args:
-            unit_type: 'W', 'M', 'C', 'B', or 'A'
+            unit_type: 'W' (Warrior), 'M' (Mage), 'C' (Cleric), 'A' (Archer),
+                       'K' (Knight), 'R' (Rogue), 'S' (Sorcerer), 'B' (Barbarian)
             x: X coordinate on grid
             y: Y coordinate on grid
             player: Player number who owns this unit
