@@ -767,7 +767,7 @@ class ReplayPlayer:
             p1_color = (100, 255, 100) if winner == 1 else (200, 200, 255)
             p2_color = (100, 255, 100) if winner == 2 else (255, 200, 200)
 
-            player_text = f"{p1_name} vs {p2_name}"
+            player_text = f"{p1_name} (P1) vs {p2_name} (P2)"
             player_surface = small_font.render(player_text, True, (255, 255, 255))
             screen.blit(player_surface, (screen_width - player_surface.get_width() - 10,
                                          panel_y + (panel_height - player_surface.get_height()) // 2))
