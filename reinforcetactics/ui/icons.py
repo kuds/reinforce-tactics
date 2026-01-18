@@ -356,30 +356,69 @@ def get_restart_icon(
     surface = pygame.Surface((size, size), pygame.SRCALPHA)
     surface.fill(bg_color)
 
-    line_thickness = thickness if thickness > 0 else max(2, size // 8)
-    padding = size // 5
-    center = (size // 2, size // 2)
-    radius = size // 2 - padding
-
-    # Draw arc (270 degrees, leaving gap at top)
     import math
-    start_angle = math.radians(45)
-    end_angle = math.radians(315)
 
-    rect = pygame.Rect(padding, padding, radius * 2, radius * 2)
-    pygame.draw.arc(surface, color, rect, start_angle, end_angle, line_thickness)
+    line_thickness = thickness if thickness > 0 else max(2, size // 7)
+    padding = size // 5
+    center_x = size // 2
+    center_y = size // 2
+    radius = (size // 2) - padding
 
-    # Draw arrowhead at the end of the arc
-    arrow_size = size // 4
-    # Arrow at top-right of circle
-    arrow_x = center[0] + int(radius * math.cos(start_angle))
-    arrow_y = center[1] - int(radius * math.sin(start_angle))
+    # Draw a smooth circular arc using anti-aliased circles
+    # Arc spans from ~60 degrees to ~300 degrees (leaving gap at top-right for arrow)
+    start_angle = 60
+    end_angle = 300
+    num_segments = 32
 
-    # Draw small triangle pointing clockwise
+    # Draw the arc as connected line segments for smoother appearance
+    points = []
+    for i in range(num_segments + 1):
+        angle_deg = start_angle + (end_angle - start_angle) * i / num_segments
+        angle_rad = math.radians(angle_deg)
+        x = center_x + radius * math.cos(angle_rad)
+        y = center_y - radius * math.sin(angle_rad)
+        points.append((x, y))
+
+    # Draw thick anti-aliased lines for the arc
+    if len(points) >= 2:
+        pygame.draw.lines(surface, color, False, points, line_thickness)
+
+        # Draw circles at each point for smoother joints and ends
+        half_thick = line_thickness // 2
+        for point in points:
+            pygame.draw.circle(surface, color, (int(point[0]), int(point[1])), half_thick)
+
+    # Draw arrowhead at the start of the arc (pointing clockwise/down-right)
+    arrow_angle_rad = math.radians(start_angle)
+    arrow_tip_x = center_x + radius * math.cos(arrow_angle_rad)
+    arrow_tip_y = center_y - radius * math.sin(arrow_angle_rad)
+
+    # Arrow size proportional to icon
+    arrow_len = size // 3
+    arrow_width = size // 4
+
+    # Arrow points downward-right (clockwise direction)
+    # The arrow tip is at the arc start, pointing in the direction of rotation
+    arrow_dir = start_angle - 90  # Perpendicular to radius, pointing clockwise
+    arrow_dir_rad = math.radians(arrow_dir)
+
+    # Calculate arrow base center (behind the tip)
+    base_x = arrow_tip_x - arrow_len * 0.6 * math.cos(arrow_dir_rad)
+    base_y = arrow_tip_y + arrow_len * 0.6 * math.sin(arrow_dir_rad)
+
+    # Calculate perpendicular for arrow width
+    perp_rad = arrow_dir_rad + math.pi / 2
+
+    # Arrow wing points
+    wing1_x = base_x + arrow_width * 0.5 * math.cos(perp_rad)
+    wing1_y = base_y - arrow_width * 0.5 * math.sin(perp_rad)
+    wing2_x = base_x - arrow_width * 0.5 * math.cos(perp_rad)
+    wing2_y = base_y + arrow_width * 0.5 * math.sin(perp_rad)
+
     arrow_points = [
-        (arrow_x, arrow_y - arrow_size // 2),
-        (arrow_x + arrow_size, arrow_y),
-        (arrow_x, arrow_y + arrow_size // 2)
+        (arrow_tip_x, arrow_tip_y),
+        (wing1_x, wing1_y),
+        (wing2_x, wing2_y)
     ]
     pygame.draw.polygon(surface, color, arrow_points)
 
