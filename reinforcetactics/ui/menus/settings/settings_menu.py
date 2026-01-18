@@ -6,6 +6,7 @@ import pygame
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.menus.settings.language_menu import LanguageMenu
 from reinforcetactics.ui.menus.settings.api_keys_menu import APIKeysMenu
+from reinforcetactics.ui.menus.settings.graphics_menu import GraphicsMenu
 from reinforcetactics.utils.language import get_language
 
 
@@ -25,6 +26,7 @@ class SettingsMenu(Menu):
     def _setup_options(self) -> None:
         lang = get_language()
         self.add_option(lang.get('settings.language', 'Language'), self._change_language)
+        self.add_option(lang.get('settings.graphics', 'Graphics'), self._configure_graphics)
         self.add_option(lang.get('settings.sound', 'Sound'), self._toggle_sound)
         self.add_option(lang.get('settings.fullscreen', 'Fullscreen'), self._toggle_fullscreen)
         self.add_option(lang.get('settings.api_keys', 'LLM API Keys'), self._configure_api_keys)
@@ -33,6 +35,10 @@ class SettingsMenu(Menu):
     def _change_language(self) -> str:
         """Open language selection menu."""
         return 'language_menu'
+
+    def _configure_graphics(self) -> str:
+        """Open graphics configuration menu."""
+        return 'graphics_menu'
 
     def _toggle_sound(self) -> None:
         """Toggle sound on/off. Currently not implemented."""
@@ -74,6 +80,11 @@ class SettingsMenu(Menu):
                     if result == 'language_menu':
                         language_menu = LanguageMenu(self.screen)
                         language_menu.run()
+                        pygame.event.clear()
+                        # Continue in settings menu
+                    elif result == 'graphics_menu':
+                        graphics_menu = GraphicsMenu(self.screen)
+                        graphics_menu.run()
                         pygame.event.clear()
                         # Continue in settings menu
                     elif result == 'api_keys_menu':

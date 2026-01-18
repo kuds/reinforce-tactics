@@ -28,6 +28,12 @@ class Settings:
             'sfx_volume': 0.8,
             'enabled': True
         },
+        'graphics': {
+            'unit_sprites_path': '',
+            'tile_sprites_path': '',
+            'use_unit_sprites': False,
+            'use_tile_sprites': False
+        },
         'llm_api_keys': {
             'openai': '',
             'anthropic': '',
