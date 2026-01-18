@@ -3,7 +3,6 @@ Base menu class and helper functions for the menu system.
 Self-contained menus that manage their own pygame screen and navigation.
 """
 from __future__ import annotations
-import sys
 from typing import Optional, List, Tuple, Callable, Any
 
 import pygame
@@ -363,8 +362,8 @@ class Menu:
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+                    self.running = False
+                    return None
 
                 result = self.handle_input(event)
                 if result is not None:

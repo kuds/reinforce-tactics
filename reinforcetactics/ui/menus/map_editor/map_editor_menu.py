@@ -169,9 +169,8 @@ class MapEditorMenu(Menu):
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    pygame.quit()
-                    import sys
-                    sys.exit()
+                    self.running = False
+                    return None
 
                 result = self.handle_input(event)
                 if result is not None:
