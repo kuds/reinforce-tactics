@@ -353,6 +353,31 @@ class TestActionSpace:
 
         env_default.close()
 
+    def test_encode_action_paralyze(self, env_default):
+        """Test _encode_action() for paralyze action (type 6)."""
+        action = np.array([6, 1, 3, 3, 4, 3])  # paralyze from (3,3) to (4,3)
+
+        action_dict = env_default._encode_action(action)
+
+        assert action_dict['action_type'] == 6
+        assert action_dict['from_pos'] == (3, 3)
+        assert action_dict['to_pos'] == (4, 3)
+
+        env_default.close()
+
+    def test_encode_action_haste(self, env_default):
+        """Test _encode_action() for haste action (type 7)."""
+        action = np.array([7, 6, 2, 2, 3, 2])  # haste from (2,2) to (3,2)
+
+        action_dict = env_default._encode_action(action)
+
+        assert action_dict['action_type'] == 7
+        assert action_dict['unit_type'] == 'S'  # Sorcerer
+        assert action_dict['from_pos'] == (2, 2)
+        assert action_dict['to_pos'] == (3, 2)
+
+        env_default.close()
+
     def test_encode_action_all_unit_types(self, env_default):
         """Test action encoding with all unit types."""
         # Test Warrior (0)
@@ -366,6 +391,26 @@ class TestActionSpace:
         # Test Cleric (2)
         action_c = np.array([0, 2, 0, 0, 1, 1])
         assert env_default._encode_action(action_c)['unit_type'] == 'C'
+
+        # Test Archer (3)
+        action_a = np.array([0, 3, 0, 0, 1, 1])
+        assert env_default._encode_action(action_a)['unit_type'] == 'A'
+
+        # Test Knight (4)
+        action_k = np.array([0, 4, 0, 0, 1, 1])
+        assert env_default._encode_action(action_k)['unit_type'] == 'K'
+
+        # Test Rogue (5)
+        action_r = np.array([0, 5, 0, 0, 1, 1])
+        assert env_default._encode_action(action_r)['unit_type'] == 'R'
+
+        # Test Sorcerer (6)
+        action_s = np.array([0, 6, 0, 0, 1, 1])
+        assert env_default._encode_action(action_s)['unit_type'] == 'S'
+
+        # Test Barbarian (7)
+        action_b = np.array([0, 7, 0, 0, 1, 1])
+        assert env_default._encode_action(action_b)['unit_type'] == 'B'
 
         env_default.close()
 
