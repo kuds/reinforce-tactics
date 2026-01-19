@@ -582,7 +582,7 @@ class GameMechanics:
     @staticmethod
     def defence_buff_unit(sorcerer, target):
         """
-        Sorcerer grants Defence Buff to target unit, reducing damage taken by 50%.
+        Sorcerer grants Defence Buff to target unit, reducing damage taken by 35%.
 
         Args:
             sorcerer: The Sorcerer unit using Defence Buff
@@ -619,7 +619,7 @@ class GameMechanics:
     @staticmethod
     def attack_buff_unit(sorcerer, target):
         """
-        Sorcerer grants Attack Buff to target unit, increasing damage dealt by 50%.
+        Sorcerer grants Attack Buff to target unit, increasing damage dealt by 35%.
 
         Args:
             sorcerer: The Sorcerer unit using Attack Buff
