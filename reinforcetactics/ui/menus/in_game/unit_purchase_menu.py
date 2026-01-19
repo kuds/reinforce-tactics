@@ -38,10 +38,11 @@ class UnitPurchaseMenu:
         self.title_font = get_font(28)
         self.option_font = get_font(24)
 
-        # Unit types to display
+        # Unit types to display (filtered by enabled units)
         # Basic: Warrior, Mage, Cleric, Archer
         # Advanced: Knight, Rogue, Sorcerer, Barbarian
-        self.unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        all_unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        self.unit_types = [ut for ut in all_unit_types if ut in game_state.enabled_units]
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []

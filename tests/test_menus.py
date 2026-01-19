@@ -822,3 +822,55 @@ class TestUnitPurchaseMenu:
             menu.handle_mouse_motion(button['rect'].center)
             assert menu.hover_element is not None
             assert menu.hover_element['type'] == 'unit_button'
+
+    @pytest.fixture
+    def limited_units_game_state(self):
+        """Create a mock game state with limited enabled units."""
+        # Create a simple 10x10 map with a building at (5, 5)
+        map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+        map_data[5][5] = 'h_1'  # HQ owned by player 1
+        map_data[6][6] = 'b_1'  # Building owned by player 1
+
+        from reinforcetactics.core.game_state import GameState
+        # Only enable Warrior, Mage, and Cleric
+        game = GameState(map_data, num_players=2, enabled_units=['W', 'M', 'C'])
+        game.current_player = 1
+        game.player_gold[1] = 300  # Enough to buy any unit
+        return game
+
+    def test_unit_purchase_menu_respects_enabled_units(self, pygame_init, limited_units_game_state):
+        """Test that only enabled units are shown in the purchase menu."""
+        from reinforcetactics.ui.menus import UnitPurchaseMenu
+
+        screen = pygame.display.set_mode((640, 640))
+        menu = UnitPurchaseMenu(screen, limited_units_game_state, (5, 5))
+
+        # Should only show enabled units
+        assert menu.unit_types == ['W', 'M', 'C']
+        assert 'K' not in menu.unit_types
+        assert 'R' not in menu.unit_types
+        assert 'S' not in menu.unit_types
+        assert 'B' not in menu.unit_types
+        assert 'A' not in menu.unit_types
+
+        # Draw the menu to populate interactive elements
+        menu.draw(screen)
+
+        # Should only have 3 unit buttons (+ 1 close button)
+        unit_buttons = [el for el in menu.interactive_elements if el['type'] == 'unit_button']
+        assert len(unit_buttons) == 3
+
+        # Check that button unit types match enabled units
+        button_unit_types = [el['unit_type'] for el in unit_buttons]
+        assert button_unit_types == ['W', 'M', 'C']
+
+    def test_unit_purchase_menu_height_adjusts_for_enabled_units(self, pygame_init, limited_units_game_state):
+        """Test that menu height adjusts based on number of enabled units."""
+        from reinforcetactics.ui.menus import UnitPurchaseMenu
+
+        screen = pygame.display.set_mode((640, 640))
+        menu = UnitPurchaseMenu(screen, limited_units_game_state, (5, 5))
+
+        # Menu height should be: header (50) + units (3 * 35) + padding (20) = 175
+        expected_height = 50 + 3 * 35 + 20
+        assert menu.menu_rect.height == expected_height
