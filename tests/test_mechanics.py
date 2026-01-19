@@ -965,9 +965,9 @@ class TestRogueForestEvadeBonus:
     """Test Rogue's additional evade chance when in forest."""
 
     def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid, monkeypatch):
-        """Test Rogue in forest evades at 0.20 (above 0.15 but below 0.25)."""
+        """Test Rogue in forest evades at 0.25 (above 0.15 but below 0.30)."""
         import reinforcetactics.game.mechanics as mechanics_module
-        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.20)
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.25)
 
         # Place rogue on forest tile (5, 5)
         rogue = Unit('R', 5, 5, 1)
@@ -975,15 +975,15 @@ class TestRogueForestEvadeBonus:
 
         result = GameMechanics.attack_unit(rogue, target, forest_grid)
 
-        # Should evade because 0.20 < 0.25 (base 0.15 + forest bonus 0.10)
+        # Should evade because 0.25 < 0.30 (base 0.15 + forest bonus 0.15)
         assert result['evade'] is True
         assert result['counter_damage'] == 0
         assert rogue.health == 12
 
     def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid, monkeypatch):
-        """Test Rogue in forest doesn't evade when random is above 0.25."""
+        """Test Rogue in forest doesn't evade when random is above 0.30."""
         import reinforcetactics.game.mechanics as mechanics_module
-        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.30)
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.35)
 
         # Place rogue on forest tile (5, 5)
         rogue = Unit('R', 5, 5, 1)
@@ -991,7 +991,7 @@ class TestRogueForestEvadeBonus:
 
         result = GameMechanics.attack_unit(rogue, target, forest_grid)
 
-        # Should NOT evade because 0.30 > 0.25
+        # Should NOT evade because 0.35 > 0.30
         assert result['evade'] is False
         assert result['counter_damage'] > 0
         assert rogue.health < 12

@@ -49,7 +49,7 @@ UNIT TYPES:
 6. Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 15% chance to dodge counter-attacks (25% in forest)
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)
 7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
@@ -87,7 +87,7 @@ COMBAT RULES:
 - Units can move then attack, but NOT attack then move (action ends unit's turn)
 - Knight's Charge: +50% damage if moved 3+ tiles before attacking
 - Rogue's Flank: +50% damage if target is adjacent to friendly unit
-- Rogue's Evade: 15% dodge chance (25% in forest)
+- Rogue's Evade: 15% dodge chance (30% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -150,7 +150,7 @@ UNIT TYPES:
 6. Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 15% chance to dodge counter-attacks (25% in forest)
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)
 7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
@@ -188,7 +188,7 @@ COMBAT RULES:
 - Units can move then attack, but NOT attack then move (action ends unit's turn)
 - Knight's Charge: +50% damage if moved 3+ tiles before attacking
 - Rogue's Flank: +50% damage if target is adjacent to friendly unit
-- Rogue's Evade: 15% dodge chance (25% in forest)
+- Rogue's Evade: 15% dodge chance (30% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -272,7 +272,7 @@ UNIT TYPES (for reference):
 - Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement
 - Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement
 - Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement
-- Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 25% in forest), 12 HP, 4 movement
+- Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement
 - Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement
 - Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
@@ -455,7 +455,7 @@ UNIT_DESCRIPTIONS = {
     'R': """Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 15% chance to dodge counter-attacks (25% in forest)""",
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)""",
     'S': """Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)

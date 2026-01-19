@@ -208,7 +208,7 @@ HEAL_AMOUNT = 5
 HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
 
 # Rogue forest bonus
-ROGUE_FOREST_EVADE_BONUS = 0.10  # Additional 10% dodge chance when in forest (15% + 10% = 25%)
+ROGUE_FOREST_EVADE_BONUS = 0.15  # Additional 15% dodge chance when in forest (15% + 15% = 30%)
 
 # Sorcerer buff abilities
 SORCERER_BUFF_DURATION = 3  # Turns the buff lasts

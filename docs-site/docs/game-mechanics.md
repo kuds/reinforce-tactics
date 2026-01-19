@@ -21,7 +21,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 | **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
-| **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (25% in forest) |
+| **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
 | **Sorcerer** | S | 400 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE: Grant ally extra action, ATTACK/DEFENCE BUFF: +35% damage/reduction for 3 turns |
 | **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High HP glass cannon with excellent mobility |
 
@@ -68,7 +68,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Stats**: 12 HP, 4 Movement, 9 Attack, 3 Defence
 - **Abilities**:
   - FLANK: +50% damage if target is adjacent to another friendly unit
-  - EVADE: 15% chance to dodge counter-attacks (25% in forest)
+  - EVADE: 15% chance to dodge counter-attacks (30% in forest)
 - **Best for**: Coordinated attacks with allies and hit-and-run tactics
 
 #### Sorcerer (S)
