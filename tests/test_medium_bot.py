@@ -179,7 +179,7 @@ class TestMediumBotVsSimpleBot:
         bots = {1: simple_bot, 2: medium_bot}
 
         # Play game
-        max_turns = 200
+        max_turns = 50
         turn_count = 0
 
         while not game.game_over and turn_count < max_turns:

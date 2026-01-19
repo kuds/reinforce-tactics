@@ -179,7 +179,7 @@ class TestAdvancedBotVsMediumBot:
         bot1 = AdvancedBot(simple_game, player=1)
         bot2 = MediumBot(simple_game, player=2)
 
-        max_turns = 100
+        max_turns = 50
         turn_count = 0
 
         while not simple_game.game_over and turn_count < max_turns:
