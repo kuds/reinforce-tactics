@@ -7,7 +7,9 @@ from reinforcetactics.constants import (
     COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT,
     STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME,
     DEFENCE_REDUCTION_PER_POINT, CHARGE_BONUS, CHARGE_MIN_DISTANCE, FLANK_BONUS,
-    HASTE_COOLDOWN, ROGUE_EVADE_CHANCE
+    HASTE_COOLDOWN, ROGUE_EVADE_CHANCE, ROGUE_FOREST_EVADE_BONUS,
+    SORCERER_BUFF_DURATION, SORCERER_BUFF_COOLDOWN,
+    SORCERER_DEFENCE_BUFF_AMOUNT, SORCERER_ATTACK_BUFF_AMOUNT
 )
 
 
@@ -214,6 +216,52 @@ class GameMechanics:
         return hasteable
 
     @staticmethod
+    def get_defence_buffable_allies(sorcerer, units):
+        """
+        Get list of friendly units that can receive Defence Buff from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units within range 1-2 that don't have defence buff
+        """
+        buffable = []
+
+        for unit in units:
+            if unit.player == sorcerer.player and unit.health > 0:
+                # Buff range is 1-2 tiles (can buff self at distance 0)
+                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+                if distance <= 2 and not unit.has_defence_buff():
+                    buffable.append(unit)
+
+        return buffable
+
+    @staticmethod
+    def get_attack_buffable_allies(sorcerer, units):
+        """
+        Get list of friendly units that can receive Attack Buff from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units within range 1-2 that don't have attack buff
+        """
+        buffable = []
+
+        for unit in units:
+            if unit.player == sorcerer.player and unit.health > 0:
+                # Buff range is 1-2 tiles (can buff self at distance 0)
+                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+                if distance <= 2 and not unit.has_attack_buff():
+                    buffable.append(unit)
+
+        return buffable
+
+    @staticmethod
     def _calculate_counter_damage(unit, target_x, target_y, grid):
         """
         Calculate counter-attack damage for a unit.
@@ -264,6 +312,8 @@ class GameMechanics:
         charge_applied = False
         flank_applied = False
         evade_applied = False
+        attack_buff_applied = False
+        defence_buff_applied = False
 
         # Knight's Charge: +50% damage if moved 3+ tiles
         if attacker.type == 'K' and attacker.distance_moved >= CHARGE_MIN_DISTANCE:
@@ -276,8 +326,19 @@ class GameMechanics:
                 base_attack_damage = int(base_attack_damage * (1 + FLANK_BONUS))
                 flank_applied = True
 
+        # Sorcerer's Attack Buff: +50% damage if attacker has attack buff
+        if attacker.has_attack_buff():
+            base_attack_damage = int(base_attack_damage * (1 + SORCERER_ATTACK_BUFF_AMOUNT))
+            attack_buff_applied = True
+
         # Apply defence reduction to attack damage
         attack_damage = GameMechanics.apply_defence_reduction(base_attack_damage, target.defence)
+
+        # Sorcerer's Defence Buff: -50% damage taken if target has defence buff
+        if target.has_defence_buff():
+            attack_damage = max(1, int(attack_damage * (1 - SORCERER_DEFENCE_BUFF_AMOUNT)))
+            defence_buff_applied = True
+
         target_alive = target.take_damage(attack_damage)
 
         attacker_alive = True
@@ -293,9 +354,15 @@ class GameMechanics:
                 if target.type not in ['A', 'M', 'S']:
                     can_counter = False
 
-            # Rogue's Evade: 25% chance to dodge counter-attacks
+            # Rogue's Evade: 25% chance to dodge counter-attacks (35% in forest)
             if can_counter and attacker.type == 'R':
-                if random.random() < ROGUE_EVADE_CHANCE:
+                evade_chance = ROGUE_EVADE_CHANCE
+                # Check if Rogue is in forest for bonus evade chance
+                if grid:
+                    rogue_tile = grid.get_tile(attacker.x, attacker.y)
+                    if rogue_tile.type == 'f':  # Forest tile
+                        evade_chance += ROGUE_FOREST_EVADE_BONUS
+                if random.random() < evade_chance:
                     can_counter = False
                     evade_applied = True
 
@@ -304,10 +371,20 @@ class GameMechanics:
                 base_counter_damage = GameMechanics._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
                 )
+
+                # Apply attack buff to counter-attacker (target)
+                if target.has_attack_buff():
+                    base_counter_damage = int(base_counter_damage * (1 + SORCERER_ATTACK_BUFF_AMOUNT))
+
                 # Apply defence reduction to counter damage
                 counter_damage = GameMechanics.apply_defence_reduction(
                     base_counter_damage, attacker.defence
                 )
+
+                # Apply defence buff to attacker receiving counter damage
+                if attacker.has_defence_buff():
+                    counter_damage = max(1, int(counter_damage * (1 - SORCERER_DEFENCE_BUFF_AMOUNT)))
+
                 if counter_damage > 0:
                     attacker_alive = attacker.take_damage(counter_damage)
 
@@ -321,9 +398,18 @@ class GameMechanics:
                 base_counter = GameMechanics._calculate_counter_damage(
                     target, attacker.x, attacker.y, grid
                 )
+
+                # Apply attack buff to counter-attacker (target)
+                if target.has_attack_buff():
+                    base_counter = int(base_counter * (1 + SORCERER_ATTACK_BUFF_AMOUNT))
+
                 counter_damage_for_response = GameMechanics.apply_defence_reduction(
                     base_counter, attacker.defence
                 )
+
+                # Apply defence buff to attacker receiving counter damage
+                if attacker.has_defence_buff():
+                    counter_damage_for_response = max(1, int(counter_damage_for_response * (1 - SORCERER_DEFENCE_BUFF_AMOUNT)))
 
         return {
             'attacker_alive': attacker_alive,
@@ -332,7 +418,9 @@ class GameMechanics:
             'counter_damage': counter_damage_for_response,
             'charge_bonus': charge_applied,
             'flank_bonus': flank_applied,
-            'evade': evade_applied
+            'evade': evade_applied,
+            'attack_buff': attack_buff_applied,
+            'defence_buff': defence_buff_applied
         }
 
     @staticmethod
@@ -432,6 +520,80 @@ class GameMechanics:
         return True
 
     @staticmethod
+    def defence_buff_unit(sorcerer, target):
+        """
+        Sorcerer grants Defence Buff to target unit, reducing damage taken by 50%.
+
+        Args:
+            sorcerer: The Sorcerer unit using Defence Buff
+            target: The target friendly unit to receive the buff
+
+        Returns:
+            bool: True if Defence Buff was successfully applied
+        """
+        if sorcerer.type != 'S':
+            return False
+
+        if sorcerer.defence_buff_cooldown > 0:
+            return False
+
+        if target.player != sorcerer.player:
+            return False
+
+        if target.has_defence_buff():
+            return False
+
+        # Check distance (range 0-2, can buff self)
+        distance = abs(sorcerer.x - target.x) + abs(sorcerer.y - target.y)
+        if distance > 2:
+            return False
+
+        # Apply defence buff to target
+        target.defence_buff_turns = SORCERER_BUFF_DURATION
+
+        # Set cooldown on sorcerer
+        sorcerer.defence_buff_cooldown = SORCERER_BUFF_COOLDOWN
+
+        return True
+
+    @staticmethod
+    def attack_buff_unit(sorcerer, target):
+        """
+        Sorcerer grants Attack Buff to target unit, increasing damage dealt by 50%.
+
+        Args:
+            sorcerer: The Sorcerer unit using Attack Buff
+            target: The target friendly unit to receive the buff
+
+        Returns:
+            bool: True if Attack Buff was successfully applied
+        """
+        if sorcerer.type != 'S':
+            return False
+
+        if sorcerer.attack_buff_cooldown > 0:
+            return False
+
+        if target.player != sorcerer.player:
+            return False
+
+        if target.has_attack_buff():
+            return False
+
+        # Check distance (range 0-2, can buff self)
+        distance = abs(sorcerer.x - target.x) + abs(sorcerer.y - target.y)
+        if distance > 2:
+            return False
+
+        # Apply attack buff to target
+        target.attack_buff_turns = SORCERER_BUFF_DURATION
+
+        # Set cooldown on sorcerer
+        sorcerer.attack_buff_cooldown = SORCERER_BUFF_COOLDOWN
+
+        return True
+
+    @staticmethod
     def decrement_haste_cooldowns(units, player):
         """
         Decrement haste cooldowns for a player's Sorcerers at turn start.
@@ -450,6 +612,58 @@ class GameMechanics:
                 if unit.haste_cooldown == 0:
                     ready.append(unit)
         return ready
+
+    @staticmethod
+    def decrement_buff_cooldowns(units, player):
+        """
+        Decrement buff cooldowns for a player's Sorcerers at turn start.
+
+        Args:
+            units: List of all units
+            player: Player number whose turn is starting
+
+        Returns:
+            Dict with lists of Sorcerers that came off defence/attack buff cooldown
+        """
+        defence_ready = []
+        attack_ready = []
+        for unit in units:
+            if unit.player == player and unit.type == 'S':
+                if unit.defence_buff_cooldown > 0:
+                    unit.defence_buff_cooldown -= 1
+                    if unit.defence_buff_cooldown == 0:
+                        defence_ready.append(unit)
+                if unit.attack_buff_cooldown > 0:
+                    unit.attack_buff_cooldown -= 1
+                    if unit.attack_buff_cooldown == 0:
+                        attack_ready.append(unit)
+        return {'defence_ready': defence_ready, 'attack_ready': attack_ready}
+
+    @staticmethod
+    def decrement_buff_durations(units, player):
+        """
+        Decrement buff durations for a player's units at turn start.
+
+        Args:
+            units: List of all units
+            player: Player number whose turn is starting
+
+        Returns:
+            Dict with lists of units that lost defence/attack buff
+        """
+        defence_expired = []
+        attack_expired = []
+        for unit in units:
+            if unit.player == player:
+                if unit.defence_buff_turns > 0:
+                    unit.defence_buff_turns -= 1
+                    if unit.defence_buff_turns == 0:
+                        defence_expired.append(unit)
+                if unit.attack_buff_turns > 0:
+                    unit.attack_buff_turns -= 1
+                    if unit.attack_buff_turns == 0:
+                        attack_expired.append(unit)
+        return {'defence_expired': defence_expired, 'attack_expired': attack_expired}
 
     @staticmethod
     def seize_structure(unit, tile):

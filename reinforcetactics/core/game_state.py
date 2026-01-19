@@ -431,6 +431,52 @@ class GameState:
             self._invalidate_cache()
         return result
 
+    def defence_buff(self, sorcerer: Unit, target: Unit) -> bool:
+        """
+        Sorcerer grants Defence Buff to a target unit.
+
+        Args:
+            sorcerer: The Sorcerer unit using Defence Buff
+            target: The target friendly unit
+
+        Returns:
+            bool: True if Defence Buff was successfully applied
+        """
+        result = self.mechanics.defence_buff_unit(sorcerer, target)
+        if result:
+            sorcerer.can_move = False
+            sorcerer.can_attack = False
+            self.record_action('defence_buff',
+                              sorcerer_pos=(sorcerer.x, sorcerer.y),
+                              target_pos=(target.x, target.y),
+                              target_type=target.type,
+                              player=sorcerer.player)
+            self._invalidate_cache()
+        return result
+
+    def attack_buff(self, sorcerer: Unit, target: Unit) -> bool:
+        """
+        Sorcerer grants Attack Buff to a target unit.
+
+        Args:
+            sorcerer: The Sorcerer unit using Attack Buff
+            target: The target friendly unit
+
+        Returns:
+            bool: True if Attack Buff was successfully applied
+        """
+        result = self.mechanics.attack_buff_unit(sorcerer, target)
+        if result:
+            sorcerer.can_move = False
+            sorcerer.can_attack = False
+            self.record_action('attack_buff',
+                              sorcerer_pos=(sorcerer.x, sorcerer.y),
+                              target_pos=(target.x, target.y),
+                              target_type=target.type,
+                              player=sorcerer.player)
+            self._invalidate_cache()
+        return result
+
     def seize(self, unit: Unit) -> Dict[str, Any]:
         """Seize the structure the unit is on."""
         tile = self.grid.get_tile(unit.x, unit.y)
@@ -602,6 +648,12 @@ class GameState:
         # Decrement Sorcerer haste cooldowns
         self.mechanics.decrement_haste_cooldowns(self.units, self.current_player)
 
+        # Decrement Sorcerer buff cooldowns (defence buff and attack buff)
+        self.mechanics.decrement_buff_cooldowns(self.units, self.current_player)
+
+        # Decrement buff durations for units with active buffs
+        self.mechanics.decrement_buff_durations(self.units, self.current_player)
+
         for unit in self.units:
             if unit.player == self.current_player:
                 if not unit.is_paralyzed():
@@ -664,6 +716,8 @@ class GameState:
             'heal': [],
             'cure': [],
             'haste': [],
+            'defence_buff': [],
+            'attack_buff': [],
             'seize': [],
             'end_turn': True
         }
@@ -754,6 +808,24 @@ class GameState:
                         hasteable_allies = self.mechanics.get_hasteable_allies(unit, self.units)
                         for ally in hasteable_allies:
                             legal_actions['haste'].append({
+                                'sorcerer': unit,
+                                'target': ally
+                            })
+
+                    # Defence Buff (Sorcerer only)
+                    if unit.type == 'S' and unit.can_use_defence_buff():
+                        buffable_allies = self.mechanics.get_defence_buffable_allies(unit, self.units)
+                        for ally in buffable_allies:
+                            legal_actions['defence_buff'].append({
+                                'sorcerer': unit,
+                                'target': ally
+                            })
+
+                    # Attack Buff (Sorcerer only)
+                    if unit.type == 'S' and unit.can_use_attack_buff():
+                        buffable_allies = self.mechanics.get_attack_buffable_allies(unit, self.units)
+                        for ally in buffable_allies:
+                            legal_actions['attack_buff'].append({
                                 'sorcerer': unit,
                                 'target': ally
                             })
