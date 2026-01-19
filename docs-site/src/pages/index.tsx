@@ -46,6 +46,42 @@ const units = [
     cardClass: styles.unitCardArcher,
     iconClass: styles.unitIconArcher,
   },
+  {
+    name: 'Knight',
+    code: 'K',
+    role: 'Heavy Cavalry',
+    description: 'Armored cavalry with devastating charge attacks. Deals +50% damage when moving 3+ tiles before attacking.',
+    stats: { hp: 18, attack: 8, defense: 5, movement: 4 },
+    cardClass: styles.unitCardKnight,
+    iconClass: styles.unitIconKnight,
+  },
+  {
+    name: 'Rogue',
+    code: 'R',
+    role: 'Stealth Assassin',
+    description: 'Swift assassins who deal +50% flank damage when enemies are adjacent to allies. 15% evade chance (30% in forests).',
+    stats: { hp: 12, attack: 9, defense: 3, movement: 4 },
+    cardClass: styles.unitCardRogue,
+    iconClass: styles.unitIconRogue,
+  },
+  {
+    name: 'Barbarian',
+    code: 'B',
+    role: 'Berserker',
+    description: 'Ferocious warriors with exceptional mobility and endurance. High HP and movement for aggressive tactics.',
+    stats: { hp: 20, attack: 10, defense: 2, movement: 5 },
+    cardClass: styles.unitCardBarbarian,
+    iconClass: styles.unitIconBarbarian,
+  },
+  {
+    name: 'Sorcerer',
+    code: 'S',
+    role: 'Battle Mage',
+    description: 'Versatile spellcasters who can grant Haste for extra actions, or buff allies with +35% attack/defense.',
+    stats: { hp: 10, attack: 8, defense: 3, movement: 2 },
+    cardClass: styles.unitCardSorcerer,
+    iconClass: styles.unitIconSorcerer,
+  },
 ];
 
 // ===== Feature Data =====
@@ -269,7 +305,7 @@ function UnitsSection(): ReactNode {
           Rich Tactical Environment
         </Heading>
         <p className={styles.sectionSubtitle}>
-          Four distinct unit types create a complex decision space that challenges AI agents
+          Eight distinct unit types create a complex decision space that challenges AI agents
           to reason about positioning, resource allocation, and opponent modeling.
         </p>
         <div className={styles.unitsGrid}>
