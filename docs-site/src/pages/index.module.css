@@ -219,6 +219,22 @@
   background: linear-gradient(90deg, #1e3a5f, #2e5a8f);
 }
 
+.unitCardKnight::before {
+  background: linear-gradient(90deg, #5c5c5c, #8a8a8a);
+}
+
+.unitCardRogue::before {
+  background: linear-gradient(90deg, #2d2d2d, #4a4a4a);
+}
+
+.unitCardBarbarian::before {
+  background: linear-gradient(90deg, #1b5e20, #388e3c);
+}
+
+.unitCardSorcerer::before {
+  background: linear-gradient(90deg, #0277bd, #03a9f4);
+}
+
 .unitHeader {
   display: flex;
   align-items: center;
@@ -254,6 +270,22 @@
 
 .unitIconArcher {
   background: linear-gradient(135deg, #1e3a5f 0%, #2e5a8f 100%);
+}
+
+.unitIconKnight {
+  background: linear-gradient(135deg, #5c5c5c 0%, #8a8a8a 100%);
+}
+
+.unitIconRogue {
+  background: linear-gradient(135deg, #2d2d2d 0%, #4a4a4a 100%);
+}
+
+.unitIconBarbarian {
+  background: linear-gradient(135deg, #1b5e20 0%, #388e3c 100%);
+}
+
+.unitIconSorcerer {
+  background: linear-gradient(135deg, #0277bd 0%, #03a9f4 100%);
 }
 
 .unitInfo h3 {
