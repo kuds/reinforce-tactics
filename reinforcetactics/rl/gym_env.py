@@ -25,7 +25,7 @@ class StrategyGameEnv(gym.Env):
     Action Space:
         MultiDiscrete with 6 dimensions:
         - action_type: [0=create_unit, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn,
-                        6=paralyze, 7=haste]
+                        6=paralyze, 7=haste, 8=defence_buff, 9=attack_buff]
         - unit_type: [0=W, 1=M, 2=C, 3=A, 4=K, 5=R, 6=S, 7=B] (for create_unit)
         - from_x: [0, grid_width)
         - from_y: [0, grid_height)
@@ -119,7 +119,7 @@ class StrategyGameEnv(gym.Env):
             self.action_space = spaces.Dict({
                 'goal': spaces.Discrete(goal_space_size),  # Manager action
                 'primitive': spaces.MultiDiscrete([
-                    8,  # action_type (0-7)
+                    10,  # action_type (0-9)
                     8,  # unit_type (for create): W, M, C, A, K, R, S, B
                     self.grid_width,  # from_x
                     self.grid_height,  # from_y
@@ -130,7 +130,7 @@ class StrategyGameEnv(gym.Env):
         else:
             # Flat RL: Direct primitive actions
             self.action_space = spaces.MultiDiscrete([
-                8,  # action_type (0-7)
+                10,  # action_type (0-9)
                 8,  # unit_type (for create): W, M, C, A, K, R, S, B
                 self.grid_width,  # from_x
                 self.grid_height,  # from_y
@@ -156,8 +156,8 @@ class StrategyGameEnv(gym.Env):
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
         # Simplified: num_action_types * grid_size^2 (approximate)
-        # 8 action types: create, move, attack, seize, heal, end_turn, paralyze, haste
-        return 8 * self.grid_width * self.grid_height
+        # 10 action types: create, move, attack, seize, heal, end_turn, paralyze, haste, defence_buff, attack_buff
+        return 10 * self.grid_width * self.grid_height
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
         """Get current observation."""
@@ -275,6 +275,18 @@ class StrategyGameEnv(gym.Env):
             target = action['target']
             set_mask(7, target.x, target.y)
 
+        # 8: Defence Buff (Sorcerer ability)
+        # legal_actions['defence_buff'] contains list of dicts: {sorcerer, target}
+        for action in legal_actions.get('defence_buff', []):
+            target = action['target']
+            set_mask(8, target.x, target.y)
+
+        # 9: Attack Buff (Sorcerer ability)
+        # legal_actions['attack_buff'] contains list of dicts: {sorcerer, target}
+        for action in legal_actions.get('attack_buff', []):
+            target = action['target']
+            set_mask(9, target.x, target.y)
+
         return mask
 
     def action_masks(self) -> Tuple[np.ndarray, ...]:
@@ -295,7 +307,7 @@ class StrategyGameEnv(gym.Env):
         legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         # Initialize masks for each dimension
-        action_type_mask = np.zeros(8, dtype=bool)
+        action_type_mask = np.zeros(10, dtype=bool)
         unit_type_mask = np.zeros(8, dtype=bool)
         from_x_mask = np.zeros(self.grid_width, dtype=bool)
         from_y_mask = np.zeros(self.grid_height, dtype=bool)
@@ -383,6 +395,26 @@ class StrategyGameEnv(gym.Env):
         # 7: Haste
         for action in legal_actions.get('haste', []):
             action_type_mask[7] = True
+            sorcerer = action['sorcerer']
+            target = action['target']
+            from_x_mask[sorcerer.x] = True
+            from_y_mask[sorcerer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # 8: Defence Buff
+        for action in legal_actions.get('defence_buff', []):
+            action_type_mask[8] = True
+            sorcerer = action['sorcerer']
+            target = action['target']
+            from_x_mask[sorcerer.x] = True
+            from_y_mask[sorcerer.y] = True
+            to_x_mask[target.x] = True
+            to_y_mask[target.y] = True
+
+        # 9: Attack Buff
+        for action in legal_actions.get('attack_buff', []):
+            action_type_mask[9] = True
             sorcerer = action['sorcerer']
             target = action['target']
             from_x_mask[sorcerer.x] = True
@@ -541,6 +573,30 @@ class StrategyGameEnv(gym.Env):
                     result = self.game_state.haste(unit, target)
                     if result:
                         reward += 6.0  # Haste is valuable for granting extra actions
+                    else:
+                        is_valid = False
+                else:
+                    is_valid = False
+
+            elif action_type == 8:  # Defence Buff (Sorcerer only)
+                unit = self.game_state.get_unit_at_position(*from_pos)
+                target = self.game_state.get_unit_at_position(*to_pos)
+                if unit and target and unit.type == 'S' and target.player == 1:
+                    result = self.game_state.defence_buff(unit, target)
+                    if result:
+                        reward += 5.0  # Defence Buff is valuable for damage reduction
+                    else:
+                        is_valid = False
+                else:
+                    is_valid = False
+
+            elif action_type == 9:  # Attack Buff (Sorcerer only)
+                unit = self.game_state.get_unit_at_position(*from_pos)
+                target = self.game_state.get_unit_at_position(*to_pos)
+                if unit and target and unit.type == 'S' and target.player == 1:
+                    result = self.game_state.attack_buff(unit, target)
+                    if result:
+                        reward += 5.0  # Attack Buff is valuable for damage increase
                     else:
                         is_valid = False
                 else:

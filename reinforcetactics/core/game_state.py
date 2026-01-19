@@ -723,10 +723,10 @@ class GameState:
         }
 
         # Building units (only at Buildings, not HQ)
-        # Available units: W, M, C, A (basic) + K, R, S (advanced)
+        # Available units: W, M, C, A (basic) + K, R, S, B (advanced)
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in ['W', 'M', 'C', 'A', 'K', 'R', 'S']:
+                for unit_type in ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']:
                     if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
                         legal_actions['create_unit'].append({
                             'unit_type': unit_type,
@@ -873,7 +873,8 @@ class GameState:
         # Unit representation (height x width x 3)
         unit_state = np.zeros((self.grid.height, self.grid.width, 3), dtype=np.float32)
 
-        unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'B': 4, 'A': 5}
+        # Encoding for all 8 unit types: W, M, C, A, K, R, S, B
+        unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'A': 4, 'K': 5, 'R': 6, 'S': 7, 'B': 8}
 
         for unit in self.units:
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)

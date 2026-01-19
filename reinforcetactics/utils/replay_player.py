@@ -291,6 +291,39 @@ class ReplayPlayer:
                 if curer and target:
                     self.game_state.cure(curer, target)
 
+            elif action_type == 'haste':
+                # Translate coordinates from original to padded
+                orig_sorcerer_pos = action['sorcerer_pos']
+                orig_target_pos = action['target_pos']
+                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
+                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if sorcerer and target:
+                    self.game_state.haste(sorcerer, target)
+
+            elif action_type == 'defence_buff':
+                # Translate coordinates from original to padded
+                orig_sorcerer_pos = action['sorcerer_pos']
+                orig_target_pos = action['target_pos']
+                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
+                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if sorcerer and target:
+                    self.game_state.defence_buff(sorcerer, target)
+
+            elif action_type == 'attack_buff':
+                # Translate coordinates from original to padded
+                orig_sorcerer_pos = action['sorcerer_pos']
+                orig_target_pos = action['target_pos']
+                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
+                target_pos = self._translate_coords(*orig_target_pos)
+                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
+                target = self.game_state.get_unit_at_position(*target_pos)
+                if sorcerer and target:
+                    self.game_state.attack_buff(sorcerer, target)
+
             elif action_type == 'resign':
                 self.game_state.resign(action['player'])
 
@@ -460,6 +493,12 @@ class ReplayPlayer:
             return f"P{player} heals unit"
         elif action_type == 'cure':
             return f"P{player} cures unit"
+        elif action_type == 'haste':
+            return f"P{player} hastes ally"
+        elif action_type == 'defence_buff':
+            return f"P{player} defence buffs ally"
+        elif action_type == 'attack_buff':
+            return f"P{player} attack buffs ally"
         elif action_type == 'seize':
             return f"P{player} seizes structure"
         elif action_type == 'resign':
