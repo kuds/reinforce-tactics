@@ -11,10 +11,10 @@ A turn-based strategy game built with Pygame and Gymnasium for reinforcement lea
 
 ## Features
 
-- **Tactical Gameplay**: 4 unit types (Warrior, Mage, Cleric, Archer) with unique abilities
+- **Tactical Gameplay**: 8 unit types (Warrior, Mage, Cleric, Archer, Knight, Rogue, Sorcerer, Barbarian) with unique abilities
 - **Gymnasium Integration**: Standard RL environment with observation/action spaces and reward shaping
 - **Multiple AI Opponents**: Rule-based bots (Easy/Medium/Hard) and LLM bots (GPT, Claude, Gemini)
-- **Training Support**: Headless mode, self-play, and Stable-Baselines3 integration
+- **Training Support**: Headless mode, self-play, action masking (MaskablePPO), and Stable-Baselines3 integration
 - **Replay System**: Record games and export to video
 - **Multi-language**: English, Korean, Spanish, French, Chinese
 
@@ -89,9 +89,13 @@ bot = ClaudeBot(game, player=2, model='claude-3-5-haiku-20241022')
 | Unit | Cost | Move | HP | Special |
 |------|------|------|-----|---------|
 | Warrior | 200 | 3 | 15 | High HP melee |
-| Mage | 250 | 2 | 10 | Ranged, paralyze |
-| Cleric | 200 | 2 | 8 | Heal allies |
-| Archer | 250 | 3 | 15 | Indirect fire |
+| Mage | 250 | 2 | 10 | Ranged, paralyze (3 turns) |
+| Cleric | 200 | 2 | 8 | Heal allies, cure paralysis |
+| Archer | 250 | 3 | 15 | Ranged 2-3 tiles (+1 on mountains) |
+| Knight | 350 | 4 | 18 | Charge (+50% dmg if moved 3+ tiles) |
+| Rogue | 300 | 4 | 12 | Flank (+50% dmg), Evade (25% dodge) |
+| Sorcerer | 300 | 2 | 10 | Haste (grant ally extra action) |
+| Barbarian | 400 | 5 | 20 | Fast, high-damage melee |
 
 **Win Conditions**: Capture enemy HQ or eliminate all enemy units
 
