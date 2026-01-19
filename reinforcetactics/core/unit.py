@@ -39,6 +39,9 @@ class Unit:
         # Knight charge tracking
         self.distance_moved = 0
 
+        # Mage paralyze ability tracking
+        self.paralyze_cooldown = 0  # Turns remaining before can use Paralyze again
+
         # Sorcerer haste ability tracking
         self.haste_cooldown = 0  # Turns remaining before can use Haste again
 
@@ -196,6 +199,10 @@ class Unit:
         self.distance_moved = 0
         self.is_hasted = False
 
+    def can_use_paralyze(self):
+        """Check if this Mage can use Paralyze ability."""
+        return self.type == 'M' and self.paralyze_cooldown == 0
+
     def can_use_haste(self):
         """Check if this Sorcerer can use Haste ability."""
         return self.type == 'S' and self.haste_cooldown == 0
@@ -225,6 +232,7 @@ class Unit:
             'player': self.player,
             'health': self.health,
             'paralyzed_turns': self.paralyzed_turns,
+            'paralyze_cooldown': self.paralyze_cooldown,
             'can_move': self.can_move,
             'can_attack': self.can_attack,
             'haste_cooldown': self.haste_cooldown,
@@ -242,6 +250,7 @@ class Unit:
         unit = cls(data['type'], data['x'], data['y'], data['player'])
         unit.health = data['health']
         unit.paralyzed_turns = data.get('paralyzed_turns', 0)
+        unit.paralyze_cooldown = data.get('paralyze_cooldown', 0)
         unit.can_move = data.get('can_move', True)
         unit.can_attack = data.get('can_attack', True)
         unit.haste_cooldown = data.get('haste_cooldown', 0)

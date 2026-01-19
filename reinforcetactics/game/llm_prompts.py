@@ -33,11 +33,11 @@ GAME OBJECTIVE:
 UNIT TYPES:
 1. Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
    - Strong melee fighter, attacks adjacent enemies only
-2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
+2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns)
+   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies and CURE paralyzed units
+   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -46,15 +46,15 @@ UNIT TYPES:
 5. Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
    - Heavy cavalry unit with high mobility
    - CHARGE: +50% damage if moved 3+ tiles before attacking
-6. Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+6. Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 25% chance to dodge counter-attacks (35% in forest)
-7. Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)
+7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)
+   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
 8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers
@@ -69,11 +69,11 @@ AVAILABLE ACTIONS:
 2. MOVE: Move a unit to a reachable position (up to movement range)
 3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
 4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
-5. HEAL: (Cleric only) Heal an adjacent ally unit
-6. CURE: (Cleric only) Remove paralysis from an adjacent ally
+5. HEAL: (Cleric only) Heal an ally unit within range 1-2
+6. CURE: (Cleric only) Remove paralysis from an ally within range 1-2
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
-8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
-9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
 10. SEIZE: Capture a neutral/enemy structure by standing on it
 11. END_TURN: Finish your turn
 12. RESIGN: Concede the game (use only as last resort when victory is impossible)
@@ -87,7 +87,7 @@ COMBAT RULES:
 - Units can move then attack, but NOT attack then move (action ends unit's turn)
 - Knight's Charge: +50% damage if moved 3+ tiles before attacking
 - Rogue's Flank: +50% damage if target is adjacent to friendly unit
-- Rogue's Evade: 25% dodge chance (35% in forest)
+- Rogue's Evade: 15% dodge chance (30% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -134,11 +134,11 @@ GAME OBJECTIVE:
 UNIT TYPES:
 1. Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
    - Strong melee fighter, attacks adjacent enemies only
-2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
+2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns)
+   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies and CURE paralyzed units
+   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -147,15 +147,15 @@ UNIT TYPES:
 5. Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
    - Heavy cavalry unit with high mobility
    - CHARGE: +50% damage if moved 3+ tiles before attacking
-6. Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+6. Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 25% chance to dodge counter-attacks (35% in forest)
-7. Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)
+7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)
+   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
 8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers
@@ -170,11 +170,11 @@ AVAILABLE ACTIONS:
 2. MOVE: Move a unit to a reachable position (up to movement range)
 3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
 4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
-5. HEAL: (Cleric only) Heal an adjacent ally unit
-6. CURE: (Cleric only) Remove paralysis from an adjacent ally
+5. HEAL: (Cleric only) Heal an ally unit within range 1-2
+6. CURE: (Cleric only) Remove paralysis from an ally within range 1-2
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
-8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
-9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
 10. SEIZE: Capture a neutral/enemy structure by standing on it
 11. END_TURN: Finish your turn
 12. RESIGN: Concede the game (use only as last resort when victory is impossible)
@@ -188,7 +188,7 @@ COMBAT RULES:
 - Units can move then attack, but NOT attack then move (action ends unit's turn)
 - Knight's Charge: +50% damage if moved 3+ tiles before attacking
 - Rogue's Flank: +50% damage if target is adjacent to friendly unit
-- Rogue's Evade: 25% dodge chance (35% in forest)
+- Rogue's Evade: 15% dodge chance (30% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -268,12 +268,12 @@ GAME OBJECTIVE:
 
 UNIT TYPES (for reference):
 - Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement
-- Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies, 10 HP, 2 movement
-- Cleric (C): Support unit, can HEAL allies and CURE paralysis, 8 HP, 2 movement
+- Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies (2-turn cooldown), 10 HP, 2 movement
+- Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement
 - Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement
 - Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement
-- Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (25% dodge), 12 HP, 4 movement
-- Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF allies, 10 HP, 2 movement
+- Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement
+- Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement
 - Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
 BUILDING TYPES:
@@ -439,11 +439,11 @@ def register_prompt(name: str, prompt: str) -> None:
 UNIT_DESCRIPTIONS = {
     'W': """Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
    - Strong melee fighter, attacks adjacent enemies only""",
-    'M': """Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
+    'M': """Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns)""",
+   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
     'C': """Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies and CURE paralyzed units""",
+   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)""",
     'A': """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -452,15 +452,15 @@ UNIT_DESCRIPTIONS = {
     'K': """Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
    - Heavy cavalry unit with high mobility
    - CHARGE: +50% damage if moved 3+ tiles before attacking""",
-    'R': """Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+    'R': """Rogue (R): Cost 350 gold, HP 12, Attack 9, Defense 3, Movement 4
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
-   - EVADE: 25% chance to dodge counter-attacks (35% in forest)""",
-    'S': """Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - EVADE: 15% chance to dodge counter-attacks (30% in forest)""",
+    'S': """Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)""",
+   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)""",
     'B': """Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers"""
@@ -469,12 +469,12 @@ UNIT_DESCRIPTIONS = {
 # Short descriptions for two-phase prompts
 UNIT_DESCRIPTIONS_SHORT = {
     'W': "Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement",
-    'M': "Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies, 10 HP, 2 movement",
-    'C': "Cleric (C): Support unit, can HEAL allies and CURE paralysis, 8 HP, 2 movement",
+    'M': "Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies (2-turn cooldown), 10 HP, 2 movement",
+    'C': "Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement",
     'A': "Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement",
     'K': "Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement",
-    'R': "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (25% dodge), 12 HP, 4 movement",
-    'S': "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF allies, 10 HP, 2 movement",
+    'R': "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 25% in forest), 12 HP, 4 movement",
+    'S': "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement",
     'B': "Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement"
 }
 

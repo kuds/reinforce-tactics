@@ -662,6 +662,9 @@ class GameState:
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
 
+        # Decrement Mage paralyze cooldowns
+        self.mechanics.decrement_paralyze_cooldowns(self.units, self.current_player)
+
         # Decrement Sorcerer haste cooldowns
         self.mechanics.decrement_haste_cooldowns(self.units, self.current_player)
 
@@ -787,8 +790,8 @@ class GameState:
                                         'target': enemy
                                     })
 
-                                    if unit.type == 'M':
-                                        # Mages can also paralyze at range
+                                    if unit.type == 'M' and unit.can_use_paralyze():
+                                        # Mages can also paralyze at range (if not on cooldown)
                                         distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
                                         if distance <= 2:
                                             legal_actions['paralyze'].append({
@@ -804,17 +807,17 @@ class GameState:
                                 'target': enemy
                             })
 
-                    # Healing (Cleric only)
+                    # Healing (Cleric only) - range 1-2
                     if unit.type == 'C':
-                        adjacent_allies = self.mechanics.get_adjacent_allies(unit, self.units)
-                        for ally in adjacent_allies:
+                        healable_allies = self.mechanics.get_healable_allies(unit, self.units)
+                        for ally in healable_allies:
                             legal_actions['heal'].append({
                                 'healer': unit,
                                 'target': ally
                             })
 
-                        adjacent_paralyzed = self.mechanics.get_adjacent_paralyzed_allies(unit, self.units)
-                        for ally in adjacent_paralyzed:
+                        curable_allies = self.mechanics.get_curable_allies(unit, self.units)
+                        for ally in curable_allies:
                             legal_actions['cure'].append({
                                 'curer': unit,
                                 'target': ally

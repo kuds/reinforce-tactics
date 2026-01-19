@@ -17,13 +17,13 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 | Unit | Code | Cost | Health | Movement | Attack | Defence | Special Abilities |
 |------|------|------|--------|----------|--------|---------|-------------------|
 | **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
-| **Mage** | M | 250 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns |
-| **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP), Can CURE paralyzed units |
+| **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns (2-turn cooldown) |
+| **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
-| **Rogue** | R | 300 | 12 | 4 | 9 | 3 | FLANK: +50% damage if enemy is adjacent to an ally, EVADE: 25% dodge chance (35% in forest) |
-| **Sorcerer** | S | 300 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE allies, DEFENCE BUFF (-50% damage taken), ATTACK BUFF (+50% damage dealt) |
-| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High mobility melee fighter, No special abilities |
+| **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
+| **Sorcerer** | S | 400 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE: Grant ally extra action, ATTACK/DEFENCE BUFF: +35% damage/reduction for 3 turns |
+| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High HP glass cannon with excellent mobility |
 
 ### Unit Details
 
@@ -36,12 +36,12 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 
 #### Mage (M)
 - **Role**: Ranged attacker with crowd control
-- **Cost**: $250
+- **Cost**: $300
 - **Stats**: 10 HP, 2 Movement, 8/12 Attack, 4 Defence
-- **Abilities**: 
+- **Abilities**:
   - Attacks at distance 1 (adjacent): 8 damage
   - Attacks at distance 2 (range): 12 damage
-  - Can PARALYZE enemies for 3 turns
+  - Can PARALYZE enemies for 3 turns (2-turn cooldown)
 - **Best for**: Disabling key enemy units and dealing ranged damage
 
 #### Cleric (C)
@@ -49,10 +49,47 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Cost**: $200
 - **Stats**: 8 HP, 2 Movement, 2 Attack, 4 Defence
 - **Abilities**:
-  - Can HEAL allies for 5 HP per action
-  - Can CURE paralyzed units
+  - Can HEAL allies for 5 HP per action (range 1-2)
+  - Can CURE paralyzed units (range 1-2)
   - Weak combat capabilities (2 attack)
 - **Best for**: Keeping your army healthy and removing status effects
+
+#### Knight (K)
+- **Role**: Heavy cavalry
+- **Cost**: $350
+- **Stats**: 18 HP, 4 Movement, 8 Attack, 5 Defence
+- **Abilities**:
+  - CHARGE: +50% damage if moved 3+ tiles before attacking
+- **Best for**: Rapid flanking maneuvers and high-impact charges
+
+#### Rogue (R)
+- **Role**: Fast melee assassin
+- **Cost**: $350
+- **Stats**: 12 HP, 4 Movement, 9 Attack, 3 Defence
+- **Abilities**:
+  - FLANK: +50% damage if target is adjacent to another friendly unit
+  - EVADE: 15% chance to dodge counter-attacks (30% in forest)
+- **Best for**: Coordinated attacks with allies and hit-and-run tactics
+
+#### Sorcerer (S)
+- **Role**: Support caster with buffs
+- **Cost**: $400
+- **Stats**: 10 HP, 2 Movement, 6/8 Attack, 3 Defence
+- **Abilities**:
+  - Attacks at distance 1 (adjacent): 6 damage
+  - Attacks at distance 2 (range): 8 damage
+  - HASTE: Grant an ally an extra action this turn (3-turn cooldown)
+  - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
+  - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
+- **Best for**: Amplifying ally effectiveness and providing tactical flexibility
+
+#### Barbarian (B)
+- **Role**: Glass cannon
+- **Cost**: $400
+- **Stats**: 20 HP, 5 Movement, 10 Attack, 2 Defence
+- **Abilities**:
+  - High HP and mobility for rapid strikes
+- **Best for**: Fast aggressive plays and overwhelming enemies
 
 #### Archer (A)
 - **Role**: Long-range attacker
