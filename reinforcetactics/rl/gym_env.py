@@ -2,7 +2,7 @@
 Gymnasium environment for Reinforce Tactics
 Supports both flat and hierarchical RL training
 """
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -35,6 +35,9 @@ class StrategyGameEnv(gym.Env):
 
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 4}
 
+    # All available unit types
+    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
     def __init__(
         self,
         map_file: Optional[str] = None,
@@ -43,7 +46,8 @@ class StrategyGameEnv(gym.Env):
         max_steps: int = 500,
         reward_config: Optional[Dict[str, float]] = None,
         hierarchical: bool = False,  # Enable for HRL
-        goal_space_size: int = 64  # For HRL goal space
+        goal_space_size: int = 64,  # For HRL goal space
+        enabled_units: Optional[List[str]] = None  # List of enabled unit types
     ):
         """
         Initialize environment.
@@ -56,6 +60,7 @@ class StrategyGameEnv(gym.Env):
             reward_config: Dict of reward weights
             hierarchical: Whether to use hierarchical action space
             goal_space_size: Size of goal space for HRL
+            enabled_units: List of enabled unit types (default all)
         """
         super().__init__()
 
@@ -66,7 +71,9 @@ class StrategyGameEnv(gym.Env):
             map_data = FileIO.generate_random_map(20, 20, num_players=2)
 
         self.initial_map_data = map_data
-        self.game_state = GameState(map_data, num_players=2)
+        # Store enabled units (default to all if not specified)
+        self.enabled_units = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
+        self.game_state = GameState(map_data, num_players=2, enabled_units=self.enabled_units)
         self.opponent_type = opponent
         self.opponent = None
         self.max_steps = max_steps
@@ -425,7 +432,12 @@ class StrategyGameEnv(gym.Env):
         # Ensure unit_type mask has at least one valid option for non-create actions
         # (unit_type is only meaningful for create, but we need valid values for masking)
         if not unit_type_mask.any():
-            unit_type_mask[0] = True  # Default to Warrior if no creates available
+            # Default to first enabled unit type if no creates available
+            if self.enabled_units:
+                first_enabled_idx = unit_type_to_idx.get(self.enabled_units[0], 0)
+                unit_type_mask[first_enabled_idx] = True
+            else:
+                unit_type_mask[0] = True  # Fallback to Warrior
 
         return (action_type_mask, unit_type_mask, from_x_mask, from_y_mask, to_x_mask, to_y_mask)
 
@@ -702,8 +714,8 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
-        # Reset game state
-        self.game_state = GameState(self.initial_map_data, num_players=2)
+        # Reset game state (preserving enabled_units configuration)
+        self.game_state = GameState(self.initial_map_data, num_players=2, enabled_units=self.enabled_units)
         self.current_step = 0
 
         # Reset opponent

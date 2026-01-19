@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 class GameState:
     """Manages the core game state without rendering."""
 
-    def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None) -> None:
+    # All available unit types
+    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None,
+                 enabled_units: Optional[List[str]] = None) -> None:
         """
         Initialize the game state.
 
@@ -30,6 +34,7 @@ class GameState:
             map_data: 2D array containing map information
             num_players: Number of players (default 2)
             max_turns: Maximum turns for the game (None = unlimited)
+            enabled_units: List of enabled unit types (default all units enabled)
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
@@ -40,6 +45,9 @@ class GameState:
         self.winner: Optional[int] = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
+
+        # Enabled unit types (defaults to all if not specified)
+        self.enabled_units: List[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
 
         # Optional map file reference for saving
         self.map_file_used: Optional[str] = None
@@ -81,7 +89,7 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players, self.max_turns)
+        self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units)
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
@@ -138,6 +146,15 @@ class GameState:
         self._cache_valid = False
         self._unit_count_cache.clear()
         self._legal_actions_cache.clear()
+
+    def is_unit_type_enabled(self, unit_type: str) -> bool:
+        """Check if a unit type is enabled for this game."""
+        return unit_type in self.enabled_units
+
+    def set_enabled_units(self, enabled_units: List[str]) -> None:
+        """Set the list of enabled unit types."""
+        self.enabled_units = enabled_units
+        self._invalidate_cache()
 
     def get_unit_count(self, player: int) -> int:
         """Get cached unit count for a player."""
@@ -723,10 +740,10 @@ class GameState:
         }
 
         # Building units (only at Buildings, not HQ)
-        # Available units: W, M, C, A (basic) + K, R, S, B (advanced)
+        # Only include enabled unit types
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']:
+                for unit_type in self.enabled_units:
                     if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
                         legal_actions['create_unit'].append({
                             'unit_type': unit_type,
@@ -856,6 +873,7 @@ class GameState:
             'winner': self.winner,
             'map_file': self.map_file_used,
             'player_configs': self.player_configs,
+            'enabled_units': self.enabled_units,
             'units': [unit.to_dict() for unit in self.units],
             'tiles': self.grid.to_dict()['tiles']
         }
@@ -1018,7 +1036,8 @@ class GameState:
             'end_time': datetime.now().isoformat(),
             'map_file': self.map_file_used,
             'initial_map': map_to_save,
-            'player_configs': enhanced_player_configs
+            'player_configs': enhanced_player_configs,
+            'enabled_units': self.enabled_units
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
@@ -1035,7 +1054,10 @@ class GameState:
         Returns:
             Restored GameState instance
         """
-        game = cls(map_data, save_data.get('num_players', 2))
+        # Extract enabled_units from save data (default to all if not present for backward compatibility)
+        enabled_units = save_data.get('enabled_units', cls.ALL_UNIT_TYPES)
+
+        game = cls(map_data, save_data.get('num_players', 2), enabled_units=enabled_units)
 
         game.current_player = save_data.get('current_player', 1)
         game.turn_number = save_data.get('turn_number', 0)
