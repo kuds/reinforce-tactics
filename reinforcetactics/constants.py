@@ -206,6 +206,15 @@ PARALYZE_DURATION = 3
 HEAL_AMOUNT = 5
 HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
 
+# Rogue forest bonus
+ROGUE_FOREST_EVADE_BONUS = 0.10  # Additional 10% dodge chance when in forest (25% + 10% = 35%)
+
+# Sorcerer buff abilities
+SORCERER_BUFF_DURATION = 3  # Turns the buff lasts
+SORCERER_BUFF_COOLDOWN = 3  # Turns before Sorcerer can use buff again
+SORCERER_DEFENCE_BUFF_AMOUNT = 0.50  # 50% damage reduction
+SORCERER_ATTACK_BUFF_AMOUNT = 0.50  # 50% damage increase
+
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility
 TILE_TYPES = {

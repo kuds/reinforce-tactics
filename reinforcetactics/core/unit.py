@@ -45,6 +45,14 @@ class Unit:
         # Haste buff tracking (for any unit that receives Haste)
         self.is_hasted = False  # True if unit has extra action this turn
 
+        # Sorcerer buff ability tracking (cooldowns for the Sorcerer)
+        self.defence_buff_cooldown = 0  # Turns remaining before can use Defence Buff again
+        self.attack_buff_cooldown = 0  # Turns remaining before can use Attack Buff again
+
+        # Buff status tracking (for any unit that receives buffs)
+        self.defence_buff_turns = 0  # Turns remaining with defence buff active
+        self.attack_buff_turns = 0  # Turns remaining with attack buff active
+
     def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
         Calculate attack damage based on distance to target.
@@ -192,6 +200,22 @@ class Unit:
         """Check if this Sorcerer can use Haste ability."""
         return self.type == 'S' and self.haste_cooldown == 0
 
+    def can_use_defence_buff(self):
+        """Check if this Sorcerer can use Defence Buff ability."""
+        return self.type == 'S' and self.defence_buff_cooldown == 0
+
+    def can_use_attack_buff(self):
+        """Check if this Sorcerer can use Attack Buff ability."""
+        return self.type == 'S' and self.attack_buff_cooldown == 0
+
+    def has_defence_buff(self):
+        """Check if this unit has an active defence buff."""
+        return self.defence_buff_turns > 0
+
+    def has_attack_buff(self):
+        """Check if this unit has an active attack buff."""
+        return self.attack_buff_turns > 0
+
     def to_dict(self):
         """Convert unit to dictionary for serialization."""
         return {
@@ -205,7 +229,11 @@ class Unit:
             'can_attack': self.can_attack,
             'haste_cooldown': self.haste_cooldown,
             'is_hasted': self.is_hasted,
-            'distance_moved': self.distance_moved
+            'distance_moved': self.distance_moved,
+            'defence_buff_cooldown': self.defence_buff_cooldown,
+            'attack_buff_cooldown': self.attack_buff_cooldown,
+            'defence_buff_turns': self.defence_buff_turns,
+            'attack_buff_turns': self.attack_buff_turns
         }
 
     @classmethod
@@ -219,6 +247,10 @@ class Unit:
         unit.haste_cooldown = data.get('haste_cooldown', 0)
         unit.is_hasted = data.get('is_hasted', False)
         unit.distance_moved = data.get('distance_moved', 0)
+        unit.defence_buff_cooldown = data.get('defence_buff_cooldown', 0)
+        unit.attack_buff_cooldown = data.get('attack_buff_cooldown', 0)
+        unit.defence_buff_turns = data.get('defence_buff_turns', 0)
+        unit.attack_buff_turns = data.get('attack_buff_turns', 0)
         unit.original_x = unit.x
         unit.original_y = unit.y
         return unit
