@@ -212,8 +212,12 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             print("Failed to load map")
             return
 
-        # Create game state
-        game = GameState(map_data, num_players=num_players)
+        # Get settings for enabled units
+        settings = get_settings()
+        enabled_units = settings.get_enabled_units()
+
+        # Create game state with enabled units from settings
+        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units)
 
         # Store map file for saving
         if map_file_used:
@@ -233,9 +237,6 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
         # Create renderer
         renderer = Renderer(game)
-
-        # Create bots
-        settings = get_settings()
         bots = create_bots_from_config(game, game.player_configs, settings)
 
         # Legacy mode: Ensure bot for player 2 in human_vs_computer
