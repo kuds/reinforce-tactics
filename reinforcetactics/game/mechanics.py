@@ -4,7 +4,7 @@ Core game mechanics including combat, movement, income, and structure capture.
 import random
 
 from reinforcetactics.constants import (
-    COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, HEAL_AMOUNT,
+    COUNTER_ATTACK_MULTIPLIER, PARALYZE_DURATION, PARALYZE_COOLDOWN, HEAL_AMOUNT,
     STRUCTURE_REGEN_RATE, HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME,
     DEFENCE_REDUCTION_PER_POINT, CHARGE_BONUS, CHARGE_MIN_DISTANCE, FLANK_BONUS,
     HASTE_COOLDOWN, ROGUE_EVADE_CHANCE, ROGUE_FOREST_EVADE_BONUS,
@@ -125,6 +125,52 @@ class GameMechanics:
                         adjacent_allies.append(ally)
 
         return adjacent_allies
+
+    @staticmethod
+    def get_healable_allies(cleric, units):
+        """
+        Get list of damaged friendly units within the Cleric's heal range (1-2 tiles).
+
+        Args:
+            cleric: The Cleric unit
+            units: List of all units
+
+        Returns:
+            List of allied units within range 1-2 that are damaged
+        """
+        healable = []
+
+        for ally in units:
+            if ally.player == cleric.player and ally.health > 0 and ally != cleric:
+                # Check distance (range 1-2)
+                distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
+                if 1 <= distance <= 2 and ally.health < ally.max_health:
+                    healable.append(ally)
+
+        return healable
+
+    @staticmethod
+    def get_curable_allies(cleric, units):
+        """
+        Get list of paralyzed friendly units within the Cleric's cure range (1-2 tiles).
+
+        Args:
+            cleric: The Cleric unit
+            units: List of all units
+
+        Returns:
+            List of allied units within range 1-2 that are paralyzed
+        """
+        curable = []
+
+        for ally in units:
+            if ally.player == cleric.player and ally.health > 0 and ally != cleric:
+                # Check distance (range 1-2)
+                distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
+                if 1 <= distance <= 2 and ally.is_paralyzed():
+                    curable.append(ally)
+
+        return curable
 
     @staticmethod
     def get_adjacent_paralyzed_allies(unit, units):
@@ -429,10 +475,14 @@ class GameMechanics:
         if paralyzer.type != 'M':
             return False
 
+        if paralyzer.paralyze_cooldown > 0:
+            return False
+
         if target.player == paralyzer.player:
             return False
 
         target.paralyzed_turns = PARALYZE_DURATION
+        paralyzer.paralyze_cooldown = PARALYZE_COOLDOWN
         return True
 
     @staticmethod
@@ -453,6 +503,11 @@ class GameMechanics:
         if target.player != healer.player:
             return -1
 
+        # Check distance (range 1-2)
+        distance = abs(healer.x - target.x) + abs(healer.y - target.y)
+        if distance < 1 or distance > 2:
+            return -1
+
         if target.health >= target.max_health:
             return -1
 
@@ -467,6 +522,11 @@ class GameMechanics:
             return False
 
         if target.player != curer.player:
+            return False
+
+        # Check distance (range 1-2)
+        distance = abs(curer.x - target.x) + abs(curer.y - target.y)
+        if distance < 1 or distance > 2:
             return False
 
         if not target.is_paralyzed():
@@ -592,6 +652,26 @@ class GameMechanics:
         sorcerer.attack_buff_cooldown = SORCERER_BUFF_COOLDOWN
 
         return True
+
+    @staticmethod
+    def decrement_paralyze_cooldowns(units, player):
+        """
+        Decrement paralyze cooldowns for a player's Mages at turn start.
+
+        Args:
+            units: List of all units
+            player: Player number whose turn is starting
+
+        Returns:
+            List of Mages that came off cooldown
+        """
+        ready = []
+        for unit in units:
+            if unit.player == player and unit.type == 'M' and unit.paralyze_cooldown > 0:
+                unit.paralyze_cooldown -= 1
+                if unit.paralyze_cooldown == 0:
+                    ready.append(unit)
+        return ready
 
     @staticmethod
     def decrement_haste_cooldowns(units, player):

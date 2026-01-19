@@ -965,9 +965,9 @@ class TestRogueForestEvadeBonus:
     """Test Rogue's additional evade chance when in forest."""
 
     def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid, monkeypatch):
-        """Test Rogue in forest evades at 0.30 (above 0.25 but below 0.35)."""
+        """Test Rogue in forest evades at 0.20 (above 0.15 but below 0.25)."""
         import reinforcetactics.game.mechanics as mechanics_module
-        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.30)
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.20)
 
         # Place rogue on forest tile (5, 5)
         rogue = Unit('R', 5, 5, 1)
@@ -975,15 +975,15 @@ class TestRogueForestEvadeBonus:
 
         result = GameMechanics.attack_unit(rogue, target, forest_grid)
 
-        # Should evade because 0.30 < 0.35 (base 0.25 + forest bonus 0.10)
+        # Should evade because 0.20 < 0.25 (base 0.15 + forest bonus 0.10)
         assert result['evade'] is True
         assert result['counter_damage'] == 0
         assert rogue.health == 12
 
     def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid, monkeypatch):
-        """Test Rogue in forest doesn't evade when random is above 0.35."""
+        """Test Rogue in forest doesn't evade when random is above 0.25."""
         import reinforcetactics.game.mechanics as mechanics_module
-        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.40)
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.30)
 
         # Place rogue on forest tile (5, 5)
         rogue = Unit('R', 5, 5, 1)
@@ -991,15 +991,15 @@ class TestRogueForestEvadeBonus:
 
         result = GameMechanics.attack_unit(rogue, target, forest_grid)
 
-        # Should NOT evade because 0.40 > 0.35
+        # Should NOT evade because 0.30 > 0.25
         assert result['evade'] is False
         assert result['counter_damage'] > 0
         assert rogue.health < 12
 
     def test_rogue_evade_on_grass_uses_base_chance(self, simple_grid, monkeypatch):
-        """Test Rogue on grass uses base 25% evade chance, not forest bonus."""
+        """Test Rogue on grass uses base 15% evade chance, not forest bonus."""
         import reinforcetactics.game.mechanics as mechanics_module
-        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.30)
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.20)
 
         # Place rogue on grass tile (not forest)
         rogue = Unit('R', 5, 5, 1)
@@ -1007,7 +1007,7 @@ class TestRogueForestEvadeBonus:
 
         result = GameMechanics.attack_unit(rogue, target, simple_grid)
 
-        # Should NOT evade because 0.30 > 0.25 (base chance without forest bonus)
+        # Should NOT evade because 0.20 > 0.15 (base chance without forest bonus)
         assert result['evade'] is False
         assert result['counter_damage'] > 0
         assert rogue.health < 12
@@ -1147,30 +1147,30 @@ class TestBuffDamageModifiers:
     """Test buff effects on damage calculations."""
 
     def test_attack_buff_increases_damage(self, simple_grid):
-        """Test Attack Buff increases damage by 50%."""
+        """Test Attack Buff increases damage by 35%."""
         attacker = Unit('W', 5, 5, 1)
         attacker.attack_buff_turns = 3  # Has attack buff
         target = Unit('A', 6, 5, 2)  # Archer: 1 defence
 
-        # Warrior (10 attack) with attack buff (+50%) = 15 attack
-        # vs Archer (1 defence, 5% reduction) = 15 * 0.95 = 14.25 → 14 damage
+        # Warrior (10 attack) with attack buff (+35%) = int(10 * 1.35) = 13 attack
+        # vs Archer (1 defence, 5% reduction) = int(13 * 0.95) = 12 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result['attack_buff'] is True
-        assert result['damage'] == 14
+        assert result['damage'] == 12
 
     def test_defence_buff_reduces_damage(self, simple_grid):
-        """Test Defence Buff reduces incoming damage by 50%."""
+        """Test Defence Buff reduces incoming damage by 35%."""
         attacker = Unit('W', 5, 5, 1)
         target = Unit('A', 6, 5, 2)  # Archer: 1 defence
         target.defence_buff_turns = 3  # Has defence buff
 
-        # Warrior (10 attack) vs Archer (1 defence, 5% reduction) = 10 * 0.95 = 9.5 → 9 damage
-        # Then reduced by defence buff (-50%) = 9 * 0.5 = 4.5 → 4 damage (minimum 1)
+        # Warrior (10 attack) vs Archer (1 defence, 5% reduction) = int(10 * 0.95) = 9 damage
+        # Then reduced by defence buff (-35%) = max(1, int(9 * 0.65)) = 5 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result['defence_buff'] is True
-        assert result['damage'] == 4
+        assert result['damage'] == 5
 
     def test_attack_buff_applies_to_counter_attack(self, simple_grid):
         """Test Attack Buff increases counter-attack damage."""
@@ -1178,12 +1178,12 @@ class TestBuffDamageModifiers:
         target = Unit('W', 6, 5, 2)  # Warrior: will counter-attack
         target.attack_buff_turns = 3  # Counter-attacker has attack buff
 
-        # Normal counter: 10 * 0.8 = 8 base, with attack buff: 8 * 1.5 = 12
-        # vs Warrior (6 defence, 30% reduction) = 12 * 0.7 = 8.4 → 8 counter damage
+        # Normal counter: 10 * 0.8 = 8 base, with attack buff: int(8 * 1.35) = 10
+        # vs Warrior (6 defence, 30% reduction) = int(10 * 0.7) = 7 counter damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         # Counter damage should be higher than normal (without buff it would be ~5)
-        assert result['counter_damage'] == 8
+        assert result['counter_damage'] == 7
 
     def test_defence_buff_applies_to_counter_attack_received(self, simple_grid):
         """Test Defence Buff reduces counter-attack damage received."""
@@ -1191,11 +1191,11 @@ class TestBuffDamageModifiers:
         attacker.defence_buff_turns = 3  # Attacker has defence buff
         target = Unit('W', 6, 5, 2)  # Warrior: will counter-attack
 
-        # Counter: 10 * 0.8 = 8 base vs Warrior (6 defence, 30% reduction) = 8 * 0.7 = 5.6 → 5
-        # Then reduced by defence buff (-50%) = 5 * 0.5 = 2.5 → 2 counter damage (minimum 1)
+        # Counter: 10 * 0.8 = 8 base vs Warrior (6 defence, 30% reduction) = int(8 * 0.7) = 5
+        # Then reduced by defence buff (-35%) = max(1, int(5 * 0.65)) = 3 counter damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
-        assert result['counter_damage'] == 2
+        assert result['counter_damage'] == 3
 
 
 class TestBuffCooldownDecrement:

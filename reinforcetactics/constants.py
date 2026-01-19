@@ -100,7 +100,7 @@ UNIT_DATA = {
         'static_path': 'mage.png',
         'animation_path': 'mage',
         'name': 'Mage',
-        'cost': 250,
+        'cost': 300,
         'color': (138, 43, 226),
         'movement': 2,
         'health': 10,
@@ -155,7 +155,7 @@ UNIT_DATA = {
         'static_path': 'rogue.png',
         'animation_path': 'rogue',
         'name': 'Rogue',
-        'cost': 300,
+        'cost': 350,
         'color': (64, 64, 64),
         'movement': 4,
         'health': 12,
@@ -166,7 +166,7 @@ UNIT_DATA = {
         'static_path': 'sorcerer.png',
         'animation_path': 'sorcerer',
         'name': 'Sorcerer',
-        'cost': 300,
+        'cost': 450,
         'color': (0, 191, 255),
         'movement': 2,
         'health': 10,
@@ -199,21 +199,22 @@ DEFENCE_REDUCTION_PER_POINT = 0.05  # Each defence point reduces damage by 5%
 CHARGE_BONUS = 0.5  # Knight: +50% damage if moved 3+ tiles
 CHARGE_MIN_DISTANCE = 3  # Minimum tiles moved to trigger Charge
 FLANK_BONUS = 0.5  # Rogue: +50% damage if enemy is adjacent to a friendly unit
-ROGUE_EVADE_CHANCE = 0.25  # Rogue: 25% chance to dodge counter-attacks
+ROGUE_EVADE_CHANCE = 0.15  # Rogue: 15% chance to dodge counter-attacks
 
 # Status effects
 PARALYZE_DURATION = 3
+PARALYZE_COOLDOWN = 2  # Turns before Mage can use Paralyze again
 HEAL_AMOUNT = 5
 HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
 
 # Rogue forest bonus
-ROGUE_FOREST_EVADE_BONUS = 0.10  # Additional 10% dodge chance when in forest (25% + 10% = 35%)
+ROGUE_FOREST_EVADE_BONUS = 0.10  # Additional 10% dodge chance when in forest (15% + 10% = 25%)
 
 # Sorcerer buff abilities
 SORCERER_BUFF_DURATION = 3  # Turns the buff lasts
 SORCERER_BUFF_COOLDOWN = 3  # Turns before Sorcerer can use buff again
-SORCERER_DEFENCE_BUFF_AMOUNT = 0.50  # 50% damage reduction
-SORCERER_ATTACK_BUFF_AMOUNT = 0.50  # 50% damage increase
+SORCERER_DEFENCE_BUFF_AMOUNT = 0.35  # 35% damage reduction
+SORCERER_ATTACK_BUFF_AMOUNT = 0.35  # 35% damage increase
 
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility
