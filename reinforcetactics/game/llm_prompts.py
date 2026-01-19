@@ -50,7 +50,7 @@ UNIT TYPES:
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (25% in forest)
-7. Sorcerer (S): Cost 450 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
@@ -151,7 +151,7 @@ UNIT TYPES:
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (25% in forest)
-7. Sorcerer (S): Cost 450 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
@@ -456,7 +456,7 @@ UNIT_DESCRIPTIONS = {
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (25% in forest)""",
-    'S': """Sorcerer (S): Cost 450 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+    'S': """Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)

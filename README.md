@@ -94,7 +94,7 @@ bot = ClaudeBot(game, player=2, model='claude-3-5-haiku-20241022')
 | Archer | 250 | 3 | 15 | Ranged 2-3 tiles (+1 on mountains) |
 | Knight | 350 | 4 | 18 | Charge (+50% dmg if moved 3+ tiles) |
 | Rogue | 350 | 4 | 12 | Flank (+50% dmg), Evade (15% dodge, 25% in forest) |
-| Sorcerer | 450 | 2 | 10 | Haste, Attack/Defence Buff (+35%) |
+| Sorcerer | 400 | 2 | 10 | Haste, Attack/Defence Buff (+35%) |
 | Barbarian | 400 | 5 | 20 | Fast, high-damage melee |
 
 **Win Conditions**: Capture enemy HQ or eliminate all enemy units

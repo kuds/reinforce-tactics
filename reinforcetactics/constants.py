@@ -166,7 +166,7 @@ UNIT_DATA = {
         'static_path': 'sorcerer.png',
         'animation_path': 'sorcerer',
         'name': 'Sorcerer',
-        'cost': 450,
+        'cost': 400,
         'color': (0, 191, 255),
         'movement': 2,
         'health': 10,
