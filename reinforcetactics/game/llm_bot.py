@@ -19,6 +19,7 @@ from reinforcetactics.game.llm_prompts import (
     PROMPT_TWO_PHASE_PLAN,
     PROMPT_TWO_PHASE_EXECUTE,
     get_prompt,
+    get_dynamic_prompt,
 )
 
 # Configure logging
@@ -328,6 +329,44 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 ', '.join(supported_models[:5]) + '...'
             )
 
+    def _get_effective_system_prompt(self) -> str:
+        """
+        Get the effective system prompt considering enabled units.
+
+        If some units are disabled, appends a note to the system prompt
+        informing the LLM about the restricted unit types.
+
+        Returns:
+            The system prompt with any disabled unit information appended.
+        """
+        # Get enabled units from game state
+        enabled_units = getattr(self.game_state, 'enabled_units', None)
+
+        # If all units are enabled or enabled_units is not set, use original prompt
+        all_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        if enabled_units is None or set(enabled_units) == set(all_units):
+            return self.system_prompt
+
+        # Find disabled units
+        disabled_units = [u for u in all_units if u not in enabled_units]
+
+        if not disabled_units:
+            return self.system_prompt
+
+        # Get unit names for disabled units
+        disabled_names = [UNIT_DATA[u]['name'] for u in disabled_units]
+
+        # Append disabled units note to the system prompt
+        disabled_note = (
+            f"\n\nIMPORTANT - DISABLED UNITS:\n"
+            f"The following unit types are DISABLED for this game and cannot be created: "
+            f"{', '.join(disabled_names)} ({', '.join(disabled_units)}).\n"
+            f"Do NOT attempt to create these units. Only the following units are available: "
+            f"{', '.join([UNIT_DATA[u]['name'] for u in enabled_units])} ({', '.join(enabled_units)})."
+        )
+
+        return self.system_prompt + disabled_note
+
     def _log_conversation_to_json(self, system_prompt: str, user_prompt: str,
                                    assistant_response: str,
                                    input_tokens: int = 0,
@@ -483,7 +522,8 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 plan=json.dumps(strategic_plan, indent=2)
             )
         else:
-            execution_system_prompt = self.system_prompt
+            # Use the effective prompt that includes disabled unit information
+            execution_system_prompt = self._get_effective_system_prompt()
 
         # Get LLM response with retries
         response_text = self._call_llm_with_retry(execution_system_prompt, user_prompt)
@@ -688,6 +728,9 @@ Respond with your strategic plan in JSON format."""
         if self.game_state.map_file_used:
             map_name = Path(self.game_state.map_file_used).stem
 
+        # Get enabled units (for informing LLM which units can be created)
+        enabled_units = getattr(self.game_state, 'enabled_units', ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'])
+
         return {
             'map_name': map_name,
             'map_width': self.game_state.original_map_width,
@@ -697,6 +740,7 @@ Respond with your strategic plan in JSON format."""
             'opponent_gold': self.game_state.player_gold[
                 1 if self.bot_player == 2 else 2
             ],
+            'enabled_units': enabled_units,
             'player_units': player_units,
             'enemy_units': enemy_units,
             'player_buildings': player_buildings,

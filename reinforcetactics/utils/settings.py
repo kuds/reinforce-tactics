@@ -41,6 +41,10 @@ class Settings:
             'openai': '',
             'anthropic': '',
             'google': ''
+        },
+        'game': {
+            # All 8 unit types enabled by default
+            'enabled_units': ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
         }
     }
 
@@ -178,6 +182,61 @@ class Settings:
             self.settings['llm_api_keys'] = {}
         self.settings['llm_api_keys'][provider] = api_key
         self.save()
+
+    def get_enabled_units(self):
+        """
+        Get list of enabled unit types.
+
+        Returns:
+            List of enabled unit type codes (e.g., ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'])
+        """
+        if 'game' not in self.settings:
+            self.settings['game'] = {'enabled_units': ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']}
+        return self.settings['game'].get('enabled_units', ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'])
+
+    def set_enabled_units(self, unit_types):
+        """
+        Set list of enabled unit types.
+
+        Args:
+            unit_types: List of unit type codes to enable (e.g., ['W', 'M', 'C'])
+        """
+        if 'game' not in self.settings:
+            self.settings['game'] = {}
+        self.settings['game']['enabled_units'] = unit_types
+        self.save()
+
+    def is_unit_enabled(self, unit_type):
+        """
+        Check if a specific unit type is enabled.
+
+        Args:
+            unit_type: Unit type code (e.g., 'W', 'M', 'C')
+
+        Returns:
+            True if unit is enabled, False otherwise
+        """
+        return unit_type in self.get_enabled_units()
+
+    def toggle_unit(self, unit_type):
+        """
+        Toggle a unit type on/off.
+
+        Args:
+            unit_type: Unit type code (e.g., 'W', 'M', 'C')
+
+        Returns:
+            True if unit is now enabled, False if now disabled
+        """
+        enabled = self.get_enabled_units()
+        if unit_type in enabled:
+            enabled.remove(unit_type)
+            result = False
+        else:
+            enabled.append(unit_type)
+            result = True
+        self.set_enabled_units(enabled)
+        return result
 
 
 # Global settings instance

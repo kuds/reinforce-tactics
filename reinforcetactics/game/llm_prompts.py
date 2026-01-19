@@ -429,3 +429,225 @@ def register_prompt(name: str, prompt: str) -> None:
         >>> prompt = get_prompt("my_custom")
     """
     PROMPT_REGISTRY[name] = prompt
+
+
+# =============================================================================
+# DYNAMIC UNIT DESCRIPTIONS - For filtering based on enabled units
+# =============================================================================
+
+# Full descriptions for each unit type
+UNIT_DESCRIPTIONS = {
+    'W': """Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
+   - Strong melee fighter, attacks adjacent enemies only""",
+    'M': """Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
+   - Can attack at range (1-2 spaces)
+   - Can PARALYZE enemies (disable them for 3 turns)""",
+    'C': """Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
+   - Can HEAL allies and CURE paralyzed units""",
+    'A': """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
+   - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
+   - Cannot attack adjacent enemies (distance 0-1)
+   - Indirect unit: melee units cannot counter-attack when hit by Archer
+   - Other Archers, Mages, and Sorcerers CAN counter-attack if Archer is within their range""",
+    'K': """Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
+   - Heavy cavalry unit with high mobility
+   - CHARGE: +50% damage if moved 3+ tiles before attacking""",
+    'R': """Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+   - Fast melee assassin
+   - FLANK: +50% damage if target is adjacent to another friendly unit
+   - EVADE: 25% chance to dodge counter-attacks (35% in forest)""",
+    'S': """Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - Support caster with ranged attacks (1-2 spaces)
+   - HASTE: Grant an ally an extra action (3-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)""",
+    'B': """Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
+   - High HP glass cannon with excellent mobility
+   - Best for rapid strikes and flanking maneuvers"""
+}
+
+# Short descriptions for two-phase prompts
+UNIT_DESCRIPTIONS_SHORT = {
+    'W': "Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement",
+    'M': "Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies, 10 HP, 2 movement",
+    'C': "Cleric (C): Support unit, can HEAL allies and CURE paralysis, 8 HP, 2 movement",
+    'A': "Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement",
+    'K': "Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement",
+    'R': "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (25% dodge), 12 HP, 4 movement",
+    'S': "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF allies, 10 HP, 2 movement",
+    'B': "Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement"
+}
+
+# Strategy tips specific to each unit
+UNIT_STRATEGY_TIPS = {
+    'M': "Mages can disable key enemy units with paralyze",
+    'C': "Clerics keep your army healthy and mobile",
+    'A': "Archers are excellent for safe ranged attacks, especially from mountains",
+    'K': "Knights excel at charging into battle after long moves",
+    'R': "Rogues work best when flanking enemies with allies",
+    'S': "Sorcerers can buff allies or haste them for extra actions",
+    'B': "Barbarians have high HP and mobility for rapid strikes"
+}
+
+
+def get_unit_types_section(enabled_units: list) -> str:
+    """
+    Generate the UNIT TYPES section of the prompt based on enabled units.
+
+    Args:
+        enabled_units: List of enabled unit type codes (e.g., ['W', 'M', 'C'])
+
+    Returns:
+        Formatted string with unit type descriptions
+    """
+    if not enabled_units:
+        enabled_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    lines = ["UNIT TYPES:"]
+    for i, unit_type in enumerate(enabled_units, 1):
+        if unit_type in UNIT_DESCRIPTIONS:
+            lines.append(f"{i}. {UNIT_DESCRIPTIONS[unit_type]}")
+
+    return "\n".join(lines)
+
+
+def get_unit_types_section_short(enabled_units: list) -> str:
+    """
+    Generate a short UNIT TYPES section for two-phase prompts.
+
+    Args:
+        enabled_units: List of enabled unit type codes
+
+    Returns:
+        Formatted string with short unit descriptions
+    """
+    if not enabled_units:
+        enabled_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    lines = ["UNIT TYPES (for reference):"]
+    for unit_type in enabled_units:
+        if unit_type in UNIT_DESCRIPTIONS_SHORT:
+            lines.append(f"- {UNIT_DESCRIPTIONS_SHORT[unit_type]}")
+
+    return "\n".join(lines)
+
+
+def get_strategy_tips(enabled_units: list) -> str:
+    """
+    Generate strategy tips based on enabled units.
+
+    Args:
+        enabled_units: List of enabled unit type codes
+
+    Returns:
+        Formatted string with relevant strategy tips
+    """
+    if not enabled_units:
+        enabled_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    lines = [
+        "STRATEGY TIPS:",
+        "- Balance economy (capturing buildings) with military (building units)",
+        "- Protect your HQ at all costs"
+    ]
+
+    for unit_type in enabled_units:
+        if unit_type in UNIT_STRATEGY_TIPS:
+            lines.append(f"- {UNIT_STRATEGY_TIPS[unit_type]}")
+
+    lines.append("- Position units to protect each other")
+
+    return "\n".join(lines)
+
+
+def get_available_actions_section(enabled_units: list) -> str:
+    """
+    Generate the AVAILABLE ACTIONS section based on enabled units.
+
+    Args:
+        enabled_units: List of enabled unit type codes
+
+    Returns:
+        Formatted string with available actions
+    """
+    if not enabled_units:
+        enabled_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    lines = [
+        "AVAILABLE ACTIONS:",
+        "1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)",
+        "2. MOVE: Move a unit to a reachable position (up to movement range)",
+        "3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)"
+    ]
+
+    action_num = 4
+
+    # Add unit-specific actions
+    if 'M' in enabled_units:
+        lines.append(f"{action_num}. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2")
+        action_num += 1
+
+    if 'C' in enabled_units:
+        lines.append(f"{action_num}. HEAL: (Cleric only) Heal an adjacent ally unit")
+        action_num += 1
+        lines.append(f"{action_num}. CURE: (Cleric only) Remove paralysis from an adjacent ally")
+        action_num += 1
+
+    if 'S' in enabled_units:
+        lines.append(f"{action_num}. HASTE: (Sorcerer only) Grant an ally an extra action this turn")
+        action_num += 1
+        lines.append(f"{action_num}. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns")
+        action_num += 1
+        lines.append(f"{action_num}. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns")
+        action_num += 1
+
+    lines.append(f"{action_num}. SEIZE: Capture a neutral/enemy structure by standing on it")
+    action_num += 1
+    lines.append(f"{action_num}. END_TURN: Finish your turn")
+    action_num += 1
+    lines.append(f"{action_num}. RESIGN: Concede the game (use only as last resort when victory is impossible)")
+
+    return "\n".join(lines)
+
+
+def get_dynamic_prompt(base_prompt_name: str, enabled_units: list) -> str:
+    """
+    Get a prompt with unit sections dynamically filtered based on enabled units.
+
+    Args:
+        base_prompt_name: Name of the base prompt ('basic', 'strategic', etc.)
+        enabled_units: List of enabled unit type codes
+
+    Returns:
+        Prompt string with only enabled units mentioned
+    """
+    base_prompt = get_prompt(base_prompt_name)
+
+    # If all units are enabled, return the original prompt
+    all_units = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+    if set(enabled_units) == set(all_units):
+        return base_prompt
+
+    # Generate dynamic sections
+    unit_types_section = get_unit_types_section(enabled_units)
+    available_actions_section = get_available_actions_section(enabled_units)
+    strategy_tips_section = get_strategy_tips(enabled_units)
+
+    # For basic and strategic prompts, we need to replace sections
+    # This is a simplified approach - for production, consider using templates
+    disabled_units_note = ""
+    disabled = [u for u in all_units if u not in enabled_units]
+    if disabled:
+        from reinforcetactics.constants import UNIT_DATA
+        disabled_names = [UNIT_DATA[u]['name'] for u in disabled]
+        disabled_units_note = f"\nNOTE: The following units are DISABLED for this game and cannot be created: {', '.join(disabled_names)}\n"
+
+    # Add the disabled units note near the beginning of the prompt
+    if disabled_units_note:
+        # Insert after the game objective section
+        if "GAME OBJECTIVE:" in base_prompt:
+            parts = base_prompt.split("UNIT TYPES:", 1)
+            if len(parts) == 2:
+                return parts[0] + disabled_units_note + "\n" + unit_types_section + "\n" + parts[1].split("\n\n", 1)[-1]
+
+    return base_prompt

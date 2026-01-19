@@ -113,7 +113,8 @@ def make_maskable_env(
     render_mode: Optional[str] = None,
     max_steps: int = 500,
     reward_config: Optional[Dict[str, float]] = None,
-    track_stats: bool = False
+    track_stats: bool = False,
+    enabled_units: Optional[List[str]] = None
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -125,6 +126,7 @@ def make_maskable_env(
         max_steps: Maximum steps per episode
         reward_config: Custom reward configuration
         track_stats: Whether to track action masking statistics
+        enabled_units: List of enabled unit types (default all)
 
     Returns:
         ActionMaskedEnv ready for training
@@ -139,7 +141,8 @@ def make_maskable_env(
         opponent=opponent,
         render_mode=render_mode,
         max_steps=max_steps,
-        reward_config=reward_config
+        reward_config=reward_config,
+        enabled_units=enabled_units
     )
     return ActionMaskedEnv(env, track_stats=track_stats)
 
@@ -150,7 +153,8 @@ def _make_env_fn(
     map_file: Optional[str],
     opponent: str,
     max_steps: int,
-    reward_config: Optional[Dict[str, float]]
+    reward_config: Optional[Dict[str, float]],
+    enabled_units: Optional[List[str]] = None
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -163,7 +167,8 @@ def _make_env_fn(
             opponent=opponent,
             render_mode=None,  # No rendering in vectorized envs
             max_steps=max_steps,
-            reward_config=reward_config
+            reward_config=reward_config,
+            enabled_units=enabled_units
         )
         env.reset(seed=seed + rank)
         wrapped = ActionMaskedEnv(env)
@@ -178,7 +183,8 @@ def make_maskable_vec_env(
     max_steps: int = 500,
     reward_config: Optional[Dict[str, float]] = None,
     seed: int = 0,
-    use_subprocess: bool = True
+    use_subprocess: bool = True,
+    enabled_units: Optional[List[str]] = None
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -194,6 +200,7 @@ def make_maskable_vec_env(
         reward_config: Custom reward configuration
         seed: Random seed (each env gets seed + rank)
         use_subprocess: Use SubprocVecEnv (True) or DummyVecEnv (False)
+        enabled_units: List of enabled unit types (default all)
 
     Returns:
         Vectorized environment ready for MaskablePPO
@@ -215,7 +222,7 @@ def make_maskable_vec_env(
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     env_fns = [
-        _make_env_fn(i, seed, map_file, opponent, max_steps, reward_config)
+        _make_env_fn(i, seed, map_file, opponent, max_steps, reward_config, enabled_units)
         for i in range(n_envs)
     ]
 
