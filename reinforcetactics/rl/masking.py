@@ -54,7 +54,7 @@ class ActionMaskedEnv(gym.Wrapper):
             self.stats = {
                 'total_actions': 0,
                 'masked_actions_attempted': 0,
-                'action_type_distribution': np.zeros(8),
+                'action_type_distribution': np.zeros(10),
             }
 
     def action_masks(self) -> np.ndarray:
@@ -250,7 +250,7 @@ def validate_action_mask(env: StrategyGameEnv) -> Dict[str, Any]:
     }
 
     # Check each mask dimension
-    action_type_names = ['create', 'move', 'attack', 'seize', 'heal', 'end_turn', 'paralyze', 'haste']
+    action_type_names = ['create', 'move', 'attack', 'seize', 'heal', 'end_turn', 'paralyze', 'haste', 'defence_buff', 'attack_buff']
 
     for i, name in enumerate(action_type_names):
         mask_enabled = masks[0][i]

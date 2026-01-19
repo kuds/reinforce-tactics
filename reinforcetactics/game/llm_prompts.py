@@ -35,14 +35,29 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for turns)
+   - Can PARALYZE enemies (disable them for 3 turns)
 3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
    - Can HEAL allies and CURE paralyzed units
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
-   - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
-   - Cannot attack adjacent enemies (distance 0)
+   - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
+   - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
-   - Other Archers and Mages CAN counter-attack if Archer is within their range
+   - Other Archers, Mages, and Sorcerers CAN counter-attack if Archer is within their range
+5. Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
+   - Heavy cavalry unit with high mobility
+   - CHARGE: +50% damage if moved 3+ tiles before attacking
+6. Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+   - Fast melee assassin
+   - FLANK: +50% damage if target is adjacent to another friendly unit
+   - EVADE: 25% chance to dodge counter-attacks (35% in forest)
+7. Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - Support caster with ranged attacks (1-2 spaces)
+   - HASTE: Grant an ally an extra action (3-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)
+8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
+   - High HP glass cannon with excellent mobility
+   - Best for rapid strikes and flanking maneuvers
 
 BUILDING TYPES:
 - HQ (h): Generates 150 gold/turn, losing it means defeat
@@ -52,21 +67,27 @@ BUILDING TYPES:
 AVAILABLE ACTIONS:
 1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
 2. MOVE: Move a unit to a reachable position (up to movement range)
-3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer)
-4. PARALYZE: (Mage only) Paralyze an adjacent enemy unit
+3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
+4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
 5. HEAL: (Cleric only) Heal an adjacent ally unit
 6. CURE: (Cleric only) Remove paralysis from an adjacent ally
-7. SEIZE: Capture a neutral/enemy structure by standing on it
-8. END_TURN: Finish your turn
-9. RESIGN: Concede the game (use only as last resort when victory is impossible)
+7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
+10. SEIZE: Capture a neutral/enemy structure by standing on it
+11. END_TURN: Finish your turn
+12. RESIGN: Concede the game (use only as last resort when victory is impossible)
 
 COMBAT RULES:
 - Most units can only attack adjacent enemies (orthogonally, not diagonally)
-- Mages can attack at range 1-2, Archers at range 1-2 (or 1-3 on mountains)
-- Archers cannot attack at distance 0 (adjacent)
+- Mages and Sorcerers can attack at range 1-2, Archers at range 2-3 (or 2-4 on mountains)
+- Archers cannot attack at distance 0-1 (adjacent or very close)
 - Attacked units counter-attack if they can, except melee units cannot counter Archers
 - Paralyzed units cannot move or attack
-- Units can move then attack, or attack then move (if they survive counter)
+- Units can move then attack, but NOT attack then move (action ends unit's turn)
+- Knight's Charge: +50% damage if moved 3+ tiles before attacking
+- Rogue's Flank: +50% damage if target is adjacent to friendly unit
+- Rogue's Evade: 25% dodge chance (35% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -79,6 +100,10 @@ STRATEGY TIPS:
 - Mages can disable key enemy units with paralyze
 - Clerics keep your army healthy and mobile
 - Archers are excellent for safe ranged attacks, especially from mountains
+- Knights excel at charging into battle after long moves
+- Rogues work best when flanking enemies with allies
+- Sorcerers can buff allies or haste them for extra actions
+- Barbarians have high HP and mobility for rapid strikes
 - Position units to protect each other
 
 WHEN TO RESIGN:
@@ -111,14 +136,29 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for turns)
+   - Can PARALYZE enemies (disable them for 3 turns)
 3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
    - Can HEAL allies and CURE paralyzed units
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
-   - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
-   - Cannot attack adjacent enemies (distance 0)
+   - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
+   - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
-   - Other Archers and Mages CAN counter-attack if Archer is within their range
+   - Other Archers, Mages, and Sorcerers CAN counter-attack if Archer is within their range
+5. Knight (K): Cost 350 gold, HP 18, Attack 8, Defense 5, Movement 4
+   - Heavy cavalry unit with high mobility
+   - CHARGE: +50% damage if moved 3+ tiles before attacking
+6. Rogue (R): Cost 300 gold, HP 12, Attack 9, Defense 3, Movement 4
+   - Fast melee assassin
+   - FLANK: +50% damage if target is adjacent to another friendly unit
+   - EVADE: 25% chance to dodge counter-attacks (35% in forest)
+7. Sorcerer (S): Cost 300 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+   - Support caster with ranged attacks (1-2 spaces)
+   - HASTE: Grant an ally an extra action (3-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (3-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (3-turn cooldown)
+8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
+   - High HP glass cannon with excellent mobility
+   - Best for rapid strikes and flanking maneuvers
 
 BUILDING TYPES:
 - HQ (h): Generates 150 gold/turn, losing it means defeat
@@ -128,21 +168,27 @@ BUILDING TYPES:
 AVAILABLE ACTIONS:
 1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
 2. MOVE: Move a unit to a reachable position (up to movement range)
-3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer)
-4. PARALYZE: (Mage only) Paralyze an adjacent enemy unit
+3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
+4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
 5. HEAL: (Cleric only) Heal an adjacent ally unit
 6. CURE: (Cleric only) Remove paralysis from an adjacent ally
-7. SEIZE: Capture a neutral/enemy structure by standing on it
-8. END_TURN: Finish your turn
-9. RESIGN: Concede the game (use only as last resort when victory is impossible)
+7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
+10. SEIZE: Capture a neutral/enemy structure by standing on it
+11. END_TURN: Finish your turn
+12. RESIGN: Concede the game (use only as last resort when victory is impossible)
 
 COMBAT RULES:
 - Most units can only attack adjacent enemies (orthogonally, not diagonally)
-- Mages can attack at range 1-2, Archers at range 1-2 (or 1-3 on mountains)
-- Archers cannot attack at distance 0 (adjacent)
+- Mages and Sorcerers can attack at range 1-2, Archers at range 2-3 (or 2-4 on mountains)
+- Archers cannot attack at distance 0-1 (adjacent or very close)
 - Attacked units counter-attack if they can, except melee units cannot counter Archers
 - Paralyzed units cannot move or attack
-- Units can move then attack, or attack then move (if they survive counter)
+- Units can move then attack, but NOT attack then move (action ends unit's turn)
+- Knight's Charge: +50% damage if moved 3+ tiles before attacking
+- Rogue's Flank: +50% damage if target is adjacent to friendly unit
+- Rogue's Evade: 25% dodge chance (35% in forest)
 
 ECONOMY:
 - You earn gold from buildings you control at the start of each turn
@@ -190,6 +236,10 @@ STRATEGY TIPS:
 - Mages can disable key enemy units with paralyze
 - Clerics keep your army healthy and mobile
 - Archers are excellent for safe ranged attacks, especially from mountains
+- Knights excel at charging into battle after long moves
+- Rogues work best when flanking enemies with allies
+- Sorcerers can buff allies or haste them for extra actions
+- Barbarians have high HP and mobility for rapid strikes
 - Position units to protect each other
 
 WHEN TO RESIGN:
@@ -220,7 +270,11 @@ UNIT TYPES (for reference):
 - Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement
 - Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies, 10 HP, 2 movement
 - Cleric (C): Support unit, can HEAL allies and CURE paralysis, 8 HP, 2 movement
-- Archer (A): Ranged (1-2, or 1-3 from mountains), cannot attack adjacent, 15 HP, 3 movement
+- Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement
+- Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement
+- Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (25% dodge), 12 HP, 4 movement
+- Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF allies, 10 HP, 2 movement
+- Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
 BUILDING TYPES:
 - HQ (h): 150 gold/turn, losing it = defeat

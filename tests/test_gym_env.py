@@ -992,7 +992,7 @@ class TestActionMasking:
 
         # Expected shapes based on action space
         expected_shapes = [
-            8,                          # action_type
+            10,                         # action_type (0-9: create, move, attack, seize, heal, end_turn, paralyze, haste, defence_buff, attack_buff)
             8,                          # unit_type
             env_default.grid_width,     # from_x
             env_default.grid_height,    # from_y
