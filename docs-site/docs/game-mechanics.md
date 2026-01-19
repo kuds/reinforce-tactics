@@ -10,7 +10,7 @@ This page provides detailed information about the game mechanics, units, structu
 
 ## Units
 
-Reinforce Tactics features **4 distinct unit types**, each with unique abilities and tactical roles:
+Reinforce Tactics features **8 distinct unit types**, each with unique abilities and tactical roles:
 
 ### Unit Statistics
 
@@ -20,6 +20,10 @@ Reinforce Tactics features **4 distinct unit types**, each with unique abilities
 | **Mage** | M | 250 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns |
 | **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP), Can CURE paralyzed units |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
+| **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
+| **Rogue** | R | 300 | 12 | 4 | 9 | 3 | FLANK: +50% damage if enemy is adjacent to an ally, EVADE: 25% dodge chance (35% in forest) |
+| **Sorcerer** | S | 300 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE allies, DEFENCE BUFF (-50% damage taken), ATTACK BUFF (+50% damage dealt) |
+| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High mobility melee fighter, No special abilities |
 
 ### Unit Details
 
@@ -59,6 +63,48 @@ Reinforce Tactics features **4 distinct unit types**, each with unique abilities
   - **Mountain bonus**: +1 attack range when on mountains (range becomes 2-4)
   - Melee units cannot counter-attack Archers
 - **Best for**: Harassing enemies from safe distance, especially effective when positioned on mountains
+
+#### Knight (K)
+- **Role**: Mobile heavy cavalry
+- **Cost**: $350
+- **Stats**: 18 HP, 4 Movement, 8 Attack, 5 Defence
+- **Abilities**:
+  - **CHARGE**: Deals +50% damage if the Knight moved 3 or more tiles before attacking
+  - Good balance of mobility, durability, and damage
+- **Best for**: Flanking maneuvers and devastating charge attacks on key targets
+
+#### Rogue (R)
+- **Role**: Agile assassin
+- **Cost**: $300
+- **Stats**: 12 HP, 4 Movement, 9 Attack, 3 Defence
+- **Abilities**:
+  - **FLANK**: Deals +50% damage when attacking an enemy that is adjacent to one of your other units
+  - **EVADE**: 25% chance to completely dodge counter-attacks
+  - **Forest bonus**: Evade chance increases to 35% when standing in forest terrain
+- **Best for**: Coordinated attacks with other units to maximize flank damage, hit-and-run tactics
+
+#### Sorcerer (S)
+- **Role**: Support caster with buffs
+- **Cost**: $300
+- **Stats**: 10 HP, 2 Movement, 6/8 Attack (adjacent/range), 3 Defence
+- **Abilities**:
+  - Attacks at distance 1 (adjacent): 6 damage
+  - Attacks at distance 2 (range): 8 damage
+  - **HASTE**: Grant an ally an extra action this turn (range 1-2, 3 turn cooldown)
+  - **DEFENCE BUFF**: Target ally takes 50% less damage for 3 turns (range 1-2, 3 turn cooldown)
+  - **ATTACK BUFF**: Target ally deals 50% more damage for 3 turns (range 1-2, 3 turn cooldown)
+- **Best for**: Empowering key units with buffs, enabling powerful combos with Haste
+
+#### Barbarian (B)
+- **Role**: High-speed berserker
+- **Cost**: $400
+- **Stats**: 20 HP, 5 Movement, 10 Attack, 2 Defence
+- **Abilities**:
+  - Highest movement speed in the game (5 tiles)
+  - Highest base health (20 HP)
+  - Strong attack power (10 damage)
+  - Low defence makes them vulnerable to focused fire
+- **Best for**: Rapid strikes, chasing down ranged units, and overwhelming enemies with speed
 
 ## Structures
 
@@ -127,6 +173,36 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Each heal action restores **5 HP** (`HEAL_AMOUNT = 5`)
 - Units cannot be healed above their maximum HP
 
+#### Haste
+- Sorcerers can grant Haste to friendly units within range 1-2
+- Hasted units can take an additional action this turn
+- After using Haste, the Sorcerer has a **3 turn cooldown** (`HASTE_COOLDOWN = 3`)
+
+#### Defence Buff
+- Sorcerers can grant Defence Buff to friendly units within range 1-2
+- Buffed units take **50% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.50`)
+- After using Defence Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
+
+#### Attack Buff
+- Sorcerers can grant Attack Buff to friendly units within range 1-2
+- Buffed units deal **50% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.50`)
+- After using Attack Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
+
+### Combat Abilities
+
+#### Charge (Knight)
+- Knights deal **+50% damage** when attacking after moving 3 or more tiles (`CHARGE_BONUS = 0.5`)
+- The Knight must move at least **3 tiles** (`CHARGE_MIN_DISTANCE = 3`) before attacking to trigger Charge
+- Charge bonus is applied automatically when the condition is met
+
+#### Flank (Rogue)
+- Rogues deal **+50% damage** when attacking an enemy that is adjacent to one of your other units (`FLANK_BONUS = 0.5`)
+- Positioning is key: coordinate your units to enable flanking attacks
+
+#### Evade (Rogue)
+- Rogues have a **25% chance** to completely dodge counter-attacks (`ROGUE_EVADE_CHANCE = 0.25`)
+- **Forest bonus**: When standing in forest terrain, evade chance increases by 10% to **35%** total (`ROGUE_FOREST_EVADE_BONUS = 0.10`)
+
 ## Terrain Bonuses
 
 ### Mountain Bonus for Archers
@@ -134,6 +210,12 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Normal range: 2-3 spaces
 - Mountain range: 2-4 spaces (+1 maximum range)
 - This bonus is automatically applied when checking attack range and calculating attackable enemies
+
+### Forest Bonus for Rogues
+- When a Rogue is positioned on a forest tile, their evade chance is increased
+- Normal evade: 25% dodge chance
+- Forest evade: 35% dodge chance (+10% bonus)
+- This bonus is automatically applied when calculating counter-attack outcomes
 
 ## Game Rules
 
@@ -160,22 +242,29 @@ Structures provide income and serve as strategic objectives. They can be capture
 ## Strategic Tips
 
 ### Unit Composition
-- **Balance your army**: Mix melee units (Warriors) with ranged units (Mages, Archers) and support (Clerics)
-- **Protect support units**: Keep Clerics and Archers behind your frontline
-- **Use terrain**: Position Archers on mountains for extended range
+- **Balance your army**: Mix melee units (Warriors, Knights, Barbarians) with ranged units (Mages, Archers, Sorcerers) and support (Clerics)
+- **Protect support units**: Keep Clerics, Sorcerers, and Archers behind your frontline
+- **Use terrain**: Position Archers on mountains for extended range, and Rogues in forests for increased evasion
 
 ### Economy Management
 - **Capture structures early**: More income means more units
 - **Protect your structures**: Losing income puts you at a disadvantage
-- **Consider unit costs**: Warriors and Clerics are cost-effective; Mages and Archers are more specialized
+- **Consider unit costs**: Warriors and Clerics ($200) are cost-effective; Knights ($350) and Barbarians ($400) are expensive but powerful
 
 ### Combat Tactics
 - **Use Mages to disable**: Paralyze key enemy units before engaging
 - **Heal efficiently**: Keep your units healthy with Clerics to maximize their effectiveness
 - **Archer positioning**: Keep Archers at range 2-3 to avoid counter-attacks
 - **Counter-attack advantage**: Let enemies attack into your defensive positions when possible
+- **Knight charges**: Position Knights far from enemies to maximize charge damage (+50%)
+- **Rogue flanking**: Coordinate your units to enable Rogue flanking attacks (+50% damage)
+- **Sorcerer buffs**: Use Haste on high-value units for devastating double actions
 
 ### Advanced Tactics
 - **Mountain control**: Fight for mountain tiles to give your Archers extended range
+- **Forest control**: Position Rogues in forests for 35% evasion chance
 - **Structure denial**: Capture or destroy enemy structures to starve their economy
 - **Unit synergy**: Combine paralysis (Mage) with healing (Cleric) to maintain board control
+- **Buff combos**: Use Sorcerer's Attack Buff on Knights before a charge for massive damage
+- **Barbarian raids**: Use Barbarians' high movement (5) to quickly capture distant structures or hunt down ranged units
+- **Haste combos**: Use Sorcerer's Haste to let units move, attack, and move again for repositioning
