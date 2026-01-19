@@ -767,10 +767,11 @@ class TestRogueFlankAbility:
 class TestRogueEvadeAbility:
     """Test Rogue's Evade ability (25% dodge counter-attacks)."""
 
-    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid, mocker):
+    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid, monkeypatch):
         """Test Rogue evades counter-attack when random roll is below 0.25."""
         # Mock random.random to return a value below 0.25
-        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.1)
+        import reinforcetactics.game.mechanics as mechanics_module
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.1)
 
         rogue = Unit('R', 5, 5, 1)
         target = Unit('W', 6, 5, 2)  # Warrior can counter-attack
@@ -781,10 +782,11 @@ class TestRogueEvadeAbility:
         assert result['counter_damage'] == 0
         assert rogue.health == 12  # Full health, no counter damage taken
 
-    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid, mocker):
+    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid, monkeypatch):
         """Test Rogue doesn't evade when random roll is above 0.25."""
         # Mock random.random to return a value above 0.25
-        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.5)
+        import reinforcetactics.game.mechanics as mechanics_module
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.5)
 
         rogue = Unit('R', 5, 5, 1)
         target = Unit('W', 6, 5, 2)  # Warrior can counter-attack
@@ -795,10 +797,11 @@ class TestRogueEvadeAbility:
         assert result['counter_damage'] > 0
         assert rogue.health < 12  # Took counter damage
 
-    def test_non_rogue_cannot_evade(self, simple_grid, mocker):
+    def test_non_rogue_cannot_evade(self, simple_grid, monkeypatch):
         """Test non-Rogue units cannot evade counter-attacks."""
         # Even with favorable random roll, non-Rogues shouldn't evade
-        mocker.patch('reinforcetactics.game.mechanics.random.random', return_value=0.1)
+        import reinforcetactics.game.mechanics as mechanics_module
+        monkeypatch.setattr(mechanics_module.random, 'random', lambda: 0.1)
 
         warrior = Unit('W', 5, 5, 1)
         target = Unit('W', 6, 5, 2)
