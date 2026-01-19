@@ -1,6 +1,17 @@
 """
 Training script for Feudal RL agent on GCP.
 Supports distributed training with multiple seeds.
+
+Supports both regular PPO and MaskablePPO (sb3-contrib) for action masking.
+Action masking significantly improves training efficiency by preventing
+the agent from wasting samples on invalid actions.
+
+Usage:
+    # Train with action masking (recommended)
+    python train_feudal_rl.py --mode flat --use-action-masking
+
+    # Train without action masking (baseline)
+    python train_feudal_rl.py --mode flat
 """
 import argparse
 import json
@@ -15,9 +26,14 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 # Local imports
 from reinforcetactics.rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.masking import (
+    make_maskable_env,
+    make_maskable_vec_env,
+    ActionMaskedEnv
+)
 
 
-def make_env(rank: int, seed: int = 0, opponent: str = 'bot'):
+def make_env(rank: int, seed: int = 0, opponent: str = 'bot', use_masking: bool = False):
     """
     Utility function for multiprocessed env.
 
@@ -25,6 +41,7 @@ def make_env(rank: int, seed: int = 0, opponent: str = 'bot'):
         rank: Index of the subprocess
         seed: Random seed
         opponent: Opponent type
+        use_masking: Whether to wrap env for action masking
     """
     def _init():
         env = StrategyGameEnv(
@@ -34,6 +51,8 @@ def make_env(rank: int, seed: int = 0, opponent: str = 'bot'):
             max_steps=500
         )
         env.reset(seed=seed + rank)
+        if use_masking:
+            env = ActionMaskedEnv(env)
         return env
     set_random_seed(seed)
     return _init
@@ -41,44 +60,88 @@ def make_env(rank: int, seed: int = 0, opponent: str = 'bot'):
 
 def train_flat_baseline(args):
     """Train flat PPO baseline for comparison."""
+    use_masking = getattr(args, 'use_action_masking', False)
+
     print("\n" + "="*60)
-    print("Training Flat PPO Baseline")
+    if use_masking:
+        print("Training Flat MaskablePPO (with Action Masking)")
+    else:
+        print("Training Flat PPO Baseline")
     print("="*60 + "\n")
 
     # Create output directories
-    log_dir = Path(args.log_dir) / f"flat_ppo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    model_name = "maskable_ppo" if use_masking else "flat_ppo"
+    log_dir = Path(args.log_dir) / f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
 
     # Create vectorized environments
-    if args.n_envs > 1:
-        env = SubprocVecEnv([make_env(i, args.seed, args.opponent) for i in range(args.n_envs)])
+    if use_masking:
+        # Use masking-compatible vectorized environments
+        env = make_maskable_vec_env(
+            n_envs=args.n_envs,
+            opponent=args.opponent,
+            seed=args.seed,
+            use_subprocess=(args.n_envs > 1)
+        )
+        # Create eval environment with masking
+        eval_env = make_maskable_env(opponent=args.opponent, render_mode=None)
     else:
-        env = DummyVecEnv([make_env(0, args.seed, args.opponent)])
+        # Standard environments without masking
+        if args.n_envs > 1:
+            env = SubprocVecEnv([make_env(i, args.seed, args.opponent, use_masking=False) for i in range(args.n_envs)])
+        else:
+            env = DummyVecEnv([make_env(0, args.seed, args.opponent, use_masking=False)])
+        eval_env = StrategyGameEnv(opponent=args.opponent, render_mode=None)
 
-    # Create eval environment
-    eval_env = StrategyGameEnv(opponent=args.opponent, render_mode=None)
+    # Create model - use MaskablePPO if action masking is enabled
+    if use_masking:
+        try:
+            from sb3_contrib import MaskablePPO
+            print("Using MaskablePPO from sb3-contrib")
+        except ImportError:
+            raise ImportError(
+                "sb3-contrib is required for action masking. "
+                "Install with: pip install sb3-contrib"
+            )
 
-    # Create model
-    model = PPO(
-        "MultiInputPolicy",
-        env,
-        learning_rate=args.learning_rate,
-        n_steps=args.n_steps,
-        batch_size=args.batch_size,
-        n_epochs=args.n_epochs,
-        gamma=args.gamma,
-        gae_lambda=args.gae_lambda,
-        clip_range=args.clip_range,
-        ent_coef=args.ent_coef,
-        vf_coef=args.vf_coef,
-        max_grad_norm=args.max_grad_norm,
-        verbose=1,
-        tensorboard_log=str(log_dir / "tensorboard"),
-        device=args.device
-    )
+        model = MaskablePPO(
+            "MultiInputPolicy",
+            env,
+            learning_rate=args.learning_rate,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            n_epochs=args.n_epochs,
+            gamma=args.gamma,
+            gae_lambda=args.gae_lambda,
+            clip_range=args.clip_range,
+            ent_coef=args.ent_coef,
+            vf_coef=args.vf_coef,
+            max_grad_norm=args.max_grad_norm,
+            verbose=1,
+            tensorboard_log=str(log_dir / "tensorboard"),
+            device=args.device
+        )
+    else:
+        model = PPO(
+            "MultiInputPolicy",
+            env,
+            learning_rate=args.learning_rate,
+            n_steps=args.n_steps,
+            batch_size=args.batch_size,
+            n_epochs=args.n_epochs,
+            gamma=args.gamma,
+            gae_lambda=args.gae_lambda,
+            clip_range=args.clip_range,
+            ent_coef=args.ent_coef,
+            vf_coef=args.vf_coef,
+            max_grad_norm=args.max_grad_norm,
+            verbose=1,
+            tensorboard_log=str(log_dir / "tensorboard"),
+            device=args.device
+        )
 
     # Callbacks
     eval_callback = EvalCallback(
@@ -152,6 +215,8 @@ def main():
                        help='Opponent type')
     parser.add_argument('--n-envs', type=int, default=4,
                        help='Number of parallel environments')
+    parser.add_argument('--use-action-masking', action='store_true',
+                       help='Use MaskablePPO with action masking (recommended for faster training)')
 
     # Training args
     parser.add_argument('--total-timesteps', type=int, default=10000000,
@@ -209,6 +274,7 @@ def main():
 
     print(f"\n🚀 Starting training on {args.device}")
     print(f"Mode: {args.mode}")
+    print(f"Action masking: {'enabled (MaskablePPO)' if args.use_action_masking else 'disabled (standard PPO)'}")
     print(f"Total timesteps: {args.total_timesteps:,}")
     print(f"Parallel envs: {args.n_envs}")
 

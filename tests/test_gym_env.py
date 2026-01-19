@@ -960,3 +960,245 @@ class TestIntegration:
         assert obs['action_mask'].shape[0] == size
 
         env_default.close()
+
+
+# ==============================================================================
+# 10. ACTION MASKING TESTS (for MaskablePPO compatibility)
+# ==============================================================================
+
+class TestActionMasking:
+    """Test action masking functionality for MaskablePPO (sb3-contrib)."""
+
+    def test_action_masks_method_exists(self, env_default):
+        """Test that action_masks() method exists on environment."""
+        env_default.reset()
+        assert hasattr(env_default, 'action_masks')
+        assert callable(env_default.action_masks)
+        env_default.close()
+
+    def test_action_masks_returns_tuple(self, env_default):
+        """Test that action_masks() returns a tuple of boolean arrays."""
+        env_default.reset()
+        masks = env_default.action_masks()
+
+        assert isinstance(masks, tuple)
+        assert len(masks) == 6  # 6 dimensions in MultiDiscrete action space
+        env_default.close()
+
+    def test_action_masks_correct_shapes(self, env_default):
+        """Test that action mask arrays have correct shapes."""
+        env_default.reset()
+        masks = env_default.action_masks()
+
+        # Expected shapes based on action space
+        expected_shapes = [
+            8,                          # action_type
+            8,                          # unit_type
+            env_default.grid_width,     # from_x
+            env_default.grid_height,    # from_y
+            env_default.grid_width,     # to_x
+            env_default.grid_height     # to_y
+        ]
+
+        for i, (mask, expected_size) in enumerate(zip(masks, expected_shapes)):
+            assert len(mask) == expected_size, f"Mask {i} has wrong size: {len(mask)} != {expected_size}"
+            assert mask.dtype == np.bool_, f"Mask {i} has wrong dtype: {mask.dtype}"
+
+        env_default.close()
+
+    def test_action_masks_end_turn_always_valid(self, env_default):
+        """Test that end_turn action (type 5) is always masked as valid."""
+        env_default.reset()
+        masks = env_default.action_masks()
+
+        action_type_mask = masks[0]
+        assert action_type_mask[5] == True, "End turn should always be valid"
+
+        env_default.close()
+
+    def test_action_masks_at_least_one_valid_per_dimension(self, env_default):
+        """Test that each mask dimension has at least one valid option."""
+        env_default.reset()
+        masks = env_default.action_masks()
+
+        dimension_names = ['action_type', 'unit_type', 'from_x', 'from_y', 'to_x', 'to_y']
+
+        for i, (mask, name) in enumerate(zip(masks, dimension_names)):
+            assert mask.any(), f"Dimension '{name}' has no valid options"
+
+        env_default.close()
+
+    def test_action_masks_consistent_with_legal_actions(self, env_default):
+        """Test that action masks are consistent with legal_actions."""
+        env_default.reset()
+        masks = env_default.action_masks()
+        legal_actions = env_default.game_state.get_legal_actions(player=1)
+
+        action_type_mask = masks[0]
+
+        # If there are create_unit actions, action_type 0 should be valid
+        if legal_actions.get('create_unit'):
+            assert action_type_mask[0] == True, "Create unit mask mismatch"
+
+        # If there are move actions, action_type 1 should be valid
+        if legal_actions.get('move'):
+            assert action_type_mask[1] == True, "Move mask mismatch"
+
+        # If there are attack actions, action_type 2 should be valid
+        if legal_actions.get('attack'):
+            assert action_type_mask[2] == True, "Attack mask mismatch"
+
+        env_default.close()
+
+    def test_action_masks_update_after_step(self, env_default):
+        """Test that action masks update after taking a step."""
+        env_default.reset()
+        masks_before = env_default.action_masks()
+
+        # Take end turn action
+        action = np.array([5, 0, 0, 0, 0, 0])
+        env_default.step(action)
+
+        masks_after = env_default.action_masks()
+
+        # Masks should still be valid tuples
+        assert isinstance(masks_after, tuple)
+        assert len(masks_after) == 6
+
+        env_default.close()
+
+    def test_action_masks_update_after_reset(self, env_default):
+        """Test that action masks are properly initialized after reset."""
+        # Take some steps
+        env_default.reset()
+        env_default.step(np.array([5, 0, 0, 0, 0, 0]))
+
+        # Reset
+        env_default.reset()
+        masks = env_default.action_masks()
+
+        # Should be valid
+        assert isinstance(masks, tuple)
+        assert len(masks) == 6
+        assert masks[0][5] == True  # End turn always valid
+
+        env_default.close()
+
+    def test_get_action_mask_flat_exists(self, env_default):
+        """Test that get_action_mask_flat() method exists and works."""
+        env_default.reset()
+
+        assert hasattr(env_default, 'get_action_mask_flat')
+        flat_mask = env_default.get_action_mask_flat()
+
+        expected_size = env_default._get_action_space_size()
+        assert flat_mask.shape == (expected_size,)
+        assert flat_mask.dtype == np.float32
+
+        env_default.close()
+
+
+class TestActionMaskingWrapper:
+    """Test the ActionMaskedEnv wrapper for MaskablePPO compatibility."""
+
+    def test_wrapper_import(self):
+        """Test that masking module can be imported."""
+        from reinforcetactics.rl.masking import (
+            ActionMaskedEnv,
+            make_maskable_env,
+            make_maskable_vec_env,
+            validate_action_mask
+        )
+
+    def test_make_maskable_env(self):
+        """Test make_maskable_env creates wrapped environment."""
+        from reinforcetactics.rl.masking import make_maskable_env
+
+        env = make_maskable_env(opponent='bot')
+
+        assert env is not None
+        assert hasattr(env, 'action_masks')
+
+        # Should be able to reset and get masks
+        env.reset()
+        masks = env.action_masks()
+        assert isinstance(masks, np.ndarray)
+
+        env.close()
+
+    def test_action_masked_env_wrapper(self):
+        """Test ActionMaskedEnv wrapper functionality."""
+        from reinforcetactics.rl.masking import ActionMaskedEnv
+
+        base_env = StrategyGameEnv(opponent='bot', render_mode=None)
+        wrapped_env = ActionMaskedEnv(base_env)
+
+        wrapped_env.reset()
+
+        # action_masks() should return concatenated 1D array for sb3-contrib
+        masks = wrapped_env.action_masks()
+        assert isinstance(masks, np.ndarray)
+        assert masks.ndim == 1
+        assert masks.dtype == np.bool_
+
+        # get_action_masks_tuple() should return the tuple format
+        masks_tuple = wrapped_env.get_action_masks_tuple()
+        assert isinstance(masks_tuple, tuple)
+        assert len(masks_tuple) == 6
+
+        wrapped_env.close()
+
+    def test_validate_action_mask(self):
+        """Test action mask validation utility."""
+        from reinforcetactics.rl.masking import validate_action_mask
+
+        env = StrategyGameEnv(opponent='bot', render_mode=None)
+        env.reset()
+
+        validation = validate_action_mask(env)
+
+        assert 'valid' in validation
+        assert 'errors' in validation
+        assert 'warnings' in validation
+        assert 'mask_summary' in validation
+
+        # Should be valid for a fresh game
+        assert validation['valid'] == True, f"Validation errors: {validation['errors']}"
+
+        env.close()
+
+    def test_make_curriculum_env(self):
+        """Test curriculum environment creation."""
+        from reinforcetactics.rl.masking import make_curriculum_env
+
+        for difficulty in ['easy', 'medium', 'hard']:
+            env = make_curriculum_env(difficulty=difficulty)
+
+            assert env is not None
+            env.reset()
+            masks = env.action_masks()
+            assert masks is not None
+
+            env.close()
+
+    def test_wrapper_with_stats_tracking(self):
+        """Test ActionMaskedEnv with stats tracking enabled."""
+        from reinforcetactics.rl.masking import ActionMaskedEnv
+
+        base_env = StrategyGameEnv(opponent='bot', render_mode=None)
+        wrapped_env = ActionMaskedEnv(base_env, track_stats=True)
+
+        wrapped_env.reset()
+
+        # Take a few actions
+        for _ in range(3):
+            action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
+            wrapped_env.step(action)
+
+        stats = wrapped_env.get_masking_stats()
+
+        assert 'total_actions' in stats
+        assert stats['total_actions'] == 3
+        assert 'action_type_distribution' in stats
+
+        wrapped_env.close()
