@@ -323,6 +323,8 @@ class TestReplayActionHandlers:
         """Test that paralyze actions are handled in replay."""
         # Create a game with paralyze action
         game = GameState(simple_map, num_players=2)
+        # Give player 1 enough gold to afford a Mage (costs 300, starting gold is 250)
+        game.player_gold[1] = 500
         mage = game.create_unit('M', 1, 1, player=1)
         enemy = game.create_unit('W', 2, 1, player=2)
 
