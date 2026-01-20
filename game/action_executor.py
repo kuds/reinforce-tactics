@@ -58,7 +58,12 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         Tuple of (target_selection_mode, target_selection_action, unit or None)
     """
     if action['type'] == 'wait':
-        unit.end_unit_turn()
+        can_still_act = unit.end_unit_turn()
+        if can_still_act:
+            print(f"{unit.type} used haste action (can act again)")
+            # Keep unit selected for another action
+            selected_unit_ref[0] = unit
+            return (False, None, unit)
         print(f"{unit.type} ended turn")
         selected_unit_ref[0] = None
         return (False, None, None)
@@ -73,7 +78,12 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         result = game.seize(unit)
         if result['captured']:
             print(f"{unit.type} captured structure!")
-        unit.end_unit_turn()
+        can_still_act = unit.end_unit_turn()
+        if can_still_act:
+            print(f"{unit.type} used haste action (can act again)")
+            # Keep unit selected for another action
+            selected_unit_ref[0] = unit
+            return (False, None, unit)
         selected_unit_ref[0] = None
         return (False, None, None)
 
@@ -104,7 +114,12 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             elif action['type'] == 'attack_buff':
                 game.attack_buff(unit, target)
                 print(f"{unit.type} granted attack buff to {target.type}")
-            unit.end_unit_turn()
+            can_still_act = unit.end_unit_turn()
+            if can_still_act:
+                print(f"{unit.type} used haste action (can act again)")
+                # Keep unit selected for another action
+                selected_unit_ref[0] = unit
+                return (False, None, unit)
             selected_unit_ref[0] = None
             return (False, None, None)
 
