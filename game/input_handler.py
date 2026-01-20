@@ -214,12 +214,7 @@ class InputHandler:
             self.selected_unit = None
             return
 
-        # Priority 3: Deselect any selected unit
-        if self.selected_unit:
-            self.selected_unit = None
-            return
-
-        # Priority 4: Show attack range preview
+        # Priority 3: Show attack range preview (right-click no longer deselects units)
         grid_x = mouse_pos[0] // TILE_SIZE
         grid_y = mouse_pos[1] // TILE_SIZE
 
@@ -285,11 +280,18 @@ class InputHandler:
                 print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
 
             # End unit's turn and reset selection
-            self.target_selection_unit.end_unit_turn()
-            self.target_selection_unit = None
+            can_still_act = self.target_selection_unit.end_unit_turn()
             self.target_selection_mode = False
             self.target_selection_action = None
-            self.selected_unit = None
+
+            if can_still_act:
+                # Unit has haste and can act again - keep it selected
+                print(f"{self.target_selection_unit.type} used haste action (can act again)")
+                self.selected_unit = self.target_selection_unit
+                self.target_selection_unit = None
+            else:
+                self.target_selection_unit = None
+                self.selected_unit = None
         else:
             # Clicked outside valid targets, cancel and return to menu
             self.target_selection_mode = False

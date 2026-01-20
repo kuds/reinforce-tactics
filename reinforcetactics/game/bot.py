@@ -69,6 +69,9 @@ class SimpleBot:
         if (tile.is_capturable() and tile.player != self.bot_player and
                 tile.health < tile.max_health):
             self.game_state.seize(unit)
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit)
             return
 
         # Find best target
@@ -82,7 +85,9 @@ class SimpleBot:
             elif target_type in ['enemy_tower', 'enemy_building', 'enemy_hq']:
                 self.move_to_and_seize(unit, target_obj)
         else:
-            unit.end_unit_turn()
+            can_still_act = unit.end_unit_turn()
+            if can_still_act:
+                self.act_with_unit(unit)
 
     def find_best_target(self, unit):
         """Find the best target for a unit (enemy unit or structure)."""
@@ -145,6 +150,9 @@ class SimpleBot:
 
         if distance == 1:
             self.game_state.attack(unit, enemy)
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit)
         else:
             target_pos = self.find_best_move_position(unit, enemy.x, enemy.y)
             if target_pos:
@@ -152,25 +160,42 @@ class SimpleBot:
                 new_distance = self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y)
                 if new_distance == 1:
                     self.game_state.attack(unit, enemy)
+                    # Check if unit can act again (haste)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit(unit)
                 else:
-                    unit.end_unit_turn()
+                    can_still_act = unit.end_unit_turn()
+                    if can_still_act:
+                        self.act_with_unit(unit)
             else:
-                unit.end_unit_turn()
+                can_still_act = unit.end_unit_turn()
+                if can_still_act:
+                    self.act_with_unit(unit)
 
     def move_to_and_seize(self, unit, structure):
         """Move towards and seize a structure."""
         if unit.x == structure.x and unit.y == structure.y:
             self.game_state.seize(unit)
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit)
         else:
             target_pos = self.find_best_move_position(unit, structure.x, structure.y)
             if target_pos:
                 self.game_state.move_unit(unit, target_pos[0], target_pos[1])
                 if unit.x == structure.x and unit.y == structure.y:
                     self.game_state.seize(unit)
+                    # Check if unit can act again (haste)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit(unit)
                 else:
-                    unit.end_unit_turn()
+                    can_still_act = unit.end_unit_turn()
+                    if can_still_act:
+                        self.act_with_unit(unit)
             else:
-                unit.end_unit_turn()
+                can_still_act = unit.end_unit_turn()
+                if can_still_act:
+                    self.act_with_unit(unit)
 
     def find_best_move_position(self, unit, target_x, target_y):
         """Find the best position to move towards a target."""
@@ -625,6 +650,9 @@ class MediumBot:
             # Check if already on structure
             if unit.x == target_structure.x and unit.y == target_structure.y:
                 self.game_state.seize(unit)
+                # Check if unit can act again (haste)
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit(unit)
                 return
 
             # Move towards structure
@@ -634,10 +662,15 @@ class MediumBot:
                 # Check if reached structure
                 if unit.x == target_structure.x and unit.y == target_structure.y:
                     self.game_state.seize(unit)
+                    # Check if unit can act again (haste)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit(unit)
                     return
 
         # Fallback: End turn
-        unit.end_unit_turn()
+        can_still_act = unit.end_unit_turn()
+        if can_still_act:
+            self.act_with_unit(unit)
 
     def manhattan_distance(self, x1, y1, x2, y2):
         """Calculate Manhattan distance between two points."""
@@ -815,10 +848,16 @@ class AdvancedBot(MediumBot):
         if (tile.is_capturable() and tile.player != self.bot_player and
                 tile.health < tile.max_health):
             self.game_state.seize(unit)
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit)
             return
 
         # Try special abilities first (Cleric heal, Mage paralyze)
         if self.try_use_special_ability(unit):
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit)
             return
 
         # PRIORITY 1: Position on mountains for attack bonus before attacking
@@ -840,11 +879,17 @@ class AdvancedBot(MediumBot):
                                 self.game_state.move_unit(unit, target_pos[0], target_pos[1])
                                 # Try to attack after positioning
                                 if self.try_ranged_attack(unit):
+                                    # Check if unit can act again (haste)
+                                    if unit.can_move or unit.can_attack:
+                                        self.act_with_unit_enhanced(unit)
                                     return
                                 break
 
         # PRIORITY 2: Ranged attacks (Archers/Mages should attack from range)
         if unit.type in ['A', 'M'] and self.try_ranged_attack(unit):
+            # Check if unit can act again (haste)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit)
             return
 
         # PRIORITY 3: Move to attack range and attack
@@ -877,6 +922,9 @@ class AdvancedBot(MediumBot):
 
             if best_target and best_score > -500:  # More aggressive threshold
                 self.game_state.attack(unit, best_target)
+                # Check if unit can act again (haste)
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit_enhanced(unit)
                 return
 
             # Try to move towards nearest enemy
@@ -894,6 +942,9 @@ class AdvancedBot(MediumBot):
                         best_after_move = max(attackable_after,
                                              key=lambda e: self.calculate_attack_value(unit, e))
                         self.game_state.attack(unit, best_after_move)
+                        # Check if unit can act again (haste)
+                        if unit.can_move or unit.can_attack:
+                            self.act_with_unit_enhanced(unit)
                         return
 
         # PRIORITY 4: Interrupt enemy captures (from MediumBot)
@@ -909,6 +960,9 @@ class AdvancedBot(MediumBot):
                     )
                     if enemy_unit in attackable:
                         self.game_state.attack(unit, enemy_unit)
+                        # Check if unit can act again (haste)
+                        if unit.can_move or unit.can_attack:
+                            self.act_with_unit_enhanced(unit)
                         return
 
         # PRIORITY 5: Capture structures (fallback)
@@ -925,6 +979,9 @@ class AdvancedBot(MediumBot):
             target_structure = capturable_structures[0][0]
             if unit.x == target_structure.x and unit.y == target_structure.y:
                 self.game_state.seize(unit)
+                # Check if unit can act again (haste)
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit_enhanced(unit)
                 return
 
             target_pos = self.find_best_move_position(unit, target_structure.x, target_structure.y)
@@ -932,10 +989,15 @@ class AdvancedBot(MediumBot):
                 self.game_state.move_unit(unit, target_pos[0], target_pos[1])
                 if unit.x == target_structure.x and unit.y == target_structure.y:
                     self.game_state.seize(unit)
+                    # Check if unit can act again (haste)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit)
                     return
 
         # Fallback: End turn
-        unit.end_unit_turn()
+        can_still_act = unit.end_unit_turn()
+        if can_still_act:
+            self.act_with_unit_enhanced(unit)
 
     def try_use_special_ability(self, unit):
         """Try to use unit special abilities effectively."""
