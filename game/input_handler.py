@@ -184,11 +184,42 @@ class InputHandler:
 
     def handle_right_click_press(self, mouse_pos):
         """
-        Handle right mouse button press - start attack range preview.
+        Handle right mouse button press.
+
+        If a unit has been selected and moved (menu is open), cancel the move
+        and deselect the unit. Otherwise, show attack range preview.
 
         Args:
             mouse_pos: Tuple of (x, y) mouse position
         """
+        # Priority 1: Cancel target selection mode
+        if self.target_selection_mode:
+            self.target_selection_mode = False
+            self.target_selection_action = None
+            if self.target_selection_unit and self.target_selection_unit.has_moved:
+                self.target_selection_unit.cancel_move()
+                print(f"Cancelled move for {self.target_selection_unit.type}")
+            self.target_selection_unit = None
+            self.active_menu = None
+            self.selected_unit = None
+            return
+
+        # Priority 2: Close menu and cancel move if unit has moved
+        if self.active_menu and isinstance(self.active_menu, UnitActionMenu):
+            if self.target_selection_unit and self.target_selection_unit.has_moved:
+                self.target_selection_unit.cancel_move()
+                print(f"Cancelled move for {self.target_selection_unit.type}")
+            self.target_selection_unit = None
+            self.active_menu = None
+            self.selected_unit = None
+            return
+
+        # Priority 3: Deselect any selected unit
+        if self.selected_unit:
+            self.selected_unit = None
+            return
+
+        # Priority 4: Show attack range preview
         grid_x = mouse_pos[0] // TILE_SIZE
         grid_y = mouse_pos[1] // TILE_SIZE
 
@@ -243,6 +274,15 @@ class InputHandler:
             elif action_type == 'cure':
                 self.game.cure(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} cured {clicked_unit.type}")
+            elif action_type == 'haste':
+                self.game.haste(self.target_selection_unit, clicked_unit)
+                print(f"{self.target_selection_unit.type} hasted {clicked_unit.type}")
+            elif action_type == 'defence_buff':
+                self.game.defence_buff(self.target_selection_unit, clicked_unit)
+                print(f"{self.target_selection_unit.type} granted defence buff to {clicked_unit.type}")
+            elif action_type == 'attack_buff':
+                self.game.attack_buff(self.target_selection_unit, clicked_unit)
+                print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
 
             # End unit's turn and reset selection
             self.target_selection_unit.end_unit_turn()

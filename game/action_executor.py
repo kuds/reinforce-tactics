@@ -77,7 +77,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         selected_unit_ref[0] = None
         return (False, None, None)
 
-    if action['type'] in ['attack', 'paralyze', 'heal', 'cure']:
+    if action['type'] in ['attack', 'paralyze', 'heal', 'cure', 'haste', 'defence_buff', 'attack_buff']:
         # Enter target selection mode
         targets = action['targets']
         if len(targets) == 1:
@@ -95,6 +95,15 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             elif action['type'] == 'cure':
                 game.cure(unit, target)
                 print(f"{unit.type} cured {target.type}")
+            elif action['type'] == 'haste':
+                game.haste(unit, target)
+                print(f"{unit.type} hasted {target.type}")
+            elif action['type'] == 'defence_buff':
+                game.defence_buff(unit, target)
+                print(f"{unit.type} granted defence buff to {target.type}")
+            elif action['type'] == 'attack_buff':
+                game.attack_buff(unit, target)
+                print(f"{unit.type} granted attack buff to {target.type}")
             unit.end_unit_turn()
             selected_unit_ref[0] = None
             return (False, None, None)
