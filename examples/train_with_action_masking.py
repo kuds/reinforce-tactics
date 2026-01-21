@@ -27,7 +27,7 @@ try:
 except ImportError:
     print("Error: sb3-contrib is required for action masking.")
     print("Install with: pip install sb3-contrib")
-    exit(1)
+    sys.exit(1)
 
 from reinforcetactics.rl import (
     make_maskable_env,
@@ -165,7 +165,9 @@ def train_with_curriculum(
 
         # Train at this difficulty
         print(f"Training for {timesteps_per_stage:,} timesteps at {difficulty} difficulty...")
-        model.learn(total_timesteps=timesteps_per_stage, progress_bar=True, reset_num_timesteps=False)
+        model.learn(
+            total_timesteps=timesteps_per_stage, progress_bar=True, reset_num_timesteps=False
+        )
 
         # Save checkpoint
         checkpoint_path = f"models/curriculum_stage_{i+1}_{difficulty}.zip"
@@ -225,7 +227,7 @@ def evaluate_agent(model_path: str, num_episodes: int = 10):
 
         print(f"Episode {episode + 1}: {result} (reward: {episode_reward:.1f})")
 
-    print(f"\n--- Results ---")
+    print("\n--- Results ---")
     print(f"Win rate: {wins}/{num_episodes} ({100*wins/num_episodes:.1f}%)")
     print(f"Average reward: {sum(total_rewards)/len(total_rewards):.1f}")
 
@@ -257,7 +259,7 @@ def watch_agent(model_path: str):
         action_masks = env.action_masks()
         action, _ = model.predict(obs, deterministic=True, action_masks=action_masks)
 
-        obs, reward, terminated, truncated, info = env.step(action)
+        obs, _, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
         env.render()

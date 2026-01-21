@@ -18,9 +18,9 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from reinforcetactics.core.game_state import GameState
-from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
+from reinforcetactics.core.game_state import GameState  # pylint: disable=wrong-import-position
+from reinforcetactics.utils.file_io import FileIO  # pylint: disable=wrong-import-position
+from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot  # pylint: disable=wrong-import-position
 
 
 def main():
