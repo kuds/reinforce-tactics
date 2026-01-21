@@ -363,6 +363,10 @@ class Menu:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    # Re-post QUIT event for parent menu if we don't own the screen
+                    # This ensures the parent can handle the quit properly
+                    if not self.owns_screen:
+                        pygame.event.post(pygame.event.Event(pygame.QUIT))
                     return None
 
                 result = self.handle_input(event)
