@@ -380,12 +380,14 @@ class SelfPlayEnv(gym.Wrapper):
 
     def _get_random_valid_action(self) -> np.ndarray:
         """Get a random valid action (fallback)."""
-        # Get action masks
-        masks = self.env.action_masks()
+        # Get action masks as tuple
+        masks = self.action_masks()
 
         # Sample valid action for each dimension
         action = []
         for mask in masks:
+            # Ensure mask is at least 1D before calling np.where
+            mask = np.atleast_1d(mask)
             valid_indices = np.where(mask)[0]
             if len(valid_indices) > 0:
                 action.append(np.random.choice(valid_indices))
@@ -634,6 +636,9 @@ class SelfPlayEnv(gym.Wrapper):
 
     def action_masks(self) -> Tuple[np.ndarray, ...]:
         """Get action masks for agent."""
+        # Check if wrapped env has get_action_masks_tuple (ActionMaskedEnv)
+        if hasattr(self.env, 'get_action_masks_tuple'):
+            return self.env.get_action_masks_tuple()
         return self.env.action_masks()
 
     def get_win_rate(self) -> float:

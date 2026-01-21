@@ -57,6 +57,10 @@ class ActionMaskedEnv(gym.Wrapper):
                 'action_type_distribution': np.zeros(10),
             }
 
+    def __getattr__(self, name):
+        """Delegate attribute access to the wrapped environment."""
+        return getattr(self.env, name)
+
     def action_masks(self) -> np.ndarray:
         """
         Get action masks in the format expected by MaskablePPO.
