@@ -40,7 +40,7 @@ from stable_baselines3.common.callbacks import (
     EvalCallback,
 )
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import VecMonitor
 
 # Local imports
 from reinforcetactics.rl.self_play import (
@@ -130,13 +130,13 @@ class SelfPlayTrainingCallback(BaseCallback):
             )
             self.pool_additions += 1
             logger.info(
-                f"Step {self.num_timesteps}: Added model to pool "
-                f"(win rate: {avg_win_rate:.2%}, pool size: {self.opponent_pool.size})"
+                "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
+                self.num_timesteps, avg_win_rate * 100, self.opponent_pool.size
             )
         else:
             logger.info(
-                f"Step {self.num_timesteps}: Win rate {avg_win_rate:.2%} "
-                f"below threshold {self.min_win_rate_for_pool:.2%}, not adding to pool"
+                "Step %d: Win rate %.2f%% below threshold %.2f%%, not adding to pool",
+                self.num_timesteps, avg_win_rate * 100, self.min_win_rate_for_pool * 100
             )
 
     def _get_average_win_rate(self) -> float:
@@ -155,10 +155,8 @@ class SelfPlayTrainingCallback(BaseCallback):
         total_wins = sum(env.stats['agent_wins'] for env in self.envs)
 
         logger.info(
-            f"Step {self.num_timesteps}: "
-            f"Win rate: {avg_win_rate:.2%}, "
-            f"Total games: {total_games}, "
-            f"Wins: {total_wins}"
+            "Step %d: Win rate: %.2f%%, Total games: %d, Wins: %d",
+            self.num_timesteps, avg_win_rate * 100, total_games, total_wins
         )
 
         # Log to tensorboard if available
@@ -198,7 +196,7 @@ class MixedTrainingCallback(BaseCallback):
             self.using_bots = np.random.random() < self.bot_ratio
             if self.verbose >= 1:
                 env_type = "bot" if self.using_bots else "self-play"
-                logger.info(f"Step {self.n_calls}: Switched to {env_type} training")
+                logger.info("Step %d: Switched to %s training", self.n_calls, env_type)
 
         return True
 
@@ -256,10 +254,13 @@ def train_self_play(args) -> Path:
             selection_strategy=args.pool_strategy,
             save_dir=str(pool_dir)
         )
-        logger.info(f"Created opponent pool (max size: {args.pool_size}, strategy: {args.pool_strategy})")
+        logger.info(
+            "Created opponent pool (max size: %d, strategy: %s)",
+            args.pool_size, args.pool_strategy
+        )
 
     # Create self-play vectorized environments
-    logger.info(f"Creating {args.n_envs} self-play environments...")
+    logger.info("Creating %d self-play environments...", args.n_envs)
     vec_env = make_self_play_vec_env(
         n_envs=args.n_envs,
         max_steps=args.max_steps,
@@ -275,7 +276,7 @@ def train_self_play(args) -> Path:
 
     # Get self-play env references for callback
     self_play_envs = get_self_play_envs_from_vec(vec_env)
-    logger.info(f"Found {len(self_play_envs)} self-play environments")
+    logger.info("Found %d self-play environments", len(self_play_envs))
 
     # Create evaluation environment
     eval_env = make_self_play_env(
@@ -295,7 +296,7 @@ def train_self_play(args) -> Path:
 
     # Create or load model
     if args.resume_from:
-        logger.info(f"Resuming from checkpoint: {args.resume_from}")
+        logger.info("Resuming from checkpoint: %s", args.resume_from)
         model = MaskablePPO.load(
             args.resume_from,
             env=vec_env,
@@ -367,14 +368,14 @@ def train_self_play(args) -> Path:
     config_path = log_dir / "config.json"
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
-    logger.info(f"Saved config to {config_path}")
+    logger.info("Saved config to %s", config_path)
 
     # Train
-    logger.info(f"\nStarting training for {args.total_timesteps:,} timesteps...")
-    logger.info(f"Opponent update frequency: {args.opponent_update_freq}")
+    logger.info("Starting training for %s timesteps...", f"{args.total_timesteps:,}")
+    logger.info("Opponent update frequency: %d", args.opponent_update_freq)
     if opponent_pool:
-        logger.info(f"Add to pool frequency: {args.add_to_pool_freq}")
-        logger.info(f"Min win rate for pool: {args.min_win_rate_for_pool:.2%}")
+        logger.info("Add to pool frequency: %d", args.add_to_pool_freq)
+        logger.info("Min win rate for pool: %.2f%%", args.min_win_rate_for_pool * 100)
 
     model.learn(
         total_timesteps=args.total_timesteps,
@@ -385,7 +386,7 @@ def train_self_play(args) -> Path:
     # Save final model
     final_path = log_dir / "final_model.zip"
     model.save(str(final_path))
-    logger.info(f"\nTraining complete! Model saved to {final_path}")
+    logger.info("Training complete! Model saved to %s", final_path)
 
     # Save final statistics
     stats = {
@@ -521,8 +522,8 @@ def train_mixed(args) -> Path:
         json.dump(config, f, indent=2)
 
     # Train
-    logger.info(f"\nStarting mixed training for {args.total_timesteps:,} timesteps...")
-    logger.info(f"Bot ratio: {args.bot_ratio:.2%}")
+    logger.info("Starting mixed training for %s timesteps...", f"{args.total_timesteps:,}")
+    logger.info("Bot ratio: %.2f%%", args.bot_ratio * 100)
 
     model.learn(
         total_timesteps=args.total_timesteps,
@@ -533,7 +534,7 @@ def train_mixed(args) -> Path:
     # Save final model
     final_path = log_dir / "final_model.zip"
     model.save(str(final_path))
-    logger.info(f"\nTraining complete! Model saved to {final_path}")
+    logger.info("Training complete! Model saved to %s", final_path)
 
     return log_dir
 
@@ -642,11 +643,11 @@ def main():
         args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # Print settings
-    logger.info(f"Starting training on {args.device}")
-    logger.info(f"Mode: {args.mode}")
-    logger.info(f"Total timesteps: {args.total_timesteps:,}")
-    logger.info(f"Parallel envs: {args.n_envs}")
-    logger.info(f"Opponent pool: {'enabled' if args.use_opponent_pool else 'disabled'}")
+    logger.info("Starting training on %s", args.device)
+    logger.info("Mode: %s", args.mode)
+    logger.info("Total timesteps: %s", f"{args.total_timesteps:,}")
+    logger.info("Parallel envs: %d", args.n_envs)
+    logger.info("Opponent pool: %s", 'enabled' if args.use_opponent_pool else 'disabled')
 
     # Initialize W&B if requested
     if args.wandb:
@@ -668,7 +669,7 @@ def main():
     elif args.mode == 'mixed':
         log_dir = train_mixed(args)
 
-    logger.info(f"\nTraining complete! Logs saved to: {log_dir}")
+    logger.info("Training complete! Logs saved to: %s", log_dir)
 
     if args.wandb:
         try:

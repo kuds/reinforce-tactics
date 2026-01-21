@@ -27,9 +27,7 @@ Usage:
     model.learn(total_timesteps=1000000, callback=callback)
 """
 
-import copy
 import logging
-import os
 import random
 from collections import deque
 from pathlib import Path
@@ -37,11 +35,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
 import numpy as np
-from gymnasium import spaces
 
-from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.gym_env import StrategyGameEnv
-from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +113,9 @@ class OpponentPool:
             save_path = self.save_dir / f"opponent_{timestep}.zip"
             try:
                 model.save(str(save_path))
-                logger.info(f"Saved opponent to pool: {save_path}")
-            except Exception as e:
-                logger.warning(f"Failed to save opponent to disk: {e}")
+                logger.info("Saved opponent to pool: %s", save_path)
+            except Exception as exc:
+                logger.warning("Failed to save opponent to disk: %s", exc)
 
     def _copy_model_params(self, model: Any) -> Dict[str, np.ndarray]:
         """Create a lightweight copy of model parameters."""
@@ -130,8 +125,8 @@ class OpponentPool:
             for name, param in model.policy.state_dict().items():
                 params[name] = param.cpu().numpy().copy()
             return params
-        except Exception as e:
-            logger.warning(f"Could not copy model params: {e}")
+        except Exception as exc:
+            logger.warning("Could not copy model params: %s", exc)
             return {}
 
     def _load_model_params(self, model: Any, params: Dict[str, np.ndarray]) -> None:
@@ -143,8 +138,8 @@ class OpponentPool:
                 for name, param in params.items()
             }
             model.policy.load_state_dict(state_dict)
-        except Exception as e:
-            logger.warning(f"Could not load model params: {e}")
+        except Exception as exc:
+            logger.warning("Could not load model params: %s", exc)
 
     def _update_selection_weights(self) -> None:
         """Update selection weights based on strategy."""
@@ -233,11 +228,11 @@ class OpponentPool:
                     'index': len(self.models) - 1
                 })
                 loaded += 1
-            except Exception as e:
-                logger.warning(f"Failed to load opponent {path}: {e}")
+            except Exception as exc:
+                logger.warning("Failed to load opponent %s: %s", path, exc)
 
         self._update_selection_weights()
-        logger.info(f"Loaded {loaded} opponents from {self.save_dir}")
+        logger.info("Loaded %d opponents from %s", loaded, self.save_dir)
         return loaded
 
     @property
@@ -329,8 +324,8 @@ class SelfPlayEnv(gym.Wrapper):
                 self._opponent_params = {}
                 for name, param in self.opponent_model.policy.state_dict().items():
                     self._opponent_params[name] = param.cpu().numpy().copy()
-            except Exception as e:
-                logger.warning(f"Could not copy current model params: {e}")
+            except Exception as exc:
+                logger.warning("Could not copy current model params: %s", exc)
 
     def _get_opponent_action(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
         """
@@ -379,8 +374,8 @@ class SelfPlayEnv(gym.Wrapper):
 
             return action
 
-        except Exception as e:
-            logger.warning(f"Error getting opponent action: {e}")
+        except Exception as exc:
+            logger.warning("Error getting opponent action: %s", exc)
             return self._get_random_valid_action()
 
     def _get_random_valid_action(self) -> np.ndarray:
@@ -523,7 +518,7 @@ class SelfPlayEnv(gym.Wrapper):
             elif action_type == 3:  # Seize
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 if unit and unit.player == 2:
-                    result = game_state.seize(unit)
+                    game_state.seize(unit)
                     return True
                 return False
 
@@ -567,8 +562,8 @@ class SelfPlayEnv(gym.Wrapper):
                     return game_state.attack_buff(unit, target)
                 return False
 
-        except Exception as e:
-            logger.debug(f"Opponent action failed: {e}")
+        except Exception as exc:
+            logger.debug("Opponent action failed: %s", exc)
             return False
 
         return False
@@ -741,8 +736,8 @@ class SelfPlayCallback:
             win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
             avg_win_rate = np.mean(win_rates) if win_rates else 0.5
             logger.info(
-                f"Step {self.n_calls}: Updated opponents. "
-                f"Avg win rate: {avg_win_rate:.2%}"
+                "Step %d: Updated opponents. Avg win rate: %.2f%%",
+                self.n_calls, avg_win_rate * 100
             )
 
     def _add_to_pool(self) -> None:
@@ -765,9 +760,8 @@ class SelfPlayCallback:
                     )
                     if self.verbose >= 1:
                         logger.info(
-                            f"Step {self.n_calls}: Added model to pool "
-                            f"(win rate: {avg_win_rate:.2%}, "
-                            f"pool size: {env.opponent_pool.size})"
+                            "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
+                            self.n_calls, avg_win_rate * 100, env.opponent_pool.size
                         )
                     break  # Only add once
 
