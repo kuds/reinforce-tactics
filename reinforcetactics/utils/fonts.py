@@ -72,9 +72,15 @@ def get_font(size: int) -> pygame.font.Font:
         pygame.font.Font instance with comprehensive Unicode support if available,
         otherwise falls back to default pygame font
     """
+    global _available_fonts_cache
+
     # Check if pygame.font is initialized; if not, initialize it
+    # Also clear caches when reinitializing to avoid stale state
     if not pygame.font.get_init():
         pygame.font.init()
+        # Clear caches after reinitialization to avoid stale fonts
+        _font_cache.clear()
+        _available_fonts_cache = None
 
     # Check if we have a cached font for this size
     # But verify it's still valid by checking if pygame.font is initialized
