@@ -29,7 +29,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import torch
@@ -45,7 +45,6 @@ from stable_baselines3.common.vec_env import VecMonitor
 # Local imports
 from reinforcetactics.rl.self_play import (
     OpponentPool,
-    SelfPlayCallback,
     SelfPlayEnv,
     make_self_play_env,
     make_self_play_vec_env,
@@ -448,7 +447,7 @@ def train_mixed(args) -> Path:
 
     # Create bot environments
     logger.info("Creating bot environments...")
-    bot_vec_env = make_maskable_vec_env(
+    _ = make_maskable_vec_env(
         n_envs=args.n_envs // 2,  # Half for bots
         opponent='bot',
         max_steps=args.max_steps,
@@ -468,8 +467,8 @@ def train_mixed(args) -> Path:
     # Import and create model
     try:
         from sb3_contrib import MaskablePPO
-    except ImportError:
-        raise ImportError("sb3-contrib is required. Install with: pip install sb3-contrib")
+    except ImportError as exc:
+        raise ImportError("sb3-contrib is required. Install with: pip install sb3-contrib") from exc
 
     model = MaskablePPO(
         "MultiInputPolicy",
