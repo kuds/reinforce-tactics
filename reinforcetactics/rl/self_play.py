@@ -143,17 +143,17 @@ class OpponentPool:
 
     def _update_selection_weights(self) -> None:
         """Update selection weights based on strategy."""
-        n = len(self.models)
-        if n == 0:
+        num_models = len(self.models)
+        if num_models == 0:
             self._selection_weights = []
             return
 
         if self.selection_strategy == 'uniform':
-            self._selection_weights = [1.0 / n] * n
+            self._selection_weights = [1.0 / num_models] * num_models
 
         elif self.selection_strategy == 'recent':
             # Exponentially favor more recent models
-            weights = [2.0 ** i for i in range(n)]
+            weights = [2.0 ** i for i in range(num_models)]
             total = sum(weights)
             self._selection_weights = [w / total for w in weights]
 
@@ -424,15 +424,15 @@ class SelfPlayEnv(gym.Wrapper):
 
         # Global features: swap player-specific features
         if 'global_features' in obs:
-            gf = obs['global_features'].copy()
+            global_feats = obs['global_features'].copy()
             # [gold_p1, gold_p2, turn, units_p1, units_p2, current_player]
             # Swap gold
-            gf[0], gf[1] = gf[1], gf[0]
+            global_feats[0], global_feats[1] = global_feats[1], global_feats[0]
             # Swap unit counts
-            gf[3], gf[4] = gf[4], gf[3]
+            global_feats[3], global_feats[4] = global_feats[4], global_feats[3]
             # Flip current player
-            gf[5] = 3 - gf[5]  # 1 -> 2, 2 -> 1
-            flipped['global_features'] = gf
+            global_feats[5] = 3 - global_feats[5]  # 1 -> 2, 2 -> 1
+            flipped['global_features'] = global_feats
 
         # Action mask: recalculate for opponent's perspective
         if 'action_mask' in obs:
