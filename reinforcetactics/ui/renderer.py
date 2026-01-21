@@ -272,6 +272,7 @@ class Renderer:
                 if animated_frame:
                     self._draw_unit_sprite(unit, animated_frame)
                     self._draw_paralysis_indicator(unit)
+                    self._draw_haste_indicator(unit)
                     self._draw_unit_health_bar(unit)
                     return
 
@@ -281,12 +282,14 @@ class Renderer:
             if static_sprite:
                 self._draw_unit_sprite(unit, static_sprite)
                 self._draw_paralysis_indicator(unit)
+                self._draw_haste_indicator(unit)
                 self._draw_unit_health_bar(unit)
                 return
 
         # Fall back to letter representation
         self._draw_unit_letter(unit)
         self._draw_paralysis_indicator(unit)
+        self._draw_haste_indicator(unit)
         self._draw_unit_health_bar(unit)
 
     def _draw_paralysis_indicator(self, unit):
@@ -306,6 +309,22 @@ class Renderer:
         bg_rect = indicator_rect.inflate(4, 2)
         pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
         pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
+        self.screen.blit(indicator_text, indicator_rect)
+
+    def _draw_haste_indicator(self, unit):
+        """Draw haste indicator if unit is hasted."""
+        if not unit.is_hasted:
+            return
+
+        indicator_font = get_font(16)
+        indicator_text = indicator_font.render("h", True, (0, 200, 255))
+        indicator_rect = indicator_text.get_rect(bottomleft=(
+            unit.x * TILE_SIZE + 2,
+            unit.y * TILE_SIZE + TILE_SIZE - 2
+        ))
+        bg_rect = indicator_rect.inflate(4, 2)
+        pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
+        pygame.draw.rect(self.screen, (0, 200, 255), bg_rect, 1)
         self.screen.blit(indicator_text, indicator_rect)
 
     def _draw_unit_sprite(self, unit, sprite):

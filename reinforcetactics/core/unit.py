@@ -180,16 +180,46 @@ class Unit:
         self.selected = False
 
     def cancel_move(self):
-        """Cancel the unit's movement and return to original position."""
+        """Cancel the unit's movement and return to original position.
+
+        Also resets can_move to True so the unit can move again.
+        """
         if self.has_moved:
             self.x = self.original_x
             self.y = self.original_y
             self.has_moved = False
+            self.can_move = True  # Allow unit to move again after cancel
+            self.distance_moved = 0  # Reset distance for Knight's Charge
             return True
         return False
 
-    def end_unit_turn(self):
-        """End this unit's turn."""
+    def end_unit_turn(self, force_end=False):
+        """End this unit's turn.
+
+        If the unit has haste (is_hasted=True) and force_end is False,
+        the haste is consumed and the unit gets another full action instead
+        of ending its turn.
+
+        Args:
+            force_end: If True, always end the turn even if hasted
+
+        Returns:
+            bool: True if the unit can still act (haste was consumed),
+                  False if the turn actually ended
+        """
+        # If hasted and not forcing end, consume haste and refresh for another action
+        if self.is_hasted and not force_end:
+            self.is_hasted = False
+            self.can_move = True
+            self.can_attack = True
+            self.has_moved = False
+            self.original_x = self.x
+            self.original_y = self.y
+            self.distance_moved = 0
+            self.selected = False
+            return True  # Unit can still act
+
+        # Normal turn end
         self.can_move = False
         self.can_attack = False
         self.selected = False
@@ -198,6 +228,7 @@ class Unit:
         self.original_y = self.y
         self.distance_moved = 0
         self.is_hasted = False
+        return False  # Turn ended
 
     def can_use_paralyze(self):
         """Check if this Mage can use Paralyze ability."""

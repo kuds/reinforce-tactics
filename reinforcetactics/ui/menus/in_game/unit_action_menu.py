@@ -85,26 +85,26 @@ class UnitActionMenu:
 
         # Heal and Cure - only for Clerics
         if self.unit.type == 'C':
-            # Heal - only with adjacent damaged allies
-            adjacent_allies = GameMechanics.get_adjacent_allies(self.unit, self.game_state.units)
-            if adjacent_allies:
+            # Heal - damaged allies within range 1-2
+            healable_allies = GameMechanics.get_healable_allies(self.unit, self.game_state.units)
+            if healable_allies:
                 actions.append({
                     'name': 'Heal (H)',
                     'key': 'h',
                     'type': 'heal',
-                    'targets': adjacent_allies
+                    'targets': healable_allies
                 })
 
-            # Cure - only with adjacent paralyzed allies
-            adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(
+            # Cure - paralyzed allies within range 1-2
+            curable_allies = GameMechanics.get_curable_allies(
                 self.unit, self.game_state.units
             )
-            if adjacent_paralyzed:
+            if curable_allies:
                 actions.append({
                     'name': 'Cure (C)',
                     'key': 'c',
                     'type': 'cure',
-                    'targets': adjacent_paralyzed
+                    'targets': curable_allies
                 })
 
         # Haste - only for Sorcerers with ability off cooldown
@@ -118,6 +118,32 @@ class UnitActionMenu:
                     'key': 't',
                     'type': 'haste',
                     'targets': hasteable_allies
+                })
+
+        # Defence Buff - only for Sorcerers with ability off cooldown
+        if self.unit.type == 'S' and self.unit.can_use_defence_buff():
+            buffable_allies = GameMechanics.get_defence_buffable_allies(
+                self.unit, self.game_state.units
+            )
+            if buffable_allies:
+                actions.append({
+                    'name': 'Defence Buff (D)',
+                    'key': 'd',
+                    'type': 'defence_buff',
+                    'targets': buffable_allies
+                })
+
+        # Attack Buff - only for Sorcerers with ability off cooldown
+        if self.unit.type == 'S' and self.unit.can_use_attack_buff():
+            buffable_allies = GameMechanics.get_attack_buffable_allies(
+                self.unit, self.game_state.units
+            )
+            if buffable_allies:
+                actions.append({
+                    'name': 'Attack Buff (B)',
+                    'key': 'b',
+                    'type': 'attack_buff',
+                    'targets': buffable_allies
                 })
 
         # Capture - only if on a capturable structure
