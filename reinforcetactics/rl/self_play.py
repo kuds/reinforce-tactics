@@ -380,12 +380,8 @@ class SelfPlayEnv(gym.Wrapper):
 
     def _get_random_valid_action(self) -> np.ndarray:
         """Get a random valid action (fallback)."""
-        # Get action masks
-        masks = self.env.action_masks()
-        
-        # Check if wrapped env has get_action_masks_tuple (ActionMaskedEnv)
-        if hasattr(self.env, 'get_action_masks_tuple'):
-            masks = self.env.get_action_masks_tuple()
+        # Get action masks as tuple
+        masks = self.action_masks()
 
         # Sample valid action for each dimension
         action = []
