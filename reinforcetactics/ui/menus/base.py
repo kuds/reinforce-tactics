@@ -98,6 +98,9 @@ class Menu:
 
     def add_option(self, text: str, callback: Callable[[], Any]) -> None:
         """Add a menu option."""
+        # Guard against empty text to prevent pygame "Text has zero width" error
+        if not text:
+            text = "(Empty)"
         self.options.append((text, callback))
 
     def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
@@ -193,6 +196,9 @@ class Menu:
         padding_y = 10
         max_text_width = 0
         for text, _ in self.options:
+            # Guard against empty text to prevent pygame "Text has zero width" error
+            if not text:
+                text = "(Empty)"
             display_text = f"> {text}"
             text_surface = self.option_font.render(display_text, True, self.text_color)
             max_text_width = max(max_text_width, text_surface.get_width())
@@ -207,6 +213,9 @@ class Menu:
         # Calculate rects for visible options
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
+            # Guard against empty text
+            if not text:
+                text = "(Empty)"
             is_selected = option_i == self.selected_index
             display_text = f"> {text}" if is_selected else f"  {text}"
 
@@ -246,6 +255,9 @@ class Menu:
         padding_y = 10
         max_text_width = 0
         for text, _ in self.options:
+            # Guard against empty text to prevent pygame "Text has zero width" error
+            if not text:
+                text = "(Empty)"
             display_text = f"> {text}"  # Use the selected format for consistent width
             text_surface = self.option_font.render(display_text, True, self.text_color)
             max_text_width = max(max_text_width, text_surface.get_width())
@@ -260,6 +272,9 @@ class Menu:
         # Draw visible options
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
+            # Guard against empty text
+            if not text:
+                text = "(Empty)"
 
             # Determine styling based on state
             is_selected = option_i == self.selected_index
