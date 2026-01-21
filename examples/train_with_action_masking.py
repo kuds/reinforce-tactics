@@ -18,6 +18,7 @@ Usage:
     python examples/train_with_action_masking.py --timesteps 500000 --difficulty medium
 """
 
+import sys
 import argparse
 from pathlib import Path
 
