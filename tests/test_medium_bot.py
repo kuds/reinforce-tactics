@@ -5,6 +5,12 @@ import numpy as np
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import MediumBot, SimpleBot
 from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.tournament import (
+    BotDescriptor,
+    BotType,
+    create_bot_instance,
+)
+from reinforcetactics.tournament.bots import discover_builtin_bots
 
 
 @pytest.fixture
@@ -239,18 +245,7 @@ class TestTournamentMediumBot:
 
     def test_tournament_discovers_mediumbot(self):
         """Test that tournament system discovers MediumBot."""
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_tournament_medium',
-            games_per_side=1
-        )
-
-        bots = runner.discover_bots(models_dir=None, include_test_bots=False)
+        bots = discover_builtin_bots()
 
         # Should find both SimpleBot and MediumBot
         bot_names = [bot.name for bot in bots]
@@ -259,18 +254,13 @@ class TestTournamentMediumBot:
 
     def test_bot_descriptor_medium_bot(self):
         """Test BotDescriptor for MediumBot."""
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import BotDescriptor
-
-        desc = BotDescriptor('TestMediumBot', 'medium')
+        desc = BotDescriptor(name='TestMediumBot', bot_type=BotType.MEDIUM)
         assert desc.name == 'TestMediumBot'
-        assert desc.bot_type == 'medium'
+        assert desc.bot_type == BotType.MEDIUM
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
 
-        bot = desc.create_bot(game_state, 2)
+        bot = create_bot_instance(desc, game_state, player=2)
         assert isinstance(bot, MediumBot)
         assert bot.bot_player == 2

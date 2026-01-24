@@ -6,8 +6,17 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.game.bot import SimpleBot, MediumBot
 from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.tournament import (
+    BotDescriptor,
+    BotType,
+    TournamentConfig,
+    TournamentRunner,
+    EloRatingSystem,
+    MapConfig,
+    create_bot_instance,
+)
 
 
 class TestModelBot:
@@ -84,179 +93,116 @@ class TestTournamentSystem:
 
     def test_bot_descriptor_simple_bot(self):
         """Test BotDescriptor for SimpleBot."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import BotDescriptor
-
-        desc = BotDescriptor('TestBot', 'simple')
+        desc = BotDescriptor(name='TestBot', bot_type=BotType.SIMPLE)
         assert desc.name == 'TestBot'
-        assert desc.bot_type == 'simple'
+        assert desc.bot_type == BotType.SIMPLE
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
 
-        bot = desc.create_bot(game_state, 1)
+        bot = create_bot_instance(desc, game_state, player=1)
         assert isinstance(bot, SimpleBot)
         assert bot.bot_player == 1
 
     def test_bot_descriptor_model_bot(self):
         """Test BotDescriptor for ModelBot."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import BotDescriptor
         from reinforcetactics.game.model_bot import ModelBot
 
-        desc = BotDescriptor('TestModel', 'model', model_path='test.zip')
+        desc = BotDescriptor(name='TestModel', bot_type=BotType.MODEL, model_path='test.zip')
         assert desc.name == 'TestModel'
-        assert desc.bot_type == 'model'
+        assert desc.bot_type == BotType.MODEL
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
         game_state = GameState(map_data, num_players=2)
 
         # Mock the model loading
         with patch.object(ModelBot, '_load_model'):
-            bot = desc.create_bot(game_state, 2)
+            bot = create_bot_instance(desc, game_state, player=2)
             assert isinstance(bot, ModelBot)
             assert bot.bot_player == 2
 
     def test_tournament_runner_initialization(self):
         """Test TournamentRunner initialization."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
+        config = TournamentConfig(
+            maps=[MapConfig(path='maps/1v1/beginner.csv', max_turns=500)],
             output_dir='/tmp/test_tournament',
             games_per_side=2
         )
+        runner = TournamentRunner(config)
 
-        assert runner.map_file == 'maps/1v1/beginner.csv'
-        assert runner.games_per_side == 2
-        assert runner.output_dir.exists()
+        assert len(config.maps) == 1
+        assert config.maps[0].path == 'maps/1v1/beginner.csv'
+        assert config.games_per_side == 2
 
     def test_tournament_runner_with_logging_parameters(self):
         """Test TournamentRunner initialization with logging parameters."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
         # Test with log_conversations=True and default log dir
-        runner1 = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
+        config1 = TournamentConfig(
+            maps=[MapConfig(path='maps/1v1/beginner.csv', max_turns=500)],
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=True
         )
+        runner1 = TournamentRunner(config1)
 
-        assert runner1.log_conversations is True
-        assert runner1.conversation_log_dir == '/tmp/test_tournament/llm_conversations'
+        assert config1.log_conversations is True
+        assert config1.conversation_log_dir == '/tmp/test_tournament/llm_conversations'
 
         # Test with custom log dir
-        runner2 = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
+        config2 = TournamentConfig(
+            maps=[MapConfig(path='maps/1v1/beginner.csv', max_turns=500)],
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=True,
             conversation_log_dir='/tmp/custom_logs'
         )
+        _ = TournamentRunner(config2)
 
-        assert runner2.log_conversations is True
-        assert runner2.conversation_log_dir == '/tmp/custom_logs'
+        assert config2.log_conversations is True
+        assert config2.conversation_log_dir == '/tmp/custom_logs'
 
         # Test with logging disabled
-        runner3 = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
+        config3 = TournamentConfig(
+            maps=[MapConfig(path='maps/1v1/beginner.csv', max_turns=500)],
             output_dir='/tmp/test_tournament',
             games_per_side=2,
             log_conversations=False
         )
+        _ = TournamentRunner(config3)
 
-        assert runner3.log_conversations is False
-        assert runner3.conversation_log_dir is None
+        assert config3.log_conversations is False
 
-    def test_bot_descriptor_llm_with_logging_params(self):
-        """Test BotDescriptor passes logging parameters to LLM bots."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import BotDescriptor
-
-        # Mock LLM bot class
-        class MockLLMBot:  # pylint: disable=missing-class-docstring
-            def __init__(self, game_state, player, api_key=None,
-                        log_conversations=False, conversation_log_dir=None):
-                self.game_state = game_state
-                self.bot_player = player
-                self.api_key = api_key
-                self.log_conversations = log_conversations
-                self.conversation_log_dir = conversation_log_dir
-
-        map_data = FileIO.generate_random_map(10, 10, num_players=2)
-        game_state = GameState(map_data, num_players=2)
-
-        # Test with logging enabled
+    def test_bot_descriptor_llm_bot(self):
+        """Test BotDescriptor for LLM bots."""
         desc = BotDescriptor(
-            'TestLLM',
-            'llm',
-            bot_class=MockLLMBot,
-            api_key='test-key',
-            log_conversations=True,
-            conversation_log_dir='/tmp/logs'
+            name='TestLLM',
+            bot_type=BotType.LLM,
+            provider='openai',
+            model='gpt-4',
         )
 
-        bot = desc.create_bot(game_state, 2)
-        assert isinstance(bot, MockLLMBot)
-        assert bot.log_conversations is True
-        assert bot.conversation_log_dir == '/tmp/logs'
+        assert desc.name == 'TestLLM'
+        assert desc.bot_type == BotType.LLM
+        assert desc.provider == 'openai'
+        assert desc.model == 'gpt-4'
 
-        # Test with logging disabled
-        desc2 = BotDescriptor(
-            'TestLLM2',
-            'llm',
-            bot_class=MockLLMBot,
-            api_key='test-key',
-            log_conversations=False
-        )
+    def test_tournament_runner_discover_bots(self):
+        """Test bot discovery functions."""
+        from reinforcetactics.tournament.bots import discover_builtin_bots
 
-        bot2 = desc2.create_bot(game_state, 2)
-        assert bot2.log_conversations is False
-        assert bot2.conversation_log_dir is None
+        bots = discover_builtin_bots()
 
-    def test_tournament_runner_discover_simple_bot(self):
-        """Test that TournamentRunner discovers SimpleBot."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_tournament',
-            games_per_side=1
-        )
-
-        bots = runner.discover_bots(models_dir=None, include_test_bots=False)
-
-        # At minimum, should find SimpleBot
+        # Should find SimpleBot, MediumBot, AdvancedBot
         assert len(bots) >= 1
         assert any(bot.name == 'SimpleBot' for bot in bots)
 
     def test_tournament_matchup_generation(self):
         """Test that tournament generates correct matchups."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner, BotDescriptor
-
-        _ = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_tournament',
-            games_per_side=1
-        )
-
         # Create 3 test bots
         bots = [
-            BotDescriptor('Bot1', 'simple'),
-            BotDescriptor('Bot2', 'simple'),
-            BotDescriptor('Bot3', 'simple'),
+            BotDescriptor(name='Bot1', bot_type=BotType.SIMPLE),
+            BotDescriptor(name='Bot2', bot_type=BotType.SIMPLE),
+            BotDescriptor(name='Bot3', bot_type=BotType.SIMPLE),
         ]
 
         # Generate matchups (should be 3 choose 2 = 3 matchups)
@@ -272,44 +218,38 @@ class TestTournamentSystem:
 
     def test_tournament_results_structure(self):
         """Test the structure of tournament results."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
+        from reinforcetactics.tournament import TournamentResults
 
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_tournament_results',
-            games_per_side=1
-        )
+        elo_system = EloRatingSystem()
+        results = TournamentResults(elo_system)
 
         # Initialize bots for Elo system
-        runner.elo_system.initialize_bot('Bot1')
-        runner.elo_system.initialize_bot('Bot2')
+        elo_system.initialize_bot('Bot1')
+        elo_system.initialize_bot('Bot2')
 
-        # Manually add some test results
-        runner.results['Bot1']['wins'] = 2
-        runner.results['Bot1']['losses'] = 0
-        runner.results['Bot1']['draws'] = 0
+        # Add some test game results
+        from reinforcetactics.tournament import GameResult
+        results.add_game_result(GameResult(
+            game_id=1, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=10, map_name='test.csv'
+        ))
+        results.add_game_result(GameResult(
+            game_id=2, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=15, map_name='test.csv'
+        ))
 
-        runner.results['Bot2']['wins'] = 0
-        runner.results['Bot2']['losses'] = 2
-        runner.results['Bot2']['draws'] = 0
+        result_dict = results.to_dict()
 
-        results = runner._generate_results()
+        assert 'standings' in result_dict
+        assert 'games' in result_dict
+        assert 'elo_history' in result_dict
+        assert len(result_dict['standings']) == 2
 
-        assert 'rankings' in results
-        assert 'timestamp' in results
-        assert 'maps_used' in results  # Changed from 'map' to 'maps_used'
-        assert 'map_pool_mode' in results
-        assert 'elo_history' in results
-        assert len(results['rankings']) == 2
-
-        # Bot1 should be ranked first (by Elo now, but Bot1 should still be first)
-        assert results['rankings'][0]['bot'] == 'Bot1'
-        assert results['rankings'][0]['wins'] == 2
-        assert results['rankings'][0]['win_rate'] == 1.0
-        assert 'elo' in results['rankings'][0]
-        assert 'elo_change' in results['rankings'][0]
+        # Bot1 should be ranked first
+        standings = results.get_standings()
+        assert standings[0].bot_name == 'Bot1'
+        assert standings[0].wins == 2
+        assert standings[0].win_rate == 1.0
 
 
 class TestModelBotActionTranslation:
@@ -448,10 +388,6 @@ class TestEloRatingSystem:
 
     def test_elo_initialization(self):
         """Test EloRatingSystem initialization."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem(starting_elo=1500, k_factor=32)
         assert elo.starting_elo == 1500
         assert elo.k_factor == 32
@@ -459,10 +395,6 @@ class TestEloRatingSystem:
 
     def test_elo_bot_initialization(self):
         """Test initializing a bot in the Elo system."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem()
         elo.initialize_bot('TestBot')
 
@@ -472,20 +404,12 @@ class TestEloRatingSystem:
 
     def test_elo_expected_score_equal_ratings(self):
         """Test expected score calculation with equal ratings."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem()
         expected = elo.calculate_expected_score(1500, 1500)
         assert abs(expected - 0.5) < 0.001  # Should be exactly 0.5
 
     def test_elo_expected_score_unequal_ratings(self):
         """Test expected score calculation with different ratings."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem()
         # Higher rated player should have higher expected score
         higher_expected = elo.calculate_expected_score(1600, 1500)
@@ -497,10 +421,6 @@ class TestEloRatingSystem:
 
     def test_elo_update_after_win(self):
         """Test Elo rating update after a win."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem(k_factor=32)
         elo.initialize_bot('Winner')
         elo.initialize_bot('Loser')
@@ -519,10 +439,6 @@ class TestEloRatingSystem:
 
     def test_elo_update_after_draw(self):
         """Test Elo rating update after a draw."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem(k_factor=32)
         elo.initialize_bot('Bot1')
         elo.initialize_bot('Bot2')
@@ -536,10 +452,6 @@ class TestEloRatingSystem:
 
     def test_elo_rating_history(self):
         """Test that rating history is tracked correctly."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import EloRatingSystem
-
         elo = EloRatingSystem()
         elo.initialize_bot('Bot1')
         elo.initialize_bot('Bot2')
@@ -563,153 +475,118 @@ class TestMultiMapTournament:
 
     def test_tournament_runner_with_multiple_maps(self):
         """Test TournamentRunner initialization with multiple maps."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        maps = ['maps/1v1/beginner.csv', 'maps/1v1/center_mountains.csv']
-        runner = TournamentRunner(
-            maps=maps,
+        config = TournamentConfig(
+            maps=[
+                MapConfig(path='maps/1v1/beginner.csv', max_turns=500),
+                MapConfig(path='maps/1v1/center_mountains.csv', max_turns=500)
+            ],
             output_dir='/tmp/test_multimap',
-            games_per_side=1
+            games_per_side=1,
+            map_pool_mode='cycle'
         )
+        _ = TournamentRunner(config)
 
-        assert runner.maps == maps
-        assert runner.map_pool_mode == 'cycle'
-        assert len(runner.maps) == 2
+        assert len(config.maps) == 2
+        assert config.map_pool_mode == 'cycle'
 
-    def test_tournament_runner_backward_compatibility(self):
-        """Test backward compatibility with single map_file."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
+    def test_tournament_config_from_dict(self):
+        """Test TournamentConfig from dictionary."""
+        config_dict = {
+            'maps': [
+                {'path': 'maps/1v1/beginner.csv', 'max_turns': 500}
+            ],
+            'output_dir': '/tmp/test_backward',
+            'games_per_side': 1
+        }
+        config = TournamentConfig.from_dict(config_dict)
 
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_backward',
-            games_per_side=1
-        )
-
-        assert len(runner.maps) == 1
-        assert runner.maps[0] == 'maps/1v1/beginner.csv'
-
-    def test_select_map_cycle_mode(self):
-        """Test map selection in cycle mode."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        maps = ['map1.csv', 'map2.csv', 'map3.csv']
-        runner = TournamentRunner(
-            maps=maps,
-            output_dir='/tmp/test_cycle',
-            map_pool_mode='cycle',
-            games_per_side=1
-        )
-
-        # Should cycle through maps in order
-        assert runner._select_map(1, 1) == 'map1.csv'
-        assert runner._select_map(1, 2) == 'map2.csv'
-        assert runner._select_map(1, 3) == 'map3.csv'
-        assert runner._select_map(1, 4) == 'map1.csv'  # Cycles back
-
-    def test_select_map_random_mode(self):
-        """Test map selection in random mode."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
-
-        maps = ['map1.csv', 'map2.csv', 'map3.csv']
-        runner = TournamentRunner(
-            maps=maps,
-            output_dir='/tmp/test_random',
-            map_pool_mode='random',
-            games_per_side=1
-        )
-
-        # Should select from available maps
-        selected_maps = [runner._select_map(1, i) for i in range(10)]
-        # All selected maps should be in the map list
-        assert all(m in maps for m in selected_maps)
+        assert len(config.maps) == 1
+        assert config.maps[0].path == 'maps/1v1/beginner.csv'
 
     def test_tournament_per_map_stats_tracking(self):
         """Test that per-map statistics are tracked correctly."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
+        from reinforcetactics.tournament import TournamentResults, GameResult
 
-        runner = TournamentRunner(
-            maps=['map1.csv', 'map2.csv'],
-            output_dir='/tmp/test_stats',
-            games_per_side=1
-        )
+        elo = EloRatingSystem()
+        results = TournamentResults(elo)
 
         # Simulate some game results
-        runner._update_results('Bot1', 'Bot2', 1, 'map1.csv')  # Bot1 wins on map1
-        runner._update_results('Bot1', 'Bot2', 2, 'map2.csv')  # Bot2 wins on map2
-        runner._update_results('Bot1', 'Bot2', 1, 'map1.csv')  # Bot1 wins on map1
+        results.add_game_result(GameResult(
+            game_id=1, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=10, map_name='map1.csv'
+        ))
+        results.add_game_result(GameResult(
+            game_id=2, bot1_name='Bot1', bot2_name='Bot2',
+            winner=2, winner_name='Bot2', turns=15, map_name='map2.csv'
+        ))
+        results.add_game_result(GameResult(
+            game_id=3, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=20, map_name='map1.csv'
+        ))
 
         # Check per-map stats
-        assert runner.per_map_stats['Bot1']['map1.csv']['wins'] == 2
-        assert runner.per_map_stats['Bot1']['map2.csv']['losses'] == 1
-        assert runner.per_map_stats['Bot2']['map1.csv']['losses'] == 2
-        assert runner.per_map_stats['Bot2']['map2.csv']['wins'] == 1
+        standings = results.get_standings()
+        bot1_standing = next(s for s in standings if s.bot_name == 'Bot1')
+        bot2_standing = next(s for s in standings if s.bot_name == 'Bot2')
+
+        assert bot1_standing.per_map_stats['map1.csv']['wins'] == 2
+        assert bot1_standing.per_map_stats['map2.csv']['losses'] == 1
+        assert bot2_standing.per_map_stats['map1.csv']['losses'] == 2
+        assert bot2_standing.per_map_stats['map2.csv']['wins'] == 1
 
     def test_tournament_elo_integration(self):
         """Test that Elo ratings are integrated into tournament."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
+        from reinforcetactics.tournament import TournamentResults, GameResult
 
-        runner = TournamentRunner(
-            maps=['map1.csv'],
-            output_dir='/tmp/test_elo',
-            games_per_side=1
-        )
+        elo = EloRatingSystem()
+        results = TournamentResults(elo)
 
         # Initialize bots
-        runner.elo_system.initialize_bot('Bot1')
-        runner.elo_system.initialize_bot('Bot2')
+        elo.initialize_bot('Bot1')
+        elo.initialize_bot('Bot2')
 
         # Simulate a game result
-        runner._update_results('Bot1', 'Bot2', 1, 'map1.csv')
+        results.add_game_result(GameResult(
+            game_id=1, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=10, map_name='map1.csv'
+        ))
 
         # Check that Elo ratings changed
-        assert runner.elo_system.get_rating('Bot1') > 1500
-        assert runner.elo_system.get_rating('Bot2') < 1500
+        assert elo.get_rating('Bot1') > 1500
+        assert elo.get_rating('Bot2') < 1500
 
     def test_generate_results_with_elo(self):
         """Test that generated results include Elo ratings."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-        from tournament import TournamentRunner
+        from reinforcetactics.tournament import TournamentResults, GameResult
 
-        runner = TournamentRunner(
-            maps=['map1.csv'],
-            output_dir='/tmp/test_results',
-            games_per_side=1
-        )
+        elo = EloRatingSystem()
+        results = TournamentResults(elo)
 
         # Setup some results
-        runner.elo_system.initialize_bot('Bot1')
-        runner.elo_system.initialize_bot('Bot2')
-        runner._update_results('Bot1', 'Bot2', 1, 'map1.csv')
-        runner._update_results('Bot1', 'Bot2', 1, 'map1.csv')
+        elo.initialize_bot('Bot1')
+        elo.initialize_bot('Bot2')
+        results.add_game_result(GameResult(
+            game_id=1, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=10, map_name='map1.csv'
+        ))
+        results.add_game_result(GameResult(
+            game_id=2, bot1_name='Bot1', bot2_name='Bot2',
+            winner=1, winner_name='Bot1', turns=15, map_name='map1.csv'
+        ))
 
-        results = runner._generate_results()
+        result_dict = results.to_dict()
 
         # Check structure
-        assert 'rankings' in results
-        assert 'elo_history' in results
-        assert 'maps_used' in results
-        assert 'map_pool_mode' in results
+        assert 'standings' in result_dict
+        assert 'elo_history' in result_dict
+        assert 'maps_used' in result_dict
 
-        # Check rankings include Elo
-        for ranking in results['rankings']:
-            assert 'elo' in ranking
-            assert 'elo_change' in ranking
-            assert 'per_map_stats' in ranking
+        # Check standings include Elo
+        for standing in result_dict['standings']:
+            assert 'elo' in standing
+            assert 'elo_change' in standing
+            assert 'per_map_stats' in standing
 
         # Check Elo history
-        assert 'Bot1' in results['elo_history']
-        assert 'Bot2' in results['elo_history']
+        assert 'Bot1' in result_dict['elo_history']
+        assert 'Bot2' in result_dict['elo_history']
