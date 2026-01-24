@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
@@ -316,7 +316,7 @@ class TournamentRunner:
         bots = {1: bot1, 2: bot2}
 
         # Check if LLM bots are involved (for API delay)
-        has_llm = bot1_desc.bot_type == BotType.LLM or bot2_desc.bot_type == BotType.LLM
+        has_llm = BotType.LLM in (bot1_desc.bot_type, bot2_desc.bot_type)
 
         # Play the game
         try:

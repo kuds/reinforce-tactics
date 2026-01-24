@@ -5,7 +5,15 @@ import numpy as np
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import AdvancedBot, MediumBot
 from game.bot_factory import create_bot
-from scripts.tournament import BotDescriptor
+from reinforcetactics.tournament import (
+    BotDescriptor,
+    BotType,
+    TournamentConfig,
+    TournamentRunner,
+    MapConfig,
+    create_bot_instance,
+)
+from reinforcetactics.tournament.bots import discover_builtin_bots
 
 
 @pytest.fixture
@@ -212,15 +220,7 @@ class TestTournamentAdvancedBot:
 
     def test_tournament_discovers_advancedbot(self):
         """Test that tournament system discovers AdvancedBot."""
-        from scripts.tournament import TournamentRunner
-
-        runner = TournamentRunner(
-            map_file='maps/1v1/beginner.csv',
-            output_dir='/tmp/test_tournament',
-            games_per_side=1
-        )
-
-        bots = runner.discover_bots()
+        bots = discover_builtin_bots()
 
         # Should find AdvancedBot
         bot_names = [b.name for b in bots]
@@ -233,8 +233,8 @@ class TestTournamentAdvancedBot:
         map_data = FileIO.load_map('maps/1v1/beginner.csv')
         game_state = GameState(map_data, num_players=2)
 
-        descriptor = BotDescriptor('AdvancedBot', 'advanced')
-        bot = descriptor.create_bot(game_state, 2)
+        descriptor = BotDescriptor(name='AdvancedBot', bot_type=BotType.ADVANCED)
+        bot = create_bot_instance(descriptor, game_state, player=2)
 
         assert isinstance(bot, AdvancedBot)
         assert bot.bot_player == 2

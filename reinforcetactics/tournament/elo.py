@@ -6,7 +6,7 @@ bot performance across tournament games.
 """
 
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 class EloRatingSystem:

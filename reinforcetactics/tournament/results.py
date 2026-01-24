@@ -7,7 +7,6 @@ tournament data to various formats (JSON, CSV).
 
 import json
 import logging
-import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -529,9 +528,8 @@ def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 k: sanitize(v) for k, v in value.items() if not is_sensitive(k)
             }
-        elif isinstance(value, list):
+        if isinstance(value, list):
             return [sanitize(item) for item in value]
-        else:
-            return value
+        return value
 
     return sanitize(config)
