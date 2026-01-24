@@ -1,7 +1,39 @@
 # Reinforce Tactics - Codebase Improvement Plan
 
 **Created:** January 2026
-**Status:** Review & Discussion
+**Status:** Tournament Consolidation COMPLETED
+
+## Implementation Progress
+
+### COMPLETED: Tournament System Consolidation
+
+A unified tournament library has been created at `reinforcetactics/tournament/`:
+
+```
+reinforcetactics/tournament/
+├── __init__.py      # Package exports
+├── elo.py           # EloRatingSystem (single source of truth)
+├── bots.py          # BotDescriptor, BotType, bot discovery & factory
+├── schedule.py      # Game scheduling, round-robin generation, MapConfig
+├── results.py       # GameResult, TournamentResults, ResultsExporter
+├── config.py        # TournamentConfig with validation
+└── runner.py        # TournamentRunner (core execution engine)
+```
+
+**What was done:**
+1. Created unified `EloRatingSystem` class with save/load, merge capabilities
+2. Created `BotDescriptor` for consistent bot configuration across all runners
+3. Extracted scheduling logic (`generate_round_robin_schedule`) with resume support
+4. Created `TournamentConfig` supporting both flat and nested (docker) formats
+5. Created `TournamentRunner` with concurrent execution and progress callbacks
+6. Refactored `scripts/tournament.py` to use new library (~1000 → ~220 lines)
+7. Refactored `docker/tournament/run_tournament.py` to use new library (~1600 → ~410 lines)
+8. Updated both tournament notebooks to use the library directly
+9. Added comprehensive tests in `tests/test_tournament_library.py`
+
+**Code reduction:** ~2,700 lines of duplicated code eliminated
+
+---
 
 This document outlines recommended improvements for the Reinforce Tactics codebase, organized by priority and impact area.
 
