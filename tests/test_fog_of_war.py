@@ -231,6 +231,113 @@ class TestFOWActionFiltering:
         assert target in attack_targets
 
 
+class TestPreMoveAttackFiltering:
+    """Test that units can only attack enemies visible before moving."""
+
+    def test_cannot_attack_enemy_discovered_after_move(self, game_with_fow):
+        """Test that a unit cannot attack an enemy it discovers by moving."""
+        # Player 1 unit starts near HQ
+        attacker = game_with_fow.create_unit('W', 1, 1, player=1)
+        attacker.can_move = True
+        attacker.can_attack = True
+
+        # Player 2 unit is hidden (far from player 1's vision)
+        target = game_with_fow.create_unit('W', 6, 6, player=2)
+
+        game_with_fow.update_visibility(player=1)
+
+        # Verify target is NOT visible initially
+        assert not game_with_fow.is_position_visible(6, 6, player=1)
+
+        # Capture the pre-move visibility snapshot
+        game_with_fow.capture_visible_enemies_for_unit(attacker)
+
+        # Move attacker to (5, 5) - now adjacent to target and target becomes visible
+        # First we need to make this position reachable by resetting unit position
+        attacker.x = 4
+        attacker.y = 5
+        attacker.original_x = 4
+        attacker.original_y = 5
+
+        # Now move to adjacent to target
+        game_with_fow.move_unit(attacker, 5, 5)
+
+        # After move, target should be visible
+        assert game_with_fow.is_position_visible(6, 6, player=1)
+
+        # But attacker should NOT be able to attack target (discovered after move)
+        assert not game_with_fow.is_enemy_attackable_by_unit(attacker, target)
+
+        # Get legal actions - should NOT include the discovered enemy
+        legal_actions = game_with_fow.get_legal_actions(player=1)
+        attack_targets = [a['target'] for a in legal_actions['attack']]
+        assert target not in attack_targets
+
+    def test_can_attack_enemy_visible_before_move(self, game_with_fow):
+        """Test that a unit can attack an enemy that was visible before moving."""
+        # Player 1 unit near HQ
+        attacker = game_with_fow.create_unit('W', 2, 2, player=1)
+        attacker.can_move = True
+        attacker.can_attack = True
+
+        # Player 2 unit visible but not adjacent
+        target = game_with_fow.create_unit('W', 4, 2, player=2)
+
+        game_with_fow.update_visibility(player=1)
+
+        # Verify target IS visible initially (within attacker's vision range)
+        assert game_with_fow.is_position_visible(4, 2, player=1)
+
+        # Capture the pre-move visibility snapshot
+        game_with_fow.capture_visible_enemies_for_unit(attacker)
+
+        # Move attacker adjacent to target
+        game_with_fow.move_unit(attacker, 3, 2)
+
+        # Target should still be attackable (was visible before move)
+        assert game_with_fow.is_enemy_attackable_by_unit(attacker, target)
+
+        # Get legal actions - should include the target
+        legal_actions = game_with_fow.get_legal_actions(player=1)
+        attack_targets = [a['target'] for a in legal_actions['attack']]
+        assert target in attack_targets
+
+    def test_snapshot_cleared_on_turn_end(self, game_with_fow):
+        """Test that visibility snapshot is cleared when unit's turn ends."""
+        unit = game_with_fow.create_unit('W', 2, 2, player=1)
+        unit.can_move = True
+        unit.can_attack = True
+
+        game_with_fow.update_visibility(player=1)
+
+        # Capture snapshot
+        game_with_fow.capture_visible_enemies_for_unit(unit)
+        assert unit.visible_enemies_at_action_start is not None
+
+        # End unit's turn
+        unit.end_unit_turn()
+
+        # Snapshot should be cleared
+        assert unit.visible_enemies_at_action_start is None
+
+    def test_no_snapshot_in_non_fow_game(self, game_without_fow):
+        """Test that snapshot is None in non-FOW games."""
+        unit = game_without_fow.create_unit('W', 2, 2, player=1)
+
+        # Capture should set snapshot to None (no FOW)
+        game_without_fow.capture_visible_enemies_for_unit(unit)
+        assert unit.visible_enemies_at_action_start is None
+
+    def test_all_enemies_attackable_without_fow(self, game_without_fow):
+        """Test that all adjacent enemies are attackable without FOW."""
+        attacker = game_without_fow.create_unit('W', 5, 5, player=1)
+        attacker.can_attack = True
+        target = game_without_fow.create_unit('W', 6, 5, player=2)
+
+        # Without FOW, all enemies should be attackable
+        assert game_without_fow.is_enemy_attackable_by_unit(attacker, target)
+
+
 class TestFOWObservation:
     """Test observation generation with fog of war."""
 

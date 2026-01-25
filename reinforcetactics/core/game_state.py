@@ -235,6 +235,52 @@ class GameState:
 
         return vis_map.is_explored(x, y)
 
+    def capture_visible_enemies_for_unit(self, unit: Unit) -> None:
+        """
+        Capture which enemy units are currently visible to a unit's owner.
+
+        This is used for fog of war to prevent "move to discover, then attack"
+        exploitation. Call this when a unit starts its action (is selected).
+
+        Args:
+            unit: The unit starting its action
+        """
+        if not self.fog_of_war:
+            unit.visible_enemies_at_action_start = None
+            return
+
+        visible_positions = set()
+        for enemy in self.units:
+            if enemy.player != unit.player:
+                if self.is_position_visible(enemy.x, enemy.y, unit.player):
+                    visible_positions.add((enemy.x, enemy.y))
+
+        unit.visible_enemies_at_action_start = visible_positions
+
+    def is_enemy_attackable_by_unit(self, unit: Unit, enemy: Unit) -> bool:
+        """
+        Check if an enemy is attackable by a unit considering FOW pre-move snapshot.
+
+        In fog of war mode, a unit can only attack enemies that were visible
+        when the unit started its action, not enemies discovered by moving.
+
+        Args:
+            unit: The attacking unit
+            enemy: The potential target
+
+        Returns:
+            True if the enemy can be attacked
+        """
+        if not self.fog_of_war:
+            return True  # No FOW, all visible enemies are attackable
+
+        # If no snapshot was captured, fall back to current visibility
+        if unit.visible_enemies_at_action_start is None:
+            return self.is_position_visible(enemy.x, enemy.y, unit.player)
+
+        # Check if enemy's position was in the pre-move snapshot
+        return (enemy.x, enemy.y) in unit.visible_enemies_at_action_start
+
     def is_unit_type_enabled(self, unit_type: str) -> bool:
         """Check if a unit type is enabled for this game."""
         return unit_type in self.enabled_units
@@ -878,8 +924,8 @@ class GameState:
 
                         for enemy in self.units:
                             if enemy.player != player:
-                                # FOW: Skip enemies that are not visible
-                                if self.fog_of_war and not self.is_position_visible(enemy.x, enemy.y, player):
+                                # FOW: Skip enemies not attackable (checks pre-move snapshot)
+                                if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
                                     continue
 
                                 damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
@@ -901,8 +947,8 @@ class GameState:
                         # For other units, only adjacent enemies
                         adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
                         for enemy in adjacent_enemies:
-                            # FOW: Skip enemies that are not visible
-                            if self.fog_of_war and not self.is_position_visible(enemy.x, enemy.y, player):
+                            # FOW: Skip enemies not attackable (checks pre-move snapshot)
+                            if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
                                 continue
 
                             legal_actions['attack'].append({
