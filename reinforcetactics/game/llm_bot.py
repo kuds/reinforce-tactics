@@ -686,9 +686,15 @@ Respond with your strategic plan in JSON format."""
                 unit_id += 1
 
         # Serialize enemy units (less detail, convert to original coordinates)
+        # With fog of war, only include visible enemy units
         enemy_units = []
         for unit in self.game_state.units:
             if unit.player != self.bot_player:
+                # FOW: Skip enemies that are not visible
+                if self.game_state.fog_of_war:
+                    if not self.game_state.is_position_visible(unit.x, unit.y, self.bot_player):
+                        continue
+
                 orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
                 enemy_data = {
                     'type': unit.type,
@@ -699,6 +705,7 @@ Respond with your strategic plan in JSON format."""
                 enemy_units.append(enemy_data)
 
         # Serialize buildings (convert to original coordinates)
+        # With fog of war, only include explored structures
         player_buildings = []
         enemy_buildings = []
         neutral_buildings = []
@@ -706,12 +713,23 @@ Respond with your strategic plan in JSON format."""
         for row in self.game_state.grid.tiles:
             for tile in row:
                 if tile.type in ['b', 'h', 't']:
+                    # FOW: Skip structures that haven't been explored
+                    if self.game_state.fog_of_war:
+                        if not self.game_state.is_position_explored(tile.x, tile.y, self.bot_player):
+                            continue
+
                     orig_x, orig_y = self.game_state.padded_to_original_coords(tile.x, tile.y)
                     building_info = {
                         'type': tile.type,
                         'position': [orig_x, orig_y],
                         'income': 150 if tile.type == 'h' else (100 if tile.type == 'b' else 50)
                     }
+
+                    # FOW: For non-visible structures, don't show current ownership
+                    if self.game_state.fog_of_war:
+                        if not self.game_state.is_position_visible(tile.x, tile.y, self.bot_player):
+                            # Mark as 'last_seen' to indicate outdated info
+                            building_info['last_seen'] = True
 
                     if tile.player == self.bot_player:
                         player_buildings.append(building_info)
@@ -731,15 +749,13 @@ Respond with your strategic plan in JSON format."""
         # Get enabled units (for informing LLM which units can be created)
         enabled_units = getattr(self.game_state, 'enabled_units', ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'])
 
-        return {
+        # Build the state dictionary
+        state = {
             'map_name': map_name,
             'map_width': self.game_state.original_map_width,
             'map_height': self.game_state.original_map_height,
             'turn_number': self.game_state.turn_number,
             'player_gold': self.game_state.player_gold[self.bot_player],
-            'opponent_gold': self.game_state.player_gold[
-                1 if self.bot_player == 2 else 2
-            ],
             'enabled_units': enabled_units,
             'player_units': player_units,
             'enemy_units': enemy_units,
@@ -748,6 +764,18 @@ Respond with your strategic plan in JSON format."""
             'neutral_buildings': neutral_buildings,
             'legal_actions': formatted_legal_actions
         }
+
+        # FOW: Include fog of war status and hide enemy gold
+        if self.game_state.fog_of_war:
+            state['fog_of_war'] = True
+            state['opponent_gold'] = 'hidden'  # Hide enemy gold in FOW mode
+        else:
+            state['fog_of_war'] = False
+            state['opponent_gold'] = self.game_state.player_gold[
+                1 if self.bot_player == 2 else 2
+            ]
+
+        return state
 
     def _compute_move_then_actions(self, unit, unit_id: int,
                                      reachable_positions: List[tuple]

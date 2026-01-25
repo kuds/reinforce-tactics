@@ -76,6 +76,9 @@ class PlayerConfigMenu:
                 'model_path': None
             })
 
+        # Game options
+        self.fog_of_war = False  # Fog of war toggle
+
         # Model validation state: {player_idx: {'valid': bool, 'error': str}}
         self.model_validation = {}
 
@@ -264,6 +267,10 @@ class PlayerConfigMenu:
                                 validation = self._validate_model(file_path)
                                 self.model_validation[player_idx] = validation
 
+                        elif element['type'] == 'fog_of_war_toggle':
+                            # Toggle fog of war
+                            self.fog_of_war = not self.fog_of_war
+
                         elif element['type'] == 'start_button':
                             return self._get_result()
 
@@ -305,7 +312,8 @@ class PlayerConfigMenu:
                     return None
 
         return {
-            'players': self.player_configs
+            'players': self.player_configs,
+            'fog_of_war': self.fog_of_war
         }
 
     def draw(self) -> None:
@@ -409,12 +417,41 @@ class PlayerConfigMenu:
                     status_rect = status_surface.get_rect(x=browse_x, y=y_pos + 30)
                     self.screen.blit(status_surface, status_rect)
 
+        # Draw Game Options section
+        options_y = start_y + self.num_players * spacing_y + 10
+
+        # Draw divider line
+        divider_y = options_y
+        pygame.draw.line(
+            self.screen,
+            (60, 60, 80),
+            (50, divider_y),
+            (screen_width - 50, divider_y),
+            2
+        )
+
+        # Game Options label
+        options_label = self.lang.get('player_config.game_options', 'Game Options')
+        options_surface = self.label_font.render(options_label, True, self.title_color)
+        options_rect = options_surface.get_rect(x=50, y=divider_y + 10)
+        self.screen.blit(options_surface, options_rect)
+
+        # Fog of War toggle
+        fow_y = divider_y + 50
+        fow_label = self.lang.get('player_config.fog_of_war', 'Fog of War')
+        fow_label_surface = self.option_font.render(fow_label, True, self.text_color)
+        self.screen.blit(fow_label_surface, (50, fow_y))
+
+        fow_status = self.lang.get('common.enabled', 'Enabled') if self.fog_of_war else self.lang.get('common.disabled', 'Disabled')
+        fow_color = (100, 255, 100) if self.fog_of_war else (150, 150, 150)
+        self._draw_toggle_button(200, fow_y - 5, fow_status, 'fog_of_war_toggle', fow_color)
+
         # Draw Start Game button
         # Add extra spacing if any player uses ModelBot (for status text)
         extra_spacing = 30 if any(
             c['bot_type'] == 'ModelBot' for c in self.player_configs
         ) else 0
-        start_y_pos = start_y + self.num_players * spacing_y + 20 + extra_spacing
+        start_y_pos = fow_y + 50 + extra_spacing
         start_text = self.lang.get('player_config.start_game', 'Start Game')
 
         # Disable start button if any ModelBot has invalid/missing model
@@ -517,6 +554,65 @@ class PlayerConfigMenu:
                 'rect': button_rect,
                 'player_idx': player_idx
             })
+
+        return button_rect
+
+    def _draw_toggle_button(
+            self, x: int, y: int, text: str, element_type: str,
+            text_color: tuple = (255, 255, 255)) -> pygame.Rect:
+        """
+        Draw a toggle button for game options.
+
+        Args:
+            x: X position
+            y: Y position
+            text: Button text (current state)
+            element_type: Type of element for click handling
+            text_color: Color of the text
+
+        Returns:
+            Button rect
+        """
+        padding_x = 15
+        padding_y = 8
+
+        # Render text
+        text_surface = self.option_font.render(text, True, text_color)
+        text_rect = text_surface.get_rect()
+
+        # Calculate button dimensions
+        button_width = text_rect.width + 2 * padding_x
+        button_height = text_rect.height + 2 * padding_y
+
+        button_rect = pygame.Rect(x, y, button_width, button_height)
+
+        # Determine styling
+        is_hovered = (
+            self.hover_element
+            and self.hover_element.get('rect') == button_rect
+        )
+
+        if is_hovered:
+            bg_color = self.option_bg_hover_color
+            border_color = self.hover_color
+        else:
+            bg_color = self.option_bg_color
+            border_color = (60, 60, 80)
+
+        # Draw button background
+        pygame.draw.rect(self.screen, bg_color, button_rect, border_radius=6)
+        pygame.draw.rect(self.screen, border_color, button_rect, width=1, border_radius=6)
+
+        # Draw text
+        text_rect.center = button_rect.center
+        self.screen.blit(text_surface, text_rect)
+
+        # Register as interactive element
+        self.interactive_elements.append({
+            'type': element_type,
+            'rect': button_rect,
+            'player_idx': -1
+        })
 
         return button_rect
 

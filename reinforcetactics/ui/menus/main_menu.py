@@ -64,7 +64,8 @@ class MainMenu(Menu):
                 'type': 'new_game',
                 'map': selected_map,
                 'mode': selected_mode,  # Contains "1v1" or "2v2"
-                'players': player_config_result['players']
+                'players': player_config_result['players'],
+                'fog_of_war': player_config_result.get('fog_of_war', False)
             }
         return None
 

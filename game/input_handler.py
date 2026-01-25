@@ -288,6 +288,8 @@ class InputHandler:
                 # Unit has haste and can act again - keep it selected
                 print(f"{self.target_selection_unit.type} used haste action (can act again)")
                 self.selected_unit = self.target_selection_unit
+                # FOW: Capture visible enemies for the new action
+                self.game.capture_visible_enemies_for_unit(self.selected_unit)
                 self.target_selection_unit = None
             else:
                 self.target_selection_unit = None
@@ -362,6 +364,8 @@ class InputHandler:
             else:
                 # Select new unit
                 self.selected_unit = clicked_unit
+                # FOW: Capture visible enemies at the start of this unit's action
+                self.game.capture_visible_enemies_for_unit(clicked_unit)
                 print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
             return 'continue'
 

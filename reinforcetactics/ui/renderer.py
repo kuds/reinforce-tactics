@@ -9,6 +9,7 @@ from reinforcetactics.constants import (
     TILE_SIZE, TILE_TYPES, TILE_IMAGES,
     PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
 )
+from reinforcetactics.core.visibility import UNEXPLORED, SHROUDED, VISIBLE
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.settings import get_settings
 from reinforcetactics.ui.sprite_animator import SpriteAnimator
@@ -17,16 +18,19 @@ from reinforcetactics.ui.sprite_animator import SpriteAnimator
 class Renderer:
     """Handles all Pygame rendering."""
 
-    def __init__(self, game_state, replay_mode=False):
+    def __init__(self, game_state, replay_mode=False, viewing_player=None):
         """
         Initialize the renderer.
 
         Args:
             game_state: GameState instance to render
             replay_mode: If True, skip rendering gameplay controls (End Turn, Resign)
+            viewing_player: Player whose perspective to render (for fog of war).
+                           If None, shows current player's view (or omniscient if no FOW).
         """
         self.game_state = game_state
         self.replay_mode = replay_mode
+        self.viewing_player = viewing_player  # For FOW perspective
 
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
@@ -157,18 +161,46 @@ class Renderer:
 
     def _draw_grid(self):
         """Draw the tile grid."""
+        # Determine which player's perspective to use for fog of war
+        fow_player = self._get_fow_player()
+
         for y in range(self.game_state.grid.height):
             for x in range(self.game_state.grid.width):
                 tile = self.game_state.grid.tiles[y][x]
-                self._draw_tile(tile)
+                self._draw_tile(tile, fow_player)
 
-    def _draw_tile(self, tile):
-        """Draw a single tile with improved visuals."""
+    def _get_fow_player(self):
+        """Get the player whose fog of war perspective to render."""
+        if not self.game_state.fog_of_war:
+            return None  # No FOW, show everything
+
+        if self.viewing_player is not None:
+            return self.viewing_player
+
+        # Default to current player
+        return self.game_state.current_player
+
+    def _get_visibility_state(self, x, y, player):
+        """Get the visibility state of a tile for a player."""
+        if player is None or not self.game_state.fog_of_war:
+            return VISIBLE
+
+        vis_map = self.game_state.visibility_maps.get(player)
+        if vis_map is None:
+            return VISIBLE
+
+        return vis_map.get_visibility_state(x, y)
+
+    def _draw_tile(self, tile, fow_player=None):
+        """Draw a single tile with improved visuals and fog of war."""
         rect = pygame.Rect(tile.x * TILE_SIZE, tile.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+
+        # Check visibility state for fog of war
+        vis_state = self._get_visibility_state(tile.x, tile.y, fow_player)
 
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
 
-        # Draw tile image or color
+        # Draw tile image or color (always draw terrain, even in fog)
         if self.tile_images.get(tile_type_name):
             self.screen.blit(self.tile_images[tile_type_name], rect)
         else:
@@ -212,16 +244,26 @@ class Renderer:
                             (rect.left, center_y), (rect.right, center_y), 2)
 
             elif tile.type in ['h', 'b', 't']:  # Structures - border highlight
+                # HQ ownership is always visible (players know where enemy HQs are)
+                # Buildings and towers only show ownership when visible
                 if tile.player:
-                    player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
-                    pygame.draw.rect(self.screen, player_color, rect, 3)
+                    if tile.type == 'h' or vis_state == VISIBLE:
+                        player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
+                        pygame.draw.rect(self.screen, player_color, rect, 3)
 
             # Tile border
             pygame.draw.rect(self.screen, (0, 0, 0), rect, 1)
 
-        # Draw structure health bar (only for capturable structures)
+        # Draw structure health bar (only for capturable structures and visible tiles)
         if tile.is_capturable() and tile.health is not None:
-            self._draw_structure_health_bar(tile)
+            if vis_state == VISIBLE:
+                self._draw_structure_health_bar(tile)
+
+        # Apply fog overlay for unexplored and shrouded tiles (50% black)
+        if vis_state in (UNEXPLORED, SHROUDED):
+            fog_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            fog_overlay.fill((0, 0, 0, 128))  # 50% black overlay
+            self.screen.blit(fog_overlay, rect)
 
     def _draw_structure_health_bar(self, tile):
         """Draw health bar for structures."""
@@ -249,7 +291,18 @@ class Renderer:
 
     def _draw_units(self):
         """Draw all units."""
+        fow_player = self._get_fow_player()
+
         for unit in self.game_state.units:
+            # With fog of war, only draw visible units (own units + units in visible tiles)
+            if fow_player is not None:
+                # Always show own units
+                if unit.player != fow_player:
+                    # Check if enemy unit is in a visible tile
+                    vis_state = self._get_visibility_state(unit.x, unit.y, fow_player)
+                    if vis_state != VISIBLE:
+                        continue
+
             self._draw_unit(unit)
 
     def _draw_unit(self, unit):
@@ -470,6 +523,16 @@ class Renderer:
         resign_text_rect = resign_text.get_rect(center=self.resign_button.center)
         self.screen.blit(resign_text, resign_text_rect)
 
+        # Draw fog of war indicator if enabled
+        if self.game_state.fog_of_war:
+            fow_font = get_font(20)
+            fow_text = fow_font.render("FOW", True, (180, 180, 220))
+            fow_rect = fow_text.get_rect(topright=(self.screen.get_width() - 10, self.resign_button.bottom + 10))
+            fow_bg = fow_rect.inflate(8, 4)
+            pygame.draw.rect(self.screen, (40, 40, 60), fow_bg, border_radius=4)
+            pygame.draw.rect(self.screen, (80, 80, 120), fow_bg, width=1, border_radius=4)
+            self.screen.blit(fow_text, fow_rect)
+
     def draw_movement_overlay(self, unit):
         """Draw movement range overlay for a unit."""
         if not unit.can_move:
@@ -672,6 +735,27 @@ class Renderer:
         """Clean up animation data for a removed unit."""
         if self.animator:
             self.animator.cleanup_unit(unit)
+
+    def set_viewing_player(self, player):
+        """
+        Set which player's perspective to render for fog of war.
+
+        Args:
+            player: Player number (1 or 2), or None for current player's view
+        """
+        self.viewing_player = player
+
+    def toggle_fow_perspective(self):
+        """Toggle between player perspectives and omniscient view (for replays)."""
+        if not self.game_state.fog_of_war:
+            return
+
+        if self.viewing_player is None:
+            self.viewing_player = 1
+        elif self.viewing_player == 1:
+            self.viewing_player = 2
+        elif self.viewing_player == 2:
+            self.viewing_player = None  # Omniscient view
 
     def close(self):
         """Close the renderer."""
