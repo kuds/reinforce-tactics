@@ -47,7 +47,8 @@ class StrategyGameEnv(gym.Env):
         reward_config: Optional[Dict[str, float]] = None,
         hierarchical: bool = False,  # Enable for HRL
         goal_space_size: int = 64,  # For HRL goal space
-        enabled_units: Optional[List[str]] = None  # List of enabled unit types
+        enabled_units: Optional[List[str]] = None,  # List of enabled unit types
+        fog_of_war: bool = False  # Enable fog of war
     ):
         """
         Initialize environment.
@@ -61,6 +62,7 @@ class StrategyGameEnv(gym.Env):
             hierarchical: Whether to use hierarchical action space
             goal_space_size: Size of goal space for HRL
             enabled_units: List of enabled unit types (default all)
+            fog_of_war: Enable fog of war for partial observability (default False)
         """
         super().__init__()
 
@@ -73,7 +75,13 @@ class StrategyGameEnv(gym.Env):
         self.initial_map_data = map_data
         # Store enabled units (default to all if not specified)
         self.enabled_units = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
-        self.game_state = GameState(map_data, num_players=2, enabled_units=self.enabled_units)
+        # Fog of war setting
+        self.fog_of_war = fog_of_war
+        self.game_state = GameState(map_data, num_players=2, enabled_units=self.enabled_units, fog_of_war=fog_of_war)
+
+        # Initialize visibility at game start
+        if fog_of_war:
+            self.game_state.update_visibility()
         self.opponent_type = opponent
         self.opponent = None
         self.max_steps = max_steps
@@ -97,7 +105,7 @@ class StrategyGameEnv(gym.Env):
         self.grid_width = self.game_state.grid.width
 
         # Define observation space
-        self.observation_space = spaces.Dict({
+        obs_dict = {
             'grid': spaces.Box(
                 low=0, high=255,
                 shape=(self.grid_height, self.grid_width, 3),
@@ -118,7 +126,17 @@ class StrategyGameEnv(gym.Env):
                 shape=(self._get_action_space_size(),),
                 dtype=np.float32
             )
-        })
+        }
+
+        # Add visibility layer when fog of war is enabled
+        if fog_of_war:
+            obs_dict['visibility'] = spaces.Box(
+                low=0, high=2,  # 0=unexplored, 1=shrouded, 2=visible
+                shape=(self.grid_height, self.grid_width),
+                dtype=np.uint8
+            )
+
+        self.observation_space = spaces.Dict(obs_dict)
 
         # Define action space
         if hierarchical:
@@ -169,24 +187,47 @@ class StrategyGameEnv(gym.Env):
     def _get_obs(self) -> Dict[str, np.ndarray]:
         """Get current observation."""
         # Convert game state to numpy arrays
-        state_arrays = self.game_state.to_numpy()
+        # When fog of war is enabled, filter observation for player 1
+        if self.fog_of_war:
+            state_arrays = self.game_state.to_numpy(for_player=1)
+        else:
+            state_arrays = self.game_state.to_numpy()
 
         # Get action mask
         action_mask = self._get_action_mask()
 
-        obs = {
-            'grid': state_arrays['grid'].astype(np.float32),
-            'units': state_arrays['units'].astype(np.float32),
-            'global_features': np.array([
+        # When FOW is enabled, hide enemy gold
+        if self.fog_of_war:
+            global_features = np.array([
+                self.game_state.player_gold[1],
+                0,  # Hide enemy gold
+                self.game_state.turn_number,
+                len([u for u in self.game_state.units if u.player == 1]),
+                # Count only visible enemy units
+                len([u for u in self.game_state.units
+                     if u.player == 2 and self.game_state.is_position_visible(u.x, u.y, 1)]),
+                self.game_state.current_player
+            ], dtype=np.float32)
+        else:
+            global_features = np.array([
                 self.game_state.player_gold[1],
                 self.game_state.player_gold[2],
                 self.game_state.turn_number,
                 len([u for u in self.game_state.units if u.player == 1]),
                 len([u for u in self.game_state.units if u.player == 2]),
                 self.game_state.current_player
-            ], dtype=np.float32),
+            ], dtype=np.float32)
+
+        obs = {
+            'grid': state_arrays['grid'].astype(np.float32),
+            'units': state_arrays['units'].astype(np.float32),
+            'global_features': global_features,
             'action_mask': action_mask
         }
+
+        # Add visibility layer when FOW is enabled
+        if self.fog_of_war and 'visibility' in state_arrays:
+            obs['visibility'] = state_arrays['visibility']
 
         return obs
 
@@ -714,9 +755,18 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
-        # Reset game state (preserving enabled_units configuration)
-        self.game_state = GameState(self.initial_map_data, num_players=2, enabled_units=self.enabled_units)
+        # Reset game state (preserving enabled_units and fog_of_war configuration)
+        self.game_state = GameState(
+            self.initial_map_data,
+            num_players=2,
+            enabled_units=self.enabled_units,
+            fog_of_war=self.fog_of_war
+        )
         self.current_step = 0
+
+        # Initialize visibility at game start
+        if self.fog_of_war:
+            self.game_state.update_visibility()
 
         # Reset opponent
         if self.opponent_type == 'bot':

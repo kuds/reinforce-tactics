@@ -12,6 +12,7 @@ import pandas as pd
 
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.grid import TileGrid
+from reinforcetactics.core.visibility import VisibilityMap, get_visible_units, VISIBLE
 from reinforcetactics.game.mechanics import GameMechanics
 from reinforcetactics.constants import STARTING_GOLD, UNIT_DATA, TileType
 
@@ -26,7 +27,8 @@ class GameState:
     ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
 
     def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None,
-                 enabled_units: Optional[List[str]] = None) -> None:
+                 enabled_units: Optional[List[str]] = None,
+                 fog_of_war: bool = False) -> None:
         """
         Initialize the game state.
 
@@ -35,6 +37,7 @@ class GameState:
             num_players: Number of players (default 2)
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
+            fog_of_war: Enable fog of war (default False for backward compatibility)
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
@@ -45,6 +48,19 @@ class GameState:
         self.winner: Optional[int] = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
+
+        # Fog of war settings
+        self.fog_of_war: bool = fog_of_war
+        # FOW method for future compatibility when different algorithms are added
+        # Current options: 'simple_radius' (Option A from proposal)
+        # Future options: 'line_of_sight', 'hybrid'
+        self.fog_of_war_method: str = 'simple_radius' if fog_of_war else 'none'
+        self.visibility_maps: Dict[int, VisibilityMap] = {}
+        if fog_of_war:
+            for player in range(1, num_players + 1):
+                self.visibility_maps[player] = VisibilityMap(
+                    self.grid.width, self.grid.height, player
+                )
 
         # Enabled unit types (defaults to all if not specified)
         self.enabled_units: List[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
@@ -89,7 +105,7 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units)
+        self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units, self.fog_of_war)
 
     def set_map_metadata(self, original_width: int, original_height: int,
                          padding_offset_x: int, padding_offset_y: int,
@@ -146,6 +162,78 @@ class GameState:
         self._cache_valid = False
         self._unit_count_cache.clear()
         self._legal_actions_cache.clear()
+
+    def update_visibility(self, player: Optional[int] = None) -> None:
+        """
+        Update visibility maps for fog of war.
+
+        Args:
+            player: Specific player to update, or None to update all players
+        """
+        if not self.fog_of_war:
+            return
+
+        if player is not None:
+            if player in self.visibility_maps:
+                self.visibility_maps[player].update(self)
+        else:
+            for vis_map in self.visibility_maps.values():
+                vis_map.update(self)
+
+    def get_visible_units_for_player(self, player: int, include_own: bool = True) -> List[Unit]:
+        """
+        Get units visible to a specific player.
+
+        Args:
+            player: Player to get visible units for
+            include_own: Whether to include the player's own units
+
+        Returns:
+            List of visible units
+        """
+        return get_visible_units(self, player, include_own)
+
+    def is_position_visible(self, x: int, y: int, player: int) -> bool:
+        """
+        Check if a position is visible to a player.
+
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            player: Player to check visibility for
+
+        Returns:
+            True if position is visible (or if fog of war is disabled)
+        """
+        if not self.fog_of_war:
+            return True
+
+        vis_map = self.visibility_maps.get(player)
+        if vis_map is None:
+            return True
+
+        return vis_map.is_visible(x, y)
+
+    def is_position_explored(self, x: int, y: int, player: int) -> bool:
+        """
+        Check if a position has been explored by a player.
+
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            player: Player to check exploration for
+
+        Returns:
+            True if position is explored (or if fog of war is disabled)
+        """
+        if not self.fog_of_war:
+            return True
+
+        vis_map = self.visibility_maps.get(player)
+        if vis_map is None:
+            return True
+
+        return vis_map.is_explored(x, y)
 
     def is_unit_type_enabled(self, unit_type: str) -> bool:
         """Check if a unit type is enabled for this game."""
@@ -317,6 +405,10 @@ class GameState:
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
         self._invalidate_cache()
+
+        # Update visibility for the moving player
+        self.update_visibility(unit.player)
+
         return True
 
     def attack(self, attacker: Unit, target: Unit) -> Dict[str, Any]:
@@ -698,6 +790,9 @@ class GameState:
         healing_stats = self.heal_units_on_structures(self.current_player)
         income_data['healing'] = healing_stats
 
+        # Update visibility for the new current player
+        self.update_visibility(self.current_player)
+
         return income_data
 
     def resign(self, player: Optional[int] = None) -> None:
@@ -783,6 +878,10 @@ class GameState:
 
                         for enemy in self.units:
                             if enemy.player != player:
+                                # FOW: Skip enemies that are not visible
+                                if self.fog_of_war and not self.is_position_visible(enemy.x, enemy.y, player):
+                                    continue
+
                                 damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
                                 if damage > 0:
                                     legal_actions['attack'].append({
@@ -802,6 +901,10 @@ class GameState:
                         # For other units, only adjacent enemies
                         adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
                         for enemy in adjacent_enemies:
+                            # FOW: Skip enemies that are not visible
+                            if self.fog_of_war and not self.is_position_visible(enemy.x, enemy.y, player):
+                                continue
+
                             legal_actions['attack'].append({
                                 'attacker': unit,
                                 'target': enemy
@@ -877,13 +980,19 @@ class GameState:
             'map_file': self.map_file_used,
             'player_configs': self.player_configs,
             'enabled_units': self.enabled_units,
+            'fog_of_war': self.fog_of_war,
+            'fog_of_war_method': self.fog_of_war_method,
             'units': [unit.to_dict() for unit in self.units],
             'tiles': self.grid.to_dict()['tiles']
         }
 
-    def to_numpy(self) -> Dict[str, np.ndarray]:
+    def to_numpy(self, for_player: Optional[int] = None) -> Dict[str, np.ndarray]:
         """
         Convert game state to numpy arrays for RL.
+
+        Args:
+            for_player: If specified and fog_of_war is enabled, filter observation
+                        to only show what this player can see. If None, shows full state.
 
         Returns:
             dict with numpy arrays
@@ -897,18 +1006,51 @@ class GameState:
         # Encoding for all 8 unit types: W, M, C, A, K, R, S, B
         unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'A': 4, 'K': 5, 'R': 6, 'S': 7, 'B': 8}
 
+        # Visibility mask for FOW
+        visibility_state = np.full((self.grid.height, self.grid.width), VISIBLE, dtype=np.uint8)
+
+        if self.fog_of_war and for_player is not None:
+            vis_map = self.visibility_maps.get(for_player)
+            if vis_map is not None:
+                visibility_state = vis_map.to_numpy()
+
         for unit in self.units:
+            # FOW: Only show units that are visible or owned by the player
+            if self.fog_of_war and for_player is not None:
+                if unit.player != for_player and visibility_state[unit.y, unit.x] != VISIBLE:
+                    continue
+
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)
             unit_state[unit.y, unit.x, 1] = unit.player
             unit_state[unit.y, unit.x, 2] = (unit.health / unit.max_health) * 100
 
-        return {
+        # FOW: Mask grid ownership for non-visible tiles
+        if self.fog_of_war and for_player is not None:
+            # For shrouded/unexplored tiles, hide current ownership updates
+            # (they keep their last-seen state in the visibility map)
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    if visibility_state[y, x] != VISIBLE:
+                        # Hide structure ownership for non-visible tiles
+                        # Keep terrain type visible if explored
+                        if visibility_state[y, x] == 0:  # UNEXPLORED
+                            grid_state[y, x, 0] = 0  # Hide terrain type
+                            grid_state[y, x, 1] = 0  # Hide owner
+                            grid_state[y, x, 2] = 0  # Hide health
+
+        result = {
             'grid': grid_state,
             'units': unit_state,
             'gold': np.array([self.player_gold[i] for i in range(1, self.num_players + 1)], dtype=np.float32),
             'current_player': self.current_player,
             'turn_number': self.turn_number
         }
+
+        # Add visibility layer when FOW is enabled
+        if self.fog_of_war:
+            result['visibility'] = visibility_state
+
+        return result
 
     def save_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
         """
@@ -1040,7 +1182,9 @@ class GameState:
             'map_file': self.map_file_used,
             'initial_map': map_to_save,
             'player_configs': enhanced_player_configs,
-            'enabled_units': self.enabled_units
+            'enabled_units': self.enabled_units,
+            'fog_of_war': self.fog_of_war,
+            'fog_of_war_method': self.fog_of_war_method
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
@@ -1060,7 +1204,16 @@ class GameState:
         # Extract enabled_units from save data (default to all if not present for backward compatibility)
         enabled_units = save_data.get('enabled_units', cls.ALL_UNIT_TYPES)
 
-        game = cls(map_data, save_data.get('num_players', 2), enabled_units=enabled_units)
+        # Extract fog_of_war from save data (default to False for backward compatibility)
+        fog_of_war = save_data.get('fog_of_war', False)
+
+        # Extract fog_of_war_method (default to 'simple_radius' if FOW enabled, 'none' otherwise)
+        fog_of_war_method = save_data.get('fog_of_war_method', 'simple_radius' if fog_of_war else 'none')
+
+        game = cls(map_data, save_data.get('num_players', 2), enabled_units=enabled_units, fog_of_war=fog_of_war)
+
+        # Restore the fog of war method
+        game.fog_of_war_method = fog_of_war_method
 
         game.current_player = save_data.get('current_player', 1)
         game.turn_number = save_data.get('turn_number', 0)
