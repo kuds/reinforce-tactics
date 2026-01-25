@@ -170,7 +170,8 @@ class GameSession:  # pylint: disable=too-few-public-methods
         return result if result else 'quit'
 
 
-def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=None):
+def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=None,
+                   fog_of_war=False):
     """
     Start a new game with the specified mode, map, and player configurations.
 
@@ -178,6 +179,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         mode: Game mode string
         selected_map: Map file path or 'random'
         player_configs: List of player configuration dictionaries
+        fog_of_war: Whether to enable fog of war
     """
     print(f"\n🎮 Starting new game: {mode}\n")
 
@@ -217,7 +219,13 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         enabled_units = settings.get_enabled_units()
 
         # Create game state with enabled units from settings
-        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units)
+        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units,
+                         fog_of_war=fog_of_war)
+
+        # Initialize visibility for fog of war games
+        if fog_of_war:
+            game.update_visibility()
+            print("Fog of war enabled!")
 
         # Store map file for saving
         if map_file_used:
@@ -284,6 +292,11 @@ def load_saved_game():
 
         # Restore game state
         game = GameState.from_dict(save_data, map_data)
+
+        # Initialize visibility for fog of war games
+        if game.fog_of_war:
+            game.update_visibility()
+            print("Fog of war enabled!")
 
         # Create renderer
         renderer = Renderer(game)

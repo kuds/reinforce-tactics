@@ -28,6 +28,9 @@ def simple_map():
 def game_with_fow(simple_map):
     """Create a game state with fog of war enabled."""
     game = GameState(simple_map, num_players=2, fog_of_war=True)
+    # Give players enough gold to create units for testing
+    game.player_gold[1] = 10000
+    game.player_gold[2] = 10000
     game.update_visibility()
     return game
 
@@ -35,7 +38,11 @@ def game_with_fow(simple_map):
 @pytest.fixture
 def game_without_fow(simple_map):
     """Create a game state without fog of war."""
-    return GameState(simple_map, num_players=2, fog_of_war=False)
+    game = GameState(simple_map, num_players=2, fog_of_war=False)
+    # Give players enough gold to create units for testing
+    game.player_gold[1] = 10000
+    game.player_gold[2] = 10000
+    return game
 
 
 class TestVisibilityMapBasics:
@@ -142,17 +149,21 @@ class TestGameStateWithFOW:
 
     def test_visibility_updates_on_move(self, game_with_fow):
         """Test that visibility updates when unit moves."""
-        unit = game_with_fow.create_unit('W', 1, 1, player=1)
+        # Create unit at (5, 1) - away from HQ
+        unit = game_with_fow.create_unit('W', 5, 1, player=1)
         game_with_fow.update_visibility(player=1)
 
-        # Position (5, 5) might not be visible initially (far from HQ and unit)
-        initial_visibility = game_with_fow.is_position_visible(5, 5, player=1)
+        # Position (5, 5) is not visible initially
+        # - HQ at (0,0) with range 4: distance to (5,5) = max(5,5) = 5 > 4, not visible
+        # - Unit at (5,1) with range 3: distance to (5,5) = max(0,4) = 4 > 3, not visible
+        assert not game_with_fow.is_position_visible(5, 5, player=1)
 
-        # Move unit closer
+        # Move unit from (5, 1) to (5, 3) - reachable with movement 3
         unit.can_move = True
-        game_with_fow.move_unit(unit, 3, 3)
+        result = game_with_fow.move_unit(unit, 5, 3)
+        assert result, "Move should succeed"
 
-        # Now (5, 5) should be visible (within range 3 from unit at 3,3)
+        # Now (5, 5) should be visible (distance from (5,3) to (5,5) = max(0,2) = 2 <= 3)
         assert game_with_fow.is_position_visible(5, 5, player=1)
 
 
@@ -163,6 +174,7 @@ class TestFOWActionFiltering:
         """Test that player cannot attack enemies they cannot see."""
         # Player 1 unit near their HQ
         attacker = game_with_fow.create_unit('W', 1, 1, player=1)
+        attacker.can_attack = True  # Enable attack for testing
 
         # Player 2 unit far away (not visible to player 1)
         target = game_with_fow.create_unit('W', 8, 8, player=2)
@@ -183,6 +195,7 @@ class TestFOWActionFiltering:
         """Test that player can attack enemies they can see."""
         # Player 1 unit
         attacker = game_with_fow.create_unit('W', 3, 3, player=1)
+        attacker.can_attack = True  # Enable attack for testing
 
         # Player 2 unit adjacent (definitely visible)
         target = game_with_fow.create_unit('W', 4, 3, player=2)
@@ -203,6 +216,7 @@ class TestFOWActionFiltering:
         """Test that ranged attacks require visibility of target."""
         # Archer for player 1
         archer = game_with_fow.create_unit('A', 2, 2, player=1)
+        archer.can_attack = True  # Enable attack for testing
 
         # Enemy at range 2 (within attack range but check visibility)
         target = game_with_fow.create_unit('W', 4, 2, player=2)
@@ -290,6 +304,7 @@ class TestFOWWithoutFOW:
     def test_can_attack_any_adjacent_enemy_without_fow(self, game_without_fow):
         """Test that attacks work normally without FOW."""
         attacker = game_without_fow.create_unit('W', 5, 5, player=1)
+        attacker.can_attack = True  # Enable attack for testing
         target = game_without_fow.create_unit('W', 6, 5, player=2)
 
         legal_actions = game_without_fow.get_legal_actions(player=1)

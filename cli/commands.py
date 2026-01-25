@@ -286,7 +286,8 @@ def play_mode(_args):
             game_result = start_new_game(
                 mode=menu_result.get('mode', 'human_vs_computer'),
                 selected_map=menu_result.get('map'),
-                player_configs=menu_result.get('players')
+                player_configs=menu_result.get('players'),
+                fog_of_war=menu_result.get('fog_of_war', False)
             )
         elif menu_result['type'] == 'load_game':
             game_result = load_saved_game()
