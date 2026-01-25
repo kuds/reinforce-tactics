@@ -244,10 +244,12 @@ class Renderer:
                             (rect.left, center_y), (rect.right, center_y), 2)
 
             elif tile.type in ['h', 'b', 't']:  # Structures - border highlight
-                # Only show player ownership color if tile is visible
-                if vis_state == VISIBLE and tile.player:
-                    player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
-                    pygame.draw.rect(self.screen, player_color, rect, 3)
+                # HQ ownership is always visible (players know where enemy HQs are)
+                # Buildings and towers only show ownership when visible
+                if tile.player:
+                    if tile.type == 'h' or vis_state == VISIBLE:
+                        player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
+                        pygame.draw.rect(self.screen, player_color, rect, 3)
 
             # Tile border
             pygame.draw.rect(self.screen, (0, 0, 0), rect, 1)
