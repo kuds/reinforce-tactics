@@ -198,15 +198,9 @@ class Renderer:
         # Check visibility state for fog of war
         vis_state = self._get_visibility_state(tile.x, tile.y, fow_player)
 
-        # For unexplored tiles, draw solid fog
-        if vis_state == UNEXPLORED:
-            pygame.draw.rect(self.screen, (20, 20, 30), rect)
-            pygame.draw.rect(self.screen, (40, 40, 50), rect, 1)
-            return
-
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
 
-        # Draw tile image or color
+        # Draw tile image or color (always draw terrain, even in fog)
         if self.tile_images.get(tile_type_name):
             self.screen.blit(self.tile_images[tile_type_name], rect)
         else:
@@ -250,7 +244,8 @@ class Renderer:
                             (rect.left, center_y), (rect.right, center_y), 2)
 
             elif tile.type in ['h', 'b', 't']:  # Structures - border highlight
-                if tile.player:
+                # Only show player ownership color if tile is visible
+                if vis_state == VISIBLE and tile.player:
                     player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
                     pygame.draw.rect(self.screen, player_color, rect, 3)
 
@@ -262,10 +257,10 @@ class Renderer:
             if vis_state == VISIBLE:
                 self._draw_structure_health_bar(tile)
 
-        # Apply fog overlay for shrouded tiles
-        if vis_state == SHROUDED:
+        # Apply fog overlay for unexplored and shrouded tiles (50% black)
+        if vis_state in (UNEXPLORED, SHROUDED):
             fog_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-            fog_overlay.fill((30, 30, 50, 140))  # Semi-transparent dark blue
+            fog_overlay.fill((0, 0, 0, 128))  # 50% black overlay
             self.screen.blit(fog_overlay, rect)
 
     def _draw_structure_health_bar(self, tile):
