@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reinforcetactics"
+version = "0.2.0"
+description = "A turn-based strategy game built with Pygame and Gymnasium for reinforcement learning research"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "kuds" },
+]
+keywords = ["reinforcement-learning", "strategy-game", "gymnasium", "pygame", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Games/Entertainment :: Turn Based Strategy",
+]
+dependencies = [
+    "gymnasium",
+    "pettingzoo",
+    "stable-baselines3",
+    "sb3-contrib",
+    "numpy",
+    "torch",
+    "tensorboard",
+    "pandas",
+]
+
+[project.optional-dependencies]
+gui = [
+    "pygame-ce",
+    "opencv-python",
+    "matplotlib",
+]
+llm = [
+    "openai",
+    "anthropic",
+    "google-genai",
+]
+dev = [
+    "pytest",
+]
+all = [
+    "reinforcetactics[gui]",
+    "reinforcetactics[llm]",
+    "reinforcetactics[dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/kuds/reinforce-tactics"
+Documentation = "https://reinforcetactics.com"
+Repository = "https://github.com/kuds/reinforce-tactics"
+Issues = "https://github.com/kuds/reinforce-tactics/issues"
+
+[project.scripts]
+reinforce-tactics = "main:main"
+
+[tool.setuptools.packages.find]
+include = ["reinforcetactics*", "cli*", "utils*", "game*"]
+exclude = ["tests*", "docs*", "docs-site*", "examples*", "notebooks*", "scripts*", "train*", "eval*", "docker*", "maps*"]
