@@ -20,3 +20,8 @@
 /replays
 /saves
 settings.json
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
