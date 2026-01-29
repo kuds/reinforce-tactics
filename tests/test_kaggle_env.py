@@ -5,14 +5,13 @@ These tests verify the interpreter, serialisation, action execution,
 win/draw conditions, and the built-in agents without requiring the
 kaggle-environments package to be installed.
 """
+# pylint: disable=missing-function-docstring,too-many-lines
 import json
 import types
-import pytest
+
 import numpy as np
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.core.unit import Unit
-from reinforcetactics.constants import UNIT_DATA, STARTING_GOLD
 from reinforcetactics.kaggle.reinforce_tactics import (
     interpreter,
     renderer,
@@ -239,7 +238,7 @@ class TestSerialisation:
     def test_serialize_units_empty(self):
         game = _create_test_game()
         units = _serialize_units(game)
-        assert units == []  # No units created yet
+        assert not units  # No units created yet
 
     def test_serialize_units_with_units(self):
         game = _create_test_game()
@@ -372,7 +371,7 @@ class TestActionExecution:
         game = _create_test_game()
         attacker = game.create_unit("W", 5, 5, player=1)
         attacker.can_attack = True
-        target = game.create_unit("C", 6, 5, player=2)
+        assert game.create_unit("C", 6, 5, player=2) is not None
         result = _execute_action(game, {
             "type": "attack",
             "from_x": 5,
@@ -384,9 +383,10 @@ class TestActionExecution:
 
     def test_attack_own_unit_fails(self):
         game = _create_test_game()
+        game.player_gold[1] = 1000
         attacker = game.create_unit("W", 5, 5, player=1)
         attacker.can_attack = True
-        ally = game.create_unit("W", 6, 5, player=1)
+        assert game.create_unit("W", 6, 5, player=1) is not None
         result = _execute_action(game, {
             "type": "attack",
             "from_x": 5,
@@ -411,7 +411,7 @@ class TestActionExecution:
     def test_seize_own_structure_fails(self):
         game = _create_test_game()
         # Place P1 unit on P1 HQ at (0,0)
-        unit = game.create_unit("W", 0, 0, player=1)
+        assert game.create_unit("W", 0, 0, player=1) is not None
         result = _execute_action(game, {
             "type": "seize",
             "x": 0,
@@ -557,7 +557,7 @@ class TestInterpreterFlow:
 
     def test_initialisation(self):
         """First interpreter call should initialise the game."""
-        state, env = self._setup_interpreter_game()
+        state, _env = self._setup_interpreter_game()
         assert state[0].status == "ACTIVE"
         assert state[1].status == "INACTIVE"
         # Board should be populated
@@ -565,15 +565,15 @@ class TestInterpreterFlow:
         assert len(state[1].observation.board) > 0
 
     def test_initial_gold(self):
-        state, env = self._setup_interpreter_game()
+        state, _env = self._setup_interpreter_game()
         gold = state[0].observation.gold
         assert gold[0] == 250
         assert gold[1] == 250
 
     def test_initial_units_empty(self):
-        state, env = self._setup_interpreter_game()
+        state, _env = self._setup_interpreter_game()
         # No units should exist at game start
-        assert state[0].observation.units == []
+        assert not state[0].observation.units
 
     def test_end_turn_swaps_active_player(self):
         state, env = self._setup_interpreter_game()

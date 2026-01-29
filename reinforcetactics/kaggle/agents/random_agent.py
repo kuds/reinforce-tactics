@@ -54,7 +54,7 @@ def agent(observation, configuration):
     ]
 
     # Parse enabled units from configuration
-    enabled_str = configuration.enabledUnits if hasattr(configuration, "enabledUnits") else "W,M,C,A,K,R,S,B"
+    enabled_str = getattr(configuration, "enabledUnits", "W,M,C,A,K,R,S,B")
     enabled_units = [u.strip() for u in enabled_str.split(",") if u.strip()]
 
     # Try to create a random unit at each available building

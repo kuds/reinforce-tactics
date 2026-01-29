@@ -14,16 +14,11 @@ Required exports for kaggle-environments:
 import json
 import logging
 from os import path
-from copy import deepcopy
 
 import numpy as np
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.core.unit import Unit
-from reinforcetactics.constants import (
-    UNIT_DATA, TileType, STARTING_GOLD,
-    HEADQUARTERS_INCOME, BUILDING_INCOME, TOWER_INCOME,
-)
+from reinforcetactics.constants import UNIT_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -75,16 +70,10 @@ def interpreter(state, env):
     # Initialisation (first call after env.reset)
     # ------------------------------------------------------------------
     if env.done:
-        game = _init_game(env.configuration)
-        _games[key] = game
-        _update_observations(state, game, env.configuration)
-        state[0].status = "ACTIVE"
-        state[1].status = "INACTIVE"
-        return state
+        return _interpreter_init(state, env, key)
 
     game = _games.get(key)
     if game is None:
-        # Safety fallback – should not happen in normal flow
         for agent in state:
             agent.status = "ERROR"
         return state
@@ -96,84 +85,99 @@ def interpreter(state, env):
     if active_idx is None:
         return state  # both done / error
 
+    # ------------------------------------------------------------------
+    # Execute agent actions, end turn, check outcomes
+    # ------------------------------------------------------------------
+    _process_turn(state, env, game, active_idx, key)
+
+    return state
+
+
+def _interpreter_init(state, env, key):
+    """Handle the first interpreter call (game initialisation)."""
+    game = _init_game(env.configuration)
+    _games[key] = game
+    _update_observations(state, game, env.configuration)
+    state[0].status = "ACTIVE"
+    state[1].status = "INACTIVE"
+    return state
+
+
+def _process_turn(state, env, game, active_idx, key):
+    """Process actions, end turn, and check win/draw conditions."""
     agent = state[active_idx]
     actions = agent.action if agent.action else []
 
-    # Ensure actions is a list
     if not isinstance(actions, list):
         actions = [actions]
 
-    # ------------------------------------------------------------------
-    # Execute agent actions
-    # ------------------------------------------------------------------
     game_player = active_idx + 1  # GameState uses 1-indexed players
 
-    for action in actions:
-        if not isinstance(action, dict):
-            agent.status = "INVALID"
-            agent.reward = -1
-            state[1 - active_idx].reward = 1
-            state[1 - active_idx].status = "DONE"
-            agent.status = "DONE"
-            return state
+    # Execute each action in the agent's action list
+    if not _run_actions(state, game, actions, active_idx, game_player):
+        return  # Agent lost due to invalid action
 
-        action_type = action.get("type", "")
-        if action_type == "end_turn":
-            break
-
-        success = _execute_action(game, action, game_player)
-        if not success:
-            # Invalid action – the agent loses
-            agent.status = "INVALID"
-            agent.reward = -1
-            state[1 - active_idx].reward = 1
-            state[1 - active_idx].status = "DONE"
-            agent.status = "DONE"
-            return state
-
-        # Check if game ended mid-action (e.g. HQ captured or all units eliminated)
-        if game.game_over:
-            break
-
-    # ------------------------------------------------------------------
     # End the turn (income, healing, status effects, etc.)
-    # ------------------------------------------------------------------
     if not game.game_over:
         game.end_turn()
 
-    # ------------------------------------------------------------------
-    # Check win / draw conditions
-    # ------------------------------------------------------------------
+    # Check win condition
     if game.game_over:
-        winner_idx = game.winner - 1  # convert to 0-indexed
+        winner_idx = game.winner - 1
         state[winner_idx].reward = 1
         state[winner_idx].status = "DONE"
         state[1 - winner_idx].reward = -1
         state[1 - winner_idx].status = "DONE"
         _update_observations(state, game, env.configuration)
-        # Clean up stored game
         _games.pop(key, None)
-        return state
+        return
 
-    # Check max turns (draw)
-    max_turns = env.configuration.episodeSteps
-    if game.turn_number >= max_turns:
+    # Check draw (max turns)
+    if game.turn_number >= env.configuration.episodeSteps:
         for i in range(2):
             state[i].reward = 0
             state[i].status = "DONE"
         _update_observations(state, game, env.configuration)
         _games.pop(key, None)
-        return state
+        return
 
-    # ------------------------------------------------------------------
-    # Update observations and swap active player
-    # ------------------------------------------------------------------
+    # Normal continuation: update observations and swap active player
     _update_observations(state, game, env.configuration)
-
     state[active_idx].status = "INACTIVE"
     state[1 - active_idx].status = "ACTIVE"
 
-    return state
+
+def _run_actions(state, game, actions, active_idx, game_player):
+    """
+    Execute all actions for the active agent.
+
+    Returns True if all actions were valid, False if the agent made an
+    invalid action (in which case the agent is marked as lost).
+    """
+    for action in actions:
+        if not isinstance(action, dict):
+            _mark_agent_loss(state, active_idx)
+            return False
+
+        if action.get("type", "") == "end_turn":
+            break
+
+        if not _execute_action(game, action, game_player):
+            _mark_agent_loss(state, active_idx)
+            return False
+
+        if game.game_over:
+            break
+
+    return True
+
+
+def _mark_agent_loss(state, losing_idx):
+    """Mark the agent at losing_idx as having lost."""
+    state[losing_idx].status = "DONE"
+    state[losing_idx].reward = -1
+    state[1 - losing_idx].reward = 1
+    state[1 - losing_idx].status = "DONE"
 
 
 # ---------------------------------------------------------------------------
@@ -286,141 +290,148 @@ def _execute_action(game, action, player):
     """
     atype = action.get("type", "")
 
+    handlers = {
+        "create_unit": _exec_create_unit,
+        "move": _exec_move,
+        "attack": _exec_attack,
+        "seize": _exec_seize,
+        "heal": _exec_heal,
+        "cure": _exec_cure,
+        "paralyze": _exec_paralyze,
+        "haste": _exec_haste,
+        "defence_buff": _exec_defence_buff,
+        "attack_buff": _exec_attack_buff,
+        "end_turn": lambda _g, _a, _p: True,
+    }
+
+    handler = handlers.get(atype)
+    if handler is None:
+        return False
+
     try:
-        if atype == "create_unit":
-            unit_type = action.get("unit_type", "")
-            x = int(action.get("x", -1))
-            y = int(action.get("y", -1))
-            if unit_type not in UNIT_DATA:
-                return False
-            result = game.create_unit(unit_type, x, y, player)
-            return result is not None
-
-        elif atype == "move":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            unit = game.get_unit_at_position(from_x, from_y)
-            if unit is None or unit.player != player:
-                return False
-            return game.move_unit(unit, to_x, to_y)
-
-        elif atype == "attack":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            attacker = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if attacker is None or target is None:
-                return False
-            if attacker.player != player or target.player == player:
-                return False
-            game.attack(attacker, target)
-            return True
-
-        elif atype == "seize":
-            x = int(action.get("x", -1))
-            y = int(action.get("y", -1))
-            unit = game.get_unit_at_position(x, y)
-            if unit is None or unit.player != player:
-                return False
-            tile = game.grid.get_tile(x, y)
-            if tile is None or not tile.is_capturable() or tile.player == player:
-                return False
-            game.seize(unit)
-            return True
-
-        elif atype == "heal":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            healer = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if healer is None or target is None:
-                return False
-            if healer.player != player or healer.type != 'C':
-                return False
-            amount = game.heal(healer, target)
-            return amount > 0
-
-        elif atype == "cure":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            curer = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if curer is None or target is None:
-                return False
-            if curer.player != player or curer.type != 'C':
-                return False
-            return game.cure(curer, target)
-
-        elif atype == "paralyze":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            mage = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if mage is None or target is None:
-                return False
-            if mage.player != player or mage.type != 'M':
-                return False
-            return game.paralyze(mage, target)
-
-        elif atype == "haste":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            sorcerer = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if sorcerer is None or target is None:
-                return False
-            if sorcerer.player != player or sorcerer.type != 'S':
-                return False
-            return game.haste(sorcerer, target)
-
-        elif atype == "defence_buff":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            sorcerer = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if sorcerer is None or target is None:
-                return False
-            if sorcerer.player != player or sorcerer.type != 'S':
-                return False
-            return game.defence_buff(sorcerer, target)
-
-        elif atype == "attack_buff":
-            from_x = int(action.get("from_x", -1))
-            from_y = int(action.get("from_y", -1))
-            to_x = int(action.get("to_x", -1))
-            to_y = int(action.get("to_y", -1))
-            sorcerer = game.get_unit_at_position(from_x, from_y)
-            target = game.get_unit_at_position(to_x, to_y)
-            if sorcerer is None or target is None:
-                return False
-            if sorcerer.player != player or sorcerer.type != 'S':
-                return False
-            return game.attack_buff(sorcerer, target)
-
-        elif atype == "end_turn":
-            return True
-
-        else:
-            # Unknown action type
-            return False
-
-    except Exception:
+        return handler(game, action, player)
+    except Exception:  # pylint: disable=broad-except
         logger.exception("Error executing action: %s", action)
         return False
+
+
+def _exec_create_unit(game, action, player):
+    """Handle create_unit action."""
+    unit_type = action.get("unit_type", "")
+    x = int(action.get("x", -1))
+    y = int(action.get("y", -1))
+    if unit_type not in UNIT_DATA:
+        return False
+    return game.create_unit(unit_type, x, y, player) is not None
+
+
+def _exec_move(game, action, player):
+    """Handle move action."""
+    from_x = int(action.get("from_x", -1))
+    from_y = int(action.get("from_y", -1))
+    to_x = int(action.get("to_x", -1))
+    to_y = int(action.get("to_y", -1))
+    unit = game.get_unit_at_position(from_x, from_y)
+    if unit is None or unit.player != player:
+        return False
+    return game.move_unit(unit, to_x, to_y)
+
+
+def _exec_attack(game, action, player):
+    """Handle attack action."""
+    from_x = int(action.get("from_x", -1))
+    from_y = int(action.get("from_y", -1))
+    to_x = int(action.get("to_x", -1))
+    to_y = int(action.get("to_y", -1))
+    attacker = game.get_unit_at_position(from_x, from_y)
+    target = game.get_unit_at_position(to_x, to_y)
+    if attacker is None or target is None:
+        return False
+    if attacker.player != player or target.player == player:
+        return False
+    game.attack(attacker, target)
+    return True
+
+
+def _exec_seize(game, action, player):
+    """Handle seize action."""
+    x = int(action.get("x", -1))
+    y = int(action.get("y", -1))
+    unit = game.get_unit_at_position(x, y)
+    if unit is None or unit.player != player:
+        return False
+    tile = game.grid.get_tile(x, y)
+    if tile is None or not tile.is_capturable() or tile.player == player:
+        return False
+    game.seize(unit)
+    return True
+
+
+def _exec_heal(game, action, player):
+    """Handle heal action."""
+    healer, target = _get_source_target(game, action, player, 'C')
+    if healer is None:
+        return False
+    return game.heal(healer, target) > 0
+
+
+def _exec_cure(game, action, player):
+    """Handle cure action."""
+    curer, target = _get_source_target(game, action, player, 'C')
+    if curer is None:
+        return False
+    return game.cure(curer, target)
+
+
+def _exec_paralyze(game, action, player):
+    """Handle paralyze action."""
+    mage, target = _get_source_target(game, action, player, 'M')
+    if mage is None:
+        return False
+    return game.paralyze(mage, target)
+
+
+def _exec_haste(game, action, player):
+    """Handle haste action."""
+    sorcerer, target = _get_source_target(game, action, player, 'S')
+    if sorcerer is None:
+        return False
+    return game.haste(sorcerer, target)
+
+
+def _exec_defence_buff(game, action, player):
+    """Handle defence_buff action."""
+    sorcerer, target = _get_source_target(game, action, player, 'S')
+    if sorcerer is None:
+        return False
+    return game.defence_buff(sorcerer, target)
+
+
+def _exec_attack_buff(game, action, player):
+    """Handle attack_buff action."""
+    sorcerer, target = _get_source_target(game, action, player, 'S')
+    if sorcerer is None:
+        return False
+    return game.attack_buff(sorcerer, target)
+
+
+def _get_source_target(game, action, player, required_type):
+    """
+    Extract source and target units from an action dict.
+
+    Returns (source, target) or (None, None) if validation fails.
+    """
+    from_x = int(action.get("from_x", -1))
+    from_y = int(action.get("from_y", -1))
+    to_x = int(action.get("to_x", -1))
+    to_y = int(action.get("to_y", -1))
+    source = game.get_unit_at_position(from_x, from_y)
+    target = game.get_unit_at_position(to_x, to_y)
+    if source is None or target is None:
+        return None, None
+    if source.player != player or source.type != required_type:
+        return None, None
+    return source, target
 
 
 # ---------------------------------------------------------------------------
@@ -593,8 +604,6 @@ def _aggressive_agent(observation, configuration):
     player_idx = observation.player
     player = player_idx + 1  # 1-indexed
     gold = observation.gold[player_idx]
-    my_units = [u for u in observation.units if u["owner"] == player]
-    enemy_units = [u for u in observation.units if u["owner"] != player]
 
     # Find available buildings (structures owned by us that are buildings)
     structures = observation.structures if hasattr(observation, "structures") else []

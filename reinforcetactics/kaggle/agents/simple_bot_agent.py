@@ -10,10 +10,6 @@ This agent implements a basic strategy:
 Usage as a Kaggle submission:
     Copy this file and submit it.
 """
-import random
-from collections import deque
-
-
 # Unit costs for budget tracking
 UNIT_COSTS = {
     "W": 200, "M": 300, "C": 200, "A": 250,
@@ -53,7 +49,7 @@ def agent(observation, configuration):
     map_h = observation.mapHeight if hasattr(observation, "mapHeight") else 20
 
     # Parse enabled units
-    enabled_str = configuration.enabledUnits if hasattr(configuration, "enabledUnits") else "W,M,C,A,K,R,S,B"
+    enabled_str = getattr(configuration, "enabledUnits", "W,M,C,A,K,R,S,B")
     enabled_units = set(u.strip() for u in enabled_str.split(",") if u.strip())
 
     my_units = [u for u in units if u["owner"] == player]
@@ -129,16 +125,12 @@ def agent(observation, configuration):
             target = None
             if enemy_units:
                 # Find nearest enemy
-                nearest = min(
-                    enemy_units,
-                    key=lambda e: abs(ux - e["x"]) + abs(uy - e["y"])
-                )
+                nearest = _find_nearest_enemy(ux, uy, enemy_units)
                 target = (nearest["x"], nearest["y"])
             elif enemy_hq:
                 target = enemy_hq
 
             if target:
-                move_range = UNIT_MOVEMENT.get(unit["type"], 3)
                 next_pos = _step_toward(
                     ux, uy, target[0], target[1],
                     board, occupied, map_w, map_h
@@ -159,14 +151,21 @@ def agent(observation, configuration):
     return actions
 
 
+def _find_nearest_enemy(ux, uy, enemy_units):
+    """Find the nearest enemy unit by Manhattan distance."""
+    return min(
+        enemy_units,
+        key=lambda e: abs(ux - e["x"]) + abs(uy - e["y"])
+    )
+
+
 def _get_attack_range(unit_type):
     """Return (min_range, max_range) for a unit type."""
     if unit_type in ("M", "S"):
         return (1, 2)
-    elif unit_type == "A":
+    if unit_type == "A":
         return (2, 3)
-    else:
-        return (1, 1)
+    return (1, 1)
 
 
 def _get_structure_at(structures, x, y):
