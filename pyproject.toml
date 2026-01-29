@@ -26,18 +26,20 @@ classifiers = [
 dependencies = [
     "gymnasium",
     "pettingzoo",
-    "pygame-ce",
     "stable-baselines3",
     "sb3-contrib",
     "numpy",
-    "opencv-python",
     "torch",
     "tensorboard",
-    "matplotlib",
     "pandas",
 ]
 
 [project.optional-dependencies]
+gui = [
+    "pygame-ce",
+    "opencv-python",
+    "matplotlib",
+]
 llm = [
     "openai",
     "anthropic",
@@ -45,6 +47,11 @@ llm = [
 ]
 dev = [
     "pytest",
+]
+all = [
+    "reinforcetactics[gui]",
+    "reinforcetactics[llm]",
+    "reinforcetactics[dev]",
 ]
 
 [project.urls]
