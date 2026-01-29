@@ -2,7 +2,7 @@
   "name": "reinforce_tactics",
   "title": "Reinforce Tactics",
   "description": "A turn-based tactical strategy game where two players command armies of diverse unit types to capture the enemy headquarters or eliminate all enemy units.",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "agents": [2],
 
   "configuration": {
