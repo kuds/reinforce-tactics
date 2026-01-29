@@ -21,11 +21,30 @@ kaggle_environments/envs/reinforce_tactics/
     __init__.py                  # Package init (empty or re-exports)
     reinforce_tactics.json       # Environment specification
     reinforce_tactics.py         # Interpreter, renderer, specification, agents
+    reinforce_tactics_engine/    # Vendored game engine (self-contained)
+        __init__.py              # Exports GameState, UNIT_DATA
+        constants.py             # Game constants and unit data
+        core/
+            __init__.py
+            tile.py              # Tile class
+            unit.py              # Unit class
+            grid.py              # TileGrid class
+            visibility.py        # Fog of war visibility
+            game_state.py        # Core GameState logic
+        game/
+            __init__.py
+            mechanics.py         # Combat, healing, buffs mechanics
     agents/
         __init__.py
         random_agent.py          # Minimal baseline agent
         simple_bot_agent.py      # Strategic baseline agent
 ```
+
+The `reinforce_tactics_engine/` directory is a vendored copy of the core
+game engine with all imports rewritten as relative imports. This follows
+the same pattern as [Lux AI Season 3](https://github.com/Kaggle/kaggle-environments/tree/master/kaggle_environments/envs/lux_ai_s3),
+which vendors its engine as the `luxai_s3/` sub-package. No external
+`pip install` is required — the environment is fully self-contained.
 
 ## Step-by-Step PR Process
 
@@ -45,22 +64,14 @@ mkdir -p kaggle_environments/envs/reinforce_tactics/agents
 
 ### 3. Copy Files
 
-Copy the files from this package into the directory created above.
-The interpreter module (`reinforce_tactics.py`) contains the inlined
-map generation so it does not depend on pygame or other UI libraries.
+Copy the entire `reinforce_tactics/` directory (including the
+`reinforce_tactics_engine/` sub-package and `agents/`) into the
+kaggle-environments envs directory.
 
-**Important:** The interpreter imports from `reinforcetactics.core` and
-`reinforcetactics.constants`. For the Kaggle submission you have two
-options:
-
-**Option A (Recommended):** Bundle the core game engine as a dependency.
-Add `reinforce-tactics` to the kaggle-environments `setup.py` or inline
-the necessary core modules.
-
-**Option B:** Inline all game logic into `reinforce_tactics.py` so the
-environment is fully self-contained within the kaggle-environments repo.
-This means copying `GameState`, `Unit`, `Tile`, `TileGrid`,
-`GameMechanics`, and `constants` into the environment directory.
+The game engine is vendored as a self-contained sub-package with
+relative imports, so no `pip install` of the main `reinforcetactics`
+package is needed. Map generation is inlined in the interpreter to
+avoid pygame or other UI dependencies.
 
 ### 4. Register the Environment
 
@@ -119,6 +130,7 @@ Then open a PR against `Kaggle/kaggle-environments` with:
 ## Files
 - reinforce_tactics.json: Environment specification
 - reinforce_tactics.py: Interpreter, renderer, built-in agents
+- reinforce_tactics_engine/: Vendored game engine (self-contained)
 - agents/: Standalone baseline agents for competition submissions
 
 ## Testing

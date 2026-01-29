@@ -11,7 +11,7 @@ import types
 
 import numpy as np
 
-from reinforcetactics.core.game_state import GameState
+from reinforcetactics.kaggle.reinforce_tactics_engine import GameState
 from reinforcetactics.kaggle.reinforce_tactics import (
     interpreter,
     renderer,
@@ -268,7 +268,7 @@ class TestSerialisation:
         game.create_unit("W", 1, 1, player=1)
         game.create_unit("W", 8, 8, player=2)
         # Initialize visibility maps
-        from reinforcetactics.core.visibility import VisibilityMap
+        from reinforcetactics.kaggle.reinforce_tactics_engine.core.visibility import VisibilityMap
         game.visibility_maps = {
             1: VisibilityMap(game.grid.width, game.grid.height, 1),
             2: VisibilityMap(game.grid.width, game.grid.height, 2),

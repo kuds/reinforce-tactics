@@ -17,8 +17,7 @@ from os import path
 
 import numpy as np
 
-from reinforcetactics.core.game_state import GameState
-from reinforcetactics.constants import UNIT_DATA
+from .reinforce_tactics_engine import GameState, UNIT_DATA
 
 logger = logging.getLogger(__name__)
 
