@@ -267,7 +267,7 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Movement Rules
 - Units can move up to their movement range in Manhattan distance (sum of horizontal and vertical movement)
-- Units cannot move through water, ocean, or mountain tiles
+- Units cannot move through water or ocean tiles
 - Units cannot move through other units (friendly or enemy)
 - After moving, units can still attack if they haven't attacked yet
 
