@@ -48,7 +48,7 @@ From the main menu, select **"Map Editor"** to access:
 - **Grass** (p): Walkable terrain
 - **Ocean** (o): Not walkable
 - **Water** (w): Not walkable
-- **Mountain** (m): Not walkable
+- **Mountain** (m): Walkable
 - **Forest** (f): Walkable
 - **Road** (r): Walkable
 
