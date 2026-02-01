@@ -12,7 +12,8 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class SpatialFeatureExtractor(BaseFeaturesExtractor):
     """
     CNN-based feature extractor for spatial game state.
-    Processes grid and unit channels.
+    Processes grid channels, unit channels, and global features
+    (gold, turn number, unit counts, current player).
     """
 
     def __init__(self, observation_space, features_dim: int = 512):
@@ -31,7 +32,13 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
         )
 
-        # Compute shape by doing one forward pass
+        # Determine global_features size if present in observation space
+        if 'global_features' in observation_space.spaces:
+            self.n_global = observation_space['global_features'].shape[0]
+        else:
+            self.n_global = 0
+
+        # Compute CNN output shape by doing one forward pass
         with torch.no_grad():
             sample_obs = observation_space.sample()
             grid = torch.as_tensor(sample_obs['grid']).float()
@@ -39,8 +46,9 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             combined = torch.cat([grid, units], dim=-1).permute(2, 0, 1).unsqueeze(0)
             n_flatten = self.cnn(combined).flatten(1).shape[1]
 
+        # Linear projection: CNN output + global features -> features_dim
         self.linear = nn.Sequential(
-            nn.Linear(n_flatten, features_dim),
+            nn.Linear(n_flatten + self.n_global, features_dim),
             nn.ReLU()
         )
 
@@ -49,7 +57,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         Extract features from observations.
 
         Args:
-            observations: Dict with 'grid' and 'units'
+            observations: Dict with 'grid', 'units', and optionally 'global_features'
 
         Returns:
             Feature tensor of shape (batch, features_dim)
@@ -64,6 +72,11 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         # CNN forward
         features = self.cnn(combined)  # (B, 64, H, W)
         features = features.flatten(1)  # (B, 64*H*W)
+
+        # Concatenate global features (gold, turn, unit counts, current player)
+        if self.n_global > 0 and 'global_features' in observations:
+            global_feat = observations['global_features']  # (B, 6)
+            features = torch.cat([features, global_feat], dim=1)  # (B, 64*H*W + 6)
 
         # Linear projection
         features = self.linear(features)  # (B, features_dim)
@@ -204,7 +217,7 @@ class WorkerNetwork(nn.Module):
         self,
         feature_dim: int = 512,
         goal_embedding_dim: int = 64,
-        action_space_dims: list = [6, 3, 20, 20, 20, 20]
+        action_space_dims: list = [10, 8, 20, 20, 20, 20]  # 10 action types, 8 unit types
     ):
         super().__init__()
 
@@ -352,7 +365,7 @@ class FeudalRLAgent:
         self.worker = WorkerNetwork(
             feature_dim=512,
             goal_embedding_dim=64,
-            action_space_dims=[6, 3, grid_width, grid_height, grid_width, grid_height]
+            action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height]
         ).to(device)
 
         # Current goal (maintained across steps)
@@ -372,11 +385,11 @@ class FeudalRLAgent:
             action: Primitive action array
             goal: Current goal (for logging/debugging)
         """
-        # Convert observation to tensor
+        # Convert observation to tensor (grid, units, and global_features)
         obs_tensor = {
-            k: torch.as_tensor(v).unsqueeze(0).to(self.device)
+            k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
             for k, v in observation.items()
-            if k in ['grid', 'units']
+            if k in ['grid', 'units', 'global_features']
         }
 
         # Extract features
