@@ -182,9 +182,12 @@ def train_flat_baseline(args):
 
 
 def train_feudal_rl(args):
-    """Train Feudal RL agent."""
+    """Train Feudal RL agent with Manager-Worker hierarchy."""
+    from torch.utils.tensorboard import SummaryWriter
+    from reinforcetactics.rl.feudal_rl import FeudalRLAgent
+
     print("\n" + "="*60)
-    print("Training Feudal RL Agent")
+    print("Training Feudal RL Agent (Manager-Worker Hierarchy)")
     print("="*60 + "\n")
 
     # Create output directories
@@ -193,13 +196,108 @@ def train_feudal_rl(args):
 
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
+    (log_dir / "best_model").mkdir(exist_ok=True)
 
-    # TODO: Implement custom Feudal RL training loop
-    # For now, this is a placeholder
-    print("⚠️  Feudal RL training not yet fully implemented")
-    print("Using flat baseline for now...")
+    # Create environments (single env for feudal — hierarchy is per-episode stateful)
+    env = StrategyGameEnv(
+        map_file=None, opponent=args.opponent,
+        render_mode=None, max_steps=500
+    )
+    eval_env = StrategyGameEnv(
+        map_file=None, opponent=args.opponent,
+        render_mode=None, max_steps=500
+    )
 
-    return train_flat_baseline(args)
+    # Create agent
+    agent = FeudalRLAgent(
+        observation_space=env.observation_space,
+        grid_width=env.grid_width,
+        grid_height=env.grid_height,
+        device=args.device
+    )
+    agent.manager_horizon = args.manager_horizon
+
+    # Setup training
+    agent.setup_training(
+        learning_rate=args.learning_rate,
+        manager_lr_scale=args.manager_lr_scale,
+        worker_lr_scale=args.worker_lr_scale,
+    )
+
+    # Initialize
+    obs, _ = env.reset()
+    agent._last_obs = obs  # pylint: disable=protected-access
+    agent.reset_goal()
+
+    writer = SummaryWriter(str(log_dir / "tensorboard"))
+
+    num_updates = args.total_timesteps // args.n_steps
+    total_timesteps = 0
+    best_eval_reward = float('-inf')
+
+    print(f"Manager horizon: {args.manager_horizon}")
+    print(f"Worker reward alpha: {args.worker_reward_alpha}")
+    print(f"Updates to run: {num_updates}")
+    print(f"Steps per update: {args.n_steps}\n")
+
+    for update_idx in range(num_updates):
+        # Collect rollout
+        buf = agent.collect_rollout(
+            env, n_steps=args.n_steps,
+            gamma=args.gamma, gae_lambda=args.gae_lambda,
+            worker_reward_alpha=args.worker_reward_alpha,
+        )
+        total_timesteps += args.n_steps
+
+        # PPO update
+        losses = agent.update(
+            buf, n_epochs=args.n_epochs,
+            batch_size=args.batch_size,
+            clip_range=args.clip_range,
+            ent_coef=args.ent_coef,
+            vf_coef=args.vf_coef,
+            max_grad_norm=args.max_grad_norm,
+        )
+
+        # Log to TensorBoard
+        for key, val in losses.items():
+            writer.add_scalar(f"train/{key}", val, total_timesteps)
+        writer.add_scalar("train/manager_segments", len(buf.m_rewards), total_timesteps)
+        writer.add_scalar("train/worker_mean_reward", float(buf.w_rewards.mean()), total_timesteps)
+
+        # Progress logging
+        if (update_idx + 1) % 10 == 0:
+            print(f"[{total_timesteps:,}] w_policy={losses.get('worker_policy_loss', 0):.3f} "
+                  f"m_policy={losses.get('manager_policy_loss', 0):.3f} "
+                  f"w_entropy={losses.get('worker_entropy', 0):.3f}")
+
+        # Periodic evaluation
+        if total_timesteps % args.eval_freq < args.n_steps:
+            eval_results = agent.evaluate(eval_env, n_episodes=args.n_eval_episodes)
+            writer.add_scalar("eval/mean_reward", eval_results['mean_reward'], total_timesteps)
+            writer.add_scalar("eval/win_rate", eval_results['win_rate'], total_timesteps)
+            print(f"  EVAL [{total_timesteps:,}] reward={eval_results['mean_reward']:.1f} "
+                  f"win_rate={eval_results['win_rate']:.2f}")
+
+            if eval_results['mean_reward'] > best_eval_reward:
+                best_eval_reward = eval_results['mean_reward']
+                agent.save_checkpoint(str(log_dir / "best_model" / "best_feudal.pt"))
+
+        # Periodic checkpoint
+        if total_timesteps % args.checkpoint_freq < args.n_steps:
+            agent.save_checkpoint(str(checkpoint_dir / f"feudal_{total_timesteps}.pt"))
+
+    # Save final model and config
+    agent.save_checkpoint(str(log_dir / "final_model.pt"))
+    config = vars(args)
+    config_path = log_dir / "config.json"
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
+
+    writer.close()
+    print(f"\nTraining complete! Model saved to {log_dir / 'final_model.pt'}")
+
+    return log_dir
 
 
 def main():
@@ -247,6 +345,16 @@ def main():
                        help='Value function coefficient')
     parser.add_argument('--max-grad-norm', type=float, default=0.5,
                        help='Max gradient norm')
+
+    # Feudal RL hyperparameters
+    parser.add_argument('--manager-horizon', type=int, default=10,
+                       help='Worker steps between manager goal updates')
+    parser.add_argument('--worker-reward-alpha', type=float, default=0.5,
+                       help='Weight of extrinsic reward in worker reward (0=intrinsic only, 1=extrinsic only)')
+    parser.add_argument('--manager-lr-scale', type=float, default=1.0,
+                       help='Manager learning rate multiplier relative to base LR')
+    parser.add_argument('--worker-lr-scale', type=float, default=1.0,
+                       help='Worker learning rate multiplier relative to base LR')
 
     # Evaluation args
     parser.add_argument('--eval-freq', type=int, default=10000,
