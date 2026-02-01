@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 class ModelBot:  # pylint: disable=too-few-public-methods
     """Bot that uses a trained Stable-Baselines3 model for decision-making."""
 
+    # Canonical unit type ordering — must match StrategyGameEnv action space indices
+    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+
+    # Number of action types in the environment (0-9)
+    NUM_ACTION_TYPES = 10
+
     def __init__(self, game_state, player: int = 2, model_path: Optional[str] = None):
         """
         Initialize the model bot.
@@ -141,7 +147,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 self.game_state.current_player
             ], dtype=np.float32),
             'action_mask': np.ones(
-                6 * self.game_state.grid.width * self.game_state.grid.height,
+                self.NUM_ACTION_TYPES * self.game_state.grid.width * self.game_state.grid.height,
                 dtype=np.float32
             )
         }
@@ -169,7 +175,8 @@ class ModelBot:  # pylint: disable=too-few-public-methods
 
             action_type, unit_type, from_x, from_y, to_x, to_y = action[:6]
 
-            # Map action types: 0=create, 1=move, 2=attack, 3=seize, 4=heal, 5=end_turn
+            # Map action types: 0=create, 1=move, 2=attack, 3=seize, 4=heal/cure,
+            # 5=end_turn, 6=paralyze, 7=haste, 8=defence_buff, 9=attack_buff
             if action_type == 0:  # Create unit
                 return self._create_unit(unit_type, to_x, to_y)
             if action_type == 1:  # Move
@@ -178,10 +185,18 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 return self._attack(from_x, from_y, to_x, to_y)
             if action_type == 3:  # Seize
                 return self._seize(from_x, from_y)
-            if action_type == 4:  # Heal
+            if action_type == 4:  # Heal/Cure
                 return self._heal(from_x, from_y, to_x, to_y)
             if action_type == 5:  # End turn
                 return True  # Will be handled by caller
+            if action_type == 6:  # Paralyze (Mage/Sorcerer)
+                return self._paralyze(from_x, from_y, to_x, to_y)
+            if action_type == 7:  # Haste (Sorcerer)
+                return self._buff(from_x, from_y, to_x, to_y, 'haste')
+            if action_type == 8:  # Defence Buff (Sorcerer)
+                return self._buff(from_x, from_y, to_x, to_y, 'defence_buff')
+            if action_type == 9:  # Attack Buff (Sorcerer)
+                return self._buff(from_x, from_y, to_x, to_y, 'attack_buff')
 
             logger.warning("Unknown action type: %s", action_type)
             return False
@@ -193,12 +208,16 @@ class ModelBot:  # pylint: disable=too-few-public-methods
     def _create_unit(self, unit_type: int, x: int, y: int) -> bool:  # pylint: disable=too-many-return-statements
         """Create a unit at the specified location."""
         try:
-            # Map unit_type index to unit code
-            unit_codes = ['W', 'M', 'C', 'A']
-            if unit_type < 0 or unit_type >= len(unit_codes):
+            # Map unit_type index to unit code using canonical ordering
+            if unit_type < 0 or unit_type >= len(self.ALL_UNIT_TYPES):
                 return False
 
-            unit_code = unit_codes[unit_type]
+            unit_code = self.ALL_UNIT_TYPES[unit_type]
+
+            # Check if this unit type is enabled in the current game
+            if hasattr(self.game_state, 'is_unit_type_enabled'):
+                if not self.game_state.is_unit_type_enabled(unit_code):
+                    return False
 
             # Check if we have enough gold
             cost = UNIT_DATA[unit_code]['cost']
@@ -280,7 +299,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             return False
 
     def _heal(self, from_x: int, from_y: int, to_x: int, to_y: int) -> bool:
-        """Heal a unit."""
+        """Heal or cure a unit (Cleric only). Prioritizes cure if target is paralyzed."""
         try:
             healer = self.game_state.get_unit_at_position(from_x, from_y)
             target = self.game_state.get_unit_at_position(to_x, to_y)
@@ -291,14 +310,68 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if healer.player != self.bot_player or target.player != self.bot_player:
                 return False
 
-            if healer.type != 'C':  # Only clerics can heal
+            if healer.type != 'C':  # Only clerics can heal/cure
                 return False
 
-            self.game_state.heal(healer, target)
-            return True
+            # Priority: cure if paralyzed, otherwise heal (matches gym_env logic)
+            if target.is_paralyzed():
+                result = self.game_state.cure(healer, target)
+                if result:
+                    return True
+
+            heal_amount = self.game_state.heal(healer, target)
+            return heal_amount > 0
 
         except Exception as e:
             logger.debug("Failed to heal: %s", e)
+            return False
+
+    def _paralyze(self, from_x: int, from_y: int, to_x: int, to_y: int) -> bool:
+        """Paralyze an enemy unit (Mage/Sorcerer)."""
+        try:
+            unit = self.game_state.get_unit_at_position(from_x, from_y)
+            target = self.game_state.get_unit_at_position(to_x, to_y)
+
+            if not unit or not target:
+                return False
+
+            if unit.player != self.bot_player or target.player == self.bot_player:
+                return False
+
+            if unit.type not in ('M', 'S'):
+                return False
+
+            return self.game_state.paralyze(unit, target)
+
+        except Exception as e:
+            logger.debug("Failed to paralyze: %s", e)
+            return False
+
+    def _buff(self, from_x: int, from_y: int, to_x: int, to_y: int,
+              buff_type: str) -> bool:
+        """Apply a Sorcerer buff (haste, defence_buff, or attack_buff) to a friendly unit."""
+        try:
+            unit = self.game_state.get_unit_at_position(from_x, from_y)
+            target = self.game_state.get_unit_at_position(to_x, to_y)
+
+            if not unit or not target:
+                return False
+
+            if unit.player != self.bot_player or target.player != self.bot_player:
+                return False
+
+            if unit.type != 'S':  # Only Sorcerers can buff
+                return False
+
+            buff_fn = getattr(self.game_state, buff_type, None)
+            if buff_fn is None:
+                logger.warning("Unknown buff type: %s", buff_type)
+                return False
+
+            return buff_fn(unit, target)
+
+        except Exception as e:
+            logger.debug("Failed to apply %s: %s", buff_type, e)
             return False
 
     def _is_end_turn_action(self, action) -> bool:

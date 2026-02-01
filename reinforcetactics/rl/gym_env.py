@@ -565,9 +565,12 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 if unit and unit.player == 1:
                     result = self.game_state.seize(unit)
-                    reward += 1.0
-                    if result['captured']:
-                        reward += 20.0
+                    if result.get('damage', 0) > 0:
+                        reward += 1.0  # Seize progressed (structure took damage)
+                        if result['captured']:
+                            reward += 20.0
+                    else:
+                        is_valid = False  # Seize had no effect (not capturable or already owned)
                 else:
                     is_valid = False
 
@@ -712,6 +715,11 @@ class StrategyGameEnv(gym.Env):
             observation, reward, terminated, truncated, info
         """
         self.current_step += 1
+        self.episode_stats['length'] = self.current_step
+
+        # In hierarchical mode, extract the primitive action from the Dict
+        if self.hierarchical and isinstance(action, dict):
+            action = action['primitive']
 
         # Decode and execute action
         action_dict = self._encode_action(action)

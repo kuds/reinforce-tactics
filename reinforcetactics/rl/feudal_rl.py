@@ -12,7 +12,8 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class SpatialFeatureExtractor(BaseFeaturesExtractor):
     """
     CNN-based feature extractor for spatial game state.
-    Processes grid and unit channels.
+    Processes grid channels, unit channels, and global features
+    (gold, turn number, unit counts, current player).
     """
 
     def __init__(self, observation_space, features_dim: int = 512):
@@ -31,7 +32,13 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
         )
 
-        # Compute shape by doing one forward pass
+        # Determine global_features size if present in observation space
+        if 'global_features' in observation_space.spaces:
+            self.n_global = observation_space['global_features'].shape[0]
+        else:
+            self.n_global = 0
+
+        # Compute CNN output shape by doing one forward pass
         with torch.no_grad():
             sample_obs = observation_space.sample()
             grid = torch.as_tensor(sample_obs['grid']).float()
@@ -39,8 +46,9 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             combined = torch.cat([grid, units], dim=-1).permute(2, 0, 1).unsqueeze(0)
             n_flatten = self.cnn(combined).flatten(1).shape[1]
 
+        # Linear projection: CNN output + global features -> features_dim
         self.linear = nn.Sequential(
-            nn.Linear(n_flatten, features_dim),
+            nn.Linear(n_flatten + self.n_global, features_dim),
             nn.ReLU()
         )
 
@@ -49,7 +57,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         Extract features from observations.
 
         Args:
-            observations: Dict with 'grid' and 'units'
+            observations: Dict with 'grid', 'units', and optionally 'global_features'
 
         Returns:
             Feature tensor of shape (batch, features_dim)
@@ -64,6 +72,11 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         # CNN forward
         features = self.cnn(combined)  # (B, 64, H, W)
         features = features.flatten(1)  # (B, 64*H*W)
+
+        # Concatenate global features (gold, turn, unit counts, current player)
+        if self.n_global > 0 and 'global_features' in observations:
+            global_feat = observations['global_features']  # (B, 6)
+            features = torch.cat([features, global_feat], dim=1)  # (B, 64*H*W + 6)
 
         # Linear projection
         features = self.linear(features)  # (B, features_dim)
@@ -204,7 +217,7 @@ class WorkerNetwork(nn.Module):
         self,
         feature_dim: int = 512,
         goal_embedding_dim: int = 64,
-        action_space_dims: list = [6, 3, 20, 20, 20, 20]
+        action_space_dims: list = [10, 8, 20, 20, 20, 20]  # 10 action types, 8 unit types
     ):
         super().__init__()
 
@@ -318,9 +331,126 @@ class WorkerNetwork(nn.Module):
         return log_prob, entropy, value
 
 
+def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda,
+                  segment_lengths=None):
+    """
+    Compute Generalized Advantage Estimation.
+
+    For the manager, segment_lengths adjusts the discount to gamma^k
+    where k is the number of worker steps in each manager segment.
+    """
+    n = len(rewards)
+    advantages = np.zeros(n, dtype=np.float32)
+    last_gae = 0.0
+    for t in reversed(range(n)):
+        next_val = last_value if t == n - 1 else values[t + 1]
+        non_terminal = 1.0 - float(dones[t])
+        discount = (gamma ** segment_lengths[t]) if segment_lengths is not None else gamma
+        delta = rewards[t] + discount * next_val * non_terminal - values[t]
+        last_gae = delta + discount * gae_lambda * non_terminal * last_gae
+        advantages[t] = last_gae
+    returns = advantages + values
+    return advantages, returns
+
+
+class FeudalRolloutBuffer:
+    """Rollout buffer for feudal RL with separate manager and worker storage."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Clear all stored data."""
+        # Worker storage (one per env step)
+        self.w_obs_grid = []
+        self.w_obs_units = []
+        self.w_obs_global = []
+        self.w_actions = []
+        self.w_log_probs = []
+        self.w_values = []
+        self.w_goals = []
+        self.w_rewards = []
+        self.w_dones = []
+
+        # Manager storage (one per goal-setting event)
+        self.m_obs_grid = []
+        self.m_obs_units = []
+        self.m_obs_global = []
+        self.m_goals = []
+        self.m_log_probs = []
+        self.m_values = []
+        self.m_rewards = []
+        self.m_dones = []
+        self.m_segment_lengths = []
+
+    def add_worker_step(self, obs, action, log_prob, value, goal,
+                        extrinsic_reward, intrinsic_reward, done,
+                        worker_reward_alpha):
+        """Add a single worker step to the buffer."""
+        self.w_obs_grid.append(obs['grid'])
+        self.w_obs_units.append(obs['units'])
+        self.w_obs_global.append(obs['global_features'])
+        self.w_actions.append(action)
+        self.w_log_probs.append(log_prob)
+        self.w_values.append(value)
+        self.w_goals.append(goal)
+        self.w_rewards.append(intrinsic_reward + worker_reward_alpha * extrinsic_reward)
+        self.w_dones.append(done)
+
+    def add_manager_step(self, obs, goal, log_prob, value):
+        """Record a goal-setting event (reward/done filled later)."""
+        self.m_obs_grid.append(obs['grid'])
+        self.m_obs_units.append(obs['units'])
+        self.m_obs_global.append(obs['global_features'])
+        self.m_goals.append(goal)
+        self.m_log_probs.append(log_prob)
+        self.m_values.append(value)
+
+    def end_manager_segment(self, cumulative_reward, done, segment_length):
+        """Finalize a manager goal segment with its accumulated reward."""
+        self.m_rewards.append(cumulative_reward)
+        self.m_dones.append(done)
+        self.m_segment_lengths.append(segment_length)
+
+    def finalize(self):
+        """Convert all lists to numpy arrays."""
+        self.w_obs_grid = np.stack(self.w_obs_grid)
+        self.w_obs_units = np.stack(self.w_obs_units)
+        self.w_obs_global = np.stack(self.w_obs_global)
+        self.w_actions = np.array(self.w_actions, dtype=np.int64)
+        self.w_log_probs = np.array(self.w_log_probs, dtype=np.float32)
+        self.w_values = np.array(self.w_values, dtype=np.float32)
+        self.w_goals = np.array(self.w_goals, dtype=np.float32)
+        self.w_rewards = np.array(self.w_rewards, dtype=np.float32)
+        self.w_dones = np.array(self.w_dones, dtype=np.float32)
+
+        self.m_obs_grid = np.stack(self.m_obs_grid)
+        self.m_obs_units = np.stack(self.m_obs_units)
+        self.m_obs_global = np.stack(self.m_obs_global)
+        self.m_goals = np.array(self.m_goals, dtype=np.float32)
+        self.m_log_probs = np.array(self.m_log_probs, dtype=np.float32)
+        self.m_values = np.array(self.m_values, dtype=np.float32)
+        self.m_rewards = np.array(self.m_rewards, dtype=np.float32)
+        self.m_dones = np.array(self.m_dones, dtype=np.float32)
+        self.m_segment_lengths = np.array(self.m_segment_lengths, dtype=np.int64)
+
+    def compute_advantages(self, last_w_value, last_m_value, gamma, gae_lambda):
+        """Compute GAE advantages for both worker and manager."""
+        self.w_advantages, self.w_returns = _compute_gae(
+            self.w_rewards, self.w_values, self.w_dones,
+            last_w_value, gamma, gae_lambda
+        )
+        self.m_advantages, self.m_returns = _compute_gae(
+            self.m_rewards, self.m_values, self.m_dones,
+            last_m_value, gamma, gae_lambda,
+            segment_lengths=self.m_segment_lengths
+        )
+
+
 class FeudalRLAgent:
     """
     Complete Feudal RL agent with manager and worker.
+    Supports both inference (select_action) and training (collect_rollout + update).
     """
 
     def __init__(
@@ -352,7 +482,7 @@ class FeudalRLAgent:
         self.worker = WorkerNetwork(
             feature_dim=512,
             goal_embedding_dim=64,
-            action_space_dims=[6, 3, grid_width, grid_height, grid_width, grid_height]
+            action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height]
         ).to(device)
 
         # Current goal (maintained across steps)
@@ -372,11 +502,11 @@ class FeudalRLAgent:
             action: Primitive action array
             goal: Current goal (for logging/debugging)
         """
-        # Convert observation to tensor
+        # Convert observation to tensor (grid, units, and global_features)
         obs_tensor = {
-            k: torch.as_tensor(v).unsqueeze(0).to(self.device)
+            k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
             for k, v in observation.items()
-            if k in ['grid', 'units']
+            if k in ['grid', 'units', 'global_features']
         }
 
         # Extract features
@@ -412,6 +542,320 @@ class FeudalRLAgent:
         """Reset current goal (call at episode start)."""
         self.current_goal = None
         self.goal_step_counter = 0
+
+    # ------------------------------------------------------------------
+    # Training methods
+    # ------------------------------------------------------------------
+
+    def setup_training(self, learning_rate: float = 3e-4,
+                       manager_lr_scale: float = 1.0,
+                       worker_lr_scale: float = 1.0):
+        """Initialize optimizer with per-component learning rates."""
+        self.optimizer = torch.optim.Adam([
+            {'params': self.feature_extractor.parameters(), 'lr': learning_rate},
+            {'params': self.manager.parameters(), 'lr': learning_rate * manager_lr_scale},
+            {'params': self.worker.parameters(), 'lr': learning_rate * worker_lr_scale},
+        ])
+        self.feature_extractor.train()
+        self.manager.train()
+        self.worker.train()
+        self._last_obs = None
+
+    def _obs_to_tensor(self, obs: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
+        """Convert a single observation dict to batched tensor dict on device."""
+        return {
+            k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
+            for k, v in obs.items()
+            if k in ['grid', 'units', 'global_features']
+        }
+
+    def _batch_obs_to_tensor(self, grid, units, global_feat):
+        """Convert pre-stacked numpy arrays to tensor dict on device."""
+        return {
+            'grid': torch.as_tensor(grid).float().to(self.device),
+            'units': torch.as_tensor(units).float().to(self.device),
+            'global_features': torch.as_tensor(global_feat).float().to(self.device),
+        }
+
+    def collect_rollout(self, env, n_steps: int, gamma: float, gae_lambda: float,
+                        worker_reward_alpha: float = 0.5) -> FeudalRolloutBuffer:
+        """
+        Collect n_steps of experience using the feudal hierarchy.
+
+        Args:
+            env: Gymnasium environment
+            n_steps: Number of environment steps to collect
+            gamma: Discount factor
+            gae_lambda: GAE lambda
+            worker_reward_alpha: Weight of extrinsic reward in worker reward
+
+        Returns:
+            Filled FeudalRolloutBuffer with computed advantages
+        """
+        buf = FeudalRolloutBuffer()
+        obs = self._last_obs
+        manager_reward_accum = 0.0
+        manager_step_count = 0
+
+        self.feature_extractor.eval()
+        self.manager.eval()
+        self.worker.eval()
+
+        for _ in range(n_steps):
+            obs_tensor = self._obs_to_tensor(obs)
+
+            with torch.no_grad():
+                features = self.feature_extractor(obs_tensor)
+
+                # Check if manager needs to set a new goal
+                need_new_goal = (self.current_goal is None
+                                 or self.goal_step_counter >= self.manager_horizon)
+
+                if need_new_goal:
+                    # Close previous manager segment if one exists
+                    if self.current_goal is not None and manager_step_count > 0:
+                        buf.end_manager_segment(manager_reward_accum,
+                                                done=False,
+                                                segment_length=manager_step_count)
+                        manager_reward_accum = 0.0
+                        manager_step_count = 0
+
+                    # Sample new goal
+                    goal, m_log_prob = self.manager.sample_goal(features)
+                    _, _, m_value = self.manager.evaluate_goal(features, goal)
+                    buf.add_manager_step(obs, goal.cpu().numpy()[0],
+                                         m_log_prob.item(), m_value.item())
+                    self.current_goal = goal
+                    self.goal_step_counter = 0
+
+                # Worker selects action conditioned on goal
+                action, w_log_prob = self.worker.sample_action(features, self.current_goal)
+                _, _, w_value = self.worker.evaluate_action(
+                    features, self.current_goal, action)
+
+            # Step environment
+            action_np = action.cpu().numpy()[0]
+            next_obs, ext_reward, terminated, truncated, _info = env.step(action_np)
+            done = terminated or truncated
+
+            # Compute intrinsic reward
+            goal_np = self.current_goal.cpu().numpy()[0]
+            int_reward = compute_intrinsic_reward(obs, goal_np, next_obs)
+
+            # Store worker transition
+            buf.add_worker_step(obs, action_np, w_log_prob.item(), w_value.item(),
+                                goal_np, ext_reward, int_reward, done,
+                                worker_reward_alpha)
+
+            manager_reward_accum += ext_reward
+            manager_step_count += 1
+            self.goal_step_counter += 1
+
+            if done:
+                buf.end_manager_segment(manager_reward_accum, done=True,
+                                        segment_length=manager_step_count)
+                manager_reward_accum = 0.0
+                manager_step_count = 0
+                obs, _ = env.reset()
+                self.reset_goal()
+            else:
+                obs = next_obs
+
+        # Close any pending manager segment
+        if manager_step_count > 0:
+            buf.end_manager_segment(manager_reward_accum, done=False,
+                                    segment_length=manager_step_count)
+
+        # Bootstrap last values for GAE
+        with torch.no_grad():
+            obs_tensor = self._obs_to_tensor(obs)
+            features = self.feature_extractor(obs_tensor)
+            # Need a goal for worker value bootstrap
+            if self.current_goal is None:
+                self.current_goal, _ = self.manager.sample_goal(features)
+            _, last_w_value = self.worker(features, self.current_goal)
+            _, _, _, last_m_value = self.manager(features)
+
+        self._last_obs = obs
+
+        buf.finalize()
+        buf.compute_advantages(last_w_value.item(), last_m_value.item(),
+                               gamma, gae_lambda)
+
+        self.feature_extractor.train()
+        self.manager.train()
+        self.worker.train()
+
+        return buf
+
+    def update(self, buf: FeudalRolloutBuffer, n_epochs: int, batch_size: int,
+               clip_range: float, ent_coef: float, vf_coef: float,
+               max_grad_norm: float) -> Dict[str, float]:
+        """
+        Run PPO update for both manager and worker.
+
+        Returns dict of loss metrics.
+        """
+        import torch.nn.functional as F  # pylint: disable=import-outside-toplevel
+
+        all_params = (list(self.feature_extractor.parameters())
+                      + list(self.manager.parameters())
+                      + list(self.worker.parameters()))
+
+        n_worker = len(buf.w_rewards)
+        n_manager = len(buf.m_rewards)
+        w_batch_size = min(batch_size, n_worker)
+        m_batch_size = min(batch_size, n_manager)
+
+        # Convert to tensors
+        w_actions_t = torch.as_tensor(buf.w_actions).to(self.device)
+        w_old_lp = torch.as_tensor(buf.w_log_probs).to(self.device)
+        w_adv = torch.as_tensor(buf.w_advantages).to(self.device)
+        w_ret = torch.as_tensor(buf.w_returns).to(self.device)
+        w_goals_t = torch.as_tensor(buf.w_goals).float().to(self.device)
+
+        m_goals_t = torch.as_tensor(buf.m_goals).float().to(self.device)
+        m_old_lp = torch.as_tensor(buf.m_log_probs).to(self.device)
+        m_adv = torch.as_tensor(buf.m_advantages).to(self.device)
+        m_ret = torch.as_tensor(buf.m_returns).to(self.device)
+
+        # Normalize advantages
+        w_adv = (w_adv - w_adv.mean()) / (w_adv.std() + 1e-8)
+        if n_manager > 1:
+            m_adv = (m_adv - m_adv.mean()) / (m_adv.std() + 1e-8)
+
+        metrics = {}
+
+        for _epoch in range(n_epochs):
+            # --- Worker update ---
+            w_indices = np.random.permutation(n_worker)
+            for start in range(0, n_worker, w_batch_size):
+                idx = w_indices[start:start + w_batch_size]
+                b_obs = self._batch_obs_to_tensor(
+                    buf.w_obs_grid[idx], buf.w_obs_units[idx], buf.w_obs_global[idx])
+                b_actions = w_actions_t[idx]
+                b_old_lp = w_old_lp[idx]
+                b_adv = w_adv[idx]
+                b_ret = w_ret[idx]
+                b_goals = w_goals_t[idx]
+
+                features = self.feature_extractor(b_obs)
+                new_lp, entropy, values = self.worker.evaluate_action(
+                    features, b_goals, b_actions)
+
+                ratio = torch.exp(new_lp - b_old_lp)
+                surr1 = ratio * b_adv
+                surr2 = torch.clamp(ratio, 1 - clip_range, 1 + clip_range) * b_adv
+                policy_loss = -torch.min(surr1, surr2).mean()
+                value_loss = F.mse_loss(values.squeeze(-1), b_ret)
+                entropy_loss = -entropy.mean()
+
+                loss = policy_loss + vf_coef * value_loss + ent_coef * entropy_loss
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
+                self.optimizer.step()
+
+            metrics['worker_policy_loss'] = policy_loss.item()
+            metrics['worker_value_loss'] = value_loss.item()
+            metrics['worker_entropy'] = -entropy_loss.item()
+
+            # --- Manager update ---
+            m_indices = np.random.permutation(n_manager)
+            for start in range(0, n_manager, m_batch_size):
+                idx = m_indices[start:start + m_batch_size]
+                b_obs = self._batch_obs_to_tensor(
+                    buf.m_obs_grid[idx], buf.m_obs_units[idx], buf.m_obs_global[idx])
+                b_goals = m_goals_t[idx]
+                b_old_lp = m_old_lp[idx]
+                b_adv = m_adv[idx]
+                b_ret = m_ret[idx]
+
+                features = self.feature_extractor(b_obs)
+                new_lp, entropy, values = self.manager.evaluate_goal(
+                    features, b_goals)
+
+                ratio = torch.exp(new_lp - b_old_lp)
+                surr1 = ratio * b_adv
+                surr2 = torch.clamp(ratio, 1 - clip_range, 1 + clip_range) * b_adv
+                policy_loss = -torch.min(surr1, surr2).mean()
+                value_loss = F.mse_loss(values.squeeze(-1), b_ret)
+                entropy_loss = -entropy.mean()
+
+                loss = policy_loss + vf_coef * value_loss + ent_coef * entropy_loss
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
+                self.optimizer.step()
+
+            metrics['manager_policy_loss'] = policy_loss.item()
+            metrics['manager_value_loss'] = value_loss.item()
+            metrics['manager_entropy'] = -entropy_loss.item()
+
+        return metrics
+
+    def save_checkpoint(self, path):
+        """Save all network weights and optimizer state."""
+        from pathlib import Path as _Path  # pylint: disable=import-outside-toplevel
+        _Path(path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save({
+            'feature_extractor': self.feature_extractor.state_dict(),
+            'manager': self.manager.state_dict(),
+            'worker': self.worker.state_dict(),
+            'optimizer': self.optimizer.state_dict()
+                       if hasattr(self, 'optimizer') else None,
+        }, path)
+
+    def load_checkpoint(self, path):
+        """Load network weights and optionally optimizer state."""
+        checkpoint = torch.load(path, map_location=self.device)
+        self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
+        self.manager.load_state_dict(checkpoint['manager'])
+        self.worker.load_state_dict(checkpoint['worker'])
+        if checkpoint.get('optimizer') and hasattr(self, 'optimizer'):
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+
+    def evaluate(self, env, n_episodes: int = 10) -> Dict[str, float]:
+        """
+        Evaluate the agent over n_episodes.
+
+        Returns dict with mean_reward, std_reward, win_rate.
+        """
+        self.feature_extractor.eval()
+        self.manager.eval()
+        self.worker.eval()
+
+        rewards = []
+        wins = 0
+
+        for _ in range(n_episodes):
+            obs, _ = env.reset()
+            self.reset_goal()
+            ep_reward = 0.0
+            done = False
+
+            while not done:
+                action, _ = self.select_action(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = env.step(action)
+                ep_reward += reward
+                done = terminated or truncated
+
+            rewards.append(ep_reward)
+            if info.get('winner') == 1:
+                wins += 1
+
+        self.feature_extractor.train()
+        self.manager.train()
+        self.worker.train()
+
+        rewards_arr = np.array(rewards)
+        return {
+            'mean_reward': float(rewards_arr.mean()),
+            'std_reward': float(rewards_arr.std()),
+            'win_rate': wins / max(n_episodes, 1),
+        }
 
 
 def compute_intrinsic_reward(
