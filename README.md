@@ -24,10 +24,10 @@ A turn-based strategy game built with Pygame and Gymnasium for reinforcement lea
 
 ```bash
 # Basic (GUI only)
-pip install pygame pandas numpy
+pip install pygame-ce pandas numpy
 
 # With RL training
-pip install pygame pandas numpy gymnasium stable-baselines3[extra]
+pip install pygame-ce pandas numpy gymnasium stable-baselines3[extra]
 
 # Optional: video export
 pip install opencv-python
@@ -60,7 +60,7 @@ python main.py --mode evaluate --model models/ppo_model.zip --episodes 10
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 env = StrategyGameEnv(
-    map_file='maps/1v1/test_map.csv',
+    map_file='maps/1v1/beginner.csv',
     opponent='bot',
     render_mode=None  # None for headless, 'human' for GUI
 )

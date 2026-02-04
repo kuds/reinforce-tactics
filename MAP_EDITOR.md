@@ -48,7 +48,7 @@ From the main menu, select **"Map Editor"** to access:
 - **Grass** (p): Walkable terrain
 - **Ocean** (o): Not walkable
 - **Water** (w): Not walkable
-- **Mountain** (m): Walkable
+- **Mountain** (m): Walkable terrain (archers gain +1 attack range when standing on mountains)
 - **Forest** (f): Walkable
 - **Road** (r): Walkable
 

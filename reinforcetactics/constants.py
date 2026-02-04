@@ -26,7 +26,7 @@ class TileType(Enum):
 
     def is_walkable(self) -> bool:
         """Check if this tile type can be walked on."""
-        return self not in (TileType.WATER, TileType.OCEAN, TileType.MOUNTAIN)
+        return self not in (TileType.WATER, TileType.OCEAN)
 
     def is_capturable(self) -> bool:
         """Check if this tile type can be captured."""

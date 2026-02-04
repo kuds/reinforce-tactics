@@ -320,7 +320,6 @@ def calculate_vision_radius(
         base_range = UNIT_VISION_RANGES.get(unit_or_structure_type, 3)
 
     # Mountain bonus: +1 vision when standing on mountain (units only)
-    # Note: Units can't normally stand on mountains, but keeping for future flexibility
     if not is_structure and tile_type == 'm':
         base_range += 1
 

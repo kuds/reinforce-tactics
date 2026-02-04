@@ -91,58 +91,6 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
   - High HP and mobility for rapid strikes
 - **Best for**: Fast aggressive plays and overwhelming enemies
 
-#### Archer (A)
-- **Role**: Long-range attacker
-- **Cost**: $250
-- **Stats**: 15 HP, 3 Movement, 5 Attack, 1 Defence
-- **Abilities**:
-  - Ranged attacks at distance 2-3 (cannot attack adjacent enemies at distance 1)
-  - **Mountain bonus**: +1 attack range when on mountains (range becomes 2-4)
-  - Melee units cannot counter-attack Archers
-- **Best for**: Harassing enemies from safe distance, especially effective when positioned on mountains
-
-#### Knight (K)
-- **Role**: Mobile heavy cavalry
-- **Cost**: $350
-- **Stats**: 18 HP, 4 Movement, 8 Attack, 5 Defence
-- **Abilities**:
-  - **CHARGE**: Deals +50% damage if the Knight moved 3 or more tiles before attacking
-  - Good balance of mobility, durability, and damage
-- **Best for**: Flanking maneuvers and devastating charge attacks on key targets
-
-#### Rogue (R)
-- **Role**: Agile assassin
-- **Cost**: $300
-- **Stats**: 12 HP, 4 Movement, 9 Attack, 3 Defence
-- **Abilities**:
-  - **FLANK**: Deals +50% damage when attacking an enemy that is adjacent to one of your other units
-  - **EVADE**: 25% chance to completely dodge counter-attacks
-  - **Forest bonus**: Evade chance increases to 35% when standing in forest terrain
-- **Best for**: Coordinated attacks with other units to maximize flank damage, hit-and-run tactics
-
-#### Sorcerer (S)
-- **Role**: Support caster with buffs
-- **Cost**: $300
-- **Stats**: 10 HP, 2 Movement, 6/8 Attack (adjacent/range), 3 Defence
-- **Abilities**:
-  - Attacks at distance 1 (adjacent): 6 damage
-  - Attacks at distance 2 (range): 8 damage
-  - **HASTE**: Grant an ally an extra action this turn (range 1-2, 3 turn cooldown)
-  - **DEFENCE BUFF**: Target ally takes 50% less damage for 3 turns (range 1-2, 3 turn cooldown)
-  - **ATTACK BUFF**: Target ally deals 50% more damage for 3 turns (range 1-2, 3 turn cooldown)
-- **Best for**: Empowering key units with buffs, enabling powerful combos with Haste
-
-#### Barbarian (B)
-- **Role**: High-speed berserker
-- **Cost**: $400
-- **Stats**: 20 HP, 5 Movement, 10 Attack, 2 Defence
-- **Abilities**:
-  - Highest movement speed in the game (5 tiles)
-  - Highest base health (20 HP)
-  - Strong attack power (10 damage)
-  - Low defence makes them vulnerable to focused fire
-- **Best for**: Rapid strikes, chasing down ranged units, and overwhelming enemies with speed
-
 ## Structures
 
 Structures provide income and serve as strategic objectives. They can be captured by enemy units.
@@ -217,12 +165,12 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 #### Defence Buff
 - Sorcerers can grant Defence Buff to friendly units within range 1-2
-- Buffed units take **50% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.50`)
+- Buffed units take **35% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.35`)
 - After using Defence Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
 
 #### Attack Buff
 - Sorcerers can grant Attack Buff to friendly units within range 1-2
-- Buffed units deal **50% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.50`)
+- Buffed units deal **35% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.35`)
 - After using Attack Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
 
 ### Combat Abilities
@@ -237,8 +185,8 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Positioning is key: coordinate your units to enable flanking attacks
 
 #### Evade (Rogue)
-- Rogues have a **25% chance** to completely dodge counter-attacks (`ROGUE_EVADE_CHANCE = 0.25`)
-- **Forest bonus**: When standing in forest terrain, evade chance increases by 10% to **35%** total (`ROGUE_FOREST_EVADE_BONUS = 0.10`)
+- Rogues have a **15% chance** to completely dodge counter-attacks (`ROGUE_EVADE_CHANCE = 0.15`)
+- **Forest bonus**: When standing in forest terrain, evade chance increases by 15% to **30%** total (`ROGUE_FOREST_EVADE_BONUS = 0.15`)
 
 ## Terrain Bonuses
 
@@ -250,8 +198,8 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Forest Bonus for Rogues
 - When a Rogue is positioned on a forest tile, their evade chance is increased
-- Normal evade: 25% dodge chance
-- Forest evade: 35% dodge chance (+10% bonus)
+- Normal evade: 15% dodge chance
+- Forest evade: 30% dodge chance (+15% bonus)
 - This bonus is automatically applied when calculating counter-attack outcomes
 
 ## Game Rules
@@ -299,7 +247,7 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Advanced Tactics
 - **Mountain control**: Fight for mountain tiles to give your Archers extended range
-- **Forest control**: Position Rogues in forests for 35% evasion chance
+- **Forest control**: Position Rogues in forests for 30% evasion chance
 - **Structure denial**: Capture or destroy enemy structures to starve their economy
 - **Unit synergy**: Combine paralysis (Mage) with healing (Cleric) to maintain board control
 - **Buff combos**: Use Sorcerer's Attack Buff on Knights before a charge for massive damage
