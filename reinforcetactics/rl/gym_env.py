@@ -235,7 +235,7 @@ class StrategyGameEnv(gym.Env):
         """
         Get binary mask of valid actions for the current player.
 
-        The action mask corresponds to the flattened action space of size 8 * W * H.
+        The action mask corresponds to the flattened action space of size 10 * W * H.
         Segments:
         0: Create Unit (at pos) - Valid if pos is a building and we can afford unit
         1: Move (to pos) - Valid if ANY unit can move to pos
@@ -245,6 +245,8 @@ class StrategyGameEnv(gym.Env):
         5: End Turn (any pos) - Always valid (usually just mapped to one index or all)
         6: Paralyze (target at pos) - Valid if Mage/Sorcerer can paralyze enemy at pos
         7: Haste (target at pos) - Valid if Sorcerer can grant haste to ally at pos
+        8: Defence Buff (target at pos) - Valid if Sorcerer can buff ally at pos
+        9: Attack Buff (target at pos) - Valid if Sorcerer can buff ally at pos
 
         Note: This is a "valid target" mask. It tells the agent *where* something can happen,
         but implies *someone* can do it. The agent then picks (ActionType, UnitType, From, To).
@@ -256,7 +258,7 @@ class StrategyGameEnv(gym.Env):
         legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         # Create mask (all zeros initially)
-        # Size: 8 * W * H
+        # Size: 10 * W * H
         mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
 
         width = self.grid_width
@@ -486,7 +488,7 @@ class StrategyGameEnv(gym.Env):
         """
         Get flattened action mask for compatibility with some algorithms.
 
-        Returns the original target-based mask of size (8 * W * H,).
+        Returns the original target-based mask of size (10 * W * H,).
         """
         return self._get_action_mask()
 

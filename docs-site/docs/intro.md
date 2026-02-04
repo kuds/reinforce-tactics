@@ -16,7 +16,7 @@ slug: /
 Reinforce Tactics is a 2D turn-based strategy game featuring:
 
 - **Turn-based tactical gameplay** with multiple unit types
-- **4 unit types**: Warrior, Mage, Cleric, and Archer (each with unique abilities)
+- **8 unit types**: Warrior, Mage, Cleric, Archer, Knight, Rogue, Sorcerer, and Barbarian (each with unique abilities)
 - **Combat system** with attacks, counter-attacks, paralysis, and healing
 - **Economic system** with income from controlled structures
 - **Structure capture**: Towers, Buildings, and Headquarters
@@ -68,7 +68,7 @@ from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
 env = StrategyGameEnv(
-    map_file='maps/1v1/test_map.csv',
+    map_file='maps/1v1/beginner.csv',
     opponent='bot',
     render_mode=None
 )
@@ -91,7 +91,7 @@ This documentation is organized into several sections:
 - [GitHub Repository](https://github.com/kuds/reinforce-tactics)
 - [Main README](https://github.com/kuds/reinforce-tactics#readme)
 - [Issues](https://github.com/kuds/reinforce-tactics/issues)
-- [License (MIT)](https://github.com/kuds/reinforce-tactics/blob/main/LICENSE)
+- [License (Apache 2.0)](https://github.com/kuds/reinforce-tactics/blob/main/LICENSE)
 
 ## 💡 Contributing
 
@@ -105,4 +105,4 @@ Feel free to open issues or submit pull requests on GitHub.
 
 ## 📜 License
 
-This project is licensed under the MIT License - feel free to use and modify!
+This project is licensed under the Apache License 2.0 - feel free to use and modify!
