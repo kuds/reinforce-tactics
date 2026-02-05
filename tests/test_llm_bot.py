@@ -243,7 +243,7 @@ class TestOpenAIBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'gpt-4o-mini'  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'gpt-5-mini-2025-08-07'  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
@@ -251,10 +251,9 @@ class TestOpenAIBot:
             from reinforcetactics.game.llm_bot import OpenAIBot as TestBot, OPENAI_MODELS  # pylint: disable=import-outside-toplevel
             assert TestBot._get_supported_models(Mock()) == OPENAI_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
-            assert 'gpt-4o' in OPENAI_MODELS
-            assert 'gpt-4o-mini' in OPENAI_MODELS
-            assert 'gpt-4-turbo' in OPENAI_MODELS
-            assert 'o1' in OPENAI_MODELS
+            assert 'gpt-5.2' in OPENAI_MODELS
+            assert 'gpt-5-mini-2025-08-07' in OPENAI_MODELS
+            assert 'gpt-5-nano-2025-08-07' in OPENAI_MODELS
 
 
 class TestClaudeBot:
@@ -270,7 +269,7 @@ class TestClaudeBot:
         """Test default model selection."""
         with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
             from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'claude-3-5-haiku-20241022'  # pylint: disable=protected-access
+            assert TestBot._get_default_model(Mock()) == 'claude-haiku-4-5-20251001'  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
@@ -278,10 +277,10 @@ class TestClaudeBot:
             from reinforcetactics.game.llm_bot import ClaudeBot as TestBot, ANTHROPIC_MODELS  # pylint: disable=import-outside-toplevel
             assert TestBot._get_supported_models(Mock()) == ANTHROPIC_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
+            assert 'claude-opus-4-6' in ANTHROPIC_MODELS
+            assert 'claude-sonnet-4-5-20250929' in ANTHROPIC_MODELS
+            assert 'claude-haiku-4-5-20251001' in ANTHROPIC_MODELS
             assert 'claude-sonnet-4-20250514' in ANTHROPIC_MODELS
-            assert 'claude-3-5-sonnet-20241022' in ANTHROPIC_MODELS
-            assert 'claude-3-5-haiku-20241022' in ANTHROPIC_MODELS
-            assert 'claude-3-opus-20240229' in ANTHROPIC_MODELS
 
 
 class TestGeminiBot:
@@ -307,8 +306,8 @@ class TestGeminiBot:
             # Verify some expected models are present
             assert 'gemini-2.5-flash' in GEMINI_MODELS
             assert 'gemini-2.5-pro' in GEMINI_MODELS
-            assert 'gemini-2.0-flash' in GEMINI_MODELS
-            assert 'gemini-1.5-pro' in GEMINI_MODELS
+            assert 'gemini-3-pro-preview' in GEMINI_MODELS
+            assert 'gemini-2.5-flash-lite' in GEMINI_MODELS
 
 
 class TestConversationLogging:
