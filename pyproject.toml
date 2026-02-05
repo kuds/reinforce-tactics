@@ -47,6 +47,9 @@ llm = [
 ]
 dev = [
     "pytest",
+    "pre-commit",
+    "pylint",
+    "flake8",
 ]
 all = [
     "reinforcetactics[gui]",

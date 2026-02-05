@@ -28,151 +28,45 @@ logger = logging.getLogger(__name__)
 
 # Supported models for each provider
 OPENAI_MODELS = [
-    # GPT-4o family (latest, most capable)
-    'gpt-4o',
-    'gpt-4o-mini',
-    'gpt-4o-2024-11-20',
-    'gpt-4o-2024-08-06',
-    'gpt-4o-2024-05-13',
-    'gpt-4o-mini-2024-07-18',
-    # GPT-4 Turbo (high performance)
-    'gpt-4-turbo',
-    'gpt-4-turbo-2024-04-09',
-    'gpt-4-turbo-preview',
-    'gpt-4-0125-preview',
-    'gpt-4-1106-preview',
-    # GPT-4 (stable, proven)
-    'gpt-4',
-    'gpt-4-0613',
-    # GPT-3.5 Turbo (fast and economical)
-    'gpt-3.5-turbo',
-    'gpt-3.5-turbo-0125',
-    'gpt-3.5-turbo-1106',
-    # O1 Reasoning models (advanced reasoning)
-    'o1',
-    'o1-2024-12-17',
-    'o1-mini',
-    'o1-mini-2024-09-12',
-    'o1-preview',
-    'o1-preview-2024-09-12',
-    # O3 models (if available)
-    'o3-mini',
-    'o3-mini-2025-01-31',
-    'gpt-5.2-2025-12-11',
+    # GPT-5.2 (flagship reasoning model)
+    'gpt-5.2',
+    # GPT-5 family
+    'gpt-5-2025-08-07',
     'gpt-5-mini-2025-08-07',
+    'gpt-5-nano-2025-08-07',
 ]
 
 ANTHROPIC_MODELS = [
-    # Claude 4 (latest generation)
+    # Claude Opus 4.6 (latest, most intelligent)
+    'claude-opus-4-6',
+    # Claude Sonnet 4.5 (best speed/intelligence balance)
     'claude-sonnet-4-5-20250929',
-    'claude-sonnet-4-20250514',
-    # Claude 3.5 (high performance)
-    'claude-3-5-sonnet-20241022',
-    'claude-3-5-sonnet-20240620',
-    'claude-3-5-haiku-20241022',
-    # Claude 3 (proven models)
-    'claude-3-opus-20240229',
-    'claude-3-sonnet-20240229',
-    'claude-3-haiku-20240307',
+    # Claude Haiku 4.5 (fastest, near-frontier intelligence)
     'claude-haiku-4-5-20251001',
+    # Claude Opus 4.5
     'claude-opus-4-5-20251101',
+    # Claude Opus 4.1
+    'claude-opus-4-1-20250805',
+    # Claude Sonnet 4 / Opus 4
+    'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514',
 ]
 
 GEMINI_MODELS = [
-    # Gemini 3.0 (latest generation)
+    # Gemini 3.0 (latest generation, preview)
     'gemini-3-pro-preview',
     'gemini-3-flash-preview',
-    # Gemini 2.5
+    # Gemini 2.5 (current production)
     'gemini-2.5-pro',
     'gemini-2.5-flash',
-    # Gemini 2.0
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-001',
-    'gemini-2.0-flash-lite',
-    'gemini-2.0-flash-lite-001',
-    # Gemini 1.5 (legacy but still supported)
-    'gemini-1.5-pro',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-8b',
-    # Gemini 1.0 (legacy)
-    'gemini-1.0-pro',
-    'gemini-pro',
+    'gemini-2.5-flash-lite',
 ]
 
 
-# System prompt explaining the game rules
-SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
-
-GAME OBJECTIVE:
-- Win by capturing the enemy HQ or eliminating all enemy units
-- Build units, move strategically, attack enemies, and capture structures
-
-UNIT TYPES:
-1. Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
-   - Strong melee fighter, attacks adjacent enemies only
-2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
-   - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for turns)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies and CURE paralyzed units
-4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
-   - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
-   - Cannot attack adjacent enemies (distance 0)
-   - Indirect unit: melee units cannot counter-attack when hit by Archer
-   - Other Archers and Mages CAN counter-attack if Archer is within their range
-
-BUILDING TYPES:
-- HQ (h): Generates 150 gold/turn, losing it means defeat
-- Building (b): Generates 100 gold/turn, used to recruit units
-- Tower (t): Generates 50 gold/turn, defensive structure
-
-AVAILABLE ACTIONS:
-1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
-2. MOVE: Move a unit to a reachable position (up to movement range)
-3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer)
-4. PARALYZE: (Mage only) Paralyze an adjacent enemy unit
-5. HEAL: (Cleric only) Heal an adjacent ally unit
-6. CURE: (Cleric only) Remove paralysis from an adjacent ally
-7. SEIZE: Capture a neutral/enemy structure by standing on it
-8. END_TURN: Finish your turn
-9. RESIGN: Concede the game (use only as last resort when victory is impossible)
-
-COMBAT RULES:
-- Most units can only attack adjacent enemies (orthogonally, not diagonally)
-- Mages can attack at range 1-2, Archers at range 1-2 (or 1-3 on mountains)
-- Archers cannot attack at distance 0 (adjacent)
-- Attacked units counter-attack if they can, except melee units cannot counter Archers
-- Paralyzed units cannot move or attack
-- Units can move first, then perform one action (attack, capture, heal, cure, paralyze), but cannot act first then move
-
-ECONOMY:
-- You earn gold from buildings you control at the start of each turn
-- Spend gold to create units at buildings
-- Control more structures to generate more income
-
-STRATEGY TIPS:
-- Balance economy (capturing buildings) with military (building units)
-- Protect your HQ at all costs
-- Mages can disable key enemy units with paralyze
-- Clerics keep your army healthy and mobile
-- Archers are excellent for safe ranged attacks, especially from mountains
-- Position units to protect each other
-
-WHEN TO RESIGN:
-Consider resigning ONLY when ALL of these conditions are true:
-- You have no units left AND cannot afford to create any
-- OR enemy units are about to capture your HQ and you cannot stop them
-- OR you are vastly outnumbered with no realistic path to victory
-Do NOT resign if you still have units, gold, or any chance of a comeback.
-
-CRITICAL CONSTRAINTS:
-- Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
-- Each action in your list is executed sequentially - plan accordingly.
-- If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
-
-Respond with ONLY the JSON object below. No extra text before or after."""
+# Legacy alias - the actual prompt used by bots is DEFAULT_PROMPT from llm_prompts.py
+# which includes all 8 unit types (W, M, C, A, K, R, S, B) with correct stats.
+# See reinforcetactics/game/llm_prompts.py for the full prompt definitions.
+SYSTEM_PROMPT = DEFAULT_PROMPT
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods
@@ -329,6 +223,19 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 ', '.join(supported_models[:5]) + '...'
             )
 
+    def get_token_usage(self) -> Dict[str, int]:
+        """
+        Get unified token usage statistics across all providers.
+
+        Returns:
+            Dictionary with total_input_tokens, total_output_tokens, and total_tokens.
+        """
+        return {
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens,
+        }
+
     def _get_effective_system_prompt(self) -> str:
         """
         Get the effective system prompt considering enabled units.
@@ -436,13 +343,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 # Append new turn
                 log_data['turns'].append(turn_data)
 
-                # Update cumulative token usage for Claude models
+                # Update cumulative token usage
                 if input_tokens > 0 or output_tokens > 0:
-                    log_data['total_token_usage'] = {
-                        "total_input_tokens": self.total_input_tokens,
-                        "total_output_tokens": self.total_output_tokens,
-                        "total_tokens": self.total_input_tokens + self.total_output_tokens
-                    }
+                    log_data['total_token_usage'] = self.get_token_usage()
             else:
                 # Create new log file with metadata
                 log_data = {
@@ -466,13 +369,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     "turns": [turn_data]
                 }
 
-                # Add cumulative token usage for Claude models
+                # Add cumulative token usage
                 if input_tokens > 0 or output_tokens > 0:
-                    log_data['total_token_usage'] = {
-                        "total_input_tokens": self.total_input_tokens,
-                        "total_output_tokens": self.total_output_tokens,
-                        "total_tokens": self.total_input_tokens + self.total_output_tokens
-                    }
+                    log_data['total_token_usage'] = self.get_token_usage()
 
             # Write to file with configurable formatting
             indent = 2 if self.pretty_print_logs else None
@@ -1335,19 +1234,15 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
     LLM bot using OpenAI's GPT models.
 
-    Supports the full range of OpenAI models including:
-    - GPT-4o family: Latest generation with best performance (gpt-4o, gpt-4o-mini)
-    - GPT-4 Turbo: High performance models (gpt-4-turbo)
-    - GPT-4: Stable and proven models (gpt-4)
-    - GPT-3.5 Turbo: Fast and economical (gpt-3.5-turbo)
-    - O1 models: Advanced reasoning capabilities (o1, o1-mini)
+    Supports OpenAI GPT-5+ models:
+    - GPT-5.2: Flagship reasoning model, most capable
+    - GPT-5: gpt-5, gpt-5-mini, gpt-5-nano
 
-    Default model: gpt-4o-mini (excellent balance of cost and performance)
+    Default model: gpt-5-mini-2025-08-07 (good balance of cost and performance)
 
     Cost tiers:
-    - Budget: gpt-4o-mini, gpt-3.5-turbo (~$0.15-0.50/1M input tokens)
-    - Standard: gpt-4o, gpt-4-turbo (~$2.50-10/1M input tokens)
-    - Premium: o1 series (~$15/1M input tokens)
+    - Budget: gpt-5-nano, gpt-5-mini (~$0.15-0.50/1M input tokens)
+    - Premium: gpt-5.2 (~$10-15/1M input tokens)
     """
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -1357,7 +1252,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'OPENAI_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'gpt-4o-mini'
+        return 'gpt-5-mini-2025-08-07'
 
     def _get_supported_models(self) -> List[str]:
         return OPENAI_MODELS
@@ -1410,21 +1305,22 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
     LLM bot using Anthropic's Claude models.
 
-    Supports Claude models across multiple generations:
-    - Claude 4: Latest generation (claude-sonnet-4-20250514)
-    - Claude 3.5: High performance (claude-3-5-sonnet, claude-3-5-haiku)
-    - Claude 3: Proven models (claude-3-opus, claude-3-sonnet, claude-3-haiku)
+    Supports Claude 4+ models:
+    - Claude Opus 4.6: Most intelligent, exceptional coding/reasoning (claude-opus-4-6)
+    - Claude Sonnet 4.5: Best speed/intelligence balance (claude-sonnet-4-5-20250929)
+    - Claude Haiku 4.5: Fastest, near-frontier intelligence (claude-haiku-4-5-20251001)
+    - Claude Opus 4.5/4.1/4: Previous generation Opus and Sonnet models
 
-    Default model: claude-3-5-haiku-20241022 (latest Haiku, fast and economical)
+    Default model: claude-haiku-4-5-20251001 (fast, economical, near-frontier)
 
     Cost tiers:
-    - Budget: claude-3-haiku, claude-3-5-haiku (~$0.25/1M input tokens)
-    - Standard: claude-3-sonnet, claude-3-5-sonnet (~$3/1M input tokens)
-    - Premium: claude-3-opus, claude-sonnet-4 (~$15/1M input tokens)
+    - Budget: claude-haiku-4-5 (~$1/1M input tokens)
+    - Standard: claude-sonnet-4-5 (~$3/1M input tokens)
+    - Premium: claude-opus-4-6, claude-opus-4-5 (~$5/1M input tokens)
 
     Token limits:
-    - Claude 3.5/4: 200K context window
-    - Claude 3: 200K context window (Opus), 200K (Sonnet/Haiku)
+    - Claude Opus 4.6 / Sonnet 4.5: 200K (1M beta), 128K/64K max output
+    - Claude Haiku 4.5: 200K context, 64K max output
     """
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -1434,7 +1330,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'ANTHROPIC_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'claude-3-5-haiku-20241022'
+        return 'claude-haiku-4-5-20251001'
 
     def _get_supported_models(self) -> List[str]:
         return ANTHROPIC_MODELS
@@ -1467,6 +1363,9 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             else:
                 user_messages.append(msg)
 
+        # Prefill assistant response with "{" to guide JSON output
+        user_messages.append({"role": "assistant", "content": "{"})
+
         # Build request kwargs, conditionally including max_tokens and temperature
         request_kwargs = {
             "model": self.model,
@@ -1488,34 +1387,32 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         if response.stop_reason:
             self._last_stop_reason = response.stop_reason
 
-        return response.content[0].text
+        # Prepend the prefilled "{" to reconstruct the full JSON response
+        return "{" + response.content[0].text
 
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
-    LLM bot using Google's Gemini models via the new google-genai SDK.
+    LLM bot using Google's Gemini models via the google-genai SDK.
 
-    Supports Gemini models across multiple generations:
-    - Gemini 2.5: Latest generation with thinking (gemini-2.5-pro, gemini-2.5-flash)
-    - Gemini 2.0: Stable and fast (gemini-2.0-flash)
-    - Gemini 1.5: Legacy but still supported (gemini-1.5-pro, gemini-1.5-flash)
+    Supports Gemini 2.5+ models:
+    - Gemini 3.0: Latest generation (gemini-3-pro-preview, gemini-3-flash-preview)
+    - Gemini 2.5: Production models with thinking (gemini-2.5-pro, gemini-2.5-flash)
 
-    Default model: gemini-2.5-flash (latest Flash with thinking capabilities)
+    Default model: gemini-2.5-flash (production Flash with thinking capabilities)
 
     Cost tiers:
-    - Budget: gemini-2.0-flash-lite, gemini-1.5-flash (~$0.075/1M input tokens)
-    - Standard: gemini-2.5-flash, gemini-2.0-flash (~$0.15/1M input tokens)
-    - Premium: gemini-2.5-pro, gemini-1.5-pro (~$1.25/1M input tokens)
+    - Budget: gemini-2.5-flash-lite (~$0.075/1M input tokens)
+    - Standard: gemini-2.5-flash, gemini-3-flash-preview (~$0.15/1M input tokens)
+    - Premium: gemini-2.5-pro, gemini-3-pro-preview (~$1.25/1M input tokens)
 
     Token limits:
-    - Gemini 2.5: Up to 1M token context window
-    - Gemini 2.0: Up to 1M token context window
-    - Gemini 1.5: Up to 2M token context window (Pro)
+    - Gemini 3.0/2.5: Up to 1M token context window
 
     Best use cases:
-    - gemini-2.5-flash: Best balance of speed and quality with thinking
+    - gemini-3-flash-preview: Latest generation, fast, frontier-class
+    - gemini-2.5-flash: Best production balance of speed and quality
     - gemini-2.5-pro: Complex reasoning tasks
-    - gemini-2.0-flash: Fast responses when thinking not needed
     """
 
     def __init__(self, *args, **kwargs):
