@@ -52,12 +52,20 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             from stable_baselines3 import PPO, A2C, DQN
             from reinforcetactics.rl.gym_env import StrategyGameEnv
 
+            # Also try MaskablePPO from sb3-contrib
+            algorithm_classes = [PPO, A2C, DQN]
+            try:
+                from sb3_contrib import MaskablePPO
+                algorithm_classes.insert(0, MaskablePPO)
+            except ImportError:
+                pass
+
             model_path = Path(model_path)
             if not model_path.exists():
                 raise FileNotFoundError(f"Model file not found: {model_path}")
 
             # Try to load with different algorithms
-            for algorithm_class in [PPO, A2C, DQN]:
+            for algorithm_class in algorithm_classes:
                 try:
                     self.model = algorithm_class.load(str(model_path))
                     logger.info("Successfully loaded model as %s: %s",
@@ -146,13 +154,104 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 len([u for u in self.game_state.units if u.player == 2]),
                 self.game_state.current_player
             ], dtype=np.float32),
-            'action_mask': np.ones(
-                self.NUM_ACTION_TYPES * self.game_state.grid.width * self.game_state.grid.height,
-                dtype=np.float32
-            )
+            'action_mask': self._compute_action_mask()
         }
 
         return obs
+
+    def _compute_action_mask(self) -> np.ndarray:
+        """Compute action mask from legal actions instead of returning all-ones."""
+        w = self.game_state.grid.width
+        h = self.game_state.grid.height
+        mask_size = self.NUM_ACTION_TYPES * w * h
+        mask = np.zeros(mask_size, dtype=np.float32)
+
+        try:
+            legal_actions = self.game_state.get_legal_actions(self.bot_player)
+
+            # Mark end_turn as always valid (action_type=5)
+            for x in range(w):
+                for y in range(h):
+                    mask[5 * w * h + y * w + x] = 1.0
+
+            # Create unit actions (action_type=0)
+            for action in legal_actions.get('create_unit', []):
+                idx = 0 * w * h + action['y'] * w + action['x']
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
+
+            # Move actions (action_type=1)
+            for action in legal_actions.get('move', []):
+                for tx, ty in action.get('positions', []):
+                    idx = 1 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Attack actions (action_type=2)
+            for action in legal_actions.get('attack', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 2 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Seize actions (action_type=3)
+            for action in legal_actions.get('seize', []):
+                idx = 3 * w * h + action['y'] * w + action['x']
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
+
+            # Heal/cure actions (action_type=4)
+            for action in legal_actions.get('heal', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 4 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Paralyze (action_type=6)
+            for action in legal_actions.get('paralyze', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 6 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Haste (action_type=7)
+            for action in legal_actions.get('haste', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 7 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Defence buff (action_type=8)
+            for action in legal_actions.get('defence_buff', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 8 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+            # Attack buff (action_type=9)
+            for action in legal_actions.get('attack_buff', []):
+                for target in action.get('targets', []):
+                    tx, ty = target['x'], target['y']
+                    idx = 9 * w * h + ty * w + tx
+                    if 0 <= idx < mask_size:
+                        mask[idx] = 1.0
+
+        except Exception as e:
+            logger.warning("Failed to compute action mask, using all-ones: %s", e)
+            mask[:] = 1.0
+
+        # Ensure at least end_turn is valid
+        if mask.sum() == 0:
+            for x in range(w):
+                for y in range(h):
+                    mask[5 * w * h + y * w + x] = 1.0
+
+        return mask
 
     def _execute_action(self, action) -> bool:  # pylint: disable=too-many-return-statements
         """
@@ -338,7 +437,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if unit.player != self.bot_player or target.player == self.bot_player:
                 return False
 
-            if unit.type not in ('M', 'S'):
+            if unit.type != 'M':  # Only Mages can paralyze
                 return False
 
             return self.game_state.paralyze(unit, target)

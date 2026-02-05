@@ -357,22 +357,22 @@ class SelfPlayEnv(gym.Wrapper):
                 }
                 self.opponent_model.policy.load_state_dict(state_dict)
 
-            # Get action from model
-            action, _ = self.opponent_model.predict(
-                obs,
-                deterministic=self.opponent_deterministic
-            )
-
-            # Restore original params if we swapped
-            if original_params:
-                import torch
-                state_dict = {
-                    name: torch.tensor(param)
-                    for name, param in original_params.items()
-                }
-                self.opponent_model.policy.load_state_dict(state_dict)
-
-            return action
+            try:
+                # Get action from model
+                action, _ = self.opponent_model.predict(
+                    obs,
+                    deterministic=self.opponent_deterministic
+                )
+                return action
+            finally:
+                # Always restore original params if we swapped
+                if original_params:
+                    import torch
+                    state_dict = {
+                        name: torch.tensor(param)
+                        for name, param in original_params.items()
+                    }
+                    self.opponent_model.policy.load_state_dict(state_dict)
 
         except Exception as exc:
             logger.warning("Error getting opponent action: %s", exc)
@@ -445,33 +445,44 @@ class SelfPlayEnv(gym.Wrapper):
     def _execute_opponent_turn(self) -> None:
         """Execute the opponent's turn."""
         game_state = self.env.game_state
+        opponent_player = 3 - self.agent_player  # 2 if agent is 1, 1 if agent is 2
 
         # Safety limit to prevent infinite loops
         max_actions = 50
         actions_taken = 0
+        consecutive_invalid = 0
+        max_consecutive_invalid = 5
 
-        while (game_state.current_player == 2 and
+        while (game_state.current_player == opponent_player and
                not game_state.game_over and
                actions_taken < max_actions):
 
             # Get observation from opponent's perspective
-            obs = self._get_obs_for_player(2)
+            obs = self._get_obs_for_player(opponent_player)
 
             # Get opponent's action
             action = self._get_opponent_action(obs)
 
-            # Execute action
-            action_executed = self._execute_opponent_action(action)
-
-            # If action was end_turn or failed, break
-            if action[0] == 5 or not action_executed:
+            # If action is end_turn, break
+            if action[0] == 5:
                 game_state.end_turn()
                 break
 
-            actions_taken += 1
+            # Execute action
+            action_executed = self._execute_opponent_action(action)
+
+            if action_executed:
+                consecutive_invalid = 0
+                actions_taken += 1
+            else:
+                consecutive_invalid += 1
+                if consecutive_invalid >= max_consecutive_invalid:
+                    # Too many invalid actions in a row, end turn
+                    game_state.end_turn()
+                    break
 
         # Ensure turn ends if still opponent's turn
-        if game_state.current_player == 2 and not game_state.game_over:
+        if game_state.current_player == opponent_player and not game_state.game_over:
             game_state.end_turn()
 
     def _get_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
@@ -489,6 +500,7 @@ class SelfPlayEnv(gym.Wrapper):
             True if action was valid, False otherwise
         """
         game_state = self.env.game_state
+        opp = 3 - self.agent_player  # opponent player number
 
         action_type = int(action[0])
         unit_type_idx = int(action[1])
@@ -500,26 +512,26 @@ class SelfPlayEnv(gym.Wrapper):
 
         try:
             if action_type == 0:  # Create unit
-                unit = game_state.create_unit(unit_type, to_x, to_y, player=2)
+                unit = game_state.create_unit(unit_type, to_x, to_y, player=opp)
                 return unit is not None
 
             elif action_type == 1:  # Move
                 unit = game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == 2 and unit.can_move:
+                if unit and unit.player == opp and unit.can_move:
                     return game_state.move_unit(unit, to_x, to_y)
                 return False
 
             elif action_type == 2:  # Attack
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.player == 2 and target.player != 2:
+                if unit and target and unit.player == opp and target.player != opp:
                     game_state.attack(unit, target)
                     return True
                 return False
 
             elif action_type == 3:  # Seize
                 unit = game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == 2:
+                if unit and unit.player == opp:
                     game_state.seize(unit)
                     return True
                 return False
@@ -527,7 +539,7 @@ class SelfPlayEnv(gym.Wrapper):
             elif action_type == 4:  # Heal/Cure
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'C' and unit.player == 2:
+                if unit and target and unit.type == 'C' and unit.player == opp:
                     if target.is_paralyzed():
                         return game_state.cure(unit, target)
                     return game_state.heal(unit, target) > 0
@@ -539,28 +551,28 @@ class SelfPlayEnv(gym.Wrapper):
             elif action_type == 6:  # Paralyze
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type in ['M', 'S'] and unit.player == 2:
+                if unit and target and unit.type == 'M' and unit.player == opp:
                     return game_state.paralyze(unit, target)
                 return False
 
             elif action_type == 7:  # Haste
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == 2:
+                if unit and target and unit.type == 'S' and unit.player == opp:
                     return game_state.haste(unit, target)
                 return False
 
             elif action_type == 8:  # Defence buff
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == 2:
+                if unit and target and unit.type == 'S' and unit.player == opp:
                     return game_state.defence_buff(unit, target)
                 return False
 
             elif action_type == 9:  # Attack buff
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == 2:
+                if unit and target and unit.type == 'S' and unit.player == opp:
                     return game_state.attack_buff(unit, target)
                 return False
 
@@ -595,10 +607,10 @@ class SelfPlayEnv(gym.Wrapper):
             # Adjust reward for game end
             if terminated:
                 winner = self.env.game_state.winner
-                if winner == 1:
+                if winner == self.agent_player:
                     reward += self.env.reward_config['win']
                     self.stats['agent_wins'] += 1
-                elif winner == 2:
+                elif winner is not None:
                     reward += self.env.reward_config['loss']
                     self.stats['opponent_wins'] += 1
                 else:
@@ -626,9 +638,11 @@ class SelfPlayEnv(gym.Wrapper):
             self.update_opponent_from_pool()
 
         # Optionally swap player order
+        self.agent_player = 1  # Reset to default
         if self.swap_players and random.random() < 0.5:
             # Agent plays as player 2 this game
-            # For simplicity, we just let opponent go first
+            self.agent_player = 2
+            # Let opponent go first as player 1
             self._execute_opponent_turn()
             obs = self.env._get_obs()
 
