@@ -66,10 +66,10 @@
       "max_tokens": 12000
     },
     {
-      "name": "GPT-4o Mini",
+      "name": "GPT-5 Mini",
       "type": "llm",
       "provider": "openai",
-      "model": "gpt-4o-mini",
+      "model": "gpt-5-mini-2025-08-07",
       "temperature": 0.5,
       "max_tokens": 8000
     },

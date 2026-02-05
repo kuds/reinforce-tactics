@@ -34,35 +34,6 @@ OPENAI_MODELS = [
     'gpt-5-2025-08-07',
     'gpt-5-mini-2025-08-07',
     'gpt-5-nano-2025-08-07',
-    # O-series reasoning models (latest)
-    'o3',
-    'o3-pro',
-    'o4-mini',
-    'o4-mini-2025-04-16',
-    # O3 mini (previous generation reasoning)
-    'o3-mini',
-    'o3-mini-2025-01-31',
-    # GPT-4.1 family (improved instruction following, 1M context)
-    'gpt-4.1',
-    'gpt-4.1-2025-04-14',
-    'gpt-4.1-mini',
-    'gpt-4.1-mini-2025-04-14',
-    'gpt-4.1-nano',
-    'gpt-4.1-nano-2025-04-14',
-    # GPT-4o family (legacy, retiring Feb 2026)
-    'gpt-4o',
-    'gpt-4o-mini',
-    'gpt-4o-2024-11-20',
-    'gpt-4o-2024-08-06',
-    'gpt-4o-mini-2024-07-18',
-    # GPT-4 Turbo (legacy)
-    'gpt-4-turbo',
-    'gpt-4-turbo-2024-04-09',
-    # O1 Reasoning models (legacy)
-    'o1',
-    'o1-2024-12-17',
-    'o1-mini',
-    'o1-mini-2024-09-12',
 ]
 
 ANTHROPIC_MODELS = [
@@ -72,23 +43,13 @@ ANTHROPIC_MODELS = [
     'claude-sonnet-4-5-20250929',
     # Claude Haiku 4.5 (fastest, near-frontier intelligence)
     'claude-haiku-4-5-20251001',
-    # Claude Opus 4.5 (legacy)
+    # Claude Opus 4.5
     'claude-opus-4-5-20251101',
-    # Claude Opus 4.1 (legacy)
+    # Claude Opus 4.1
     'claude-opus-4-1-20250805',
-    # Claude Sonnet 4 / Opus 4 (legacy)
+    # Claude Sonnet 4 / Opus 4
     'claude-sonnet-4-20250514',
     'claude-opus-4-20250514',
-    # Claude 3.7 Sonnet (legacy)
-    'claude-3-7-sonnet-20250219',
-    # Claude 3.5 (legacy)
-    'claude-3-5-sonnet-20241022',
-    'claude-3-5-sonnet-20240620',
-    'claude-3-5-haiku-20241022',
-    # Claude 3 (legacy)
-    'claude-3-opus-20240229',
-    'claude-3-sonnet-20240229',
-    'claude-3-haiku-20240307',
 ]
 
 GEMINI_MODELS = [
@@ -99,11 +60,6 @@ GEMINI_MODELS = [
     'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
-    # Gemini 2.0 (deprecated, shutting down March 31, 2026)
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-001',
-    'gemini-2.0-flash-lite',
-    'gemini-2.0-flash-lite-001',
 ]
 
 
@@ -1340,19 +1296,15 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
     LLM bot using OpenAI's GPT models.
 
-    Supports the full range of OpenAI models including:
+    Supports OpenAI GPT-5+ models:
     - GPT-5.2: Flagship reasoning model, most capable
-    - GPT-5 family: gpt-5, gpt-5-mini, gpt-5-nano
-    - O-series: o3, o3-pro, o4-mini (advanced reasoning)
-    - GPT-4.1 family: gpt-4.1, gpt-4.1-mini, gpt-4.1-nano (1M context)
-    - GPT-4o family: Legacy, retiring Feb 2026 (gpt-4o, gpt-4o-mini)
+    - GPT-5: gpt-5, gpt-5-mini, gpt-5-nano
 
-    Default model: gpt-4o-mini (widely available, good balance of cost and performance)
+    Default model: gpt-5-mini-2025-08-07 (good balance of cost and performance)
 
     Cost tiers:
-    - Budget: gpt-4o-mini, gpt-4.1-nano (~$0.15-0.50/1M input tokens)
-    - Standard: gpt-4o, gpt-4.1 (~$2-10/1M input tokens)
-    - Premium: gpt-5.2, o3 series (~$10-15/1M input tokens)
+    - Budget: gpt-5-nano, gpt-5-mini (~$0.15-0.50/1M input tokens)
+    - Premium: gpt-5.2 (~$10-15/1M input tokens)
     """
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -1362,7 +1314,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'OPENAI_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'gpt-4o-mini'
+        return 'gpt-5-mini-2025-08-07'
 
     def _get_supported_models(self) -> List[str]:
         return OPENAI_MODELS
@@ -1415,18 +1367,17 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
     LLM bot using Anthropic's Claude models.
 
-    Supports Claude models across multiple generations:
+    Supports Claude 4+ models:
     - Claude Opus 4.6: Most intelligent, exceptional coding/reasoning (claude-opus-4-6)
     - Claude Sonnet 4.5: Best speed/intelligence balance (claude-sonnet-4-5-20250929)
     - Claude Haiku 4.5: Fastest, near-frontier intelligence (claude-haiku-4-5-20251001)
-    - Claude Opus 4.5/4.1/4: Legacy Opus models
-    - Claude 3.5/3: Legacy models still supported
+    - Claude Opus 4.5/4.1/4: Previous generation Opus and Sonnet models
 
     Default model: claude-haiku-4-5-20251001 (fast, economical, near-frontier)
 
     Cost tiers:
-    - Budget: claude-haiku-4-5, claude-3-haiku (~$0.25-1/1M input tokens)
-    - Standard: claude-sonnet-4-5, claude-3-5-sonnet (~$3/1M input tokens)
+    - Budget: claude-haiku-4-5 (~$1/1M input tokens)
+    - Standard: claude-sonnet-4-5 (~$3/1M input tokens)
     - Premium: claude-opus-4-6, claude-opus-4-5 (~$5/1M input tokens)
 
     Token limits:
@@ -1502,10 +1453,9 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
     LLM bot using Google's Gemini models via the google-genai SDK.
 
-    Supports Gemini models across multiple generations:
+    Supports Gemini 2.5+ models:
     - Gemini 3.0: Latest generation (gemini-3-pro-preview, gemini-3-flash-preview)
     - Gemini 2.5: Production models with thinking (gemini-2.5-pro, gemini-2.5-flash)
-    - Gemini 2.0: Deprecated, shutting down March 31, 2026
 
     Default model: gemini-2.5-flash (production Flash with thinking capabilities)
 

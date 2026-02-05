@@ -104,7 +104,7 @@ You can mix both formats:
 
 | Provider | Environment Variable | Supported Models |
 |----------|---------------------|------------------|
-| `openai` | `OPENAI_API_KEY` | gpt-5.2, gpt-4o-mini, o3, o4-mini, gpt-4.1 |
+| `openai` | `OPENAI_API_KEY` | gpt-5.2, gpt-5-mini, gpt-5-nano |
 | `anthropic` | `ANTHROPIC_API_KEY` | claude-opus-4-6, claude-sonnet-4-5, claude-haiku-4-5 |
 | `google` | `GOOGLE_API_KEY` | gemini-3-flash-preview, gemini-2.5-flash, gemini-2.5-pro |
 
@@ -147,7 +147,7 @@ You can mix both formats:
   ],
   "bots": [
     {"name": "SimpleBot", "type": "simple"},
-    {"name": "GPT-4o Mini", "type": "llm", "provider": "openai", "model": "gpt-4o-mini"},
+    {"name": "GPT-5 Mini", "type": "llm", "provider": "openai", "model": "gpt-5-mini-2025-08-07"},
     {"name": "Claude Haiku 4.5", "type": "llm", "provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
   ]
 }
