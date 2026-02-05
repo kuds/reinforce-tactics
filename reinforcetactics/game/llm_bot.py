@@ -223,6 +223,19 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 ', '.join(supported_models[:5]) + '...'
             )
 
+    def get_token_usage(self) -> Dict[str, int]:
+        """
+        Get unified token usage statistics across all providers.
+
+        Returns:
+            Dictionary with total_input_tokens, total_output_tokens, and total_tokens.
+        """
+        return {
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens,
+        }
+
     def _get_effective_system_prompt(self) -> str:
         """
         Get the effective system prompt considering enabled units.
@@ -330,13 +343,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                 # Append new turn
                 log_data['turns'].append(turn_data)
 
-                # Update cumulative token usage for Claude models
+                # Update cumulative token usage
                 if input_tokens > 0 or output_tokens > 0:
-                    log_data['total_token_usage'] = {
-                        "total_input_tokens": self.total_input_tokens,
-                        "total_output_tokens": self.total_output_tokens,
-                        "total_tokens": self.total_input_tokens + self.total_output_tokens
-                    }
+                    log_data['total_token_usage'] = self.get_token_usage()
             else:
                 # Create new log file with metadata
                 log_data = {
@@ -360,13 +369,9 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
                     "turns": [turn_data]
                 }
 
-                # Add cumulative token usage for Claude models
+                # Add cumulative token usage
                 if input_tokens > 0 or output_tokens > 0:
-                    log_data['total_token_usage'] = {
-                        "total_input_tokens": self.total_input_tokens,
-                        "total_output_tokens": self.total_output_tokens,
-                        "total_tokens": self.total_input_tokens + self.total_output_tokens
-                    }
+                    log_data['total_token_usage'] = self.get_token_usage()
 
             # Write to file with configurable formatting
             indent = 2 if self.pretty_print_logs else None
@@ -1358,6 +1363,9 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
             else:
                 user_messages.append(msg)
 
+        # Prefill assistant response with "{" to guide JSON output
+        user_messages.append({"role": "assistant", "content": "{"})
+
         # Build request kwargs, conditionally including max_tokens and temperature
         request_kwargs = {
             "model": self.model,
@@ -1379,7 +1387,8 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         if response.stop_reason:
             self._last_stop_reason = response.stop_reason
 
-        return response.content[0].text
+        # Prepend the prefilled "{" to reconstruct the full JSON response
+        return "{" + response.content[0].text
 
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods

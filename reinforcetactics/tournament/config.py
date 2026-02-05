@@ -59,6 +59,9 @@ class TournamentConfig:
     should_reason: bool = False
     llm_api_delay: float = 1.0
 
+    # Unit restriction settings
+    enabled_units: Optional[List[str]] = None
+
     # Execution settings
     concurrent_games: int = 1
 
@@ -122,6 +125,7 @@ class TournamentConfig:
                 should_reason=tournament_data.get("should_reason", False),
                 llm_api_delay=tournament_data.get("llm_api_delay", 1.0),
                 concurrent_games=tournament_data.get("concurrent_games", 1),
+                enabled_units=tournament_data.get("enabled_units"),
             )
 
         # Handle flat format
@@ -143,6 +147,7 @@ class TournamentConfig:
             should_reason=data.get("should_reason", False),
             llm_api_delay=data.get("llm_api_delay", 1.0),
             concurrent_games=data.get("concurrent_games", 1),
+            enabled_units=data.get("enabled_units"),
         )
 
     @classmethod
@@ -176,6 +181,7 @@ class TournamentConfig:
             "should_reason": self.should_reason,
             "llm_api_delay": self.llm_api_delay,
             "concurrent_games": self.concurrent_games,
+            "enabled_units": self.enabled_units,
         }
 
     def to_json(self, filepath: str) -> None:
@@ -210,6 +216,14 @@ class TournamentConfig:
 
         if self.concurrent_games < 1:
             errors.append("concurrent_games must be at least 1")
+
+        if self.enabled_units is not None:
+            valid_units = {'W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'}
+            invalid = [u for u in self.enabled_units if u not in valid_units]
+            if invalid:
+                errors.append(f"Invalid unit types in enabled_units: {invalid}")
+            if not self.enabled_units:
+                errors.append("enabled_units cannot be empty")
 
         return errors
 

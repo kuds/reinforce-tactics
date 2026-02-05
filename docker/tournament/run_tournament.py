@@ -335,6 +335,7 @@ def main():
         should_reason=tournament_data.get('should_reason', False),
         llm_api_delay=tournament_data.get('llm_api_delay', 1.0),
         concurrent_games=tournament_data.get('concurrent_games', 1),
+        enabled_units=tournament_data.get('enabled_units'),
     )
 
     # Set up GCS uploader if configured

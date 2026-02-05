@@ -290,7 +290,10 @@ class TournamentRunner:
 
         # Load map and create game state
         map_data = FileIO.load_map(map_config.path)
-        game_state = GameState(map_data, num_players=2)
+        game_state = GameState(
+            map_data, num_players=2,
+            enabled_units=self.config.enabled_units,
+        )
         max_turns = map_config.max_turns or self.config.max_turns
         game_state.max_turns = max_turns
 
