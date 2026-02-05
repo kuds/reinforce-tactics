@@ -2,6 +2,9 @@
 Gymnasium environment for Reinforce Tactics
 Supports both flat and hierarchical RL training
 """
+import logging
+import random
+import traceback
 from typing import Dict, Any, Tuple, Optional, List
 import gymnasium as gym
 from gymnasium import spaces
@@ -9,6 +12,8 @@ import numpy as np
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyGameEnv(gym.Env):
@@ -89,16 +94,36 @@ class StrategyGameEnv(gym.Env):
         self.hierarchical = hierarchical
         self.goal_space_size = goal_space_size
 
-        # Reward configuration
-        self.reward_config = reward_config or {
+        # Reward configuration with defaults
+        default_reward_config = {
             'win': 1000.0,
             'loss': -1000.0,
+            'draw': 0.0,
             'income_diff': 0.1,
             'unit_diff': 1.0,
             'structure_control': 5.0,
             'invalid_action': -10.0,
-            'turn_penalty': -0.1
+            'turn_penalty': -0.1,
+            # Action rewards (moved from hardcoded values for tunability)
+            'create_unit': 2.0,
+            'move': 0.1,
+            'damage_scale': 0.2,       # reward per damage point (was damage/5.0)
+            'kill': 10.0,
+            'seize_progress': 1.0,
+            'capture': 20.0,
+            'cure': 5.0,
+            'heal_scale': 0.5,         # reward per HP healed (was heal/2.0)
+            'paralyze': 8.0,
+            'haste': 6.0,
+            'defence_buff': 5.0,
+            'attack_buff': 5.0,
         }
+        if reward_config:
+            default_reward_config.update(reward_config)
+        self.reward_config = default_reward_config
+
+        # Previous potential for potential-based reward shaping (Phi(s) tracking)
+        self._prev_potential = 0.0
 
         # Grid dimensions
         self.grid_height = self.game_state.grid.height
@@ -527,6 +552,7 @@ class StrategyGameEnv(gym.Env):
         action_type = action_dict['action_type']
         from_pos = action_dict['from_pos']
         to_pos = action_dict['to_pos']
+        rc = self.reward_config
 
         reward = 0.0
         is_valid = True
@@ -538,7 +564,7 @@ class StrategyGameEnv(gym.Env):
                     unit_type, to_pos[0], to_pos[1], player=1
                 )
                 if unit:
-                    reward += 2.0
+                    reward += rc.get('create_unit', 2.0)
                 else:
                     is_valid = False
 
@@ -546,7 +572,7 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 if unit and unit.player == 1 and unit.can_move:
                     if self.game_state.move_unit(unit, to_pos[0], to_pos[1]):
-                        reward += 0.1
+                        reward += rc.get('move', 0.1)
                     else:
                         is_valid = False
                 else:
@@ -557,9 +583,9 @@ class StrategyGameEnv(gym.Env):
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.player == 1 and target.player != 1:
                     result = self.game_state.attack(unit, target)
-                    reward += result['damage'] / 5.0
+                    reward += result['damage'] * rc.get('damage_scale', 0.2)
                     if not result['target_alive']:
-                        reward += 10.0
+                        reward += rc.get('kill', 10.0)
                 else:
                     is_valid = False
 
@@ -568,11 +594,11 @@ class StrategyGameEnv(gym.Env):
                 if unit and unit.player == 1:
                     result = self.game_state.seize(unit)
                     if result.get('damage', 0) > 0:
-                        reward += 1.0  # Seize progressed (structure took damage)
+                        reward += rc.get('seize_progress', 1.0)
                         if result['captured']:
-                            reward += 20.0
+                            reward += rc.get('capture', 20.0)
                     else:
-                        is_valid = False  # Seize had no effect (not capturable or already owned)
+                        is_valid = False
                 else:
                     is_valid = False
 
@@ -580,26 +606,20 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == 'C':
-                    # Priority: Cure if paralyzed, otherwise Heal
-                    # Or check what's possible
-
-                    # Try to cure first if target is paralyzed
                     action_performed = False
                     if target.is_paralyzed():
                         result = self.game_state.cure(unit, target)
                         if result:
-                            reward += 5.0 # Reward for curing
+                            reward += rc.get('cure', 5.0)
                             action_performed = True
 
-                    # If not cured (or not paralyzed), try to heal
                     if not action_performed:
                         heal_amount = self.game_state.heal(unit, target)
                         if heal_amount > 0:
-                            reward += heal_amount / 2.0
+                            reward += heal_amount * rc.get('heal_scale', 0.5)
                             action_performed = True
 
                     if not action_performed:
-                        # If neither worked (e.g. full health and not paralyzed), action failed
                         is_valid = False
                 else:
                     is_valid = False
@@ -607,10 +627,12 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 5:  # End turn
                 self.game_state.end_turn()
                 reward += self.reward_config['turn_penalty']
-                # Opponent plays
-                if self.opponent:
-                    self._opponent_turn()
-                    self.game_state.end_turn()
+                # Opponent plays (dispatch on opponent_type, not opponent object)
+                if self.opponent_type and self.opponent_type != 'self':
+                    if not self.game_state.game_over:
+                        self._opponent_turn()
+                        if not self.game_state.game_over:
+                            self.game_state.end_turn()
 
             elif action_type == 6:  # Paralyze (Mage/Sorcerer)
                 unit = self.game_state.get_unit_at_position(*from_pos)
@@ -618,7 +640,7 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type in ['M', 'S'] and target.player != 1:
                     result = self.game_state.paralyze(unit, target)
                     if result:
-                        reward += 8.0  # Paralyze is very valuable
+                        reward += rc.get('paralyze', 8.0)
                     else:
                         is_valid = False
                 else:
@@ -630,7 +652,7 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type == 'S' and target.player == 1:
                     result = self.game_state.haste(unit, target)
                     if result:
-                        reward += 6.0  # Haste is valuable for granting extra actions
+                        reward += rc.get('haste', 6.0)
                     else:
                         is_valid = False
                 else:
@@ -642,7 +664,7 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type == 'S' and target.player == 1:
                     result = self.game_state.defence_buff(unit, target)
                     if result:
-                        reward += 5.0  # Defence Buff is valuable for damage reduction
+                        reward += rc.get('defence_buff', 5.0)
                     else:
                         is_valid = False
                 else:
@@ -654,14 +676,18 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type == 'S' and target.player == 1:
                     result = self.game_state.attack_buff(unit, target)
                     if result:
-                        reward += 5.0  # Attack Buff is valuable for damage increase
+                        reward += rc.get('attack_buff', 5.0)
                     else:
                         is_valid = False
                 else:
                     is_valid = False
 
+        except (ValueError, KeyError, IndexError) as e:
+            logger.debug("Game action failed (type=%s): %s", action_type, e)
+            is_valid = False
         except Exception as e:
-            print(f"Error executing action: {e}")
+            logger.error("Unexpected error executing action (type=%s): %s\n%s",
+                         action_type, e, traceback.format_exc())
             is_valid = False
 
         return reward, is_valid
@@ -669,43 +695,98 @@ class StrategyGameEnv(gym.Env):
     def _opponent_turn(self):
         """Execute opponent's turn."""
         if self.opponent_type == 'bot':
-            self.opponent.take_turn()
+            if self.opponent:
+                self.opponent.take_turn()
         elif self.opponent_type == 'random':
-            # Random valid action
+            self._random_opponent_turn()
+        # 'self' mode is handled externally by the training script
+
+    def _random_opponent_turn(self, max_actions: int = 20):
+        """Execute random valid actions for opponent player 2."""
+        for _ in range(max_actions):
+            if self.game_state.game_over:
+                break
             legal_actions = self.game_state.get_legal_actions(player=2)
-            if legal_actions and legal_actions.get('end_turn'):
-                # Just end turn for random opponent
-                pass
-        elif self.opponent_type == 'self':
-            # Self-play (will be handled by training script)
-            pass
+
+            # Collect all non-end-turn actions
+            all_actions = []
+            for action_key in ['create_unit', 'move', 'attack', 'seize',
+                               'paralyze', 'heal', 'cure', 'haste',
+                               'defence_buff', 'attack_buff']:
+                for action in legal_actions.get(action_key, []):
+                    all_actions.append((action_key, action))
+
+            if not all_actions:
+                break  # Only end_turn available, stop
+
+            # Pick a random action and execute it
+            action_key, action = random.choice(all_actions)
+            try:
+                if action_key == 'create_unit':
+                    self.game_state.create_unit(
+                        action['unit_type'], action['x'], action['y'], player=2)
+                elif action_key == 'move':
+                    self.game_state.move_unit(
+                        action['unit'], action['to_x'], action['to_y'])
+                elif action_key == 'attack':
+                    self.game_state.attack(action['attacker'], action['target'])
+                elif action_key == 'seize':
+                    self.game_state.seize(action['unit'])
+                elif action_key == 'paralyze':
+                    self.game_state.paralyze(action['paralyzer'], action['target'])
+                elif action_key == 'heal':
+                    self.game_state.heal(action['healer'], action['target'])
+                elif action_key == 'cure':
+                    self.game_state.cure(action['curer'], action['target'])
+                elif action_key == 'haste':
+                    self.game_state.haste(action['sorcerer'], action['target'])
+                elif action_key == 'defence_buff':
+                    self.game_state.defence_buff(action['sorcerer'], action['target'])
+                elif action_key == 'attack_buff':
+                    self.game_state.attack_buff(action['sorcerer'], action['target'])
+            except Exception:
+                continue  # Skip failed actions, try another
+
+    def _compute_potential(self) -> float:
+        """
+        Compute potential function Phi(s) for potential-based reward shaping.
+
+        Using potential-based shaping (Ng et al., 1999) preserves optimal policy:
+        shaping = gamma * Phi(s') - Phi(s)
+        Since gamma ~= 1.0 in practice, we use: shaping = Phi(s') - Phi(s)
+        """
+        potential = 0.0
+
+        if self.reward_config.get('income_diff', 0) > 0:
+            income_p1 = self.game_state.mechanics.calculate_income(1, self.game_state.grid)
+            income_p2 = self.game_state.mechanics.calculate_income(2, self.game_state.grid)
+            potential += (income_p1['total'] - income_p2['total']) * self.reward_config['income_diff']
+
+        if self.reward_config.get('unit_diff', 0) > 0:
+            units_p1 = sum(1 for u in self.game_state.units if u.player == 1)
+            units_p2 = sum(1 for u in self.game_state.units if u.player == 2)
+            potential += (units_p1 - units_p2) * self.reward_config['unit_diff']
+
+        if self.reward_config.get('structure_control', 0) > 0:
+            structures_p1 = len(self.game_state.grid.get_capturable_tiles(player=1))
+            structures_p2 = len(self.game_state.grid.get_capturable_tiles(player=2))
+            potential += (structures_p1 - structures_p2) * self.reward_config['structure_control']
+
+        return potential
 
     def _calculate_reward(self, action_reward: float, is_valid: bool) -> float:
-        """Calculate total reward including shaping terms."""
+        """Calculate total reward including potential-based shaping terms."""
         reward = action_reward
 
         if not is_valid:
             reward += self.reward_config['invalid_action']
             self.episode_stats['invalid_actions'] += 1
 
-        # Dense reward shaping
-        if self.reward_config['income_diff'] > 0:
-            income_data_p1 = self.game_state.mechanics.calculate_income(1, self.game_state.grid)
-            income_data_p2 = self.game_state.mechanics.calculate_income(2, self.game_state.grid)
-            income_diff = income_data_p1['total'] - income_data_p2['total']
-            reward += income_diff * self.reward_config['income_diff']
-
-        if self.reward_config['unit_diff'] > 0:
-            units_p1 = len([u for u in self.game_state.units if u.player == 1])
-            units_p2 = len([u for u in self.game_state.units if u.player == 2])
-            unit_diff = units_p1 - units_p2
-            reward += unit_diff * self.reward_config['unit_diff']
-
-        if self.reward_config['structure_control'] > 0:
-            structures_p1 = len(self.game_state.grid.get_capturable_tiles(player=1))
-            structures_p2 = len(self.game_state.grid.get_capturable_tiles(player=2))
-            structure_diff = structures_p1 - structures_p2
-            reward += structure_diff * self.reward_config['structure_control']
+        # Potential-based reward shaping: reward += Phi(s') - Phi(s)
+        # This only rewards CHANGES in advantage, not maintaining a lead
+        current_potential = self._compute_potential()
+        reward += current_potential - self._prev_potential
+        self._prev_potential = current_potential
 
         return reward
 
@@ -739,9 +820,13 @@ class StrategyGameEnv(gym.Env):
             if self.game_state.winner == 1:
                 reward += self.reward_config['win']
                 self.episode_stats['winner'] = 1
+            elif self.game_state.winner is None:
+                # Draw (e.g. max_turns reached)
+                reward += self.reward_config.get('draw', 0.0)
+                self.episode_stats['winner'] = None
             else:
                 reward += self.reward_config['loss']
-                self.episode_stats['winner'] = 2
+                self.episode_stats['winner'] = self.game_state.winner
 
         # Get observation
         obs = self._get_obs()
@@ -773,6 +858,7 @@ class StrategyGameEnv(gym.Env):
             fog_of_war=self.fog_of_war
         )
         self.current_step = 0
+        self._prev_potential = 0.0
 
         # Initialize visibility at game start
         if self.fog_of_war:

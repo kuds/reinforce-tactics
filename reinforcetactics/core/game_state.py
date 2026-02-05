@@ -98,10 +98,11 @@ class GameState:
         self.action_history: List[Dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
 
-        # Cached values for performance
+        # Cached values for performance (separate validity flags to prevent stale cross-reads)
         self._unit_count_cache: Dict[int, int] = {}
+        self._unit_count_cache_valid: bool = False
         self._legal_actions_cache: Dict[int, Dict[str, List[Any]]] = {}
-        self._cache_valid: bool = False
+        self._legal_actions_cache_valid: bool = False
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
@@ -159,8 +160,9 @@ class GameState:
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
-        self._cache_valid = False
+        self._unit_count_cache_valid = False
         self._unit_count_cache.clear()
+        self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
     def update_visibility(self, player: Optional[int] = None) -> None:
@@ -292,11 +294,11 @@ class GameState:
 
     def get_unit_count(self, player: int) -> int:
         """Get cached unit count for a player."""
-        if not self._cache_valid:
+        if not self._unit_count_cache_valid:
             self._unit_count_cache = {}
             for unit in self.units:
                 self._unit_count_cache[unit.player] = self._unit_count_cache.get(unit.player, 0) + 1
-            self._cache_valid = True
+            self._unit_count_cache_valid = True
         return self._unit_count_cache.get(player, 0)
 
     def get_unit_at_position(self, x: int, y: int) -> Optional[Unit]:
@@ -504,7 +506,8 @@ class GameState:
             if attacker_tile.is_capturable() and attacker_tile.health < attacker_tile.max_health:
                 attacker_tile.regenerating = True
             defeated_player = attacker.player
-            self.units.remove(attacker)
+            if attacker in self.units:
+                self.units.remove(attacker)
             self._invalidate_cache()
 
             # Check if defeated player has any remaining units
@@ -517,6 +520,8 @@ class GameState:
                 else:
                     self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
 
+        # Always disable attacker actions after combat (even if dead, since external code
+        # like bots may still hold references and check these flags)
         attacker.can_move = False
         attacker.can_attack = False
         self._invalidate_cache()
@@ -797,6 +802,13 @@ class GameState:
             self.current_player = 1
             self.turn_number += 1
 
+            # Check max_turns limit (checked once per full round, after all players have gone)
+            if self.max_turns is not None and self.turn_number >= self.max_turns:
+                self.game_over = True
+                # No winner on max_turns draw
+                self.winner = None
+                return {'total': 0, 'healing': {'total_healed': 0, 'total_cost': 0, 'units_healed': []}}
+
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
 
@@ -866,7 +878,7 @@ class GameState:
             player = self.current_player
 
         # Return cached actions if available and cache is valid
-        if self._cache_valid and player in self._legal_actions_cache:
+        if self._legal_actions_cache_valid and player in self._legal_actions_cache:
             return self._legal_actions_cache[player]
 
         legal_actions = {
@@ -903,7 +915,8 @@ class GameState:
                     reachable = unit.get_reachable_positions(
                         self.grid.width,
                         self.grid.height,
-                        lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, self.units)
+                        lambda x, y, _u=unit: self.mechanics.can_move_to_position(
+                            x, y, self.grid, self.units, moving_unit=_u)
                     )
                     for pos in reachable:
                         legal_actions['move'].append({
@@ -1008,8 +1021,8 @@ class GameState:
                         })
 
         # Cache the result
-        if self._cache_valid:
-            self._legal_actions_cache[player] = legal_actions
+        self._legal_actions_cache[player] = legal_actions
+        self._legal_actions_cache_valid = True
 
         return legal_actions
 
@@ -1256,7 +1269,8 @@ class GameState:
         # Extract fog_of_war_method (default to 'simple_radius' if FOW enabled, 'none' otherwise)
         fog_of_war_method = save_data.get('fog_of_war_method', 'simple_radius' if fog_of_war else 'none')
 
-        game = cls(map_data, save_data.get('num_players', 2), enabled_units=enabled_units, fog_of_war=fog_of_war)
+        max_turns = save_data.get('max_turns')
+        game = cls(map_data, save_data.get('num_players', 2), max_turns=max_turns, enabled_units=enabled_units, fog_of_war=fog_of_war)
 
         # Restore the fog of war method
         game.fog_of_war_method = fog_of_war_method
