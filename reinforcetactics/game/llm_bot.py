@@ -63,77 +63,10 @@ GEMINI_MODELS = [
 ]
 
 
-# System prompt explaining the game rules
-SYSTEM_PROMPT = """You are an expert player of Reinforce Tactics, a turn-based strategy game.
-
-GAME OBJECTIVE:
-- Win by capturing the enemy HQ or eliminating all enemy units
-- Build units, move strategically, attack enemies, and capture structures
-
-UNIT TYPES:
-1. Warrior (W): Cost 200 gold, HP 15, Attack 10, Defense 6, Movement 3
-   - Strong melee fighter, attacks adjacent enemies only
-2. Mage (M): Cost 250 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
-   - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for turns)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies and CURE paralyzed units
-4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
-   - Ranged unit that attacks at distance 1-2 (1-3 on mountains)
-   - Cannot attack adjacent enemies (distance 0)
-   - Indirect unit: melee units cannot counter-attack when hit by Archer
-   - Other Archers and Mages CAN counter-attack if Archer is within their range
-
-BUILDING TYPES:
-- HQ (h): Generates 150 gold/turn, losing it means defeat
-- Building (b): Generates 100 gold/turn, used to recruit units
-- Tower (t): Generates 50 gold/turn, defensive structure
-
-AVAILABLE ACTIONS:
-1. CREATE_UNIT: Spawn a unit at an owned building (costs gold)
-2. MOVE: Move a unit to a reachable position (up to movement range)
-3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer)
-4. PARALYZE: (Mage only) Paralyze an adjacent enemy unit
-5. HEAL: (Cleric only) Heal an adjacent ally unit
-6. CURE: (Cleric only) Remove paralysis from an adjacent ally
-7. SEIZE: Capture a neutral/enemy structure by standing on it
-8. END_TURN: Finish your turn
-9. RESIGN: Concede the game (use only as last resort when victory is impossible)
-
-COMBAT RULES:
-- Most units can only attack adjacent enemies (orthogonally, not diagonally)
-- Mages can attack at range 1-2, Archers at range 1-2 (or 1-3 on mountains)
-- Archers cannot attack at distance 0 (adjacent)
-- Attacked units counter-attack if they can, except melee units cannot counter Archers
-- Paralyzed units cannot move or attack
-- Units can move first, then perform one action (attack, capture, heal, cure, paralyze), but cannot act first then move
-
-ECONOMY:
-- You earn gold from buildings you control at the start of each turn
-- Spend gold to create units at buildings
-- Control more structures to generate more income
-
-STRATEGY TIPS:
-- Balance economy (capturing buildings) with military (building units)
-- Protect your HQ at all costs
-- Mages can disable key enemy units with paralyze
-- Clerics keep your army healthy and mobile
-- Archers are excellent for safe ranged attacks, especially from mountains
-- Position units to protect each other
-
-WHEN TO RESIGN:
-Consider resigning ONLY when ALL of these conditions are true:
-- You have no units left AND cannot afford to create any
-- OR enemy units are about to capture your HQ and you cannot stop them
-- OR you are vastly outnumbered with no realistic path to victory
-Do NOT resign if you still have units, gold, or any chance of a comeback.
-
-CRITICAL CONSTRAINTS:
-- Only ONE unit can occupy any tile. You cannot create a unit on an occupied building.
-- Each action in your list is executed sequentially - plan accordingly.
-- If enemies are within 2-3 tiles of your HQ, defending it is your TOP priority.
-
-Respond with ONLY the JSON object below. No extra text before or after."""
+# Legacy alias - the actual prompt used by bots is DEFAULT_PROMPT from llm_prompts.py
+# which includes all 8 unit types (W, M, C, A, K, R, S, B) with correct stats.
+# See reinforcetactics/game/llm_prompts.py for the full prompt definitions.
+SYSTEM_PROMPT = DEFAULT_PROMPT
 
 
 class LLMBot(ABC):  # pylint: disable=too-few-public-methods

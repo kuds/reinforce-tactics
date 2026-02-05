@@ -473,7 +473,7 @@ UNIT_DESCRIPTIONS_SHORT = {
     'C': "Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement",
     'A': "Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement",
     'K': "Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement",
-    'R': "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 25% in forest), 12 HP, 4 movement",
+    'R': "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement",
     'S': "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement",
     'B': "Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement"
 }
@@ -596,9 +596,9 @@ def get_available_actions_section(enabled_units: list) -> str:
     if 'S' in enabled_units:
         lines.append(f"{action_num}. HASTE: (Sorcerer only) Grant an ally an extra action this turn")
         action_num += 1
-        lines.append(f"{action_num}. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns")
+        lines.append(f"{action_num}. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns")
         action_num += 1
-        lines.append(f"{action_num}. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns")
+        lines.append(f"{action_num}. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns")
         action_num += 1
 
     lines.append(f"{action_num}. SEIZE: Capture a neutral/enemy structure by standing on it")
