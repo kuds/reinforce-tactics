@@ -22,7 +22,7 @@ Reinforce Tactics is a 2D turn-based strategy game featuring:
 - **Structure capture**: Towers, Buildings, and Headquarters
 - **Save/Load system** for continuing games
 - **Replay system** for watching past games
-- **AI opponents**: SimpleBot and LLM-powered bots (GPT, Claude, Gemini)
+- **AI opponents**: SimpleBot, MediumBot, AdvancedBot, and LLM-powered bots (GPT, Claude, Gemini)
 - **Full Gymnasium integration** for RL training
 - **Headless mode** for fast training without rendering
 - **Multiple training algorithms**: PPO, A2C, DQN via Stable-Baselines3
@@ -42,11 +42,21 @@ This project is designed to be:
 ### Installation
 
 ```bash
-# Basic Installation (GUI Mode)
-pip install pygame pandas numpy
+# Clone the repository
+git clone https://github.com/kuds/reinforce-tactics.git
+cd reinforce-tactics
 
-# Full Installation (with RL)
-pip install pygame pandas numpy gymnasium stable-baselines3[extra]
+# Basic Installation (core + RL dependencies)
+pip install .
+
+# With GUI support
+pip install ".[gui]"
+
+# With LLM bot support
+pip install ".[llm]"
+
+# Full Installation (all extras)
+pip install ".[all]"
 ```
 
 ### Play the Game
@@ -84,6 +94,10 @@ obs, reward, terminated, truncated, info = env.step(action)
 This documentation is organized into several sections:
 
 - **Getting Started** (this page): Overview and quick start guide
+- **Game Mechanics**: Units, combat system, structures, and terrain
+- **Bot Tournaments**: Official tournament results and analysis
+- **Maps**: Available maps with previews and descriptions
+- **Tournament System**: Technical guide for running tournaments
 - **Implementation Status**: Current state of the project and completed features
 
 ## 🔗 Useful Links
