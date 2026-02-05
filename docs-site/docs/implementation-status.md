@@ -11,16 +11,16 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ## ✅ Completed Features
 
 ### Core Game Logic (Headless-Compatible)
-- [x] `constants.py` - All game constants and configuration (8 unit types, terrain, structures)
-- [x] `core/tile.py` - Tile class with ownership and HP
-- [x] `core/unit.py` - Unit class with all 8 unit types and abilities
-- [x] `core/grid.py` - Grid management with numpy conversion
-- [x] `core/game_state.py` - Complete game state manager
-- [x] `core/visibility.py` - Fog of war visibility system
+- [x] `reinforcetactics/constants.py` - All game constants and configuration (8 unit types, terrain, structures)
+- [x] `reinforcetactics/core/tile.py` - Tile class with ownership and HP
+- [x] `reinforcetactics/core/unit.py` - Unit class with all 8 unit types and abilities
+- [x] `reinforcetactics/core/grid.py` - Grid management with numpy conversion
+- [x] `reinforcetactics/core/game_state.py` - Complete game state manager
+- [x] `reinforcetactics/core/visibility.py` - Fog of war visibility system
 
 ### Game Mechanics
 - [x] `game/mechanics.py` - Combat, healing, structures, income, all special abilities
-- [x] `game/bot.py` - SimpleBot and MediumBot AI for training
+- [x] `game/bot.py` - SimpleBot, MediumBot, and AdvancedBot AI for training
 - [x] `game/llm_bot.py` - LLM-powered bots (OpenAI GPT, Claude, Gemini)
 - [x] `game/model_bot.py` - Trained model bot for tournament play
 
@@ -67,7 +67,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 | **Special Abilities** | Paralyze, Heal, Cure, Charge, Flank, Evade, Haste, Attack Buff, Defence Buff | ✅ Complete |
 | **Terrain Types** | 6 (Grass, Water, Ocean, Mountain, Forest, Road) | ✅ Complete |
 | **Structure Types** | 3 (HQ, Building, Tower) | ✅ Complete |
-| **Bot Types** | SimpleBot, MediumBot, LLM Bots (3 providers), ModelBot | ✅ Complete |
+| **Bot Types** | SimpleBot, MediumBot, AdvancedBot, LLM Bots (3 providers), ModelBot | ✅ Complete |
 | **RL Features** | Gymnasium env, Action masking, Self-play, Feudal HRL | ✅ Complete |
 | **Tournament** | Round-robin, ELO ratings, Resume, Multi-map | ✅ Complete |
 | **Fog of War** | Full visibility system with explored/visible states | ✅ Complete |

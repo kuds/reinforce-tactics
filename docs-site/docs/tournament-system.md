@@ -17,6 +17,7 @@ Looking for tournament results? Check out the [Bot Tournaments](./tournaments) p
 The tournament system automatically discovers and runs competitions between:
 - **SimpleBot**: Built-in basic rule-based bot (always included)
 - **MediumBot**: Built-in improved rule-based bot with advanced strategies (always included)
+- **AdvancedBot**: Built-in sophisticated bot extending MediumBot with map analysis, enhanced unit composition, mountain positioning, ranged combat prioritization, and special ability usage (always included)
 - **LLM Bots**: OpenAI, Claude, and Gemini bots (if API keys configured)
 - **Model Bots**: Trained Stable-Baselines3 models (from `models/` directory)
 
@@ -42,17 +43,36 @@ python3 scripts/tournament.py [OPTIONS]
 
 ### Options
 
-- `--map PATH`: Path to map file (default: `maps/1v1/6x6_beginner.csv`)
+- `--map PATH`: Path to single map file (for backward compatibility)
+- `--maps PATH [PATH ...]`: List of map file paths to use in evaluation
+- `--map-dir PATH`: Directory to load all maps from (alternative to listing individual maps)
+- `--map-pool-mode {cycle,random,all}`: How to select maps: `cycle` (default), `random`, or `all`
 - `--models-dir PATH`: Directory containing trained models (default: `models/`)
 - `--output-dir PATH`: Directory for results and replays (default: `tournament_results/`)
 - `--games-per-side INT`: Number of games per side in each matchup (default: 2)
+- `--max-turns INT`: Maximum turns per game (default: 500)
 - `--test`: Test mode - adds duplicate SimpleBots for testing
+- `--log-conversations`: Enable LLM conversation logging to JSON files
+- `--conversation-log-dir PATH`: Directory for conversation logs (default: `output_dir/llm_conversations/`)
+- `--concurrent INT`: Number of concurrent games (default: 1, sequential)
+- `--no-llm`: Skip LLM bot discovery
+- `--no-models`: Skip trained model bot discovery
 
 ### Examples
 
-Run a tournament on a different map:
+Run a tournament on a specific map:
 ```bash
-python3 scripts/tournament.py --map maps/1v1/10x10_easy.csv
+python3 scripts/tournament.py --map maps/1v1/beginner.csv
+```
+
+Run a tournament across multiple maps:
+```bash
+python3 scripts/tournament.py --maps maps/1v1/beginner.csv maps/1v1/funnel_point.csv
+```
+
+Run a tournament on all maps in a directory:
+```bash
+python3 scripts/tournament.py --map-dir maps/1v1/ --map-pool-mode all
 ```
 
 Run more games per matchup:
@@ -65,6 +85,11 @@ Save results to a custom directory:
 python3 scripts/tournament.py --output-dir my_tournament
 ```
 
+Run with concurrent games (no LLM bots):
+```bash
+python3 scripts/tournament.py --no-llm --concurrent 4
+```
+
 Test the tournament system:
 ```bash
 python3 scripts/tournament.py --test --games-per-side 1
@@ -72,11 +97,12 @@ python3 scripts/tournament.py --test --games-per-side 1
 
 ## Bot Discovery
 
-### SimpleBot & MediumBot
-Both built-in bots are always included. No configuration needed.
+### SimpleBot, MediumBot & AdvancedBot
+All three built-in bots are always included. No configuration needed.
 
 - **SimpleBot**: Basic strategy with single-unit purchases and simple targeting
 - **MediumBot**: Advanced strategy with coordinated attacks and maximized unit production
+- **AdvancedBot**: Extends MediumBot with map analysis, optimized unit composition (Warriors 25%, Archers 20%, Mages 15%, Knights 10%, Rogues 10%, Barbarians 8%, Clerics 7%, Sorcerers 5%), mountain positioning for archers, ranged combat prioritization, and special ability usage (Mage Paralyze, Cleric Heal)
 
 ### LLM Bots
 Automatically included if:
@@ -86,23 +112,20 @@ Automatically included if:
 
 #### Supported Models
 
-**OpenAI (Default: gpt-4o-mini)**
-- GPT-4o family: `gpt-4o`, `gpt-4o-mini` (recommended for cost-effectiveness)
-- GPT-4 Turbo: `gpt-4-turbo`, `gpt-4-turbo-2024-04-09`
-- GPT-4: `gpt-4`, `gpt-4-0613`
-- GPT-3.5 Turbo: `gpt-3.5-turbo`, `gpt-3.5-turbo-0125`
-- O1 Reasoning: `o1`, `o1-mini`, `o1-preview`
-- O3: `o3-mini` (if available)
+**OpenAI (Default: gpt-5-mini-2025-08-07)**
+- GPT-5: `gpt-5-mini-2025-08-07` (recommended for cost-effectiveness)
+- GPT-4o family: `gpt-4o`, `gpt-4o-mini`
+- O-series: `o1`, `o1-mini`, `o3-mini`
 
-**Anthropic Claude (Default: claude-3-5-haiku-20241022)**
+**Anthropic Claude (Default: claude-haiku-4-5-20251001)**
+- Claude 4.5: `claude-haiku-4-5-20251001` (recommended), `claude-sonnet-4-5-20250929`
 - Claude 4: `claude-sonnet-4-20250514`
-- Claude 3.5: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022` (recommended)
-- Claude 3: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
+- Claude 3.5: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
 
-**Google Gemini (Default: gemini-2.0-flash)**
-- Gemini 2.0: `gemini-2.0-flash` (recommended), `gemini-2.0-flash-thinking-exp`
-- Gemini 1.5: `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`
-- Gemini 1.0: `gemini-1.0-pro`, `gemini-pro`
+**Google Gemini (Default: gemini-2.5-flash)**
+- Gemini 2.5: `gemini-2.5-flash` (recommended)
+- Gemini 2.0: `gemini-2.0-flash`
+- Gemini 1.5: `gemini-1.5-pro`, `gemini-1.5-flash`
 
 Configure API keys in `settings.json`:
 ```json
@@ -276,23 +299,33 @@ python3 scripts/tournament.py --test --games-per-side 1 --output-dir /tmp/test
 
 1. **BotDescriptor**: Describes a bot and knows how to instantiate it
 2. **TournamentRunner**: Manages tournament execution
-3. **ModelBot**: Wrapper for Stable-Baselines3 models
-4. **Bot discovery**: Automatic detection of available bots
-5. **Results tracking**: Win/loss/draw statistics
+3. **TournamentConfig**: Unified configuration for tournament settings
+4. **ELO Rating**: Rating system with configurable K-factor
+5. **TournamentSchedule**: Round-robin scheduling with resume support
+6. **ModelBot**: Wrapper for Stable-Baselines3 models
+7. **Bot discovery**: Automatic detection of available bots (built-in, LLM, model)
+8. **Results tracking**: Win/loss/draw statistics with CSV/JSON export
 
 ### Code Structure
 
 ```
 scripts/
-  tournament.py          # Main tournament script
+  tournament.py              # Main tournament CLI script
 reinforcetactics/
   game/
-    bot.py              # SimpleBot implementation
-    llm_bot.py          # LLM bot implementations
-    model_bot.py        # ModelBot for trained models
-    __init__.py         # Exports all bot types
+    bot.py                   # SimpleBot, MediumBot, AdvancedBot
+    llm_bot.py               # LLM bot implementations (OpenAI, Claude, Gemini)
+    model_bot.py             # ModelBot for trained models
+  tournament/
+    bots.py                  # Bot descriptors and discovery
+    runner.py                # Tournament execution engine
+    config.py                # Tournament configuration
+    schedule.py              # Round-robin scheduling with resume support
+    results.py               # Results tracking and export
+    elo.py                   # ELO rating system
 tests/
-  test_tournament.py    # Tournament system tests
+  test_tournament.py         # Tournament system tests
+  test_tournament_library.py # Tournament library tests
 ```
 
 ## Docker Tournament Runner
