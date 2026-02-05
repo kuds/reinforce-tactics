@@ -39,8 +39,8 @@ class GameOverMenu(Menu):
         """Save game replay."""
         return self.game_state.save_replay_to_file()
 
-    def draw(self) -> None:
-        super().draw()
+    def _draw_content(self) -> None:
+        super()._draw_content()
 
         # Draw winner announcement
         lang = get_language()
@@ -53,5 +53,3 @@ class GameOverMenu(Menu):
             y=100
         )
         self.screen.blit(winner_surface, winner_rect)
-
-        pygame.display.flip()

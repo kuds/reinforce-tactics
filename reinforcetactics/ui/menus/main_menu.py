@@ -36,6 +36,12 @@ class MainMenu(Menu):
         self.add_option(lang.get('main_menu.settings', 'Settings'), self._settings)
         self.add_option(lang.get('main_menu.quit', 'Quit'), self._quit)
 
+    def _refresh_options(self) -> None:
+        """Rebuild options with current language strings."""
+        self.options.clear()
+        self.title = self._get_title()
+        self._setup_options()
+
     def _new_game(self) -> Optional[Dict[str, Any]]:
         """Handle new game - show game mode selection, map selection, and player configuration."""
         # Step 1: Select game mode
@@ -107,7 +113,9 @@ class MainMenu(Menu):
         settings_menu = SettingsMenu(self.screen)
         settings_menu.run()
         pygame.event.clear()
-        # Return to main menu after settings
+        # Refresh options in case language was changed in settings
+        self._refresh_options()
+        self._populate_option_rects()
 
     def _credits(self) -> None:
         """Handle credits - show credits menu."""

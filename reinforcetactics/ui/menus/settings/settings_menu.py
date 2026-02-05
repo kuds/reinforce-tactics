@@ -34,6 +34,12 @@ class SettingsMenu(Menu):
         self.add_option(lang.get('settings.api_keys', 'LLM API Keys'), self._configure_api_keys)
         self.add_option(lang.get('common.back', 'Back'), lambda: None)
 
+    def _refresh_options(self) -> None:
+        """Rebuild options with current language strings."""
+        self.options.clear()
+        self.title = get_language().get('settings.title', 'Settings')
+        self._setup_options()
+
     def _change_language(self) -> str:
         """Open language selection menu."""
         return 'language_menu'
@@ -87,7 +93,9 @@ class SettingsMenu(Menu):
                         language_menu = LanguageMenu(self.screen)
                         language_menu.run()
                         pygame.event.clear()
-                        # Continue in settings menu
+                        # Refresh options with new language strings
+                        self._refresh_options()
+                        self._populate_option_rects()
                     elif result == 'graphics_menu':
                         graphics_menu = GraphicsMenu(self.screen)
                         graphics_menu.run()
