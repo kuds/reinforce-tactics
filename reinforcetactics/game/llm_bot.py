@@ -28,77 +28,82 @@ logger = logging.getLogger(__name__)
 
 # Supported models for each provider
 OPENAI_MODELS = [
-    # GPT-4o family (latest, most capable)
+    # GPT-5.2 (flagship reasoning model)
+    'gpt-5.2',
+    # GPT-5 family
+    'gpt-5-2025-08-07',
+    'gpt-5-mini-2025-08-07',
+    'gpt-5-nano-2025-08-07',
+    # O-series reasoning models (latest)
+    'o3',
+    'o3-pro',
+    'o4-mini',
+    'o4-mini-2025-04-16',
+    # O3 mini (previous generation reasoning)
+    'o3-mini',
+    'o3-mini-2025-01-31',
+    # GPT-4.1 family (improved instruction following, 1M context)
+    'gpt-4.1',
+    'gpt-4.1-2025-04-14',
+    'gpt-4.1-mini',
+    'gpt-4.1-mini-2025-04-14',
+    'gpt-4.1-nano',
+    'gpt-4.1-nano-2025-04-14',
+    # GPT-4o family (legacy, retiring Feb 2026)
     'gpt-4o',
     'gpt-4o-mini',
     'gpt-4o-2024-11-20',
     'gpt-4o-2024-08-06',
-    'gpt-4o-2024-05-13',
     'gpt-4o-mini-2024-07-18',
-    # GPT-4 Turbo (high performance)
+    # GPT-4 Turbo (legacy)
     'gpt-4-turbo',
     'gpt-4-turbo-2024-04-09',
-    'gpt-4-turbo-preview',
-    'gpt-4-0125-preview',
-    'gpt-4-1106-preview',
-    # GPT-4 (stable, proven)
-    'gpt-4',
-    'gpt-4-0613',
-    # GPT-3.5 Turbo (fast and economical)
-    'gpt-3.5-turbo',
-    'gpt-3.5-turbo-0125',
-    'gpt-3.5-turbo-1106',
-    # O1 Reasoning models (advanced reasoning)
+    # O1 Reasoning models (legacy)
     'o1',
     'o1-2024-12-17',
     'o1-mini',
     'o1-mini-2024-09-12',
-    'o1-preview',
-    'o1-preview-2024-09-12',
-    # O3 models (if available)
-    'o3-mini',
-    'o3-mini-2025-01-31',
-    'gpt-5.2-2025-12-11',
-    'gpt-5-mini-2025-08-07',
 ]
 
 ANTHROPIC_MODELS = [
-    # Claude 4 (latest generation)
+    # Claude Opus 4.6 (latest, most intelligent)
+    'claude-opus-4-6',
+    # Claude Sonnet 4.5 (best speed/intelligence balance)
     'claude-sonnet-4-5-20250929',
+    # Claude Haiku 4.5 (fastest, near-frontier intelligence)
+    'claude-haiku-4-5-20251001',
+    # Claude Opus 4.5 (legacy)
+    'claude-opus-4-5-20251101',
+    # Claude Opus 4.1 (legacy)
+    'claude-opus-4-1-20250805',
+    # Claude Sonnet 4 / Opus 4 (legacy)
     'claude-sonnet-4-20250514',
-    # Claude 3.5 (high performance)
+    'claude-opus-4-20250514',
+    # Claude 3.7 Sonnet (legacy)
+    'claude-3-7-sonnet-20250219',
+    # Claude 3.5 (legacy)
     'claude-3-5-sonnet-20241022',
     'claude-3-5-sonnet-20240620',
     'claude-3-5-haiku-20241022',
-    # Claude 3 (proven models)
+    # Claude 3 (legacy)
     'claude-3-opus-20240229',
     'claude-3-sonnet-20240229',
     'claude-3-haiku-20240307',
-    'claude-haiku-4-5-20251001',
-    'claude-opus-4-5-20251101',
 ]
 
 GEMINI_MODELS = [
-    # Gemini 3.0 (latest generation)
+    # Gemini 3.0 (latest generation, preview)
     'gemini-3-pro-preview',
     'gemini-3-flash-preview',
-    # Gemini 2.5
+    # Gemini 2.5 (current production)
     'gemini-2.5-pro',
     'gemini-2.5-flash',
-    # Gemini 2.0
+    'gemini-2.5-flash-lite',
+    # Gemini 2.0 (deprecated, shutting down March 31, 2026)
     'gemini-2.0-flash',
     'gemini-2.0-flash-001',
     'gemini-2.0-flash-lite',
     'gemini-2.0-flash-lite-001',
-    # Gemini 1.5 (legacy but still supported)
-    'gemini-1.5-pro',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-8b',
-    # Gemini 1.0 (legacy)
-    'gemini-1.0-pro',
-    'gemini-pro',
 ]
 
 
@@ -1336,18 +1341,18 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     LLM bot using OpenAI's GPT models.
 
     Supports the full range of OpenAI models including:
-    - GPT-4o family: Latest generation with best performance (gpt-4o, gpt-4o-mini)
-    - GPT-4 Turbo: High performance models (gpt-4-turbo)
-    - GPT-4: Stable and proven models (gpt-4)
-    - GPT-3.5 Turbo: Fast and economical (gpt-3.5-turbo)
-    - O1 models: Advanced reasoning capabilities (o1, o1-mini)
+    - GPT-5.2: Flagship reasoning model, most capable
+    - GPT-5 family: gpt-5, gpt-5-mini, gpt-5-nano
+    - O-series: o3, o3-pro, o4-mini (advanced reasoning)
+    - GPT-4.1 family: gpt-4.1, gpt-4.1-mini, gpt-4.1-nano (1M context)
+    - GPT-4o family: Legacy, retiring Feb 2026 (gpt-4o, gpt-4o-mini)
 
-    Default model: gpt-4o-mini (excellent balance of cost and performance)
+    Default model: gpt-4o-mini (widely available, good balance of cost and performance)
 
     Cost tiers:
-    - Budget: gpt-4o-mini, gpt-3.5-turbo (~$0.15-0.50/1M input tokens)
-    - Standard: gpt-4o, gpt-4-turbo (~$2.50-10/1M input tokens)
-    - Premium: o1 series (~$15/1M input tokens)
+    - Budget: gpt-4o-mini, gpt-4.1-nano (~$0.15-0.50/1M input tokens)
+    - Standard: gpt-4o, gpt-4.1 (~$2-10/1M input tokens)
+    - Premium: gpt-5.2, o3 series (~$10-15/1M input tokens)
     """
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -1411,20 +1416,22 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
     LLM bot using Anthropic's Claude models.
 
     Supports Claude models across multiple generations:
-    - Claude 4: Latest generation (claude-sonnet-4-20250514)
-    - Claude 3.5: High performance (claude-3-5-sonnet, claude-3-5-haiku)
-    - Claude 3: Proven models (claude-3-opus, claude-3-sonnet, claude-3-haiku)
+    - Claude Opus 4.6: Most intelligent, exceptional coding/reasoning (claude-opus-4-6)
+    - Claude Sonnet 4.5: Best speed/intelligence balance (claude-sonnet-4-5-20250929)
+    - Claude Haiku 4.5: Fastest, near-frontier intelligence (claude-haiku-4-5-20251001)
+    - Claude Opus 4.5/4.1/4: Legacy Opus models
+    - Claude 3.5/3: Legacy models still supported
 
-    Default model: claude-3-5-haiku-20241022 (latest Haiku, fast and economical)
+    Default model: claude-haiku-4-5-20251001 (fast, economical, near-frontier)
 
     Cost tiers:
-    - Budget: claude-3-haiku, claude-3-5-haiku (~$0.25/1M input tokens)
-    - Standard: claude-3-sonnet, claude-3-5-sonnet (~$3/1M input tokens)
-    - Premium: claude-3-opus, claude-sonnet-4 (~$15/1M input tokens)
+    - Budget: claude-haiku-4-5, claude-3-haiku (~$0.25-1/1M input tokens)
+    - Standard: claude-sonnet-4-5, claude-3-5-sonnet (~$3/1M input tokens)
+    - Premium: claude-opus-4-6, claude-opus-4-5 (~$5/1M input tokens)
 
     Token limits:
-    - Claude 3.5/4: 200K context window
-    - Claude 3: 200K context window (Opus), 200K (Sonnet/Haiku)
+    - Claude Opus 4.6 / Sonnet 4.5: 200K (1M beta), 128K/64K max output
+    - Claude Haiku 4.5: 200K context, 64K max output
     """
 
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -1434,7 +1441,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         return 'ANTHROPIC_API_KEY'
 
     def _get_default_model(self) -> str:
-        return 'claude-3-5-haiku-20241022'
+        return 'claude-haiku-4-5-20251001'
 
     def _get_supported_models(self) -> List[str]:
         return ANTHROPIC_MODELS
@@ -1493,29 +1500,27 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     """
-    LLM bot using Google's Gemini models via the new google-genai SDK.
+    LLM bot using Google's Gemini models via the google-genai SDK.
 
     Supports Gemini models across multiple generations:
-    - Gemini 2.5: Latest generation with thinking (gemini-2.5-pro, gemini-2.5-flash)
-    - Gemini 2.0: Stable and fast (gemini-2.0-flash)
-    - Gemini 1.5: Legacy but still supported (gemini-1.5-pro, gemini-1.5-flash)
+    - Gemini 3.0: Latest generation (gemini-3-pro-preview, gemini-3-flash-preview)
+    - Gemini 2.5: Production models with thinking (gemini-2.5-pro, gemini-2.5-flash)
+    - Gemini 2.0: Deprecated, shutting down March 31, 2026
 
-    Default model: gemini-2.5-flash (latest Flash with thinking capabilities)
+    Default model: gemini-2.5-flash (production Flash with thinking capabilities)
 
     Cost tiers:
-    - Budget: gemini-2.0-flash-lite, gemini-1.5-flash (~$0.075/1M input tokens)
-    - Standard: gemini-2.5-flash, gemini-2.0-flash (~$0.15/1M input tokens)
-    - Premium: gemini-2.5-pro, gemini-1.5-pro (~$1.25/1M input tokens)
+    - Budget: gemini-2.5-flash-lite (~$0.075/1M input tokens)
+    - Standard: gemini-2.5-flash, gemini-3-flash-preview (~$0.15/1M input tokens)
+    - Premium: gemini-2.5-pro, gemini-3-pro-preview (~$1.25/1M input tokens)
 
     Token limits:
-    - Gemini 2.5: Up to 1M token context window
-    - Gemini 2.0: Up to 1M token context window
-    - Gemini 1.5: Up to 2M token context window (Pro)
+    - Gemini 3.0/2.5: Up to 1M token context window
 
     Best use cases:
-    - gemini-2.5-flash: Best balance of speed and quality with thinking
+    - gemini-3-flash-preview: Latest generation, fast, frontier-class
+    - gemini-2.5-flash: Best production balance of speed and quality
     - gemini-2.5-pro: Complex reasoning tasks
-    - gemini-2.0-flash: Fast responses when thinking not needed
     """
 
     def __init__(self, *args, **kwargs):

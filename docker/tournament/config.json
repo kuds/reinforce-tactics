@@ -42,18 +42,26 @@
       "type": "advanced"
     },
     {
-      "name": "Claude Haiku 3.5",
+      "name": "Claude Opus 4.6",
       "type": "llm",
       "provider": "anthropic",
-      "model": "claude-3-5-haiku-20241022",
+      "model": "claude-opus-4-6",
+      "temperature": 0.5,
+      "max_tokens": 16000
+    },
+    {
+      "name": "Claude Haiku 4.5",
+      "type": "llm",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
       "temperature": 0.5,
       "max_tokens": 12000
     },
     {
-      "name": "Claude Sonnet 3.5",
+      "name": "Claude Sonnet 4.5",
       "type": "llm",
       "provider": "anthropic",
-      "model": "claude-3-5-sonnet-20241022",
+      "model": "claude-sonnet-4-5-20250929",
       "temperature": 0.5,
       "max_tokens": 12000
     },
@@ -66,18 +74,26 @@
       "max_tokens": 8000
     },
     {
-      "name": "GPT-4o",
+      "name": "GPT-5.2",
       "type": "llm",
       "provider": "openai",
-      "model": "gpt-4o",
+      "model": "gpt-5.2",
       "temperature": 0.5,
-      "max_tokens": 8000
+      "max_tokens": 16000
     },
     {
-      "name": "Gemini 2.0 Flash",
+      "name": "Gemini 2.5 Flash",
       "type": "llm",
       "provider": "google",
-      "model": "gemini-2.0-flash",
+      "model": "gemini-2.5-flash",
+      "temperature": 0.5,
+      "max_tokens": 8192
+    },
+    {
+      "name": "Gemini 3 Flash",
+      "type": "llm",
+      "provider": "google",
+      "model": "gemini-3-flash-preview",
       "temperature": 0.5,
       "max_tokens": 8192
     }

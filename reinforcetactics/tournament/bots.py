@@ -349,7 +349,7 @@ def discover_llm_bots(
                 BotDescriptor.llm_bot(
                     name="OpenAIBot",
                     provider="openai",
-                    model="gpt-4",
+                    model="gpt-4o-mini",
                     api_key=openai_key,
                 )
             )
@@ -363,7 +363,7 @@ def discover_llm_bots(
                 BotDescriptor.llm_bot(
                     name="ClaudeBot",
                     provider="anthropic",
-                    model="claude-3-sonnet-20240229",
+                    model="claude-haiku-4-5-20251001",
                     api_key=anthropic_key,
                 )
             )
@@ -377,7 +377,7 @@ def discover_llm_bots(
                 BotDescriptor.llm_bot(
                     name="GeminiBot",
                     provider="google",
-                    model="gemini-pro",
+                    model="gemini-2.5-flash",
                     api_key=google_key,
                 )
             )
@@ -478,10 +478,11 @@ def _test_anthropic_key(api_key: str) -> bool:
 def _test_google_key(api_key: str) -> bool:
     """Test if Google API key is valid."""
     try:
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=api_key)
-        list(genai.list_models())
+        client = genai.Client(api_key=api_key)
+        # Attempt a lightweight API call to verify the key
+        client.models.get(model="gemini-2.5-flash")
         return True
     except Exception as e:
         logger.warning(f"Google API key test failed: {e}")
