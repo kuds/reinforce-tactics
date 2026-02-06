@@ -105,6 +105,12 @@ class InputHandler:
                 if result:
                     self.target_selection_mode, self.target_selection_action = result
 
+        # Handle keyboard shortcuts for UnitPurchaseMenu
+        elif self.active_menu and isinstance(self.active_menu, UnitPurchaseMenu):
+            menu_result = self.active_menu.handle_keydown(event)
+            if menu_result:
+                return self._handle_menu_result(menu_result, pygame.time.get_ticks())
+
         elif event.key == pygame.K_s and not self.active_menu:
             # Save game
             return 'save'

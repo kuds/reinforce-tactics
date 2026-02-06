@@ -47,6 +47,11 @@ class UnitPurchaseMenu:
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []
         self.hover_element = None
+        self.selected_index = 0  # Keyboard navigation index
+
+        # Cached overlay surface to avoid per-frame allocation
+        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+        self._overlay.fill((0, 0, 0, 100))
 
         # Calculate menu position and size
         self._calculate_menu_rect()
@@ -134,6 +139,71 @@ class UnitPurchaseMenu:
                 self.hover_element = element
                 break
 
+    def handle_keydown(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
+        """
+        Handle keyboard input for unit selection.
+
+        Supports arrow keys + Enter, number keys 1-8, and Escape to close.
+
+        Args:
+            event: pygame.KEYDOWN event
+
+        Returns:
+            Dict with action result, or None
+        """
+        if event.key == pygame.K_ESCAPE:
+            return {'type': 'close'}
+
+        # Arrow key navigation
+        if event.key == pygame.K_UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif event.key == pygame.K_DOWN:
+            self.selected_index = min(len(self.unit_types) - 1, self.selected_index + 1)
+            return None
+
+        # Enter to confirm selection
+        if event.key == pygame.K_RETURN:
+            if 0 <= self.selected_index < len(self.unit_types):
+                return self._try_purchase(self.selected_index)
+            return None
+
+        # Number keys 1-8 for direct unit selection
+        number_keys = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4,
+                       pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8]
+        for i, key in enumerate(number_keys):
+            if event.key == key and i < len(self.unit_types):
+                return self._try_purchase(i)
+
+        return None
+
+    def _try_purchase(self, index: int) -> Optional[Dict[str, Any]]:
+        """
+        Attempt to purchase a unit at the given index.
+
+        Args:
+            index: Index into self.unit_types
+
+        Returns:
+            Dict with action result, or None if purchase failed
+        """
+        unit_type = self.unit_types[index]
+        unit_data = UNIT_DATA[unit_type]
+        current_player = self.game_state.current_player
+        player_gold = self.game_state.player_gold[current_player]
+
+        if player_gold < unit_data['cost']:
+            return None  # Can't afford
+
+        unit = self.game_state.create_unit(
+            unit_type,
+            self.building_pos[0],
+            self.building_pos[1]
+        )
+        if unit:
+            return {'type': 'unit_created', 'unit': unit}
+        return None
+
     def draw(self, screen: pygame.Surface) -> None:
         """
         Draw the unit purchase menu.
@@ -144,9 +214,7 @@ class UnitPurchaseMenu:
         self.interactive_elements = []
 
         # Draw semi-transparent background overlay for entire screen (to show menu is modal)
-        overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 100))
-        screen.blit(overlay, (0, 0))
+        screen.blit(self._overlay, (0, 0))
 
         # Draw menu background
         pygame.draw.rect(screen, self.bg_color, self.menu_rect, border_radius=10)
@@ -223,16 +291,17 @@ class UnitPurchaseMenu:
             button_x = self.menu_rect.x + 15
             button_rect = pygame.Rect(button_x, y_pos, button_width, button_height)
 
-            # Check if hovering
+            # Check if hovering or keyboard-selected
             is_hovered = (self.hover_element and
                          self.hover_element.get('rect') == button_rect and
                          can_afford)
+            is_selected = (i == self.selected_index and can_afford)
 
             # Choose colors
             if not can_afford:
                 bg_color = self.disabled_bg_color
                 text_color = self.disabled_color
-            elif is_hovered:
+            elif is_hovered or is_selected:
                 bg_color = (70, 70, 90)
                 text_color = self.hover_color
             else:
@@ -242,7 +311,7 @@ class UnitPurchaseMenu:
             # Draw button background
             pygame.draw.rect(screen, bg_color, button_rect, border_radius=5)
 
-            if is_hovered:
+            if is_hovered or is_selected:
                 pygame.draw.rect(screen, self.hover_color, button_rect, width=2, border_radius=5)
 
             # Draw text: "Unit Name - Cost"

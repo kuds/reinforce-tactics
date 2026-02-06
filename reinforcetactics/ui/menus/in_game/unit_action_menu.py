@@ -43,6 +43,10 @@ class UnitActionMenu:
         self.interactive_elements: List[Dict[str, Any]] = []
         self.hover_element = None
 
+        # Cached overlay surface to avoid per-frame allocation
+        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+        self._overlay.fill((0, 0, 0, 100))
+
         # Calculate available actions
         self.actions = self._calculate_available_actions()
 
@@ -278,9 +282,7 @@ class UnitActionMenu:
         self.interactive_elements = []
 
         # Draw semi-transparent background overlay for entire screen (modal style)
-        overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 100))
-        screen.blit(overlay, (0, 0))
+        screen.blit(self._overlay, (0, 0))
 
         # Draw menu background
         pygame.draw.rect(screen, self.bg_color, self.menu_rect, border_radius=10)
