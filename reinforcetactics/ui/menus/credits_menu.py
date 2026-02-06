@@ -24,10 +24,10 @@ class CreditsMenu(Menu):
         lang = get_language()
         self.add_option(lang.get('common.back', 'Back'), lambda: None)
 
-    def draw(self) -> None:
+    def _draw_content(self) -> None:
         """Draw the credits menu with additional information."""
-        # Draw base menu (title, background)
-        super().draw()
+        # Draw base menu (title, background, options)
+        super()._draw_content()
 
         # Get language for translations
         lang = get_language()
@@ -68,8 +68,6 @@ class CreditsMenu(Menu):
             y=280
         )
         self.screen.blit(description_surface, description_rect)
-
-        pygame.display.flip()
 
     def run(self) -> Optional[Any]:
         """

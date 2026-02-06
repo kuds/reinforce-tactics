@@ -40,7 +40,7 @@ class Renderer:
         screen_width = game_state.grid.width * TILE_SIZE
         screen_height = game_state.grid.height * TILE_SIZE
         self.screen = pygame.display.set_mode((screen_width, screen_height))
-        pygame.display.set_caption("2D Strategy Game")
+        pygame.display.set_caption("Reinforce Tactics")
 
         # Initialize clipboard support
         try:
@@ -752,9 +752,9 @@ class Renderer:
 
         if self.viewing_player is None:
             self.viewing_player = 1
-        elif self.viewing_player == 1:
-            self.viewing_player = 2
-        elif self.viewing_player == 2:
+        elif self.viewing_player < self.game_state.num_players:
+            self.viewing_player += 1
+        else:
             self.viewing_player = None  # Omniscient view
 
     def close(self):

@@ -1,6 +1,7 @@
 """Menu for selecting a replay to watch with enhanced preview and info."""
 import json
 import os
+import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -86,8 +87,11 @@ class ReplaySelectionMenu(Menu):
 
             # Get player info
             player_configs = game_info.get('player_configs', [])
+            num_players = game_info.get('num_players', 2)
             player1_name = self._get_player_display_name(player_configs, 0)
             player2_name = self._get_player_display_name(player_configs, 1)
+            player3_name = self._get_player_display_name(player_configs, 2) if num_players > 2 else None
+            player4_name = self._get_player_display_name(player_configs, 3) if num_players > 3 else None
 
             # Get winner info
             winner = game_info.get('winner')
@@ -112,13 +116,15 @@ class ReplaySelectionMenu(Menu):
                 'date': date_str,
                 'player1': player1_name,
                 'player2': player2_name,
+                'player3': player3_name,
+                'player4': player4_name,
                 'winner': winner,
                 'result': result,
                 'total_turns': total_turns,
                 'map_name': map_name,
                 'map_file': map_file,
                 'initial_map': initial_map,
-                'num_players': game_info.get('num_players', 2),
+                'num_players': num_players,
                 'max_turns': game_info.get('max_turns'),
             }
 
@@ -141,7 +147,6 @@ class ReplaySelectionMenu(Menu):
     def _extract_date_from_filename(self, filename: str) -> str:
         """Extract date from replay filename."""
         # Handle formats like "game_20251228_053412_..." or "replay_20251228_053412"
-        import re
         match = re.search(r'(\d{8})_(\d{6})', filename)
         if match:
             date_part = match.group(1)
@@ -198,54 +203,6 @@ class ReplaySelectionMenu(Menu):
 
         return f"{date} - {p1} vs {p2}"
 
-    def _load_replay_info(self, filepath: str) -> Dict[str, Any]:
-        """Load replay info from a file without loading full action history."""
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-
-            game_info = data.get('game_info', {})
-            player_configs = game_info.get('player_configs', [])
-
-            # Get player names
-            p1_name = 'P1'
-            p2_name = 'P2'
-            if player_configs:
-                if len(player_configs) > 0:
-                    p1_name = player_configs[0].get('name', 'P1')
-                if len(player_configs) > 1:
-                    p2_name = player_configs[1].get('name', 'P2')
-
-            # Parse timestamp
-            timestamp = data.get('timestamp', '')
-            date_str = ''
-            if timestamp:
-                try:
-                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    date_str = dt.strftime('%Y-%m-%d')
-                except (ValueError, TypeError):
-                    date_str = timestamp[:10] if len(timestamp) >= 10 else timestamp
-
-            return {
-                'p1_name': p1_name,
-                'p2_name': p2_name,
-                'winner': game_info.get('winner'),
-                'total_turns': game_info.get('total_turns', '?'),
-                'num_actions': len(data.get('actions', [])),
-                'date': date_str,
-                'map_file': game_info.get('map_file', ''),
-            }
-        except (json.JSONDecodeError, IOError, KeyError):
-            return {
-                'p1_name': 'Unknown',
-                'p2_name': 'Unknown',
-                'winner': None,
-                'total_turns': '?',
-                'num_actions': 0,
-                'date': '',
-                'map_file': '',
-            }
-
     def _setup_options(self) -> None:
         """Setup menu options for available replay files."""
         if not self.replay_files:
@@ -271,7 +228,7 @@ class ReplaySelectionMenu(Menu):
 
         # Calculate visible area for scrolling (same as _draw_replay_list)
         list_padding = 10
-        item_height = 50
+        item_height = 62
         list_y = left_panel_rect.y + list_padding
         max_visible = (left_panel_rect.height - 2 * list_padding) // item_height
 
@@ -287,7 +244,7 @@ class ReplaySelectionMenu(Menu):
                 left_panel_rect.x + list_padding,
                 item_y,
                 left_panel_rect.width - 2 * list_padding,
-                item_height - 5
+                item_height - 4
             )
             self.option_rects.append(item_rect)
 
@@ -391,22 +348,29 @@ class ReplaySelectionMenu(Menu):
         pygame.display.flip()
 
     def _draw_replay_list(self, panel_rect: pygame.Rect) -> None:
-        """Draw the scrollable replay list."""
+        """Draw the scrollable replay list with two-line item cards."""
         self.option_rects = []
 
         # Calculate visible area for scrolling
         list_padding = 10
-        item_height = 50
+        item_height = 62
         list_y = panel_rect.y + list_padding
         max_visible = (panel_rect.height - 2 * list_padding) // item_height
+
+        # Sync with base class so keyboard scrolling matches the visible count
+        self.max_visible_options = max_visible
 
         # Determine which items to show based on scroll
         start_idx = self.scroll_offset
         end_idx = min(start_idx + max_visible, len(self.options))
 
+        main_font = get_font(20)
+        sub_font = get_font(16)
+
         for i in range(start_idx, end_idx):
             display_idx = i - start_idx
             text, _ = self.options[i]
+            is_replay_item = i < len(self.replay_files)
 
             # Calculate item position
             item_y = list_y + display_idx * item_height
@@ -414,14 +378,13 @@ class ReplaySelectionMenu(Menu):
                 panel_rect.x + list_padding,
                 item_y,
                 panel_rect.width - 2 * list_padding,
-                item_height - 5
+                item_height - 4
             )
 
             # Determine styling
             is_selected = i == self.selected_index
             is_hovered = i == self.hover_index
 
-            # Choose colors
             if is_selected:
                 bg_color = self.option_bg_selected_color
                 text_color = self.selected_color
@@ -433,28 +396,69 @@ class ReplaySelectionMenu(Menu):
                 text_color = self.text_color
 
             # Draw background
-            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=5)
+            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=6)
             if is_selected or is_hovered:
                 border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
+                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=6)
 
-            # Draw text
-            text_font = get_font(22)
-            text_surface = text_font.render(text, True, text_color)
-            text_rect = text_surface.get_rect(
-                midleft=(item_rect.x + 10, item_rect.centery)
-            )
+            if is_replay_item:
+                # Get metadata for richer rendering
+                filepath = self.replay_files[i]
+                metadata = self.replay_metadata.get(filepath, {})
+                winner = metadata.get('winner')
 
-            # Clip text if too long
-            if text_rect.width > item_rect.width - 20:
-                # Create clipped surface
-                clip_rect = pygame.Rect(0, 0, item_rect.width - 20, text_rect.height)
-                text_surface = text_surface.subsurface(clip_rect)
-                text_rect = text_surface.get_rect(
-                    midleft=(item_rect.x + 10, item_rect.centery)
+                # Draw winner color pip on the left edge
+                pip_width = 4
+                pip_rect = pygame.Rect(
+                    item_rect.x + 2, item_rect.y + 6,
+                    pip_width, item_rect.height - 12
                 )
+                if winner and winner in PLAYER_COLORS:
+                    pip_color = PLAYER_COLORS[winner]
+                elif metadata.get('result') == 'Draw':
+                    pip_color = (200, 200, 100)
+                else:
+                    pip_color = (100, 100, 120)
+                pygame.draw.rect(self.screen, pip_color, pip_rect, border_radius=2)
 
-            self.screen.blit(text_surface, text_rect)
+                # Text area starts after the pip
+                text_x = item_rect.x + pip_width + 10
+                max_text_width = item_rect.width - pip_width - 20
+
+                # Main line: matchup text
+                main_surface = main_font.render(text, True, text_color)
+                if main_surface.get_width() > max_text_width:
+                    clip_rect = pygame.Rect(0, 0, max_text_width, main_surface.get_height())
+                    main_surface = main_surface.subsurface(clip_rect)
+                self.screen.blit(main_surface, (text_x, item_rect.y + 8))
+
+                # Subtitle: result, turns, map
+                result = metadata.get('result', '')
+                total_turns = metadata.get('total_turns', 0)
+                map_name = metadata.get('map_name', '')
+                parts = []
+                if result:
+                    parts.append(result)
+                if total_turns:
+                    parts.append(f"{total_turns} turns")
+                if map_name and map_name != 'Unknown':
+                    parts.append(map_name)
+                subtitle = "  |  ".join(parts) if parts else ""
+
+                if subtitle:
+                    sub_color = (160, 160, 170) if not (is_selected or is_hovered) else (190, 180, 140)
+                    sub_surface = sub_font.render(subtitle, True, sub_color)
+                    if sub_surface.get_width() > max_text_width:
+                        clip_rect = pygame.Rect(0, 0, max_text_width, sub_surface.get_height())
+                        sub_surface = sub_surface.subsurface(clip_rect)
+                    self.screen.blit(sub_surface, (text_x, item_rect.y + 32))
+            else:
+                # Non-replay items (e.g. "Back" button) - simple centered text
+                text_surface = main_font.render(text, True, text_color)
+                text_rect = text_surface.get_rect(
+                    center=item_rect.center
+                )
+                self.screen.blit(text_surface, text_rect)
 
             # Store rect for click detection
             self.option_rects.append(item_rect)
@@ -535,10 +539,8 @@ class ReplaySelectionMenu(Menu):
         # Result
         result = metadata.get('result', 'Unknown')
         winner = metadata.get('winner')
-        if winner == 1:
-            result_color = PLAYER_COLORS.get(1, (255, 100, 100))
-        elif winner == 2:
-            result_color = PLAYER_COLORS.get(2, (100, 100, 255))
+        if winner and winner in PLAYER_COLORS:
+            result_color = PLAYER_COLORS[winner]
         elif result == 'Draw':
             result_color = (200, 200, 100)
         else:
@@ -572,21 +574,18 @@ class ReplaySelectionMenu(Menu):
         self.screen.blit(players_value, (info_x + players_label.get_width(), info_y))
         info_y += line_spacing
 
-        # Player 1 info
-        p1_name = metadata.get('player1', 'Player 1')
-        p1_label = info_font.render("P1: ", True, PLAYER_COLORS.get(1, (255, 100, 100)))
-        p1_value = info_font.render(p1_name, True, value_color)
-        self.screen.blit(p1_label, (info_x, info_y))
-        self.screen.blit(p1_value, (info_x + p1_label.get_width(), info_y))
-        info_y += line_spacing
-
-        # Player 2 info
-        p2_name = metadata.get('player2', 'Player 2')
-        p2_label = info_font.render("P2: ", True, PLAYER_COLORS.get(2, (100, 100, 255)))
-        p2_value = info_font.render(p2_name, True, value_color)
-        self.screen.blit(p2_label, (info_x, info_y))
-        self.screen.blit(p2_value, (info_x + p2_label.get_width(), info_y))
-        info_y += line_spacing
+        # Player info (supports 2v2)
+        player_keys = ['player1', 'player2', 'player3', 'player4']
+        for p_idx in range(num_players):
+            p_name = metadata.get(player_keys[p_idx], f'Player {p_idx + 1}')
+            if p_name is None:
+                p_name = f'Player {p_idx + 1}'
+            p_num = p_idx + 1
+            p_label = info_font.render(f"P{p_num}: ", True, PLAYER_COLORS.get(p_num, (200, 200, 200)))
+            p_value = info_font.render(p_name, True, value_color)
+            self.screen.blit(p_label, (info_x, info_y))
+            self.screen.blit(p_value, (info_x + p_label.get_width(), info_y))
+            info_y += line_spacing
 
         # Date
         date = metadata.get('date', 'Unknown')

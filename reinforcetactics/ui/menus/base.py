@@ -232,8 +232,13 @@ class Menu:
 
             self.option_rects.append(bg_rect)
 
-    def draw(self) -> None:
-        """Draw the menu."""
+    def _draw_content(self) -> None:
+        """Draw the menu content without flipping the display.
+
+        Subclasses can override this to add custom content (e.g., winner text,
+        credits info) and call super()._draw_content() for the base rendering.
+        The draw() method calls this then flips the display once.
+        """
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
@@ -355,6 +360,9 @@ class Menu:
             pos_rect = pos_text.get_rect(right=screen_width - 20, bottom=screen_height - 20)
             self.screen.blit(pos_text, pos_rect)
 
+    def draw(self) -> None:
+        """Draw the menu and flip the display."""
+        self._draw_content()
         pygame.display.flip()
 
     def run(self) -> Optional[Any]:

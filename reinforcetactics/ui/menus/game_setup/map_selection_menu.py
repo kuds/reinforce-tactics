@@ -132,6 +132,9 @@ class MapSelectionMenu(Menu):
         list_y = panel_rect.y + list_padding
         max_visible = (panel_rect.height - 2 * list_padding) // item_height
 
+        # Sync with base class so keyboard scrolling matches the visible count
+        self.max_visible_options = max_visible
+
         # Determine which items to show based on scroll
         start_idx = self.scroll_offset
         end_idx = min(start_idx + max_visible, len(self.options))
