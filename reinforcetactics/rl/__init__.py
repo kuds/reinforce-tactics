@@ -5,6 +5,7 @@ This module provides:
 - StrategyGameEnv: Gymnasium environment for the tactical strategy game
 - Action masking utilities for efficient training with MaskablePPO
 - Self-play utilities for training agents against themselves
+- AlphaZero: dual-head network + MCTS for planning-based RL
 - Helper functions for creating single and vectorized environments
 """
 from reinforcetactics.rl.gym_env import StrategyGameEnv
@@ -22,6 +23,9 @@ from reinforcetactics.rl.self_play import (
     make_self_play_env,
     make_self_play_vec_env,
 )
+from reinforcetactics.rl.alphazero_net import AlphaZeroNet
+from reinforcetactics.rl.mcts import MCTS
+from reinforcetactics.rl.alphazero_trainer import AlphaZeroTrainer, ReplayBuffer
 
 __all__ = [
     # Core environment
@@ -38,4 +42,9 @@ __all__ = [
     'SelfPlayCallback',
     'make_self_play_env',
     'make_self_play_vec_env',
+    # AlphaZero
+    'AlphaZeroNet',
+    'MCTS',
+    'AlphaZeroTrainer',
+    'ReplayBuffer',
 ]
