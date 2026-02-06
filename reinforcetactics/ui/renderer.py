@@ -752,9 +752,9 @@ class Renderer:
 
         if self.viewing_player is None:
             self.viewing_player = 1
-        elif self.viewing_player == 1:
-            self.viewing_player = 2
-        elif self.viewing_player == 2:
+        elif self.viewing_player < self.game_state.num_players:
+            self.viewing_player += 1
+        else:
             self.viewing_player = None  # Omniscient view
 
     def close(self):

@@ -43,36 +43,50 @@ class MainMenu(Menu):
         self._setup_options()
 
     def _new_game(self) -> Optional[Dict[str, Any]]:
-        """Handle new game - show game mode selection, map selection, and player configuration."""
-        # Step 1: Select game mode
-        mode_menu = GameModeMenu(self.screen)
-        selected_mode = mode_menu.run()
-        pygame.event.clear()
+        """Handle new game - show game mode selection, map selection, and player configuration.
 
-        if not selected_mode:
-            return None  # User cancelled
+        Supports back-navigation: cancelling a step returns to the previous step
+        instead of exiting all the way to the main menu.
+        """
+        step = 1
+        selected_mode = None
+        selected_map = None
 
-        # Step 2: Select map from chosen mode
-        map_menu = MapSelectionMenu(self.screen, game_mode=selected_mode)
-        selected_map = map_menu.run()
-        pygame.event.clear()
+        while step > 0:
+            if step == 1:
+                # Select game mode
+                mode_menu = GameModeMenu(self.screen)
+                selected_mode = mode_menu.run()
+                pygame.event.clear()
+                if not selected_mode:
+                    return None  # Back to main menu
+                step = 2
 
-        if not selected_map:
-            return None  # User cancelled
+            elif step == 2:
+                # Select map from chosen mode
+                map_menu = MapSelectionMenu(self.screen, game_mode=selected_mode)
+                selected_map = map_menu.run()
+                pygame.event.clear()
+                if not selected_map:
+                    step = 1  # Back to mode selection
+                else:
+                    step = 3
 
-        # Step 3: Configure players
-        player_config_menu = PlayerConfigMenu(self.screen, game_mode=selected_mode)
-        player_config_result = player_config_menu.run()
-        pygame.event.clear()
+            elif step == 3:
+                # Configure players
+                player_config_menu = PlayerConfigMenu(self.screen, game_mode=selected_mode)
+                player_config_result = player_config_menu.run()
+                pygame.event.clear()
+                if player_config_result:
+                    return {
+                        'type': 'new_game',
+                        'map': selected_map,
+                        'mode': selected_mode,
+                        'players': player_config_result['players'],
+                        'fog_of_war': player_config_result.get('fog_of_war', False)
+                    }
+                step = 2  # Back to map selection
 
-        if player_config_result:
-            return {
-                'type': 'new_game',
-                'map': selected_map,
-                'mode': selected_mode,  # Contains "1v1" or "2v2"
-                'players': player_config_result['players'],
-                'fog_of_war': player_config_result.get('fog_of_war', False)
-            }
         return None
 
     def _load_game(self) -> Optional[Dict[str, Any]]:

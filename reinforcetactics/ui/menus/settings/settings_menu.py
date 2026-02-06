@@ -22,6 +22,8 @@ class SettingsMenu(Menu):
             screen: Optional pygame surface. If None, creates its own.
         """
         super().__init__(screen, get_language().get('settings.title', 'Settings'))
+        self._fullscreen = bool(pygame.display.get_surface() and
+                                pygame.display.get_surface().get_flags() & pygame.FULLSCREEN)
         self._setup_options()
 
     def _setup_options(self) -> None:
@@ -29,8 +31,15 @@ class SettingsMenu(Menu):
         self.add_option(lang.get('settings.language', 'Language'), self._change_language)
         self.add_option(lang.get('settings.graphics', 'Graphics'), self._configure_graphics)
         self.add_option(lang.get('settings.units', 'Unit Settings'), self._configure_units)
-        self.add_option(lang.get('settings.sound', 'Sound'), self._toggle_sound)
-        self.add_option(lang.get('settings.fullscreen', 'Fullscreen'), self._toggle_fullscreen)
+        self.add_option(
+            f"{lang.get('settings.sound', 'Sound')} (not implemented)",
+            self._toggle_sound
+        )
+        fullscreen_status = "ON" if self._fullscreen else "OFF"
+        self.add_option(
+            f"{lang.get('settings.fullscreen', 'Fullscreen')}: {fullscreen_status}",
+            self._toggle_fullscreen
+        )
         self.add_option(lang.get('settings.api_keys', 'LLM API Keys'), self._configure_api_keys)
         self.add_option(lang.get('common.back', 'Back'), lambda: None)
 
@@ -52,13 +61,16 @@ class SettingsMenu(Menu):
         """Open unit settings menu."""
         return 'units_menu'
 
-    def _toggle_sound(self) -> None:
+    def _toggle_sound(self) -> str:
         """Toggle sound on/off. Currently not implemented."""
-        # Sound system not yet implemented in the game
+        return 'toggled'
 
-    def _toggle_fullscreen(self) -> None:
+    def _toggle_fullscreen(self) -> str:
         """Toggle fullscreen mode."""
         pygame.display.toggle_fullscreen()
+        self._fullscreen = not self._fullscreen
+        self._refresh_options()
+        return 'toggled'
 
     def _configure_api_keys(self) -> str:
         """Open API keys configuration menu."""
@@ -88,8 +100,11 @@ class SettingsMenu(Menu):
 
                 result = self.handle_input(event)
                 if result is not None:
+                    # Handle toggled settings (stay in menu)
+                    if result == 'toggled':
+                        self._populate_option_rects()
                     # Handle submenu navigation
-                    if result == 'language_menu':
+                    elif result == 'language_menu':
                         language_menu = LanguageMenu(self.screen)
                         language_menu.run()
                         pygame.event.clear()
