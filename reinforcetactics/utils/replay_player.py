@@ -9,7 +9,7 @@ import pandas as pd
 import pygame
 
 from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
 from reinforcetactics.ui.icons import (
     get_play_icon, get_pause_icon, get_arrow_left_icon, get_arrow_right_icon,
     get_restart_icon, get_skip_back_icon, get_skip_forward_icon, get_x_icon
@@ -724,14 +724,15 @@ class ReplayPlayer:
 
         # Progress bar (only if there's space)
         if self.progress_bar_rect.width > 50:
-            pygame.draw.rect(screen, (60, 60, 70), self.progress_bar_rect)
+            pygame.draw.rect(screen, (60, 60, 70), self.progress_bar_rect, border_radius=4)
             if len(self.actions) > 0:
                 progress = self.current_action_index / len(self.actions)
                 progress_width = int(self.progress_bar_rect.width * progress)
-                progress_rect = pygame.Rect(self.progress_bar_rect.x, self.progress_bar_rect.y,
-                                            progress_width, self.progress_bar_rect.height)
-                pygame.draw.rect(screen, (100, 200, 100), progress_rect)
-            pygame.draw.rect(screen, (200, 200, 220), self.progress_bar_rect, 2)
+                if progress_width > 0:
+                    progress_rect = pygame.Rect(self.progress_bar_rect.x, self.progress_bar_rect.y,
+                                                progress_width, self.progress_bar_rect.height)
+                    pygame.draw.rect(screen, (100, 200, 100), progress_rect, border_radius=4)
+            pygame.draw.rect(screen, (160, 160, 180), self.progress_bar_rect, 2, border_radius=4)
 
         # Exit button
         exit_icon = get_x_icon(size=icon_size, color=icon_color)
@@ -797,19 +798,32 @@ class ReplayPlayer:
         # Player info on right
         player_configs = self.game_info.get('player_configs', [])
         winner = self.game_info.get('winner', None)
+        num_players = self.game_info.get('num_players', 2)
 
         if player_configs:
-            p1_name = player_configs[0].get('name', 'P1')[:12] if len(player_configs) > 0 else 'P1'
-            p2_name = player_configs[1].get('name', 'P2')[:12] if len(player_configs) > 1 else 'P2'
+            # Build player name segments with their colors
+            segments = []
+            for p_idx in range(min(num_players, len(player_configs))):
+                p_num = p_idx + 1
+                p_name = player_configs[p_idx].get('name', f'P{p_num}')[:12]
+                if winner == p_num:
+                    p_color = (100, 255, 100)
+                else:
+                    p_color = PLAYER_COLORS.get(p_num, (200, 200, 200))
+                segments.append((f"{p_name} (P{p_num})", p_color))
 
-            # Color based on winner
-            p1_color = (100, 255, 100) if winner == 1 else (200, 200, 255)
-            p2_color = (100, 255, 100) if winner == 2 else (255, 200, 200)
-
-            player_text = f"{p1_name} (P1) vs {p2_name} (P2)"
-            player_surface = small_font.render(player_text, True, (255, 255, 255))
-            screen.blit(player_surface, (screen_width - player_surface.get_width() - 10,
-                                         panel_y + (panel_height - player_surface.get_height()) // 2))
+            # Draw segments right-aligned with " vs " separator
+            right_x = screen_width - 10
+            text_y = panel_y + (panel_height - small_font.get_height()) // 2
+            for i in range(len(segments) - 1, -1, -1):
+                text, color = segments[i]
+                text_surface = small_font.render(text, True, color)
+                right_x -= text_surface.get_width()
+                screen.blit(text_surface, (right_x, text_y))
+                if i > 0:
+                    vs_surface = small_font.render(" vs ", True, (200, 200, 200))
+                    right_x -= vs_surface.get_width()
+                    screen.blit(vs_surface, (right_x, text_y))
 
     def _draw_notification(self, screen, screen_width):
         """Draw on-screen notification if active."""
@@ -845,24 +859,26 @@ class ReplayPlayer:
                 self.notification_text = ""
 
     def _draw_button(self, rect, text, mouse_pos, color, font):
-        """Draw a button with text."""
+        """Draw a button with text and rounded corners."""
         is_hover = rect.collidepoint(mouse_pos)
-        button_color = tuple(min(c + 30, 255) for c in color) if is_hover else color
+        button_color = tuple(min(c + 40, 255) for c in color) if is_hover else color
+        border_color = (220, 220, 240) if is_hover else (160, 160, 180)
 
-        pygame.draw.rect(self.renderer.screen, button_color, rect)
-        pygame.draw.rect(self.renderer.screen, (200, 200, 220), rect, 2)
+        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=6)
+        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=6)
 
         text_surface = font.render(text, True, (255, 255, 255))
         text_rect = text_surface.get_rect(center=rect.center)
         self.renderer.screen.blit(text_surface, text_rect)
 
     def _draw_icon_button(self, rect, icon, mouse_pos, color):
-        """Draw a button with an icon surface."""
+        """Draw a button with an icon surface and rounded corners."""
         is_hover = rect.collidepoint(mouse_pos)
-        button_color = tuple(min(c + 30, 255) for c in color) if is_hover else color
+        button_color = tuple(min(c + 40, 255) for c in color) if is_hover else color
+        border_color = (220, 220, 240) if is_hover else (160, 160, 180)
 
-        pygame.draw.rect(self.renderer.screen, button_color, rect)
-        pygame.draw.rect(self.renderer.screen, (200, 200, 220), rect, 2)
+        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=6)
+        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=6)
 
         icon_rect = icon.get_rect(center=rect.center)
         self.renderer.screen.blit(icon, icon_rect)
