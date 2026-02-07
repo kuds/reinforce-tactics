@@ -2,13 +2,16 @@
 Sprite animation system for unit animations.
 
 Handles loading sprite sheets and managing frame-by-frame animations
-including directional walking and smooth transitions between animation
-states during multi-step movement paths.
+including directional walking, smooth transitions between animation
+states during multi-step movement paths, and per-team palette swaps.
 """
 import os
 from collections import deque
 import pygame
-from reinforcetactics.constants import TILE_SIZE, UNIT_DATA, ANIMATION_CONFIG
+from reinforcetactics.constants import (
+    TILE_SIZE, UNIT_DATA, ANIMATION_CONFIG,
+    BASE_SPRITE_COLORS, TEAM_PALETTES,
+)
 
 
 class SpriteAnimator:
@@ -21,6 +24,10 @@ class SpriteAnimator:
 
     Directional mirroring (e.g. move_right from move_left) is handled
     automatically via the ``mirror_states`` config.
+
+    Team colours are applied at load time by replacing a fixed set of
+    base blue pixels with each team's palette, so ``get_frame`` has
+    zero per-frame overhead for colouring.
 
     Movement path animation is supported: when a unit follows a
     multi-tile path, segments are queued so the walking direction
@@ -35,19 +42,23 @@ class SpriteAnimator:
             sprites_path: Base path to sprite sheet directory
         """
         self.sprites_path = sprites_path
-        self.sprite_sheets = {}   # unit_type -> {state -> [frames]}
+
+        # Base (uncoloured) frames: unit_type -> {state -> [frames]}
+        self.sprite_sheets = {}
+
+        # Team-coloured frames: (unit_type, player) -> {state -> [frames]}
+        self.team_sheets = {}
+
         self.animation_timers = {}  # unit_id -> {current_time, current_frame}
-        self.unit_states = {}     # unit_id -> current animation state
+        self.unit_states = {}       # unit_id -> current animation state
 
         # Movement path queues for multi-step animation transitions
-        # unit_id -> deque of (state, num_frames_to_play)
-        self.movement_queues = {}
+        self.movement_queues = {}   # unit_id -> deque of state strings
 
         # Frame dimensions (can be overridden per unit type)
         self.frame_width = ANIMATION_CONFIG.get('frame_width', 32)
         self.frame_height = ANIMATION_CONFIG.get('frame_height', 32)
 
-        # Load sprite sheets for all unit types
         self._load_all_sprite_sheets()
 
     # ------------------------------------------------------------------
@@ -66,7 +77,8 @@ class SpriteAnimator:
 
     def _load_sprite_sheet(self, unit_type, animation_path):
         """
-        Load a sprite sheet for a unit type.
+        Load a sprite sheet for a unit type and generate team colour
+        variants.
 
         Args:
             unit_type: Single character unit type (e.g., 'W' for Warrior)
@@ -90,9 +102,11 @@ class SpriteAnimator:
         if sheet_surface is None:
             return
 
-        self.sprite_sheets[unit_type] = self._parse_sprite_sheet(
-            sheet_surface, unit_type
-        )
+        base_frames = self._parse_sprite_sheet(sheet_surface, unit_type)
+        self.sprite_sheets[unit_type] = base_frames
+
+        # Generate team-coloured variants
+        self._generate_team_variants(unit_type, base_frames)
 
     def _parse_sprite_sheet(self, sheet_surface, unit_type):
         """
@@ -108,12 +122,11 @@ class SpriteAnimator:
         """
         frames = {}
 
-        # Per-unit overrides
         unit_cfg = ANIMATION_CONFIG.get('units', {}).get(unit_type, {})
         fw = unit_cfg.get('frame_width', self.frame_width)
         fh = unit_cfg.get('frame_height', self.frame_height)
 
-        sprite_size = TILE_SIZE - 4  # Slightly smaller than tile for border room
+        sprite_size = TILE_SIZE - 4
 
         frame_map = ANIMATION_CONFIG.get('frame_map', {})
 
@@ -121,7 +134,6 @@ class SpriteAnimator:
             state_frames = []
             for row, col in coords:
                 rect = pygame.Rect(col * fw, row * fh, fw, fh)
-                # Bounds check
                 if (rect.right <= sheet_surface.get_width() and
                         rect.bottom <= sheet_surface.get_height()):
                     frame = sheet_surface.subsurface(rect).copy()
@@ -143,6 +155,60 @@ class SpriteAnimator:
         return frames
 
     # ------------------------------------------------------------------
+    # Team colour palette swap
+    # ------------------------------------------------------------------
+
+    def _generate_team_variants(self, unit_type, base_frames):
+        """
+        Create team-coloured copies of the base frames for every
+        configured team palette.  Recolouring is done once at load
+        time so ``get_frame`` has no per-frame cost.
+
+        Args:
+            unit_type: Unit type key (e.g. 'W')
+            base_frames: {state -> [pygame.Surface]} dict of base frames
+        """
+        if not BASE_SPRITE_COLORS:
+            return
+
+        for player, palette in TEAM_PALETTES.items():
+            if palette is None:
+                # This team uses the base colours as-is
+                self.team_sheets[(unit_type, player)] = base_frames
+                continue
+
+            recoloured = {}
+            for state, frames in base_frames.items():
+                recoloured[state] = [
+                    self._recolor_frame(f, BASE_SPRITE_COLORS, palette)
+                    for f in frames
+                ]
+            self.team_sheets[(unit_type, player)] = recoloured
+
+    @staticmethod
+    def _recolor_frame(frame, base_colors, team_colors):
+        """
+        Replace base palette colours with team colours in a single frame.
+
+        Uses ``pygame.PixelArray.replace`` for efficient exact-match
+        colour swapping (pixel art friendly).
+
+        Args:
+            frame: Source pygame.Surface (will not be mutated)
+            base_colors: List of (R, G, B) colours to find
+            team_colors: List of (R, G, B) replacement colours
+
+        Returns:
+            New pygame.Surface with swapped colours
+        """
+        recoloured = frame.copy()
+        pxa = pygame.PixelArray(recoloured)
+        for src, dst in zip(base_colors, team_colors):
+            pxa.replace(src, dst, 0.01)
+        del pxa  # unlock surface
+        return recoloured
+
+    # ------------------------------------------------------------------
     # Frame retrieval
     # ------------------------------------------------------------------
 
@@ -150,12 +216,16 @@ class SpriteAnimator:
         """
         Get the current animation frame for a unit.
 
+        Automatically selects team-coloured frames based on
+        ``unit.player`` if available, otherwise falls back to the
+        base (uncoloured) sprite sheet.
+
         Handles movement queue advancement: when the current movement
         segment finishes its allotted frames, the next queued segment's
         direction is activated automatically.
 
         Args:
-            unit: Unit object with type attribute
+            unit: Unit object with ``type`` and ``player`` attributes
             delta_time: Time since last frame in seconds
 
         Returns:
@@ -166,7 +236,11 @@ class SpriteAnimator:
         if unit_type not in self.sprite_sheets:
             return None
 
-        unit_frames = self.sprite_sheets[unit_type]
+        # Prefer team-coloured frames, fall back to base
+        player = getattr(unit, 'player', None)
+        unit_frames = self.team_sheets.get((unit_type, player))
+        if unit_frames is None:
+            unit_frames = self.sprite_sheets.get(unit_type)
         if not unit_frames:
             return None
 
@@ -299,7 +373,6 @@ class SpriteAnimator:
         unit_id = id(unit)
         queue = self.movement_queues.get(unit_id)
         if not queue:
-            # No more queued segments – go idle
             if unit_id in self.movement_queues:
                 del self.movement_queues[unit_id]
                 self.set_unit_state(unit, 'idle')
@@ -334,6 +407,7 @@ class SpriteAnimator:
             self.sprites_path = sprites_path
 
         self.sprite_sheets.clear()
+        self.team_sheets.clear()
         self.animation_timers.clear()
         self.unit_states.clear()
         self.movement_queues.clear()

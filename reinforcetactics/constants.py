@@ -71,6 +71,44 @@ PLAYER_COLORS = {
     4: (255, 255, 50)     # Yellow - Brighter
 }
 
+# Base sprite sheet palette (blue tones) to be replaced per team.
+# These are the exact RGB values in the sprite sheet PNGs that represent
+# the unit's "team colour" regions, from darkest to lightest.
+BASE_SPRITE_COLORS = [
+    (30, 87, 156),    # #1e579c - darkest
+    (60, 94, 139),    # #3c5e8b
+    (47, 114, 144),   # #2f7290
+    (40, 134, 176),   # #2886b0
+    (61, 165, 211),   # #3da5d3 - lightest
+]
+
+# Per-team replacement palettes (same length / order as BASE_SPRITE_COLORS).
+# ``None`` means "keep the base colours as-is" (blue team uses the originals).
+TEAM_PALETTES = {
+    1: [  # Red
+        (156, 47, 38),
+        (139, 72, 65),
+        (168, 62, 54),
+        (194, 58, 48),
+        (220, 90, 75),
+    ],
+    2: None,  # Blue – sprites are already blue, no swap needed
+    3: [  # Green
+        (38, 130, 56),
+        (65, 125, 78),
+        (54, 148, 80),
+        (48, 168, 98),
+        (75, 206, 122),
+    ],
+    4: [  # Yellow
+        (156, 142, 30),
+        (139, 130, 60),
+        (158, 148, 47),
+        (186, 176, 40),
+        (218, 208, 61),
+    ],
+}
+
 # Unit colors
 UNIT_COLORS = {
     'W': (139, 69, 19),      # Brown (Warrior)
