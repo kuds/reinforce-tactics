@@ -83,7 +83,7 @@ class Renderer:
         tile_variants = {}    # type_name -> [surface, ...]
 
         use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
-        tile_sprites_path = self.settings.get('graphics.tile_sprites_path', '')
+        tile_sprites_path = self.settings.get_sprites_path('tiles')
 
         for tile_type, filename in TILE_IMAGES.items():
             variants = []
@@ -189,7 +189,7 @@ class Renderer:
         unit_images = {}
 
         # Get the configured unit sprites path
-        unit_sprites_path = self.settings.get('graphics.unit_sprites_path', '')
+        unit_sprites_path = self.settings.get_sprites_path('units')
         if not unit_sprites_path:
             return unit_images
 
@@ -210,11 +210,7 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        # Try animation sprites path first, fall back to unit sprites path
-        animation_path = self.settings.get('graphics.animation_sprites_path', '')
-        if not animation_path:
-            animation_path = self.settings.get('graphics.unit_sprites_path', '')
-
+        animation_path = self.settings.get_sprites_path('animation')
         if not animation_path:
             return None
 

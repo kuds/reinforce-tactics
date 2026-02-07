@@ -35,13 +35,21 @@ class GraphicsMenu(Menu):
         disable_animations = self.settings.get('graphics.disable_animations', False)
         disable_unit_sprites = self.settings.get('graphics.disable_unit_sprites', False)
         use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
+        sprites_path = self.settings.get('graphics.sprites_path', '')
         animation_path = self.settings.get('graphics.animation_sprites_path', '')
         unit_path = self.settings.get('graphics.unit_sprites_path', '')
         tile_path = self.settings.get('graphics.tile_sprites_path', '')
 
+        # --- Base sprites path (units/ and tiles/ auto-discovered) ---
+        base_display = sprites_path if sprites_path else lang.get('graphics.not_set', '(not set)')
+        self.add_option(
+            f"Sprites Path: {base_display}",
+            self._edit_sprites_path
+        )
+
         # --- Unit Animations (sprite sheets) ---
-        # Animation sprites path
-        anim_path_display = animation_path if animation_path else lang.get('graphics.not_set', '(not set)')
+        # Animation sprites path (override)
+        anim_path_display = animation_path if animation_path else lang.get('graphics.not_set', '(auto)')
         self.add_option(
             f"{lang.get('graphics.animation_path', 'Animation Sheets Path')}: {anim_path_display}",
             self._edit_animation_path
@@ -55,8 +63,8 @@ class GraphicsMenu(Menu):
         )
 
         # --- Static Unit Sprites ---
-        # Unit sprites path
-        unit_path_display = unit_path if unit_path else lang.get('graphics.not_set', '(not set)')
+        # Unit sprites path (override)
+        unit_path_display = unit_path if unit_path else lang.get('graphics.not_set', '(auto)')
         self.add_option(
             f"{lang.get('graphics.unit_path', 'Static Sprites Path')}: {unit_path_display}",
             self._edit_unit_path
@@ -77,8 +85,8 @@ class GraphicsMenu(Menu):
             self._toggle_tile_sprites
         )
 
-        # Tile sprites path
-        tile_path_display = tile_path if tile_path else lang.get('graphics.not_set', '(not set)')
+        # Tile sprites path (override)
+        tile_path_display = tile_path if tile_path else lang.get('graphics.not_set', '(auto)')
         self.add_option(
             f"{lang.get('graphics.tile_path', 'Tile Sprites Path')}: {tile_path_display}",
             self._edit_tile_path
@@ -125,6 +133,12 @@ class GraphicsMenu(Menu):
         self._refresh_options()
         return 'toggled'
 
+    def _edit_sprites_path(self) -> str:
+        """Start editing base sprites path."""
+        self.editing_path = 'base'
+        self.input_text = self.settings.get('graphics.sprites_path', '')
+        return 'editing'
+
     def _edit_animation_path(self) -> str:
         """Start editing animation sprites path."""
         self.editing_path = 'animation'
@@ -133,7 +147,9 @@ class GraphicsMenu(Menu):
 
     def _save_path(self) -> None:
         """Save the currently edited path."""
-        if self.editing_path == 'unit':
+        if self.editing_path == 'base':
+            self.settings.set('graphics.sprites_path', self.input_text)
+        elif self.editing_path == 'unit':
             self.settings.set('graphics.unit_sprites_path', self.input_text)
         elif self.editing_path == 'tile':
             self.settings.set('graphics.tile_sprites_path', self.input_text)
@@ -201,7 +217,9 @@ class GraphicsMenu(Menu):
         lang = get_language()
 
         # Draw title
-        if self.editing_path == 'unit':
+        if self.editing_path == 'base':
+            title = 'Edit Sprites Base Path'
+        elif self.editing_path == 'unit':
             title = lang.get('graphics.edit_unit_path', 'Edit Unit Sprites Path')
         elif self.editing_path == 'animation':
             title = lang.get('graphics.edit_animation_path', 'Edit Animation Sprites Path')
