@@ -109,6 +109,20 @@ TEAM_PALETTES = {
     ],
 }
 
+# Neutral (unowned) structure palette – white/gray tones used when a
+# capturable structure has no owning player (tile.player is None).
+NEUTRAL_STRUCTURE_PALETTE = [
+    (100, 100, 112),   # dark gray
+    (120, 120, 130),   # medium-dark gray
+    (142, 142, 152),   # medium gray
+    (172, 172, 182),   # medium-light gray
+    (204, 204, 214),   # light gray
+]
+
+# Tile type names (from TILE_TYPES values) that should receive team
+# colour recoloring when rendered as sprites.
+STRUCTURE_TILE_TYPES = {'TOWER', 'BUILDING', 'HEADQUARTERS'}
+
 # Unit colors
 UNIT_COLORS = {
     'W': (139, 69, 19),      # Brown (Warrior)

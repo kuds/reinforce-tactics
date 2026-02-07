@@ -7,7 +7,9 @@ import pygame
 import numpy as np
 from reinforcetactics.constants import (
     TILE_SIZE, TILE_TYPES, TILE_IMAGES,
-    PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
+    PLAYER_COLORS, UNIT_COLORS, UNIT_DATA,
+    BASE_SPRITE_COLORS, TEAM_PALETTES,
+    NEUTRAL_STRUCTURE_PALETTE, STRUCTURE_TILE_TYPES,
 )
 from reinforcetactics.core.visibility import UNEXPLORED, SHROUDED, VISIBLE
 from reinforcetactics.utils.fonts import get_font
@@ -69,7 +71,7 @@ class Renderer:
         self._setup_ui_elements()
 
     def _load_tile_images(self):
-        """Load tile images from files."""
+        """Load tile images and generate team-coloured structure variants."""
         tile_images = {}
 
         # Check if tile sprites are enabled and path is set
@@ -78,17 +80,75 @@ class Renderer:
 
         for tile_type, filename in TILE_IMAGES.items():
             try:
-                # Build full path if sprites are enabled and path is configured
                 if use_tile_sprites and tile_sprites_path:
                     full_path = os.path.join(tile_sprites_path, filename)
                 else:
                     full_path = filename
 
-                image = pygame.image.load(full_path)
+                image = pygame.image.load(full_path).convert_alpha()
                 tile_images[tile_type] = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
             except (pygame.error, FileNotFoundError):
                 tile_images[tile_type] = None
+
+        # Generate team-coloured variants for structure tiles
+        self.team_tile_images = {}
+        self._generate_team_tile_variants(tile_images)
+
         return tile_images
+
+    def _generate_team_tile_variants(self, tile_images):
+        """
+        Create team-coloured copies of structure tile sprites.
+
+        Replaces the base blue palette with each team's colours and
+        a neutral gray palette for unowned structures.  Results are
+        stored in ``self.team_tile_images[(tile_type_name, player)]``
+        where *player* is 1-4 or ``None`` for neutral.
+        """
+        if not BASE_SPRITE_COLORS:
+            return
+
+        for tile_type_name in STRUCTURE_TILE_TYPES:
+            base_surface = tile_images.get(tile_type_name)
+            if base_surface is None:
+                continue
+
+            # Neutral variant (player=None)
+            self.team_tile_images[(tile_type_name, None)] = (
+                self._recolor_tile(base_surface, BASE_SPRITE_COLORS,
+                                   NEUTRAL_STRUCTURE_PALETTE)
+            )
+
+            # Per-team variants
+            for player, palette in TEAM_PALETTES.items():
+                if palette is None:
+                    # This team keeps the base blue sprite
+                    self.team_tile_images[(tile_type_name, player)] = base_surface
+                else:
+                    self.team_tile_images[(tile_type_name, player)] = (
+                        self._recolor_tile(base_surface, BASE_SPRITE_COLORS,
+                                           palette)
+                    )
+
+    @staticmethod
+    def _recolor_tile(surface, base_colors, team_colors):
+        """
+        Replace base palette colours with team colours in a tile surface.
+
+        Args:
+            surface: Source pygame.Surface (not mutated)
+            base_colors: List of (R, G, B) colours to find
+            team_colors: List of (R, G, B) replacement colours
+
+        Returns:
+            New pygame.Surface with swapped colours
+        """
+        recoloured = surface.copy()
+        pxa = pygame.PixelArray(recoloured)
+        for src, dst in zip(base_colors, team_colors):
+            pxa.replace(src, dst, 0.01)
+        del pxa
+        return recoloured
 
     def _load_unit_images(self):
         """Load unit images from configured sprites path."""
@@ -201,8 +261,17 @@ class Renderer:
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
 
         # Draw tile image or color (always draw terrain, even in fog)
-        if self.tile_images.get(tile_type_name):
-            self.screen.blit(self.tile_images[tile_type_name], rect)
+        # For structures, use team-coloured variant when available
+        tile_surface = None
+        if tile_type_name in STRUCTURE_TILE_TYPES:
+            tile_surface = self.team_tile_images.get(
+                (tile_type_name, tile.player)
+            )
+        if tile_surface is None:
+            tile_surface = self.tile_images.get(tile_type_name)
+
+        if tile_surface:
+            self.screen.blit(tile_surface, rect)
         else:
             color = tile.get_color()
             pygame.draw.rect(self.screen, color, rect)
