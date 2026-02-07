@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -270,16 +270,20 @@ function LLMSection(): ReactNode {
 
 // ===== Unit Card Component =====
 function UnitCard({ unit }: { unit: typeof units[0] }): ReactNode {
+  const [gifFailed, setGifFailed] = useState(false);
+  const showGif = unit.gif && !gifFailed;
+
   return (
     <div className={clsx(styles.unitCard, unit.cardClass)}>
       <div className={styles.unitHeader}>
-        {unit.gif ? (
+        {showGif ? (
           <div className={clsx(styles.unitIconGif, unit.iconClass)}>
             <img
               src={unit.gif}
               alt={`${unit.name} idle animation`}
               className={styles.unitGifImage}
               loading="lazy"
+              onError={() => setGifFailed(true)}
             />
           </div>
         ) : (
