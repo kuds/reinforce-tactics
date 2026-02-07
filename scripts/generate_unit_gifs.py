@@ -118,7 +118,8 @@ def create_gif(frames, output_path, frame_duration_ms=200):
         bg.paste(frame, (0, 0), frame)
 
         # Convert to palette mode, preserving transparency
-        quantized = bg.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+        # FASTOCTREE (method 2) is required for RGBA images
+        quantized = bg.quantize(colors=255, method=Image.Quantize.FASTOCTREE)
         gif_frames.append(quantized)
 
     gif_frames[0].save(
