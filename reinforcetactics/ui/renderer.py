@@ -382,22 +382,28 @@ class Renderer:
 
     def _draw_unit_sprite(self, unit, sprite):
         """Draw a unit using its sprite image."""
-        # Create a copy of the sprite for modifications
-        display_sprite = sprite.copy()
+        needs_effect = (
+            (not unit.can_move and not unit.can_attack)
+            or unit.is_paralyzed()
+        )
 
-        # Apply visual effects
-        # Gray out if can't act
-        if not unit.can_move and not unit.can_attack:
-            # Create a darkened version
-            dark_surface = pygame.Surface(display_sprite.get_size())
-            dark_surface.fill((128, 128, 128))
-            display_sprite.blit(dark_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+        if needs_effect:
+            # Only copy when we actually need to tint
+            display_sprite = sprite.copy()
 
-        # Purple tint for paralyzed
-        if unit.is_paralyzed():
-            purple_surface = pygame.Surface(display_sprite.get_size())
-            purple_surface.fill((200, 150, 255))
-            display_sprite.blit(purple_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+            if not unit.can_move and not unit.can_attack:
+                display_sprite.blit(
+                    self._get_overlay(sprite.get_size(), (128, 128, 128)),
+                    (0, 0), special_flags=pygame.BLEND_MULT,
+                )
+
+            if unit.is_paralyzed():
+                display_sprite.blit(
+                    self._get_overlay(sprite.get_size(), (200, 150, 255)),
+                    (0, 0), special_flags=pygame.BLEND_MULT,
+                )
+        else:
+            display_sprite = sprite
 
         # Draw player-colored border around sprite
         player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
@@ -415,6 +421,19 @@ class Renderer:
             unit.y * TILE_SIZE + TILE_SIZE // 2
         ))
         self.screen.blit(display_sprite, sprite_rect)
+
+    def _get_overlay(self, size, color):
+        """Return a cached solid-colour overlay surface for blend effects."""
+        if not hasattr(self, '_overlay_cache'):
+            self._overlay_cache = {}
+
+        key = (size, color)
+        surface = self._overlay_cache.get(key)
+        if surface is None:
+            surface = pygame.Surface(size)
+            surface.fill(color)
+            self._overlay_cache[key] = surface
+        return surface
 
     def _draw_unit_letter(self, unit):
         """Draw a unit using its letter representation (fallback)."""
