@@ -39,6 +39,7 @@ gui = [
     "pygame-ce",
     "opencv-python",
     "matplotlib",
+    "Pillow",
 ]
 llm = [
     "openai",

@@ -7,7 +7,9 @@ import pygame
 import numpy as np
 from reinforcetactics.constants import (
     TILE_SIZE, TILE_TYPES, TILE_IMAGES,
-    PLAYER_COLORS, UNIT_COLORS, UNIT_DATA
+    PLAYER_COLORS, UNIT_COLORS, UNIT_DATA,
+    BASE_SPRITE_COLORS, TEAM_PALETTES,
+    NEUTRAL_STRUCTURE_PALETTE, STRUCTURE_TILE_TYPES,
 )
 from reinforcetactics.core.visibility import UNEXPLORED, SHROUDED, VISIBLE
 from reinforcetactics.utils.fonts import get_font
@@ -69,33 +71,125 @@ class Renderer:
         self._setup_ui_elements()
 
     def _load_tile_images(self):
-        """Load tile images from files."""
-        tile_images = {}
+        """Load tile images, discover variants, and generate team-coloured
+        structure variants.
 
-        # Check if tile sprites are enabled and path is set
+        Variant discovery: for each base filename (e.g. ``grass.png``)
+        we also look for ``grass_2.png``, ``grass_3.png``, etc.  Each
+        position on the map deterministically picks one variant so the
+        terrain looks varied but stays stable across frames.
+        """
+        tile_images = {}      # type_name -> base surface (single)
+        tile_variants = {}    # type_name -> [surface, ...]
+
         use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
-        tile_sprites_path = self.settings.get('graphics.tile_sprites_path', '')
+        tile_sprites_path = self.settings.get_sprites_path('tiles')
 
         for tile_type, filename in TILE_IMAGES.items():
+            variants = []
+
+            # --- base image ---
             try:
-                # Build full path if sprites are enabled and path is configured
                 if use_tile_sprites and tile_sprites_path:
                     full_path = os.path.join(tile_sprites_path, filename)
                 else:
                     full_path = filename
 
-                image = pygame.image.load(full_path)
-                tile_images[tile_type] = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                image = pygame.image.load(full_path).convert_alpha()
+                base_surface = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                tile_images[tile_type] = base_surface
+                variants.append(base_surface)
             except (pygame.error, FileNotFoundError):
                 tile_images[tile_type] = None
+
+            # --- numbered variants (_2, _3, _4, ...) ---
+            if use_tile_sprites and tile_sprites_path and variants:
+                stem, ext = os.path.splitext(filename)
+                num = 2
+                while True:
+                    variant_name = f"{stem}_{num}{ext}"
+                    variant_path = os.path.join(tile_sprites_path, variant_name)
+                    try:
+                        img = pygame.image.load(variant_path).convert_alpha()
+                        variants.append(
+                            pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
+                        )
+                        num += 1
+                    except (pygame.error, FileNotFoundError):
+                        break
+
+            if variants:
+                tile_variants[tile_type] = variants
+
+        self.tile_variants = tile_variants
+
+        # Generate team-coloured variants for structure tiles
+        self.team_tile_variants = {}
+        self._generate_team_tile_variants(tile_variants)
+
         return tile_images
+
+    def _generate_team_tile_variants(self, tile_variants):
+        """
+        Create team-coloured copies of structure tile sprite variants.
+
+        For every visual variant of each structure type, replaces the
+        base blue palette with each team's colours and a neutral gray
+        palette for unowned structures.  Results are stored in
+        ``self.team_tile_variants[(tile_type_name, player)]`` as lists
+        matching the base variant order.
+        """
+        if not BASE_SPRITE_COLORS:
+            return
+
+        for tile_type_name in STRUCTURE_TILE_TYPES:
+            base_list = tile_variants.get(tile_type_name)
+            if not base_list:
+                continue
+
+            # Neutral variants (player=None)
+            self.team_tile_variants[(tile_type_name, None)] = [
+                self._recolor_tile(s, BASE_SPRITE_COLORS,
+                                   NEUTRAL_STRUCTURE_PALETTE)
+                for s in base_list
+            ]
+
+            # Per-team variants
+            for player, palette in TEAM_PALETTES.items():
+                if palette is None:
+                    self.team_tile_variants[(tile_type_name, player)] = base_list
+                else:
+                    self.team_tile_variants[(tile_type_name, player)] = [
+                        self._recolor_tile(s, BASE_SPRITE_COLORS, palette)
+                        for s in base_list
+                    ]
+
+    @staticmethod
+    def _recolor_tile(surface, base_colors, team_colors):
+        """
+        Replace base palette colours with team colours in a tile surface.
+
+        Args:
+            surface: Source pygame.Surface (not mutated)
+            base_colors: List of (R, G, B) colours to find
+            team_colors: List of (R, G, B) replacement colours
+
+        Returns:
+            New pygame.Surface with swapped colours
+        """
+        recoloured = surface.copy()
+        pxa = pygame.PixelArray(recoloured)
+        for src, dst in zip(base_colors, team_colors):
+            pxa.replace(src, dst, 0.01)
+        del pxa
+        return recoloured
 
     def _load_unit_images(self):
         """Load unit images from configured sprites path."""
         unit_images = {}
 
         # Get the configured unit sprites path
-        unit_sprites_path = self.settings.get('graphics.unit_sprites_path', '')
+        unit_sprites_path = self.settings.get_sprites_path('units')
         if not unit_sprites_path:
             return unit_images
 
@@ -116,11 +210,7 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        # Try animation sprites path first, fall back to unit sprites path
-        animation_path = self.settings.get('graphics.animation_sprites_path', '')
-        if not animation_path:
-            animation_path = self.settings.get('graphics.unit_sprites_path', '')
-
+        animation_path = self.settings.get_sprites_path('animation')
         if not animation_path:
             return None
 
@@ -201,8 +291,26 @@ class Renderer:
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
 
         # Draw tile image or color (always draw terrain, even in fog)
-        if self.tile_images.get(tile_type_name):
-            self.screen.blit(self.tile_images[tile_type_name], rect)
+        # For structures, pick from team-coloured variants; for terrain,
+        # pick from tile variants.  Selection is deterministic per
+        # position so each tile always shows the same variant.
+        variants = None
+        if tile_type_name in STRUCTURE_TILE_TYPES:
+            variants = self.team_tile_variants.get(
+                (tile_type_name, tile.player)
+            )
+        if variants is None:
+            variants = self.tile_variants.get(tile_type_name)
+
+        tile_surface = None
+        if variants:
+            idx = (tile.x * 7 + tile.y * 13) % len(variants)
+            tile_surface = variants[idx]
+        if tile_surface is None:
+            tile_surface = self.tile_images.get(tile_type_name)
+
+        if tile_surface:
+            self.screen.blit(tile_surface, rect)
         else:
             color = tile.get_color()
             pygame.draw.rect(self.screen, color, rect)
@@ -382,22 +490,28 @@ class Renderer:
 
     def _draw_unit_sprite(self, unit, sprite):
         """Draw a unit using its sprite image."""
-        # Create a copy of the sprite for modifications
-        display_sprite = sprite.copy()
+        needs_effect = (
+            (not unit.can_move and not unit.can_attack)
+            or unit.is_paralyzed()
+        )
 
-        # Apply visual effects
-        # Gray out if can't act
-        if not unit.can_move and not unit.can_attack:
-            # Create a darkened version
-            dark_surface = pygame.Surface(display_sprite.get_size())
-            dark_surface.fill((128, 128, 128))
-            display_sprite.blit(dark_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+        if needs_effect:
+            # Only copy when we actually need to tint
+            display_sprite = sprite.copy()
 
-        # Purple tint for paralyzed
-        if unit.is_paralyzed():
-            purple_surface = pygame.Surface(display_sprite.get_size())
-            purple_surface.fill((200, 150, 255))
-            display_sprite.blit(purple_surface, (0, 0), special_flags=pygame.BLEND_MULT)
+            if not unit.can_move and not unit.can_attack:
+                display_sprite.blit(
+                    self._get_overlay(sprite.get_size(), (128, 128, 128)),
+                    (0, 0), special_flags=pygame.BLEND_MULT,
+                )
+
+            if unit.is_paralyzed():
+                display_sprite.blit(
+                    self._get_overlay(sprite.get_size(), (200, 150, 255)),
+                    (0, 0), special_flags=pygame.BLEND_MULT,
+                )
+        else:
+            display_sprite = sprite
 
         # Draw player-colored border around sprite
         player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
@@ -415,6 +529,19 @@ class Renderer:
             unit.y * TILE_SIZE + TILE_SIZE // 2
         ))
         self.screen.blit(display_sprite, sprite_rect)
+
+    def _get_overlay(self, size, color):
+        """Return a cached solid-colour overlay surface for blend effects."""
+        if not hasattr(self, '_overlay_cache'):
+            self._overlay_cache = {}
+
+        key = (size, color)
+        surface = self._overlay_cache.get(key)
+        if surface is None:
+            surface = pygame.Surface(size)
+            surface.fill(color)
+            self._overlay_cache[key] = surface
+        return surface
 
     def _draw_unit_letter(self, unit):
         """Draw a unit using its letter representation (fallback)."""
@@ -730,6 +857,21 @@ class Renderer:
         """Set a unit to idle animation state."""
         if self.animator:
             self.animator.set_idle(unit)
+
+    def queue_movement_path_animation(self, unit, path):
+        """
+        Queue a multi-step movement path for animation transitions.
+
+        Each path segment triggers the correct walking direction animation
+        (left, right, up, down). After the full path plays through, the
+        unit returns to idle.
+
+        Args:
+            unit: Unit object
+            path: List of (x, y) positions including start position
+        """
+        if self.animator:
+            self.animator.queue_movement_path(unit, path)
 
     def cleanup_unit_animation(self, unit):
         """Clean up animation data for a removed unit."""

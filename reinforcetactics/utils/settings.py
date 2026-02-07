@@ -29,6 +29,10 @@ class Settings:
             'enabled': True
         },
         'graphics': {
+            # Single base path – units/ and tiles/ subdirectories are
+            # discovered automatically.  The per-category paths below
+            # override the auto-discovered subdirectory when set.
+            'sprites_path': '',
             'unit_sprites_path': '',
             'tile_sprites_path': '',
             'use_tile_sprites': False,
@@ -143,6 +147,44 @@ class Settings:
             self.settings['paths'] = {}
         self.settings['paths'][path_type] = path
         self.save()
+
+    def get_sprites_path(self, category):
+        """Resolve the effective directory for a sprite category.
+
+        Categories: ``'units'``, ``'tiles'``, ``'animation'``.
+
+        Resolution order:
+        1. The per-category override (e.g. ``graphics.unit_sprites_path``).
+        2. ``{graphics.sprites_path}/{category}/`` if the base path is set.
+        3. Empty string (not configured).
+        """
+        key_map = {
+            'units': 'graphics.unit_sprites_path',
+            'tiles': 'graphics.tile_sprites_path',
+            'animation': 'graphics.animation_sprites_path',
+        }
+        subdir_map = {
+            'units': 'units',
+            'tiles': 'tiles',
+            'animation': 'units',  # animation sheets live alongside unit sprites
+        }
+
+        # 1. Explicit per-category override
+        override = self.get(key_map.get(category, ''), '')
+        if override:
+            return override
+
+        # 2. Base sprites_path + well-known subdirectory
+        base = self.get('graphics.sprites_path', '')
+        if base:
+            candidate = os.path.join(base, subdir_map.get(category, category))
+            if os.path.isdir(candidate):
+                return candidate
+            # For animation, also check the base path directly
+            if category == 'animation':
+                return base
+
+        return ''
 
     def ensure_directories(self):
         """Create all configured directories if they don't exist."""

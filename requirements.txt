@@ -12,6 +12,7 @@ tensorboard
 matplotlib
 typing
 pandas
+Pillow
 
 # Optional: LLM bot dependencies
 # Uncomment the ones you need for your LLM provider:
