@@ -113,6 +113,10 @@ class SpriteAnimator:
         Parse a sprite sheet into individual animation frames using
         the coordinate-based frame_map from ANIMATION_CONFIG.
 
+        Each source frame (``frame_width`` x ``frame_height``, e.g. 64x64)
+        is centre-cropped to ``crop_width`` x ``crop_height`` (e.g. 32x32)
+        before being scaled to the display size.
+
         Args:
             sheet_surface: Pygame surface of the loaded sprite sheet
             unit_type: Unit type for getting per-unit config overrides
@@ -126,6 +130,12 @@ class SpriteAnimator:
         fw = unit_cfg.get('frame_width', self.frame_width)
         fh = unit_cfg.get('frame_height', self.frame_height)
 
+        # Crop dimensions (defaults to full frame if not configured)
+        cw = unit_cfg.get('crop_width',
+                          ANIMATION_CONFIG.get('crop_width', fw))
+        ch = unit_cfg.get('crop_height',
+                          ANIMATION_CONFIG.get('crop_height', fh))
+
         sprite_size = TILE_SIZE - 4
 
         frame_map = ANIMATION_CONFIG.get('frame_map', {})
@@ -137,6 +147,13 @@ class SpriteAnimator:
                 if (rect.right <= sheet_surface.get_width() and
                         rect.bottom <= sheet_surface.get_height()):
                     frame = sheet_surface.subsurface(rect).copy()
+                    # Centre-crop to the target crop size
+                    if cw < fw or ch < fh:
+                        cx = (fw - cw) // 2
+                        cy = (fh - ch) // 2
+                        frame = frame.subsurface(
+                            pygame.Rect(cx, cy, cw, ch)
+                        ).copy()
                     frame = pygame.transform.scale(frame, (sprite_size, sprite_size))
                     state_frames.append(frame)
 

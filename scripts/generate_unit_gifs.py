@@ -11,7 +11,7 @@ Usage:
 Example:
     python scripts/generate_unit_gifs.py ./my_sprites --output docs-site/static/img/units --scale 3
 
-Sprite sheet format (6 columns x 5 rows of 32x32 frames):
+Sprite sheet format (6 columns x 5 rows of 64x64 frames, centre-cropped to 32x32):
     Idle frames are the first 4 cells: [0,0] [0,1] [0,2] [0,3]
 """
 import argparse
@@ -33,8 +33,13 @@ UNIT_NAMES = [
 # Idle frame coordinates (row, col) from ANIMATION_CONFIG
 IDLE_FRAMES = [(0, 0), (0, 1), (0, 2), (0, 3)]
 
-FRAME_WIDTH = 32
-FRAME_HEIGHT = 32
+# Source frame size on the sprite sheet
+FRAME_WIDTH = 64
+FRAME_HEIGHT = 64
+
+# Centre-crop to this size before scaling
+CROP_WIDTH = 32
+CROP_HEIGHT = 32
 
 
 def find_sprite_sheet(sprites_dir, unit_name):
@@ -76,8 +81,14 @@ def extract_idle_frames(sheet_path, scale=1):
 
         frame = sheet.crop(box)
 
+        # Centre-crop from source size to crop size
+        if CROP_WIDTH < FRAME_WIDTH or CROP_HEIGHT < FRAME_HEIGHT:
+            cx = (FRAME_WIDTH - CROP_WIDTH) // 2
+            cy = (FRAME_HEIGHT - CROP_HEIGHT) // 2
+            frame = frame.crop((cx, cy, cx + CROP_WIDTH, cy + CROP_HEIGHT))
+
         if scale > 1:
-            new_size = (FRAME_WIDTH * scale, FRAME_HEIGHT * scale)
+            new_size = (CROP_WIDTH * scale, CROP_HEIGHT * scale)
             frame = frame.resize(new_size, Image.NEAREST)
 
         frames.append(frame)

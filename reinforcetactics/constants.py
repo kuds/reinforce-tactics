@@ -307,8 +307,8 @@ TILE_IMAGES = {
 
 # Animation configuration for sprite sheets
 #
-# Sprite sheets use a 6-column grid of 32x32 frames. Animations are defined
-# by frame coordinates (row, col) that can span across rows:
+# Sprite sheets use a 6-column grid of 64x64 frames.  Each frame is
+# centre-cropped to 32x32 before being scaled to the display size.
 #
 #   Idle (4 frames):         [0,0] [0,1] [0,2] [0,3]
 #   Move Left (8 frames):   [0,4] [0,5] [1,0] [1,1] [1,2] [1,3] [1,4] [1,5]
@@ -317,9 +317,13 @@ TILE_IMAGES = {
 #   Move Right:              auto-generated as horizontal flip of Move Left
 #
 ANIMATION_CONFIG = {
-    # Default frame dimensions
-    'frame_width': 32,
-    'frame_height': 32,
+    # Source frame size on the sprite sheet
+    'frame_width': 64,
+    'frame_height': 64,
+
+    # Centre-crop each frame to this size before scaling to display
+    'crop_width': 32,
+    'crop_height': 32,
 
     # Frame map: animation state -> list of (row, col) coordinates
     # This replaces the old row-based state_rows mapping.
