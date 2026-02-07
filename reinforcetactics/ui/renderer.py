@@ -71,14 +71,24 @@ class Renderer:
         self._setup_ui_elements()
 
     def _load_tile_images(self):
-        """Load tile images and generate team-coloured structure variants."""
-        tile_images = {}
+        """Load tile images, discover variants, and generate team-coloured
+        structure variants.
 
-        # Check if tile sprites are enabled and path is set
+        Variant discovery: for each base filename (e.g. ``grass.png``)
+        we also look for ``grass_2.png``, ``grass_3.png``, etc.  Each
+        position on the map deterministically picks one variant so the
+        terrain looks varied but stays stable across frames.
+        """
+        tile_images = {}      # type_name -> base surface (single)
+        tile_variants = {}    # type_name -> [surface, ...]
+
         use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
         tile_sprites_path = self.settings.get('graphics.tile_sprites_path', '')
 
         for tile_type, filename in TILE_IMAGES.items():
+            variants = []
+
+            # --- base image ---
             try:
                 if use_tile_sprites and tile_sprites_path:
                     full_path = os.path.join(tile_sprites_path, filename)
@@ -86,49 +96,73 @@ class Renderer:
                     full_path = filename
 
                 image = pygame.image.load(full_path).convert_alpha()
-                tile_images[tile_type] = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                base_surface = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
+                tile_images[tile_type] = base_surface
+                variants.append(base_surface)
             except (pygame.error, FileNotFoundError):
                 tile_images[tile_type] = None
 
+            # --- numbered variants (_2, _3, _4, ...) ---
+            if use_tile_sprites and tile_sprites_path and variants:
+                stem, ext = os.path.splitext(filename)
+                num = 2
+                while True:
+                    variant_name = f"{stem}_{num}{ext}"
+                    variant_path = os.path.join(tile_sprites_path, variant_name)
+                    try:
+                        img = pygame.image.load(variant_path).convert_alpha()
+                        variants.append(
+                            pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
+                        )
+                        num += 1
+                    except (pygame.error, FileNotFoundError):
+                        break
+
+            if variants:
+                tile_variants[tile_type] = variants
+
+        self.tile_variants = tile_variants
+
         # Generate team-coloured variants for structure tiles
-        self.team_tile_images = {}
-        self._generate_team_tile_variants(tile_images)
+        self.team_tile_variants = {}
+        self._generate_team_tile_variants(tile_variants)
 
         return tile_images
 
-    def _generate_team_tile_variants(self, tile_images):
+    def _generate_team_tile_variants(self, tile_variants):
         """
-        Create team-coloured copies of structure tile sprites.
+        Create team-coloured copies of structure tile sprite variants.
 
-        Replaces the base blue palette with each team's colours and
-        a neutral gray palette for unowned structures.  Results are
-        stored in ``self.team_tile_images[(tile_type_name, player)]``
-        where *player* is 1-4 or ``None`` for neutral.
+        For every visual variant of each structure type, replaces the
+        base blue palette with each team's colours and a neutral gray
+        palette for unowned structures.  Results are stored in
+        ``self.team_tile_variants[(tile_type_name, player)]`` as lists
+        matching the base variant order.
         """
         if not BASE_SPRITE_COLORS:
             return
 
         for tile_type_name in STRUCTURE_TILE_TYPES:
-            base_surface = tile_images.get(tile_type_name)
-            if base_surface is None:
+            base_list = tile_variants.get(tile_type_name)
+            if not base_list:
                 continue
 
-            # Neutral variant (player=None)
-            self.team_tile_images[(tile_type_name, None)] = (
-                self._recolor_tile(base_surface, BASE_SPRITE_COLORS,
+            # Neutral variants (player=None)
+            self.team_tile_variants[(tile_type_name, None)] = [
+                self._recolor_tile(s, BASE_SPRITE_COLORS,
                                    NEUTRAL_STRUCTURE_PALETTE)
-            )
+                for s in base_list
+            ]
 
             # Per-team variants
             for player, palette in TEAM_PALETTES.items():
                 if palette is None:
-                    # This team keeps the base blue sprite
-                    self.team_tile_images[(tile_type_name, player)] = base_surface
+                    self.team_tile_variants[(tile_type_name, player)] = base_list
                 else:
-                    self.team_tile_images[(tile_type_name, player)] = (
-                        self._recolor_tile(base_surface, BASE_SPRITE_COLORS,
-                                           palette)
-                    )
+                    self.team_tile_variants[(tile_type_name, player)] = [
+                        self._recolor_tile(s, BASE_SPRITE_COLORS, palette)
+                        for s in base_list
+                    ]
 
     @staticmethod
     def _recolor_tile(surface, base_colors, team_colors):
@@ -261,12 +295,21 @@ class Renderer:
         tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
 
         # Draw tile image or color (always draw terrain, even in fog)
-        # For structures, use team-coloured variant when available
-        tile_surface = None
+        # For structures, pick from team-coloured variants; for terrain,
+        # pick from tile variants.  Selection is deterministic per
+        # position so each tile always shows the same variant.
+        variants = None
         if tile_type_name in STRUCTURE_TILE_TYPES:
-            tile_surface = self.team_tile_images.get(
+            variants = self.team_tile_variants.get(
                 (tile_type_name, tile.player)
             )
+        if variants is None:
+            variants = self.tile_variants.get(tile_type_name)
+
+        tile_surface = None
+        if variants:
+            idx = (tile.x * 7 + tile.y * 13) % len(variants)
+            tile_surface = variants[idx]
         if tile_surface is None:
             tile_surface = self.tile_images.get(tile_type_name)
 
