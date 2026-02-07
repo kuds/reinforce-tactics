@@ -731,6 +731,21 @@ class Renderer:
         if self.animator:
             self.animator.set_idle(unit)
 
+    def queue_movement_path_animation(self, unit, path):
+        """
+        Queue a multi-step movement path for animation transitions.
+
+        Each path segment triggers the correct walking direction animation
+        (left, right, up, down). After the full path plays through, the
+        unit returns to idle.
+
+        Args:
+            unit: Unit object
+            path: List of (x, y) positions including start position
+        """
+        if self.animator:
+            self.animator.queue_movement_path(unit, path)
+
     def cleanup_unit_animation(self, unit):
         """Clean up animation data for a removed unit."""
         if self.animator:

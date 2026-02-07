@@ -18,6 +18,7 @@ const units = [
     stats: { hp: 15, attack: 10, defense: 6, movement: 3 },
     cardClass: styles.unitCardWarrior,
     iconClass: styles.unitIconWarrior,
+    gif: '/img/units/warrior_idle.gif',
   },
   {
     name: 'Mage',
@@ -27,6 +28,7 @@ const units = [
     stats: { hp: 10, attack: 12, defense: 4, movement: 2 },
     cardClass: styles.unitCardMage,
     iconClass: styles.unitIconMage,
+    gif: '/img/units/mage_idle.gif',
   },
   {
     name: 'Cleric',
@@ -36,6 +38,7 @@ const units = [
     stats: { hp: 8, attack: 2, defense: 4, movement: 2 },
     cardClass: styles.unitCardCleric,
     iconClass: styles.unitIconCleric,
+    gif: '/img/units/cleric_idle.gif',
   },
   {
     name: 'Archer',
@@ -45,6 +48,7 @@ const units = [
     stats: { hp: 15, attack: 5, defense: 1, movement: 3 },
     cardClass: styles.unitCardArcher,
     iconClass: styles.unitIconArcher,
+    gif: '/img/units/archer_idle.gif',
   },
   {
     name: 'Knight',
@@ -54,6 +58,7 @@ const units = [
     stats: { hp: 18, attack: 8, defense: 5, movement: 4 },
     cardClass: styles.unitCardKnight,
     iconClass: styles.unitIconKnight,
+    gif: '/img/units/knight_idle.gif',
   },
   {
     name: 'Rogue',
@@ -63,6 +68,7 @@ const units = [
     stats: { hp: 12, attack: 9, defense: 3, movement: 4 },
     cardClass: styles.unitCardRogue,
     iconClass: styles.unitIconRogue,
+    gif: '/img/units/rogue_idle.gif',
   },
   {
     name: 'Barbarian',
@@ -72,6 +78,7 @@ const units = [
     stats: { hp: 20, attack: 10, defense: 2, movement: 5 },
     cardClass: styles.unitCardBarbarian,
     iconClass: styles.unitIconBarbarian,
+    gif: '/img/units/barbarian_idle.gif',
   },
   {
     name: 'Sorcerer',
@@ -81,6 +88,7 @@ const units = [
     stats: { hp: 10, attack: 8, defense: 3, movement: 2 },
     cardClass: styles.unitCardSorcerer,
     iconClass: styles.unitIconSorcerer,
+    gif: '/img/units/sorcerer_idle.gif',
   },
 ];
 
@@ -265,9 +273,20 @@ function UnitCard({ unit }: { unit: typeof units[0] }): ReactNode {
   return (
     <div className={clsx(styles.unitCard, unit.cardClass)}>
       <div className={styles.unitHeader}>
-        <div className={clsx(styles.unitIcon, unit.iconClass)}>
-          {unit.code}
-        </div>
+        {unit.gif ? (
+          <div className={clsx(styles.unitIconGif, unit.iconClass)}>
+            <img
+              src={unit.gif}
+              alt={`${unit.name} idle animation`}
+              className={styles.unitGifImage}
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div className={clsx(styles.unitIcon, unit.iconClass)}>
+            {unit.code}
+          </div>
+        )}
         <div className={styles.unitInfo}>
           <h3>{unit.name}</h3>
           <p className={styles.unitRole}>{unit.role}</p>

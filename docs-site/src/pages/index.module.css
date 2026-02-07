@@ -256,6 +256,33 @@
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
+.unitIconGif {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #c9a227;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme='dark'] .unitIconGif {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.unitGifImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
 .unitIconWarrior {
   background: linear-gradient(135deg, #8b2942 0%, #b33d59 100%);
 }
