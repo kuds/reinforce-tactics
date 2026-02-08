@@ -80,6 +80,11 @@ BASE_SPRITE_COLORS = [
     (47, 114, 144),   # #2f7290
     (40, 134, 176),   # #2886b0
     (61, 165, 211),   # #3da5d3 - lightest
+    # Additional blue tones for units and bases
+    (7, 109, 191),    # #076dbf
+    (0, 152, 219),    # #0098db
+    (79, 143, 186),   # #4f8fba
+    (115, 190, 211),  # #73bed3
 ]
 
 # Per-team replacement palettes (same length / order as BASE_SPRITE_COLORS).
@@ -91,6 +96,11 @@ TEAM_PALETTES = {
         (168, 62, 54),
         (194, 58, 48),
         (220, 90, 75),
+        # Replacements for additional blue tones
+        (202, 31, 15),
+        (232, 28, 9),
+        (197, 97, 88),
+        (224, 134, 126),
     ],
     2: None,  # Blue – sprites are already blue, no swap needed
     3: [  # Green
@@ -99,6 +109,11 @@ TEAM_PALETTES = {
         (54, 148, 80),
         (48, 168, 98),
         (75, 206, 122),
+        # Replacements for additional blue tones
+        (24, 180, 68),
+        (21, 206, 73),
+        (84, 175, 110),
+        (117, 198, 140),
     ],
     4: [  # Yellow
         (156, 142, 30),
@@ -106,6 +121,11 @@ TEAM_PALETTES = {
         (158, 148, 47),
         (186, 176, 40),
         (218, 208, 61),
+        # Replacements for additional blue tones
+        (199, 181, 5),
+        (228, 207, 0),
+        (193, 183, 81),
+        (219, 210, 119),
     ],
 }
 
@@ -117,6 +137,11 @@ NEUTRAL_STRUCTURE_PALETTE = [
     (142, 142, 152),   # medium gray
     (172, 172, 182),   # medium-light gray
     (204, 204, 214),   # light gray
+    # Neutrals for additional blue tones
+    (174, 174, 185),
+    (200, 200, 212),
+    (170, 170, 180),
+    (192, 192, 205),
 ]
 
 # Tile type names (from TILE_TYPES values) that should receive team
