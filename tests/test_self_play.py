@@ -435,13 +435,14 @@ class TestSelfPlayCallback:
         assert len(envs) >= 1
 
     def test_callback_init_with_model(self, self_play_env):
-        """Test callback initialization with model."""
+        """Test callback initialization with model via init_callback (SB3 lifecycle)."""
         callback = SelfPlayCallback(env=self_play_env, verbose=0)
         mock_model = MagicMock()
 
-        result = callback._init_callback(mock_model)
+        # SB3's BaseCallback.init_callback() sets self.model then calls _init_callback()
+        callback.model = mock_model
+        callback._init_callback()
 
-        assert result is True
         assert callback.model is mock_model
 
 

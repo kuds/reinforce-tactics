@@ -40,6 +40,12 @@ from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 logger = logging.getLogger(__name__)
 
+# Conditionally import BaseCallback so the module is importable without SB3 installed.
+try:
+    from stable_baselines3.common.callbacks import BaseCallback as _BaseCallback
+except ImportError:  # pragma: no cover
+    _BaseCallback = None
+
 
 class OpponentPool:
     """
@@ -663,126 +669,142 @@ class SelfPlayEnv(gym.Wrapper):
         return self.stats['agent_wins'] / total
 
 
-class SelfPlayCallback:
-    """
-    Callback for Stable-Baselines3 that manages self-play opponent updates.
+def _make_callback_class():
+    """Build SelfPlayCallback with BaseCallback as parent when SB3 is available."""
+    base = _BaseCallback if _BaseCallback is not None else object
 
-    This callback:
-    1. Periodically updates the opponent model to the current policy
-    2. Optionally adds models to the opponent pool
-    3. Tracks win rates and training progress
-
-    Usage:
-        callback = SelfPlayCallback(
-            env,
-            update_freq=10000,
-            add_to_pool_freq=50000
-        )
-        model.learn(total_timesteps=1000000, callback=callback)
-    """
-
-    def __init__(
-        self,
-        env: Union[SelfPlayEnv, Any],
-        update_freq: int = 10000,
-        add_to_pool_freq: int = 50000,
-        min_win_rate_for_pool: float = 0.55,
-        verbose: int = 1
-    ):
+    class _SelfPlayCallback(base):
         """
-        Initialize the callback.
+        Callback for Stable-Baselines3 that manages self-play opponent updates.
 
-        Args:
-            env: The SelfPlayEnv or vectorized environment
-            update_freq: How often to update opponent to current model
-            add_to_pool_freq: How often to add model to opponent pool
-            min_win_rate_for_pool: Minimum win rate to add to pool
-            verbose: Verbosity level
-        """
-        self.env = env
-        self.update_freq = update_freq
-        self.add_to_pool_freq = add_to_pool_freq
-        self.min_win_rate_for_pool = min_win_rate_for_pool
-        self.verbose = verbose
+        When ``stable-baselines3`` is installed this class inherits from
+        ``BaseCallback``, so it can be passed directly to
+        ``model.learn(callback=...)``.  The parent handles ``self.model``,
+        ``self.n_calls``, ``self.num_timesteps``, and the full lifecycle
+        (``init_callback`` → ``on_training_start`` → ``on_step`` → …).
 
-        self.n_calls = 0
-        self.model = None
+        This callback:
+        1. Periodically updates the opponent model to the current policy
+        2. Optionally adds models to the opponent pool
+        3. Tracks win rates and training progress
 
-    def _get_self_play_envs(self) -> List[SelfPlayEnv]:
-        """Get all SelfPlayEnv instances from the environment."""
-        envs = []
-
-        # Handle vectorized environments
-        if hasattr(self.env, 'envs'):
-            for env in self.env.envs:
-                if isinstance(env, SelfPlayEnv):
-                    envs.append(env)
-                elif hasattr(env, 'env') and isinstance(env.env, SelfPlayEnv):
-                    envs.append(env.env)
-        elif isinstance(self.env, SelfPlayEnv):
-            envs.append(self.env)
-        elif hasattr(self.env, 'env') and isinstance(self.env.env, SelfPlayEnv):
-            envs.append(self.env.env)
-
-        return envs
-
-    def _init_callback(self, model: Any) -> bool:
-        """Initialize callback with model reference."""
-        self.model = model
-        return True
-
-    def _on_step(self) -> bool:
-        """Called after each step."""
-        self.n_calls += 1
-
-        # Update opponent model
-        if self.n_calls % self.update_freq == 0:
-            self._update_opponents()
-
-        # Add to pool
-        if self.n_calls % self.add_to_pool_freq == 0:
-            self._add_to_pool()
-
-        return True
-
-    def _update_opponents(self) -> None:
-        """Update all opponents to current model."""
-        for env in self._get_self_play_envs():
-            env.set_opponent_model(self.model)
-            env.update_opponent_from_current()
-
-        if self.verbose >= 1:
-            win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
-            avg_win_rate = np.mean(win_rates) if win_rates else 0.5
-            logger.info(
-                "Step %d: Updated opponents. Avg win rate: %.2f%%",
-                self.n_calls, avg_win_rate * 100
+        Usage:
+            callback = SelfPlayCallback(
+                env,
+                update_freq=10000,
+                add_to_pool_freq=50000
             )
+            model.learn(total_timesteps=1000000, callback=callback)
+        """
 
-    def _add_to_pool(self) -> None:
-        """Add current model to opponent pool if win rate is good enough."""
-        envs = self._get_self_play_envs()
-        if not envs:
-            return
+        def __init__(
+            self,
+            env: Union[SelfPlayEnv, Any],
+            update_freq: int = 10000,
+            add_to_pool_freq: int = 50000,
+            min_win_rate_for_pool: float = 0.55,
+            verbose: int = 1
+        ):
+            """
+            Initialize the callback.
 
-        # Check win rate
-        win_rates = [env.get_win_rate() for env in envs]
-        avg_win_rate = np.mean(win_rates) if win_rates else 0.5
+            Args:
+                env: The SelfPlayEnv or vectorized environment
+                update_freq: How often to update opponent to current model
+                add_to_pool_freq: How often to add model to opponent pool
+                min_win_rate_for_pool: Minimum win rate to add to pool
+                verbose: Verbosity level
+            """
+            if _BaseCallback is not None:
+                super().__init__(verbose=verbose)
+            else:
+                # Fallback attributes when SB3 is not installed
+                self.n_calls = 0
+                self.num_timesteps = 0
+                self.model = None
+                self.verbose = verbose
 
-        if avg_win_rate >= self.min_win_rate_for_pool:
-            for env in envs:
-                if env.opponent_pool is not None:
-                    env.opponent_pool.add_model(
-                        self.model,
-                        timestep=self.n_calls,
-                        win_rate=avg_win_rate
-                    )
-                    if self.verbose >= 1:
-                        logger.info(
-                            "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
-                            self.n_calls, avg_win_rate * 100, env.opponent_pool.size
+            self.env = env
+            self.update_freq = update_freq
+            self.add_to_pool_freq = add_to_pool_freq
+            self.min_win_rate_for_pool = min_win_rate_for_pool
+
+        def _get_self_play_envs(self) -> List[SelfPlayEnv]:
+            """Get all SelfPlayEnv instances from the environment."""
+            envs = []
+
+            # Handle vectorized environments
+            if hasattr(self.env, 'envs'):
+                for env in self.env.envs:
+                    if isinstance(env, SelfPlayEnv):
+                        envs.append(env)
+                    elif hasattr(env, 'env') and isinstance(env.env, SelfPlayEnv):
+                        envs.append(env.env)
+            elif isinstance(self.env, SelfPlayEnv):
+                envs.append(self.env)
+            elif hasattr(self.env, 'env') and isinstance(self.env.env, SelfPlayEnv):
+                envs.append(self.env.env)
+
+            return envs
+
+        def _init_callback(self) -> None:
+            """Called by BaseCallback.init_callback() after self.model is set."""
+
+        def _on_step(self) -> bool:
+            """Called after each env.step() by BaseCallback.on_step()."""
+            # Update opponent model
+            if self.n_calls % self.update_freq == 0:
+                self._update_opponents()
+
+            # Add to pool
+            if self.n_calls % self.add_to_pool_freq == 0:
+                self._add_to_pool()
+
+            return True
+
+        def _update_opponents(self) -> None:
+            """Update all opponents to current model."""
+            for env in self._get_self_play_envs():
+                env.set_opponent_model(self.model)
+                env.update_opponent_from_current()
+
+            if self.verbose >= 1:
+                win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
+                avg_win_rate = np.mean(win_rates) if win_rates else 0.5
+                logger.info(
+                    "Step %d: Updated opponents. Avg win rate: %.2f%%",
+                    self.n_calls, avg_win_rate * 100
+                )
+
+        def _add_to_pool(self) -> None:
+            """Add current model to opponent pool if win rate is good enough."""
+            envs = self._get_self_play_envs()
+            if not envs:
+                return
+
+            # Check win rate
+            win_rates = [env.get_win_rate() for env in envs]
+            avg_win_rate = np.mean(win_rates) if win_rates else 0.5
+
+            if avg_win_rate >= self.min_win_rate_for_pool:
+                for env in envs:
+                    if env.opponent_pool is not None:
+                        env.opponent_pool.add_model(
+                            self.model,
+                            timestep=self.n_calls,
+                            win_rate=avg_win_rate
                         )
-                    break  # Only add once
+                        if self.verbose >= 1:
+                            logger.info(
+                                "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
+                                self.n_calls, avg_win_rate * 100, env.opponent_pool.size
+                            )
+                        break  # Only add once
+
+    return _SelfPlayCallback
+
+
+SelfPlayCallback = _make_callback_class()
 
 
 def make_self_play_env(
