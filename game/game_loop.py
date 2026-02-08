@@ -12,6 +12,7 @@ from reinforcetactics.ui.renderer import Renderer
 from reinforcetactics.ui.menus import (
     MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu
 )
+from reinforcetactics.ui.menus.in_game.quit_confirm_dialog import QuitConfirmDialog
 from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.settings import get_settings
 from reinforcetactics.utils.replay_player import ReplayPlayer
@@ -73,12 +74,22 @@ class GameSession:  # pylint: disable=too-few-public-methods
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    self.running = False
+                    quit_result = self._handle_quit_request()
+                    if quit_result == 'save_quit':
+                        self._handle_save_game()
+                        self.running = False
+                    elif quit_result == 'quit':
+                        self.running = False
 
                 elif event.type == pygame.KEYDOWN:
                     result = self.input_handler.handle_keyboard_event(event)
                     if result == 'quit':
-                        self.running = False
+                        quit_result = self._handle_quit_request()
+                        if quit_result == 'save_quit':
+                            self._handle_save_game()
+                            self.running = False
+                        elif quit_result == 'quit':
+                            self.running = False
                     elif result == 'save':
                         self._handle_save_game()
 
@@ -107,7 +118,18 @@ class GameSession:  # pylint: disable=too-few-public-methods
         if self.game.game_over:
             return self._handle_game_over()
 
+        # Auto-save replay on mid-game quit
+        if self.game.action_history:
+            replay_path = self.game.save_replay_to_file()
+            if replay_path:
+                print(f"Replay saved to {replay_path}")
+
         return 'quit'
+
+    def _handle_quit_request(self):
+        """Show quit confirmation dialog and return user choice."""
+        dialog = QuitConfirmDialog(self.renderer.screen)
+        return dialog.run()
 
     def _handle_save_game(self):
         """Handle save game request."""
@@ -300,6 +322,14 @@ def load_saved_game():
 
         # Create renderer
         renderer = Renderer(game)
+
+        # If game is already over, show game over screen directly
+        if game.game_over:
+            print(f"Loaded a completed game. Winner: Player {game.winner}")
+            game_over_menu = GameOverMenu(game.winner, game, renderer.screen)
+            result = game_over_menu.run()
+            pygame.quit()
+            return result if result else 'quit'
 
         # Create bots
         settings = get_settings()

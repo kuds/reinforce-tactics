@@ -1042,7 +1042,8 @@ class GameState:
             'fog_of_war': self.fog_of_war,
             'fog_of_war_method': self.fog_of_war_method,
             'units': [unit.to_dict() for unit in self.units],
-            'tiles': self.grid.to_dict()['tiles']
+            'tiles': self.grid.to_dict()['tiles'],
+            'action_history': self.action_history,
         }
 
     def to_numpy(self, for_player: Optional[int] = None) -> Dict[str, np.ndarray]:
@@ -1306,6 +1307,9 @@ class GameState:
                     tile.health = tile_data['health']
                 if tile_data.get('regenerating') is not None:
                     tile.regenerating = tile_data['regenerating']
+
+        # Restore action history (for continuing replay recording from a loaded save)
+        game.action_history = save_data.get('action_history', [])
 
         game._invalidate_cache()
         return game

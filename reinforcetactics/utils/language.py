@@ -72,6 +72,18 @@ TRANSLATIONS = {
         'save_game.enter_name': 'Enter save name:',
         'save_game.instructions': 'Press ENTER to save, ESC to cancel',
         'load_game.title': 'Load Game',
+        'load_game.status_in_progress': 'In Progress',
+        'load_game.status_completed': 'Completed',
+        'load_game.winner_label': 'Winner: Player {player}',
+        'load_game.completed_title': 'Completed Game',
+        'load_game.completed_confirm': 'This game is already over. Load anyway?',
+
+        # Quit Confirmation
+        'quit_confirm.title': 'Quit Game',
+        'quit_confirm.message': 'Save before quitting?',
+        'quit_confirm.save_quit': 'Save & Quit',
+        'quit_confirm.quit': 'Quit',
+        'quit_confirm.cancel': 'Cancel',
 
         # Language Menu
         'language.title': 'Select Language',
@@ -245,6 +257,18 @@ TRANSLATIONS = {
         'save_game.enter_name': 'Nom de la sauvegarde:',
         'save_game.instructions': 'Appuyez sur ENTRÉE pour sauvegarder, ESC pour annuler',
         'load_game.title': 'Charger Partie',
+        'load_game.status_in_progress': 'En Cours',
+        'load_game.status_completed': 'Terminée',
+        'load_game.winner_label': 'Gagnant: Joueur {player}',
+        'load_game.completed_title': 'Partie Terminée',
+        'load_game.completed_confirm': 'Cette partie est déjà terminée. Charger quand même?',
+
+        # Quit Confirmation
+        'quit_confirm.title': 'Quitter',
+        'quit_confirm.message': 'Sauvegarder avant de quitter?',
+        'quit_confirm.save_quit': 'Sauver & Quitter',
+        'quit_confirm.quit': 'Quitter',
+        'quit_confirm.cancel': 'Annuler',
 
         # Language Menu
         'language.title': 'Choisir la Langue',
@@ -418,6 +442,18 @@ TRANSLATIONS = {
         'save_game.enter_name': '저장 이름 입력:',
         'save_game.instructions': 'ENTER로 저장, ESC로 취소',
         'load_game.title': '게임 불러오기',
+        'load_game.status_in_progress': '진행 중',
+        'load_game.status_completed': '완료',
+        'load_game.winner_label': '승자: 플레이어 {player}',
+        'load_game.completed_title': '완료된 게임',
+        'load_game.completed_confirm': '이 게임은 이미 종료되었습니다. 그래도 불러오시겠습니까?',
+
+        # Quit Confirmation
+        'quit_confirm.title': '게임 종료',
+        'quit_confirm.message': '종료 전에 저장하시겠습니까?',
+        'quit_confirm.save_quit': '저장 후 종료',
+        'quit_confirm.quit': '종료',
+        'quit_confirm.cancel': '취소',
 
         # Language Menu
         'language.title': '언어 선택',
@@ -591,6 +627,18 @@ TRANSLATIONS = {
         'save_game.enter_name': 'Nombre del guardado:',
         'save_game.instructions': 'Presiona ENTER para guardar, ESC para cancelar',
         'load_game.title': 'Cargar Juego',
+        'load_game.status_in_progress': 'En Progreso',
+        'load_game.status_completed': 'Completado',
+        'load_game.winner_label': 'Ganador: Jugador {player}',
+        'load_game.completed_title': 'Juego Completado',
+        'load_game.completed_confirm': 'Este juego ya terminó. ¿Cargar de todos modos?',
+
+        # Quit Confirmation
+        'quit_confirm.title': 'Salir del Juego',
+        'quit_confirm.message': '¿Guardar antes de salir?',
+        'quit_confirm.save_quit': 'Guardar y Salir',
+        'quit_confirm.quit': 'Salir',
+        'quit_confirm.cancel': 'Cancelar',
 
         # Language Menu
         'language.title': 'Seleccionar Idioma',
@@ -728,6 +776,18 @@ TRANSLATIONS = {
         'save_game.enter_name': '输入存档名称：',
         'save_game.instructions': '按回车保存，按ESC取消',
         'load_game.title': '加载游戏',
+        'load_game.status_in_progress': '进行中',
+        'load_game.status_completed': '已完成',
+        'load_game.winner_label': '获胜者: 玩家 {player}',
+        'load_game.completed_title': '已完成的游戏',
+        'load_game.completed_confirm': '该游戏已经结束。是否仍要加载？',
+
+        # Quit Confirmation
+        'quit_confirm.title': '退出游戏',
+        'quit_confirm.message': '退出前是否保存？',
+        'quit_confirm.save_quit': '保存并退出',
+        'quit_confirm.quit': '退出',
+        'quit_confirm.cancel': '取消',
 
         # Language Menu
         'language.title': '选择语言',
