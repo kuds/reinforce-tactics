@@ -33,6 +33,7 @@ from reinforcetactics.ui.menus.in_game.game_over_menu import GameOverMenu
 from reinforcetactics.ui.menus.in_game.unit_purchase_menu import UnitPurchaseMenu
 from reinforcetactics.ui.menus.in_game.unit_action_menu import UnitActionMenu
 from reinforcetactics.ui.menus.in_game.confirmation_dialog import ConfirmationDialog
+from reinforcetactics.ui.menus.in_game.quit_confirm_dialog import QuitConfirmDialog
 
 __all__ = [
     # Base
@@ -59,4 +60,5 @@ __all__ = [
     'UnitPurchaseMenu',
     'UnitActionMenu',
     'ConfirmationDialog',
+    'QuitConfirmDialog',
 ]

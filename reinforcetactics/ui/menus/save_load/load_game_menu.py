@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.in_game.confirmation_dialog import ConfirmationDialog
 from reinforcetactics.ui.icons import get_arrow_up_icon, get_arrow_down_icon
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
@@ -220,7 +221,11 @@ class LoadGameMenu(Menu):
         if len(p2) > max_name_len:
             p2 = p2[:max_name_len-2] + ".."
 
-        return f"{date} - {p1} vs {p2}"
+        game_over = metadata.get('game_over', False)
+        base = f"{date} - {p1} vs {p2}"
+        if game_over:
+            base += " [END]"
+        return base
 
     def _setup_options(self) -> None:
         """Setup menu options for available save files."""
@@ -531,6 +536,40 @@ class LoadGameMenu(Menu):
         label_color = (180, 180, 180)
         value_color = (255, 255, 255)
 
+        # Game status
+        lang = get_language()
+        game_over = metadata.get('game_over', False)
+        winner = metadata.get('winner')
+
+        status_label = info_font.render("Status: ", True, label_color)
+        self.screen.blit(status_label, (info_x, info_y))
+
+        if game_over:
+            status_text = lang.get('load_game.status_completed', 'Completed')
+            status_color = (255, 100, 100)
+            status_value = info_font.render(status_text, True, status_color)
+            self.screen.blit(status_value, (info_x + status_label.get_width(), info_y))
+            info_y += line_spacing
+
+            if winner:
+                winner_label = info_font.render("Winner: ", True, label_color)
+                winner_value = info_font.render(
+                    f"Player {winner}", True,
+                    PLAYER_COLORS.get(winner, value_color)
+                )
+                self.screen.blit(winner_label, (info_x, info_y))
+                self.screen.blit(winner_value, (info_x + winner_label.get_width(), info_y))
+            else:
+                draw_text = info_font.render("Draw", True, (200, 200, 100))
+                self.screen.blit(draw_text, (info_x, info_y))
+            info_y += line_spacing
+        else:
+            status_text = lang.get('load_game.status_in_progress', 'In Progress')
+            status_color = (100, 255, 100)
+            status_value = info_font.render(status_text, True, status_color)
+            self.screen.blit(status_value, (info_x + status_label.get_width(), info_y))
+            info_y += line_spacing
+
         # Turn info
         turn_number = metadata.get('turn_number', 0)
         current_player = metadata.get('current_player', 1)
@@ -623,16 +662,39 @@ class LoadGameMenu(Menu):
         Returns:
             Dict with loaded save data, or None if cancelled
         """
-        selected_path = super().run()
+        while True:
+            selected_path = super().run()
 
-        if not selected_path:
-            return None
+            if not selected_path:
+                return None
 
-        # Load the actual save data from the file
-        try:
-            with open(selected_path, 'r', encoding='utf-8') as f:
-                save_data = json.load(f)
-            return save_data
-        except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
-            print(f"Error loading save file: {e}")
-            return None
+            # Check if this is a completed game and warn the user
+            metadata = self.save_metadata.get(selected_path, {})
+            if metadata.get('game_over', False):
+                lang = get_language()
+                winner = metadata.get('winner')
+                if winner:
+                    message = f"Player {winner} won. Load anyway?"
+                else:
+                    message = "Game ended in a draw. Load anyway?"
+
+                dialog = ConfirmationDialog(
+                    self.screen,
+                    lang.get('load_game.completed_title', 'Completed Game'),
+                    message,
+                    confirm_text=lang.get('common.confirm', 'Confirm'),
+                    cancel_text=lang.get('common.cancel', 'Cancel')
+                )
+                if not dialog.run():
+                    # User cancelled — reset and let them pick again
+                    self.running = True
+                    continue
+
+            # Load the actual save data from the file
+            try:
+                with open(selected_path, 'r', encoding='utf-8') as f:
+                    save_data = json.load(f)
+                return save_data
+            except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
+                print(f"Error loading save file: {e}")
+                return None
