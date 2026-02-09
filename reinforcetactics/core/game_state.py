@@ -520,10 +520,10 @@ class GameState:
                 else:
                     self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
 
-        # Always disable attacker actions after combat (even if dead, since external code
-        # like bots may still hold references and check these flags)
-        attacker.can_move = False
-        attacker.can_attack = False
+        # Disable attacker actions after combat (only if still alive)
+        if result['attacker_alive']:
+            attacker.can_move = False
+            attacker.can_attack = False
         self._invalidate_cache()
 
         return result

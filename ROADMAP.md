@@ -55,6 +55,13 @@ tracked here:
 - Self-play weight swap: `try/finally` guards for safe weight restoration
 - Improved exception handling with structured logging
 
+### Critical Bug Fix Round 2 ✅
+- Dead attacker state mutation: guard `can_move`/`can_attack` with `attacker_alive` check
+- ClaudeBot `max_tokens` crash: Anthropic API requires `max_tokens`; defaults to 4096 when None
+- Bare exception catch in `_execute_action`: `TypeError`/`AttributeError` now re-raised instead of silenced
+- Mountain vision bonus: `calculate_vision_radius()` now wired into `PlayerVisibility.update()` (mountain +1 range works)
+- Self-play `swap_players` fix: `agent_player` attribute added to `StrategyGameEnv`; `_execute_action`, `_get_obs`, `_compute_potential`, and `step()` use it instead of hardcoded player 1; `SelfPlayEnv` propagates `agent_player` to base env on reset
+
 ### Save/Load/Replay Improvements ✅
 - Save-before-quit prompt when exiting an active game
 - Replay auto-save after game completion

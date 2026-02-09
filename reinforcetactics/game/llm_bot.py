@@ -1366,14 +1366,13 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         # Prefill assistant response with "{" to guide JSON output
         user_messages.append({"role": "assistant", "content": "{"})
 
-        # Build request kwargs, conditionally including max_tokens and temperature
+        # Build request kwargs; Anthropic API requires max_tokens so default to 4096
         request_kwargs = {
             "model": self.model,
             "system": system_message,
             "messages": user_messages,
+            "max_tokens": self.max_tokens if self.max_tokens is not None else 4096,
         }
-        if self.max_tokens is not None:
-            request_kwargs["max_tokens"] = self.max_tokens
         if self.temperature is not None:
             request_kwargs["temperature"] = self.temperature
 
