@@ -645,9 +645,11 @@ class SelfPlayEnv(gym.Wrapper):
 
         # Optionally swap player order
         self.agent_player = 1  # Reset to default
+        self.env.agent_player = 1
         if self.swap_players and random.random() < 0.5:
             # Agent plays as player 2 this game
             self.agent_player = 2
+            self.env.agent_player = 2
             # Let opponent go first as player 1
             self._execute_opponent_turn()
             obs = self.env._get_obs()

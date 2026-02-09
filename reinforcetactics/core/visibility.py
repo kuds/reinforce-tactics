@@ -113,10 +113,12 @@ class VisibilityMap:
         # Step 2: Calculate new visibility
         self._current_visible.fill(False)
 
-        # Vision from units
+        # Vision from units (includes terrain bonuses like mountain +1)
         for unit in game_state.units:
             if unit.player == self.player:
-                vision_range = UNIT_VISION_RANGES.get(unit.type, 3)
+                tile = game_state.grid.get_tile(unit.x, unit.y)
+                tile_type = tile.type if tile else None
+                vision_range = calculate_vision_radius(unit.type, tile_type=tile_type)
                 self._add_vision_radius(unit.x, unit.y, vision_range)
 
         # Vision from structures
@@ -124,7 +126,8 @@ class VisibilityMap:
             for x in range(self.width):
                 tile = game_state.grid.get_tile(x, y)
                 if tile.player == self.player and tile.type in STRUCTURE_VISION_RANGES:
-                    vision_range = STRUCTURE_VISION_RANGES[tile.type]
+                    vision_range = calculate_vision_radius(
+                        tile.type, is_structure=True)
                     self._add_vision_radius(x, y, vision_range)
 
         # Step 3: Update state array
