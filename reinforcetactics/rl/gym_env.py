@@ -48,7 +48,7 @@ class StrategyGameEnv(gym.Env):
         map_file: Optional[str] = None,
         opponent: str = 'bot',  # 'bot', 'random', 'self', or None
         render_mode: Optional[str] = None,
-        max_steps: int = 500,
+        max_steps: int = 200,
         reward_config: Optional[Dict[str, float]] = None,
         hierarchical: bool = False,  # Enable for HRL
         goal_space_size: int = 64,  # For HRL goal space
@@ -106,12 +106,12 @@ class StrategyGameEnv(gym.Env):
         default_reward_config = {
             'win': 1000.0,
             'loss': -1000.0,
-            'draw': 0.0,
-            'income_diff': 0.1,
-            'unit_diff': 1.0,
-            'structure_control': 5.0,
+            'draw': -200.0,
+            'income_diff': 0.05,
+            'unit_diff': 0.3,
+            'structure_control': 1.0,
             'invalid_action': -10.0,
-            'turn_penalty': -0.1,
+            'turn_penalty': -1.0,
             # Action rewards (moved from hardcoded values for tunability)
             'create_unit': 2.0,
             'move': 0.1,
@@ -816,6 +816,11 @@ class StrategyGameEnv(gym.Env):
             else:
                 reward += self.reward_config['loss']
                 self.episode_stats['winner'] = self.game_state.winner
+        elif truncated:
+            # Truncation penalty: agent hit step limit without finishing the game.
+            # Without this, the agent has no incentive to end games decisively.
+            reward += self.reward_config.get('draw', 0.0)
+            self.episode_stats['winner'] = None
 
         # Get observation
         obs = self._get_obs()

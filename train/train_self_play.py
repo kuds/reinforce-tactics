@@ -576,7 +576,7 @@ def main():
     # Environment settings
     parser.add_argument('--n-envs', type=int, default=8,
                        help='Number of parallel environments')
-    parser.add_argument('--max-steps', type=int, default=500,
+    parser.add_argument('--max-steps', type=int, default=200,
                        help='Maximum steps per episode')
     parser.add_argument('--no-subprocess', action='store_true',
                        help='Use DummyVecEnv instead of SubprocVecEnv')
@@ -606,7 +606,7 @@ def main():
                        help='GAE lambda')
     parser.add_argument('--clip-range', type=float, default=0.2,
                        help='PPO clip range')
-    parser.add_argument('--ent-coef', type=float, default=0.01,
+    parser.add_argument('--ent-coef', type=float, default=0.05,
                        help='Entropy coefficient')
     parser.add_argument('--vf-coef', type=float, default=0.5,
                        help='Value function coefficient')

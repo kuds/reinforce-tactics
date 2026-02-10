@@ -117,7 +117,7 @@ def make_maskable_env(
     map_file: Optional[str] = None,
     opponent: str = 'bot',
     render_mode: Optional[str] = None,
-    max_steps: int = 500,
+    max_steps: int = 200,
     reward_config: Optional[Dict[str, float]] = None,
     track_stats: bool = False,
     enabled_units: Optional[List[str]] = None,
@@ -198,7 +198,7 @@ def make_maskable_vec_env(
     n_envs: int = 4,
     map_file: Optional[str] = None,
     opponent: str = 'bot',
-    max_steps: int = 500,
+    max_steps: int = 200,
     reward_config: Optional[Dict[str, float]] = None,
     seed: int = 0,
     use_subprocess: bool = True,
@@ -341,42 +341,45 @@ def make_curriculum_env(
     """
     difficulty_configs = {
         'easy': {
-            'opponent': 'bot',  # SimpleBot
-            'max_steps': 300,
+            'opponent': 'random',  # Start with random for easier wins
+            'max_steps': 200,
             'reward_config': {
                 'win': 1000.0,
                 'loss': -1000.0,
-                'income_diff': 0.2,  # Higher shaping rewards
-                'unit_diff': 2.0,
-                'structure_control': 10.0,
-                'invalid_action': -5.0,  # Lower penalty
-                'turn_penalty': -0.05
+                'draw': -100.0,  # Lighter truncation penalty
+                'income_diff': 0.1,
+                'unit_diff': 0.5,
+                'structure_control': 2.0,
+                'invalid_action': -5.0,
+                'turn_penalty': -0.5
             }
         },
         'medium': {
             'opponent': 'bot',
-            'max_steps': 400,
+            'max_steps': 200,
             'reward_config': {
                 'win': 1000.0,
                 'loss': -1000.0,
-                'income_diff': 0.1,
-                'unit_diff': 1.0,
-                'structure_control': 5.0,
+                'draw': -200.0,
+                'income_diff': 0.05,
+                'unit_diff': 0.3,
+                'structure_control': 1.0,
                 'invalid_action': -10.0,
-                'turn_penalty': -0.1
+                'turn_penalty': -1.0
             }
         },
         'hard': {
             'opponent': 'bot',
-            'max_steps': 500,
+            'max_steps': 300,
             'reward_config': {
                 'win': 1000.0,
                 'loss': -1000.0,
-                'income_diff': 0.05,  # Lower shaping (more sparse)
-                'unit_diff': 0.5,
-                'structure_control': 2.5,
-                'invalid_action': -15.0,  # Higher penalty
-                'turn_penalty': -0.2
+                'draw': -300.0,  # Harsher truncation penalty
+                'income_diff': 0.02,
+                'unit_diff': 0.1,
+                'structure_control': 0.5,
+                'invalid_action': -15.0,
+                'turn_penalty': -2.0
             }
         }
     }

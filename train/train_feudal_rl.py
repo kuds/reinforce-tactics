@@ -339,7 +339,7 @@ def main():
                        help='GAE lambda')
     parser.add_argument('--clip-range', type=float, default=0.2,
                        help='PPO clip range')
-    parser.add_argument('--ent-coef', type=float, default=0.01,
+    parser.add_argument('--ent-coef', type=float, default=0.05,
                        help='Entropy coefficient')
     parser.add_argument('--vf-coef', type=float, default=0.5,
                        help='Value function coefficient')
