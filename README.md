@@ -5,7 +5,8 @@
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/deploy-docusaurus.yml)](https://github.com/kuds/reinforce-tactics/actions/workflows/deploy-docusaurus.yml)
 [![Documentation](https://img.shields.io/badge/docs-reinforcetactics.com-blue)](https://reinforcetactics.com)
 
-![](images/reinforce_tactics_logo.svg)
+![](images/rt_demo.gif)
+<!-- ![](images/reinforce_tactics_logo.svg) -->
 
 A turn-based strategy game built with Pygame and Gymnasium for reinforcement learning research. Train RL agents, play against AI opponents (rule-based or LLM-powered), and experiment with tactical decision-making.
 
@@ -18,7 +19,7 @@ A turn-based strategy game built with Pygame and Gymnasium for reinforcement lea
 - **Replay System**: Record games and export to video
 - **Multi-language**: English, Korean, Spanish, French, Chinese
 
-![](images/rt_demo.gif)
+<!-- ![](images/rt_demo.gif) -->
 
 ## Installation
 
