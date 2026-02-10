@@ -129,32 +129,39 @@ class SimpleBot(BotUnitMixin):
 
     def purchase_units(self):
         """Purchase units based on priority from enabled types."""
-        legal_actions = self.game_state.get_legal_actions(self.bot_player)
-        create_actions = legal_actions['create_unit']
-        # Note: legal_actions already filters by enabled_units
+        while True:
+            legal_actions = self.game_state.get_legal_actions(self.bot_player)
+            create_actions = legal_actions['create_unit']
+            # Note: legal_actions already filters by enabled_units
 
-        if not create_actions:
-            return
-
-        # Sort by priority (lower = buy first), then by cost (cheaper first)
-        create_actions.sort(
-            key=lambda a: (
-                self.UNIT_PRIORITIES.get(a['unit_type'], 99),
-                UNIT_DATA[a['unit_type']]['cost']
-            )
-        )
-
-        for action in create_actions:
-            unit_cost = UNIT_DATA[action['unit_type']]['cost']
-            if self.game_state.player_gold[self.bot_player] >= unit_cost:
-                self.game_state.create_unit(
-                    action['unit_type'],
-                    action['x'],
-                    action['y'],
-                    self.bot_player
-                )
-                # Only buy one unit per turn for SimpleBot
+            if not create_actions:
                 break
+
+            available_gold = self.game_state.player_gold[self.bot_player]
+
+            # Filter to affordable units
+            affordable = [
+                a for a in create_actions
+                if UNIT_DATA[a['unit_type']]['cost'] <= available_gold
+            ]
+            if not affordable:
+                break
+
+            # Sort by priority (lower = buy first), then by cost (cheaper first)
+            affordable.sort(
+                key=lambda a: (
+                    self.UNIT_PRIORITIES.get(a['unit_type'], 99),
+                    UNIT_DATA[a['unit_type']]['cost']
+                )
+            )
+
+            action = affordable[0]
+            self.game_state.create_unit(
+                action['unit_type'],
+                action['x'],
+                action['y'],
+                self.bot_player
+            )
 
     def move_and_act_units(self):
         """Move and act with all bot units."""
@@ -182,6 +189,16 @@ class SimpleBot(BotUnitMixin):
                 self.act_with_unit(unit, _depth + 1)
             return
 
+        # Cleric: try to heal damaged allies or cure paralyzed allies
+        if unit.type == 'C' and unit.can_attack:
+            if self._try_cleric_abilities(unit, _depth):
+                return
+
+        # Mage: try to paralyze high-value enemies before normal attack
+        if unit.type == 'M' and unit.can_attack:
+            if self._try_mage_paralyze(unit, _depth):
+                return
+
         # Find best target
         target = self.find_best_target(unit)
 
@@ -196,6 +213,59 @@ class SimpleBot(BotUnitMixin):
             can_still_act = unit.end_unit_turn()
             if can_still_act:
                 self.act_with_unit(unit, _depth + 1)
+
+    def _try_cleric_abilities(self, unit, _depth=0):
+        """Try Cleric heal or cure on nearby allies. Returns True if ability used."""
+        # Priority 1: Cure paralyzed allies
+        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
+        if curable:
+            target = curable[0]
+            self.game_state.cure(unit, target)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit, _depth + 1)
+            return True
+
+        # Priority 2: Heal damaged allies
+        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
+        if healable:
+            # Heal the most damaged ally
+            target = min(healable, key=lambda a: a.health)
+            self.game_state.heal(unit, target)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit, _depth + 1)
+            return True
+
+        return False
+
+    def _try_mage_paralyze(self, unit, _depth=0):
+        """Try Mage paralyze on a high-value target. Returns True if used."""
+        if not unit.can_use_paralyze():
+            return False
+
+        enemies = [
+            u for u in self.game_state.units
+            if u.player != self.bot_player and u.health > 0
+            and not u.is_paralyzed()
+        ]
+        if not enemies:
+            return False
+
+        # Find enemies in range (Mage range 1-2)
+        in_range = []
+        for enemy in enemies:
+            dist = self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y)
+            if 1 <= dist <= 2:
+                in_range.append(enemy)
+
+        if not in_range:
+            return False
+
+        # Paralyze the most expensive enemy in range
+        target = max(in_range, key=lambda e: UNIT_DATA[e.type]['cost'])
+        self.game_state.paralyze(unit, target)
+        if unit.can_move or unit.can_attack:
+            self.act_with_unit(unit, _depth + 1)
+        return True
 
     def find_best_target(self, unit):
         """Find the best target for a unit (enemy unit or structure)."""
@@ -216,17 +286,19 @@ class SimpleBot(BotUnitMixin):
             for u in self.game_state.units if u.player != self.bot_player
         ]
 
-        # Find enemy structures
+        # Find capturable structures (enemy-owned and neutral)
         enemy_structures = []
         for row in self.game_state.grid.tiles:
             for tile in row:
-                if tile.player and tile.player != self.bot_player:
+                if tile.is_capturable() and tile.player != self.bot_player:
                     dist = self.manhattan_distance(unit.x, unit.y, tile.x, tile.y)
                     if tile.type == 't':
                         enemy_structures.append(('enemy_tower', tile, dist))
                     elif tile.type == 'b':
                         enemy_structures.append(('enemy_building', tile, dist))
-                    elif tile.type == 'h' and not opponent_has_bases and not opponent_has_units:
+                    elif tile.type == 'h' and tile.player is not None and (
+                        not opponent_has_bases or not opponent_has_units
+                    ):
                         enemy_structures.append(('enemy_hq', tile, dist))
 
         # Combine targets
