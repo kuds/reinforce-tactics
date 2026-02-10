@@ -10,9 +10,9 @@ import pandas as pd
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.ui.renderer import Renderer
 from reinforcetactics.ui.menus import (
-    MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu
+    MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu,
+    PauseMenu
 )
-from reinforcetactics.ui.menus.in_game.quit_confirm_dialog import QuitConfirmDialog
 from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.settings import get_settings
 from reinforcetactics.utils.replay_player import ReplayPlayer
@@ -57,6 +57,9 @@ class GameSession:  # pylint: disable=too-few-public-methods
         Returns:
             'new_game', 'main_menu', or 'quit' based on game over menu selection
         """
+        # Track why the loop exited (for mid-game exits)
+        self._exit_reason = 'quit'
+
         print("\n🎮 Game started!")
         print("Controls:")
         print("  - Click units to select")
@@ -65,7 +68,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
         print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
-        print("  - Press ESC to quit")
+        print("  - Press ESC to open pause menu")
         print()
 
         while self.running and not self.game.game_over:
@@ -74,22 +77,17 @@ class GameSession:  # pylint: disable=too-few-public-methods
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    quit_result = self._handle_quit_request()
-                    if quit_result == 'save_quit':
-                        self._handle_save_game()
-                        self.running = False
-                    elif quit_result == 'quit':
-                        self.running = False
+                    # Window close -> open pause menu for save/quit options
+                    pause_result = self._handle_pause()
+                    if pause_result:
+                        return pause_result
 
                 elif event.type == pygame.KEYDOWN:
                     result = self.input_handler.handle_keyboard_event(event)
-                    if result == 'quit':
-                        quit_result = self._handle_quit_request()
-                        if quit_result == 'save_quit':
-                            self._handle_save_game()
-                            self.running = False
-                        elif quit_result == 'quit':
-                            self.running = False
+                    if result == 'pause':
+                        pause_result = self._handle_pause()
+                        if pause_result:
+                            return pause_result
                     elif result == 'save':
                         self._handle_save_game()
 
@@ -124,12 +122,36 @@ class GameSession:  # pylint: disable=too-few-public-methods
             if replay_path:
                 print(f"Replay saved to {replay_path}")
 
-        return 'quit'
+        return self._exit_reason
 
-    def _handle_quit_request(self):
-        """Show quit confirmation dialog and return user choice."""
-        dialog = QuitConfirmDialog(self.renderer.screen)
-        return dialog.run()
+    def _handle_pause(self):
+        """
+        Show pause menu and handle the result.
+
+        Returns:
+            'main_menu' or 'quit' if the game session should end, None to resume.
+        """
+        pause_menu = PauseMenu(self.renderer.screen, self.game)
+        result = pause_menu.run()
+        pygame.event.clear()
+
+        if result == 'resume':
+            return None
+        elif result == 'save_quit':
+            self._handle_save_game()
+            self.running = False
+            self._exit_reason = 'quit'
+            return 'quit'
+        elif result == 'quit':
+            self.running = False
+            self._exit_reason = 'quit'
+            return 'quit'
+        elif result == 'main_menu':
+            self.running = False
+            self._exit_reason = 'main_menu'
+            return 'main_menu'
+
+        return None
 
     def _handle_save_game(self):
         """Handle save game request."""
@@ -350,7 +372,7 @@ def load_saved_game():
         print("  - Right-click and hold on a unit to preview attack range")
         print("  - Press SPACE to end turn")
         print("  - Press S to save game")
-        print("  - Press ESC to quit")
+        print("  - Press ESC to open pause menu")
         print()
 
         # Create and run game session

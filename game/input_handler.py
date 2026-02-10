@@ -63,7 +63,7 @@ class InputHandler:
             event: pygame.KEYDOWN event
 
         Returns:
-            'quit' if game should quit, 'save' if save requested, None otherwise
+            'pause' if pause menu should open, 'save' if save requested, None otherwise
         """
         if event.key == pygame.K_ESCAPE:
             if self.target_selection_mode:
@@ -83,7 +83,7 @@ class InputHandler:
                 self.active_menu = None
                 return None
             else:
-                return 'quit'
+                return 'pause'
 
         # Handle keyboard shortcuts for UnitActionMenu
         elif self.active_menu and isinstance(self.active_menu, UnitActionMenu):
