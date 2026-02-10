@@ -87,8 +87,10 @@ class ActionMaskedEnv(gym.Wrapper):
         """Execute action and optionally track statistics."""
         if self.track_stats:
             self.stats['total_actions'] += 1
-            action_type = int(action[0])
-            self.stats['action_type_distribution'][action_type] += 1
+            # For MultiDiscrete, action is an array; for flat Discrete, it's an int
+            if isinstance(action, np.ndarray) and action.ndim > 0:
+                action_type = int(action[0])
+                self.stats['action_type_distribution'][action_type] += 1
 
         return super().step(action)
 
@@ -118,7 +120,9 @@ def make_maskable_env(
     max_steps: int = 500,
     reward_config: Optional[Dict[str, float]] = None,
     track_stats: bool = False,
-    enabled_units: Optional[List[str]] = None
+    enabled_units: Optional[List[str]] = None,
+    action_space_type: str = 'multi_discrete',
+    max_flat_actions: int = 512
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -131,14 +135,18 @@ def make_maskable_env(
         reward_config: Custom reward configuration
         track_stats: Whether to track action masking statistics
         enabled_units: List of enabled unit types (default all)
+        action_space_type: 'multi_discrete' (default) or 'flat_discrete'
+        max_flat_actions: Max actions for flat_discrete mode (default 512)
 
     Returns:
         ActionMaskedEnv ready for training
 
     Example:
+        # MultiDiscrete (default, per-dimension masks):
         env = make_maskable_env(opponent="bot")
-        model = MaskablePPO("MultiInputPolicy", env)
-        model.learn(total_timesteps=10000)
+
+        # Flat Discrete (exact per-action masks, recommended):
+        env = make_maskable_env(opponent="bot", action_space_type="flat_discrete")
     """
     env = StrategyGameEnv(
         map_file=map_file,
@@ -146,7 +154,9 @@ def make_maskable_env(
         render_mode=render_mode,
         max_steps=max_steps,
         reward_config=reward_config,
-        enabled_units=enabled_units
+        enabled_units=enabled_units,
+        action_space_type=action_space_type,
+        max_flat_actions=max_flat_actions,
     )
     return ActionMaskedEnv(env, track_stats=track_stats)
 
@@ -158,7 +168,9 @@ def _make_env_fn(
     opponent: str,
     max_steps: int,
     reward_config: Optional[Dict[str, float]],
-    enabled_units: Optional[List[str]] = None
+    enabled_units: Optional[List[str]] = None,
+    action_space_type: str = 'multi_discrete',
+    max_flat_actions: int = 512
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -172,7 +184,9 @@ def _make_env_fn(
             render_mode=None,  # No rendering in vectorized envs
             max_steps=max_steps,
             reward_config=reward_config,
-            enabled_units=enabled_units
+            enabled_units=enabled_units,
+            action_space_type=action_space_type,
+            max_flat_actions=max_flat_actions,
         )
         env.reset(seed=seed + rank)
         wrapped = ActionMaskedEnv(env)
@@ -188,7 +202,9 @@ def make_maskable_vec_env(
     reward_config: Optional[Dict[str, float]] = None,
     seed: int = 0,
     use_subprocess: bool = True,
-    enabled_units: Optional[List[str]] = None
+    enabled_units: Optional[List[str]] = None,
+    action_space_type: str = 'multi_discrete',
+    max_flat_actions: int = 512
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -205,12 +221,15 @@ def make_maskable_vec_env(
         seed: Random seed (each env gets seed + rank)
         use_subprocess: Use SubprocVecEnv (True) or DummyVecEnv (False)
         enabled_units: List of enabled unit types (default all)
+        action_space_type: 'multi_discrete' (default) or 'flat_discrete'
+        max_flat_actions: Max actions for flat_discrete mode (default 512)
 
     Returns:
         Vectorized environment ready for MaskablePPO
 
     Example:
-        vec_env = make_maskable_vec_env(n_envs=8, opponent="bot")
+        vec_env = make_maskable_vec_env(n_envs=8, opponent="bot",
+                                         action_space_type="flat_discrete")
         model = MaskablePPO("MultiInputPolicy", vec_env)
         model.learn(total_timesteps=1000000)
     """
@@ -226,7 +245,10 @@ def make_maskable_vec_env(
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     env_fns = [
-        _make_env_fn(i, seed, map_file, opponent, max_steps, reward_config, enabled_units)
+        _make_env_fn(
+            i, seed, map_file, opponent, max_steps, reward_config,
+            enabled_units, action_space_type, max_flat_actions,
+        )
         for i in range(n_envs)
     ]
 
