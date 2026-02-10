@@ -81,7 +81,7 @@ class TestEnvironmentCreation:
         assert env.grid_width > 0
         assert env.grid_height > 0
         assert env.opponent_type == 'bot'
-        assert env.max_steps == 500
+        assert env.max_steps == 200
         assert env.current_step == 0
         assert env.hierarchical is False
         assert env.render_mode is None
