@@ -53,7 +53,9 @@ class StrategyGameEnv(gym.Env):
         hierarchical: bool = False,  # Enable for HRL
         goal_space_size: int = 64,  # For HRL goal space
         enabled_units: Optional[List[str]] = None,  # List of enabled unit types
-        fog_of_war: bool = False  # Enable fog of war
+        fog_of_war: bool = False,  # Enable fog of war
+        action_space_type: str = 'multi_discrete',  # 'multi_discrete' or 'flat_discrete'
+        max_flat_actions: int = 512  # Max actions for flat_discrete mode
     ):
         """
         Initialize environment.
@@ -68,6 +70,9 @@ class StrategyGameEnv(gym.Env):
             goal_space_size: Size of goal space for HRL
             enabled_units: List of enabled unit types (default all)
             fog_of_war: Enable fog of war for partial observability (default False)
+            action_space_type: 'multi_discrete' (per-dimension masks) or
+                'flat_discrete' (exact per-action masks, eliminates invalid actions)
+            max_flat_actions: Upper bound on legal actions per step for flat_discrete
         """
         super().__init__()
 
@@ -128,6 +133,11 @@ class StrategyGameEnv(gym.Env):
         # Previous potential for potential-based reward shaping (Phi(s) tracking)
         self._prev_potential = 0.0
 
+        # Action space configuration
+        self.action_space_type = action_space_type
+        self.max_flat_actions = max_flat_actions
+        self._current_actions = []  # Legal action list for flat_discrete mode
+
         # Grid dimensions
         self.grid_height = self.game_state.grid.height
         self.grid_width = self.game_state.grid.width
@@ -180,8 +190,12 @@ class StrategyGameEnv(gym.Env):
                     self.grid_height   # to_y
                 ])
             })
+        elif action_space_type == 'flat_discrete':
+            # Flat Discrete: each index maps to a specific legal action.
+            # Exact masking eliminates invalid actions entirely.
+            self.action_space = spaces.Discrete(max_flat_actions)
         else:
-            # Flat RL: Direct primitive actions
+            # MultiDiscrete: per-dimension masks (over-approximation)
             self.action_space = spaces.MultiDiscrete([
                 10,  # action_type (0-9)
                 8,  # unit_type (for create): W, M, C, A, K, R, S, B
@@ -208,8 +222,8 @@ class StrategyGameEnv(gym.Env):
 
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
-        # Simplified: num_action_types * grid_size^2 (approximate)
-        # 10 action types: create, move, attack, seize, heal, end_turn, paralyze, haste, defence_buff, attack_buff
+        if self.action_space_type == 'flat_discrete':
+            return self.max_flat_actions
         return 10 * self.grid_width * self.grid_height
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
@@ -270,7 +284,7 @@ class StrategyGameEnv(gym.Env):
         'attack':        (2,  'attacker',             'target'),
         'seize':         (3,  'unit',                 'tile'),
         'heal':          (4,  'healer',               'target'),
-        'cure':          (4,  'healer',               'target'),
+        'cure':          (4,  'curer',                'target'),
         'paralyze':      (6,  'paralyzer',            'target'),
         'haste':         (7,  'sorcerer',             'target'),
         'defence_buff':  (8,  'sorcerer',             'target'),
@@ -366,17 +380,81 @@ class StrategyGameEnv(gym.Env):
 
         return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
 
+    def _build_flat_actions(self):
+        """
+        Build flat list of all legal actions for Discrete action space mode.
+
+        Each action is stored as a numpy array [action_type, unit_type, from_x,
+        from_y, to_x, to_y] — the same format as MultiDiscrete actions — so that
+        ``_encode_action`` and ``_execute_action`` work unchanged.
+
+        End turn is always appended as the last action.
+        """
+        legal_actions = self.game_state.get_legal_actions(
+            player=self.agent_player
+        )
+
+        actions = []
+        seen = set()
+        unit_type_to_idx = {
+            'W': 0, 'M': 1, 'C': 2, 'A': 3,
+            'K': 4, 'R': 5, 'S': 6, 'B': 7,
+        }
+
+        def _pos(obj_or_dict, fields):
+            if isinstance(fields, str):
+                o = obj_or_dict[fields]
+                return o.x, o.y
+            return obj_or_dict[fields[0]], obj_or_dict[fields[1]]
+
+        for key, (at_idx, src_fields, tgt_fields) in self._ACTION_KEY_MAP.items():
+            for action in legal_actions.get(key, []):
+                tx, ty = _pos(action, tgt_fields)
+
+                if src_fields is not None:
+                    fx, fy = _pos(action, src_fields)
+                else:
+                    fx, fy = tx, ty  # create_unit: from = building position
+
+                ut_idx = 0
+                if key == 'create_unit':
+                    ut_idx = unit_type_to_idx.get(action['unit_type'], 0)
+
+                action_key = (at_idx, ut_idx, fx, fy, tx, ty)
+                if action_key not in seen:
+                    seen.add(action_key)
+                    actions.append(np.array(action_key, dtype=np.int32))
+
+        # End turn is always valid (last entry)
+        end_turn_key = (5, 0, 0, 0, 0, 0)
+        if end_turn_key not in seen:
+            actions.append(np.array(end_turn_key, dtype=np.int32))
+
+        if len(actions) > self.max_flat_actions:
+            logger.warning(
+                "Legal actions (%d) exceed max_flat_actions (%d), truncating. "
+                "Consider increasing max_flat_actions.",
+                len(actions), self.max_flat_actions,
+            )
+            actions = actions[:self.max_flat_actions]
+
+        self._current_actions = actions
+
     def _get_action_mask(self) -> np.ndarray:
         """
         Get binary mask of valid actions for the current player.
 
-        The action mask corresponds to the flattened action space of size 10 * W * H.
-        Each segment maps an action type to target positions on the grid.
+        For flat_discrete mode, returns mask of shape (max_flat_actions,) where
+        each True index maps to a legal game action.
 
-        Note: This is a "valid target" mask. It tells the agent *where* something can
-        happen, but implies *someone* can do it. The agent then picks
-        (ActionType, UnitType, From, To).
+        For multi_discrete mode, returns the flat target-based mask of size
+        (10 * W * H,).
         """
+        if self.action_space_type == 'flat_discrete':
+            self._build_flat_actions()
+            mask = np.zeros(self.max_flat_actions, dtype=np.float32)
+            mask[:len(self._current_actions)] = 1.0
+            return mask
         flat_mask, *_ = self._build_masks()
         return flat_mask
 
@@ -384,17 +462,21 @@ class StrategyGameEnv(gym.Env):
         """
         Get action masks for MaskablePPO (sb3-contrib).
 
-        For MultiDiscrete action space [action_type, unit_type, from_x, from_y, to_x, to_y],
-        returns a tuple of boolean arrays, one per dimension.
+        For flat_discrete mode, returns a single exact boolean mask where each
+        True index corresponds to a specific legal game action. This eliminates
+        invalid actions entirely.
 
-        Since action dimensions are interdependent (e.g., valid to_x/to_y depends on
-        action_type and from_x/from_y), we compute the UNION of all valid values
-        for each dimension. This is an over-approximation that still helps training
-        by eliminating clearly invalid options.
+        For multi_discrete mode, returns per-dimension boolean masks (union
+        over-approximation).
 
         Returns:
-            Tuple of 6 boolean numpy arrays for each action dimension
+            Tuple of boolean numpy arrays
         """
+        if self.action_space_type == 'flat_discrete':
+            self._build_flat_actions()
+            mask = np.zeros(self.max_flat_actions, dtype=bool)
+            mask[:len(self._current_actions)] = True
+            return (mask,)
         _, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask = self._build_masks()
         return (at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask)
 
@@ -522,7 +604,10 @@ class StrategyGameEnv(gym.Env):
                     if not self.game_state.game_over:
                         self._opponent_turn()
                         if not self.game_state.game_over:
-                            self.game_state.end_turn()
+                            # Only end turn if opponent didn't already (SimpleBot
+                            # calls end_turn() internally; random opponent does not)
+                            if self.game_state.current_player != self.agent_player:
+                                self.game_state.end_turn()
 
             elif action_type == 6:  # Paralyze (Mage/Sorcerer)
                 unit = self.game_state.get_unit_at_position(*from_pos)
@@ -685,7 +770,7 @@ class StrategyGameEnv(gym.Env):
 
         return reward
 
-    def step(self, action: np.ndarray) -> Tuple[Dict, float, bool, bool, Dict]:
+    def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
         """
         Execute one step.
 
@@ -698,6 +783,15 @@ class StrategyGameEnv(gym.Env):
         # In hierarchical mode, extract the primitive action from the Dict
         if self.hierarchical and isinstance(action, dict):
             action = action['primitive']
+
+        # For flat_discrete, map the integer index to the actual action array
+        if self.action_space_type == 'flat_discrete':
+            action_idx = int(action)
+            if 0 <= action_idx < len(self._current_actions):
+                action = self._current_actions[action_idx]
+            else:
+                # Out-of-range index — fallback to end_turn
+                action = np.array([5, 0, 0, 0, 0, 0])
 
         # Decode and execute action
         action_dict = self._encode_action(action)

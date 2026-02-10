@@ -919,13 +919,19 @@ class GameState:
                             x, y, self.grid, self.units, moving_unit=_u)
                     )
                     for pos in reachable:
-                        legal_actions['move'].append({
-                            'unit': unit,
-                            'from_x': unit.x,
-                            'from_y': unit.y,
-                            'to_x': pos[0],
-                            'to_y': pos[1]
-                        })
+                        # Only include positions that are valid as final destinations
+                        # (not occupied by any unit)
+                        if self.mechanics.can_move_to_position(
+                            pos[0], pos[1], self.grid, self.units,
+                            moving_unit=unit, is_destination=True
+                        ):
+                            legal_actions['move'].append({
+                                'unit': unit,
+                                'from_x': unit.x,
+                                'from_y': unit.y,
+                                'to_x': pos[0],
+                                'to_y': pos[1]
+                            })
 
                 # Combat actions
                 if unit.can_attack:
