@@ -128,8 +128,9 @@ This is the highest-leverage work. The code exists; it just needs to be made acc
 
 ### 2.1 Beginner RL Environment ⬚
 **Priority:** High — single most impactful change for newcomers.
-- Create `StrategyGameEnvSimple` (or a config preset): 8x8 map, 2 unit types
-  (Warrior + Archer), no special abilities, smaller action space.
+- Create `StrategyGameEnvSimple` (or a config preset): 6x6 map (the existing
+  `maps/1v1/beginner.csv`), 2 unit types (Warrior + Archer), no special abilities,
+  smaller action space.
 - PPO should converge to >70% win rate against `SimpleBot` in <50K steps on this env.
 - Ship with a script: `examples/train_beginner.py` that runs in ~5 minutes on CPU.
 - Document expected output in the docs site.
@@ -188,13 +189,65 @@ Deepen the RL capabilities and ship pre-trained artifacts.
 - Add `examples/play_against_model.py` that loads a model and renders a game.
 - Users can immediately see what different training budgets produce.
 
-### 3.2 Auto-Regressive Action Head ⬚
-**Priority:** Medium-High — the single biggest RL architecture improvement.
-- Replace flat MultiDiscrete with sequential: predict `action_type` → sample →
-  predict `from_pos` conditioned on action_type → sample → predict `to_pos` → sample.
-- Each sub-head gets its own mask (exact, not over-approximated).
-- This is a significant effort but will dramatically improve training sample efficiency.
-- Document the architecture and comparison against flat action space.
+### 3.2 Auto-Regressive Action Decomposition ⬚
+**Priority:** **High — prerequisite before training on 10x14+ and 20x20 maps.**
+
+The current MultiDiscrete space (10 × 8 × W × H × W × H) with independent per-dimension
+masking suffers from combinatorial explosion on larger maps:
+
+| Map size | Combinations | Per-dim mask over-approx |
+|----------|-------------|--------------------------|
+| 6×6      | 288K        | Manageable               |
+| 10×14    | 1.6M        | Significant              |
+| 20×20    | 12.8M       | Severe                   |
+
+Auto-regressive decomposition keeps each step small (≤20 choices) regardless of map size
+and enables *exact* conditional masking that eliminates all invalid action combinations.
+
+**Decomposition order:**
+```
+action_type(10) → from_x(W) → from_y(H) → unit_type(8) → to_x(W) → to_y(H)
+```
+
+Each dimension is sampled conditioned on all prior choices:
+`P(at) → P(fx|at) → P(fy|at,fx) → P(ut|at,fx,fy) → P(tx|...) → P(ty|...)`
+
+**Implementation steps (6 sub-tasks):**
+
+1. **Conditional mask builder** (`gym_env.py`) — precompute a nested lookup from
+   `get_legal_actions()` so that, given choices so far, the exact valid mask for the
+   next dimension can be retrieved in O(1). Same single `get_legal_actions()` call per
+   step as the current `_build_masks()`. (~80 lines)
+
+2. **Auto-regressive policy network** (`reinforcetactics/rl/autoregressive.py`) — new
+   module. Shared CNN+MLP backbone produces hidden state; 6 sequential MLP heads each
+   take the hidden state plus learned embeddings of all previously sampled dimensions.
+   Conditional masks applied as logit masking before sampling. Includes `sample_action()`
+   and `evaluate_action()` for PPO. (~250 lines)
+
+3. **Feudal RL integration** (`feudal_rl.py`) — add `autoregressive=True` flag to
+   `FeudalRLAgent`. When enabled, `AutoRegressiveWorker` replaces the independent-head
+   `WorkerNetwork`. Per-dimension masks stored in the rollout buffer alongside actions
+   (small cost: 6 bool arrays per step vs. 20×20×3 float32 observation tensors). (~150
+   lines modified)
+
+4. **Standalone PPO mode** — add `action_space_type='autoregressive'` to
+   `StrategyGameEnv`, create SB3-compatible policy wrapper so auto-regressive
+   decomposition works without the feudal hierarchy. Update `masking.py`. (~150 lines)
+
+5. **Training CLI** — add `--autoregressive`, `--ar-embedding-dim`, `--ar-head-hidden`
+   flags to `train/train_feudal_rl.py`. Add `--mode autoregressive` for standalone
+   non-feudal training. (~50 lines)
+
+6. **Tests** (`tests/test_autoregressive.py`) — conditional mask exactness, network
+   output shapes, gradient flow, round-trip validity (sampled action ∈ legal actions),
+   evaluate/sample log-prob consistency, 20×20 smoke test. (~200 lines)
+
+**Scaling note:** Sequential sampling (6 small MLP forwards) is negligible overhead
+for a turn-based game. The CNN backbone dominates inference time regardless.
+
+**Prerequisite for:** Training on maps larger than 6×6 at competitive sample efficiency.
+Should be completed before large-map curriculum stages in Phase 5.1.
 
 ### 3.3 AlphaZero & Feudal RL Documentation 🟡
 **Priority:** Medium — these are impressive but invisible.
@@ -217,8 +270,9 @@ Deepen the RL capabilities and ship pre-trained artifacts.
   - Value function estimate (if available)
 - Toggle with a keyboard shortcut during evaluation.
 
-**Milestone:** At the end of Phase 3, the project has a model zoo, improved RL architecture,
-and documentation for advanced topics.
+**Milestone:** At the end of Phase 3, the project has a model zoo, auto-regressive action
+decomposition enabling large-map training (10×14, 20×20), and documentation for advanced
+topics.
 
 ---
 
@@ -272,12 +326,16 @@ Bigger efforts that grow the project's reach and research utility.
 **Priority:** Medium — makes the project course-ready.
 - Formalize the progressive environments from Phase 2 into a `CurriculumEnv` that
   automatically advances difficulty when the agent reaches a win-rate threshold.
-- Stages: tiny map → small map → full map; warriors only → all units; no fog → fog of war.
+- Stages: 6×6 map → 10×14 map → 20×20 map; warriors only → all units; no fog → fog of war.
 - Track and visualize progress across stages.
 
 > **Note:** `make_curriculum_env()` in `masking.py` provides difficulty presets
 > (easy/medium/hard), but auto-advancement based on win-rate thresholds is not
 > implemented.
+>
+> **Dependency:** The 10×14 and 20×20 map stages require Phase 3.2 (Auto-Regressive
+> Action Decomposition) to be completed first. Without it, the combinatorial action
+> space makes training on large maps impractical.
 
 ### 5.2 Multi-Agent RL (3+ Players) 🟡
 **Priority:** Medium — opens up MARL research.
@@ -336,13 +394,18 @@ Based on current progress, the highest-impact work to tackle next:
    Publishing reference training curves unblocks users from validating their own runs.
 
 2. **Phase 2.1 — Beginner RL Environment**: The single most impactful change for
-   newcomers. A simplified 8x8 environment with fast convergence lowers the barrier
+   newcomers. A simplified 6×6 environment with fast convergence lowers the barrier
    to entry dramatically.
 
 3. **Phase 2.2 — Core RL Documentation**: Five documentation pages that make the
    existing RL infrastructure accessible. The code is solid; the docs are the gap.
 
-4. **Phase 3.3 — AlphaZero & Feudal RL Docs**: Both algorithms are fully implemented
+4. **Phase 3.2 — Auto-Regressive Action Decomposition**: The critical path item for
+   scaling beyond 6×6 maps. Must be completed before training on 10×14 or 20×20 maps
+   (Phase 5.1 curriculum stages). Current per-dimension masking over-approximation
+   becomes severe at larger map sizes (12.8M combinations at 20×20).
+
+5. **Phase 3.3 — AlphaZero & Feudal RL Docs**: Both algorithms are fully implemented
    and tested but have zero documentation. Writing these pages would surface work
    that's already done.
 
