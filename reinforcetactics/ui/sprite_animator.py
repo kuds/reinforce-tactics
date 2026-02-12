@@ -34,14 +34,16 @@ class SpriteAnimator:
     updates correctly at each waypoint.
     """
 
-    def __init__(self, sprites_path):
+    def __init__(self, sprites_path, headless=False):
         """
         Initialize the sprite animator.
 
         Args:
             sprites_path: Base path to sprite sheet directory
+            headless: If True, skip convert_alpha() for offscreen rendering
         """
         self.sprites_path = sprites_path
+        self.headless = headless
 
         # Base (uncoloured) frames: unit_type -> {state -> [frames]}
         self.sprite_sheets = {}
@@ -94,7 +96,9 @@ class SpriteAnimator:
         for filename in possible_names:
             full_path = os.path.join(self.sprites_path, filename)
             try:
-                sheet_surface = pygame.image.load(full_path).convert_alpha()
+                sheet_surface = pygame.image.load(full_path)
+                if not self.headless:
+                    sheet_surface = sheet_surface.convert_alpha()
                 break
             except (pygame.error, FileNotFoundError):
                 continue

@@ -20,7 +20,7 @@ from reinforcetactics.ui.sprite_animator import SpriteAnimator
 class Renderer:
     """Handles all Pygame rendering."""
 
-    def __init__(self, game_state, replay_mode=False, viewing_player=None):
+    def __init__(self, game_state, replay_mode=False, viewing_player=None, headless=False):
         """
         Initialize the renderer.
 
@@ -29,10 +29,13 @@ class Renderer:
             replay_mode: If True, skip rendering gameplay controls (End Turn, Resign)
             viewing_player: Player whose perspective to render (for fog of war).
                            If None, shows current player's view (or omniscient if no FOW).
+            headless: If True, render to an offscreen surface without opening a window.
+                     Useful for recording videos in notebooks or CI environments.
         """
         self.game_state = game_state
         self.replay_mode = replay_mode
         self.viewing_player = viewing_player  # For FOW perspective
+        self.headless = headless
 
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
@@ -41,15 +44,20 @@ class Renderer:
         # Setup display
         screen_width = game_state.grid.width * TILE_SIZE
         screen_height = game_state.grid.height * TILE_SIZE
-        self.screen = pygame.display.set_mode((screen_width, screen_height))
-        pygame.display.set_caption("Reinforce Tactics")
+        if headless:
+            # Offscreen rendering: plain Surface, no window
+            self.screen = pygame.Surface((screen_width, screen_height))
+        else:
+            self.screen = pygame.display.set_mode((screen_width, screen_height))
+            pygame.display.set_caption("Reinforce Tactics")
 
         # Initialize clipboard support
-        try:
-            pygame.scrap.init()
-        except pygame.error:
-            # Clipboard not available on this platform
-            pass
+        if not headless:
+            try:
+                pygame.scrap.init()
+            except pygame.error:
+                # Clipboard not available on this platform
+                pass
 
         # Load settings
         self.settings = get_settings()
@@ -95,7 +103,9 @@ class Renderer:
                 else:
                     full_path = filename
 
-                image = pygame.image.load(full_path).convert_alpha()
+                image = pygame.image.load(full_path)
+                if not self.headless:
+                    image = image.convert_alpha()
                 base_surface = pygame.transform.scale(image, (TILE_SIZE, TILE_SIZE))
                 tile_images[tile_type] = base_surface
                 variants.append(base_surface)
@@ -110,7 +120,9 @@ class Renderer:
                     variant_name = f"{stem}_{num}{ext}"
                     variant_path = os.path.join(tile_sprites_path, variant_name)
                     try:
-                        img = pygame.image.load(variant_path).convert_alpha()
+                        img = pygame.image.load(variant_path)
+                    if not self.headless:
+                        img = img.convert_alpha()
                         variants.append(
                             pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
                         )
@@ -214,7 +226,7 @@ class Renderer:
         if not animation_path:
             return None
 
-        return SpriteAnimator(animation_path)
+        return SpriteAnimator(animation_path, headless=self.headless)
 
     def reload_sprites(self):
         """Reload sprites after settings change."""
@@ -624,8 +636,8 @@ class Renderer:
         pygame.draw.rect(self.screen, (100, 150, 200), turn_bg_rect, 2)
         self.screen.blit(turn_surface, turn_rect)
 
-        # Skip End Turn and Resign buttons in replay mode
-        if self.replay_mode:
+        # Skip End Turn and Resign buttons in replay mode or headless mode
+        if self.replay_mode or self.headless:
             return
 
         # Draw End Turn button
