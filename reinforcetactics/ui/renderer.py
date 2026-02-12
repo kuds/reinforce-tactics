@@ -121,8 +121,8 @@ class Renderer:
                     variant_path = os.path.join(tile_sprites_path, variant_name)
                     try:
                         img = pygame.image.load(variant_path)
-                    if not self.headless:
-                        img = img.convert_alpha()
+                        if not self.headless:
+                            img = img.convert_alpha()
                         variants.append(
                             pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
                         )
