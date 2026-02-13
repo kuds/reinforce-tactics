@@ -409,9 +409,9 @@ def train_mixed(args) -> Path:
     This approach maintains performance against fixed strategies (bots)
     while also improving through self-play.
     """
-    logger.info("\n" + "=" * 60)
+    logger.info("\n%s", "=" * 60)
     logger.info("Mixed Training (Self-Play + Bots)")
-    logger.info("=" * 60 + "\n")
+    logger.info("%s\n", "=" * 60)
 
     # Create output directories
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
