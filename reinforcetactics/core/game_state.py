@@ -165,6 +165,23 @@ class GameState:
         self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
+    def _check_player_eliminated(self, defeated_player: int) -> None:
+        """Check if a player has been eliminated and determine winner if appropriate.
+
+        For 2-player games, the other player wins immediately.
+        For 3+ player games, a winner is only declared when exactly one player remains.
+        """
+        remaining_units = [u for u in self.units if u.player == defeated_player]
+        if len(remaining_units) == 0:
+            if self.num_players == 2:
+                self.game_over = True
+                self.winner = 2 if defeated_player == 1 else 1
+            else:
+                active_players = set(u.player for u in self.units)
+                if len(active_players) == 1:
+                    self.game_over = True
+                    self.winner = active_players.pop()
+
     def update_visibility(self, player: Optional[int] = None) -> None:
         """
         Update visibility maps for fog of war.
@@ -490,16 +507,7 @@ class GameState:
             defeated_player = target.player
             self.units.remove(target)
             self._invalidate_cache()
-
-            # Check if defeated player has any remaining units
-            remaining_units = [u for u in self.units if u.player == defeated_player]
-            if len(remaining_units) == 0:
-                self.game_over = True
-                # Determine winner using same logic as resign method
-                if self.num_players == 2:
-                    self.winner = 2 if defeated_player == 1 else 1
-                else:
-                    self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
+            self._check_player_eliminated(defeated_player)
 
         if not result['attacker_alive']:
             attacker_tile = self.grid.get_tile(attacker.x, attacker.y)
@@ -509,16 +517,7 @@ class GameState:
             if attacker in self.units:
                 self.units.remove(attacker)
             self._invalidate_cache()
-
-            # Check if defeated player has any remaining units
-            remaining_units = [u for u in self.units if u.player == defeated_player]
-            if len(remaining_units) == 0:
-                self.game_over = True
-                # Determine winner using same logic as resign method
-                if self.num_players == 2:
-                    self.winner = 2 if defeated_player == 1 else 1
-                else:
-                    self.winner = defeated_player + 1 if defeated_player < self.num_players else 1
+            self._check_player_eliminated(defeated_player)
 
         # Disable attacker actions after combat (only if still alive)
         if result['attacker_alive']:
@@ -860,12 +859,18 @@ class GameState:
 
         self.record_action('resign', player=player)
 
+        # Remove resigning player's units
+        self.units = [u for u in self.units if u.player != player]
+        self._invalidate_cache()
+
         if self.num_players == 2:
+            self.game_over = True
             self.winner = 2 if player == 1 else 1
         else:
-            self.winner = player + 1 if player < self.num_players else 1
-
-        self.game_over = True
+            active_players = set(u.player for u in self.units)
+            if len(active_players) <= 1:
+                self.game_over = True
+                self.winner = active_players.pop() if active_players else None
 
     def get_legal_actions(self, player: Optional[int] = None) -> Dict[str, List[Any]]:
         """

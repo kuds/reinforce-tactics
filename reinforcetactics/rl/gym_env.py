@@ -363,9 +363,9 @@ class StrategyGameEnv(gym.Env):
                 if key == 'create_unit':
                     ut_mask[unit_type_to_idx.get(action['unit_type'], 0)] = True
 
-        # 5: End Turn — always valid
+        # 5: End Turn — always valid (single canonical entry at position 0,0)
         at_mask[5] = True
-        flat_mask[5 * area: 6 * area] = 1.0
+        flat_mask[5 * area] = 1.0
         fx_mask[0] = True
         fy_mask[0] = True
         tx_mask[0] = True
