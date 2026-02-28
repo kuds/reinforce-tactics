@@ -162,6 +162,83 @@ class MCTSNode:
         return flat_map
 
 
+def _find_unit_at(game_state, x: int, y: int):
+    """Find a unit at the given position in the game state."""
+    for unit in game_state.units:
+        if unit.x == x and unit.y == y:
+            return unit
+    return None
+
+
+def _resolve_action_refs(game_state, action_key: str, action_data: dict) -> dict:
+    """Re-resolve unit/tile references to point to objects in the given game state.
+
+    After deepcopy, action_data still references objects from the original state.
+    This function creates a new action_data dict with references resolved against
+    the new (deepcopied) game state.
+    """
+    if action_key in ('create_unit', 'end_turn'):
+        return action_data
+
+    resolved = dict(action_data)
+
+    if action_key == 'move':
+        unit = _find_unit_at(game_state, action_data['unit'].x, action_data['unit'].y)
+        if unit is None:
+            raise ValueError(f"Cannot resolve unit at ({action_data['unit'].x}, {action_data['unit'].y})")
+        resolved['unit'] = unit
+
+    elif action_key == 'attack':
+        attacker = _find_unit_at(game_state, action_data['attacker'].x, action_data['attacker'].y)
+        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+        if attacker is None or target is None:
+            raise ValueError("Cannot resolve attacker or target for attack action")
+        resolved['attacker'] = attacker
+        resolved['target'] = target
+
+    elif action_key == 'seize':
+        unit = _find_unit_at(game_state, action_data['unit'].x, action_data['unit'].y)
+        if unit is None:
+            raise ValueError("Cannot resolve unit for seize action")
+        resolved['unit'] = unit
+        tile = game_state.grid.get_tile(action_data['tile'].x, action_data['tile'].y)
+        resolved['tile'] = tile
+
+    elif action_key == 'heal':
+        healer = _find_unit_at(game_state, action_data['healer'].x, action_data['healer'].y)
+        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+        if healer is None or target is None:
+            raise ValueError("Cannot resolve healer or target for heal action")
+        resolved['healer'] = healer
+        resolved['target'] = target
+
+    elif action_key == 'cure':
+        curer = _find_unit_at(game_state, action_data['curer'].x, action_data['curer'].y)
+        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+        if curer is None or target is None:
+            raise ValueError("Cannot resolve curer or target for cure action")
+        resolved['curer'] = curer
+        resolved['target'] = target
+
+    elif action_key == 'paralyze':
+        paralyzer = _find_unit_at(game_state, action_data['paralyzer'].x, action_data['paralyzer'].y)
+        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+        if paralyzer is None or target is None:
+            raise ValueError("Cannot resolve paralyzer or target for paralyze action")
+        resolved['paralyzer'] = paralyzer
+        resolved['target'] = target
+
+    elif action_key in ('haste', 'defence_buff', 'attack_buff'):
+        sorcerer = _find_unit_at(game_state, action_data['sorcerer'].x, action_data['sorcerer'].y)
+        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+        if sorcerer is None or target is None:
+            raise ValueError(f"Cannot resolve sorcerer or target for {action_key} action")
+        resolved['sorcerer'] = sorcerer
+        resolved['target'] = target
+
+    return resolved
+
+
 def _execute_action_on_state(game_state, action_key: str, action_data: dict) -> None:
     """Execute a structured action on a game state (mutates in place)."""
     if action_key == 'create_unit':
@@ -421,7 +498,7 @@ class MCTS:
             if child.visit_count > 0:
                 q = child.q_value
                 # Flip value if child is opponent's turn
-                if child.player != node.player and child.game_state is not None:
+                if child.player != node.player:
                     q = -q
             else:
                 q = 0.0
@@ -439,10 +516,15 @@ class MCTS:
             best_child.game_state = copy.deepcopy(node.game_state)
             action_info = best_child._action_info  # noqa: SLF001
             try:
-                _execute_action_on_state(
+                resolved = _resolve_action_refs(
                     best_child.game_state,
                     action_info['key'],
                     action_info['action'],
+                )
+                _execute_action_on_state(
+                    best_child.game_state,
+                    action_info['key'],
+                    resolved,
                 )
             except Exception:
                 # If action fails, treat as terminal loss

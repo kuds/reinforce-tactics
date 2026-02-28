@@ -442,9 +442,10 @@ class SelfPlayEnv(gym.Wrapper):
             global_feats[5] = 3 - global_feats[5]  # 1 -> 2, 2 -> 1
             flipped['global_features'] = global_feats
 
-        # Action mask: recalculate for opponent's perspective
+        # Action mask: recalculate from the game state for the current player.
+        # The mask from _get_obs() may be for the agent, not the opponent.
         if 'action_mask' in obs:
-            flipped['action_mask'] = obs['action_mask'].copy()
+            flipped['action_mask'] = self.env._get_action_mask()
 
         return flipped
 
@@ -494,7 +495,7 @@ class SelfPlayEnv(gym.Wrapper):
     def _get_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
         """Get observation from a specific player's perspective."""
         obs = self.env._get_obs()
-        if player == 2:
+        if player != self.agent_player:
             obs = self._flip_observation(obs)
         return obs
 
