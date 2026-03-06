@@ -7,6 +7,20 @@ from typing import Optional
 import pygame
 
 
+def init_clipboard() -> None:
+    """Initialize clipboard support (pygame.scrap).
+
+    Safe to call multiple times; does nothing if already initialized
+    or if clipboard is unavailable on the current platform.
+    """
+    try:
+        if not pygame.scrap.get_init():
+            pygame.scrap.init()
+    except pygame.error:
+        # Clipboard not available on this platform
+        pass
+
+
 def get_clipboard_text() -> Optional[str]:
     """
     Get text from the system clipboard.

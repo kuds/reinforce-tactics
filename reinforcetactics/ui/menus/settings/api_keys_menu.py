@@ -5,7 +5,7 @@ from typing import Optional
 import pygame
 
 from reinforcetactics.ui.icons import get_checkmark_icon, get_x_icon
-from reinforcetactics.utils.clipboard import get_clipboard_text
+from reinforcetactics.utils.clipboard import get_clipboard_text, init_clipboard
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
@@ -29,12 +29,7 @@ class APIKeysMenu:
         if self.owns_screen:
             self.screen = pygame.display.set_mode((900, 700))
             pygame.display.set_caption("Reinforce Tactics - API Keys")
-            # Initialize clipboard support when we own the screen
-            try:
-                pygame.scrap.init()
-            except pygame.error:
-                # Clipboard not available on this platform
-                pass
+            init_clipboard()
         else:
             self.screen = screen
 
