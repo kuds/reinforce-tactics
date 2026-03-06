@@ -827,8 +827,16 @@ def make_self_play_vec_env(
 
     env_fns = [
         _make_self_play_env_fn(
-            i, seed, map_file, max_steps, reward_config, opponent_pool,
-            swap_players, enabled_units, action_space_type, max_flat_actions,
+            i,
+            seed,
+            map_file,
+            max_steps,
+            reward_config,
+            opponent_pool,
+            swap_players,
+            enabled_units,
+            action_space_type,
+            max_flat_actions,
         )
         for i in range(n_envs)
     ]
