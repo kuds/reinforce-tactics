@@ -34,21 +34,29 @@ class MCTSNode:
     """
 
     __slots__ = [
-        'parent', 'action', 'children', 'visit_count', 'value_sum',
-        'prior', 'game_state', 'player', 'is_terminal', '_legal_actions_cache',
-        '_action_info',
+        "parent",
+        "action",
+        "children",
+        "visit_count",
+        "value_sum",
+        "prior",
+        "game_state",
+        "player",
+        "is_terminal",
+        "_legal_actions_cache",
+        "_action_info",
     ]
 
     def __init__(
         self,
         game_state,
-        parent: Optional['MCTSNode'] = None,
+        parent: Optional["MCTSNode"] = None,
         action: Optional[int] = None,
         prior: float = 0.0,
     ):
         self.parent = parent
         self.action = action  # flat action index that led to this node
-        self.children: Dict[int, 'MCTSNode'] = {}  # flat_action -> child node
+        self.children: Dict[int, "MCTSNode"] = {}  # flat_action -> child node
         self.visit_count: int = 0
         self.value_sum: float = 0.0
         self.prior: float = prior
@@ -88,75 +96,75 @@ class MCTSNode:
 
         # Map structured actions to flat indices
         # 0: Create unit
-        for action in legal_actions.get('create_unit', []):
-            idx = flat_idx(0, action['x'], action['y'])
+        for action in legal_actions.get("create_unit", []):
+            idx = flat_idx(0, action["x"], action["y"])
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'create_unit', 'action': action}
+                flat_map[idx] = {"key": "create_unit", "action": action}
 
         # 1: Move
-        for action in legal_actions.get('move', []):
-            idx = flat_idx(1, action['to_x'], action['to_y'])
+        for action in legal_actions.get("move", []):
+            idx = flat_idx(1, action["to_x"], action["to_y"])
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'move', 'action': action}
+                flat_map[idx] = {"key": "move", "action": action}
 
         # 2: Attack
-        for action in legal_actions.get('attack', []):
-            target = action['target']
+        for action in legal_actions.get("attack", []):
+            target = action["target"]
             idx = flat_idx(2, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'attack', 'action': action}
+                flat_map[idx] = {"key": "attack", "action": action}
 
         # 3: Seize
-        for action in legal_actions.get('seize', []):
-            tile = action['tile']
+        for action in legal_actions.get("seize", []):
+            tile = action["tile"]
             idx = flat_idx(3, tile.x, tile.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'seize', 'action': action}
+                flat_map[idx] = {"key": "seize", "action": action}
 
         # 4: Heal / Cure
-        for action in legal_actions.get('heal', []):
-            target = action['target']
+        for action in legal_actions.get("heal", []):
+            target = action["target"]
             idx = flat_idx(4, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'heal', 'action': action}
+                flat_map[idx] = {"key": "heal", "action": action}
 
-        for action in legal_actions.get('cure', []):
-            target = action['target']
+        for action in legal_actions.get("cure", []):
+            target = action["target"]
             idx = flat_idx(4, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'cure', 'action': action}
+                flat_map[idx] = {"key": "cure", "action": action}
 
         # 5: End turn — map to a single canonical index (0, 0)
         idx = flat_idx(5, 0, 0)
-        flat_map[idx] = {'key': 'end_turn', 'action': {}}
+        flat_map[idx] = {"key": "end_turn", "action": {}}
 
         # 6: Paralyze
-        for action in legal_actions.get('paralyze', []):
-            target = action['target']
+        for action in legal_actions.get("paralyze", []):
+            target = action["target"]
             idx = flat_idx(6, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'paralyze', 'action': action}
+                flat_map[idx] = {"key": "paralyze", "action": action}
 
         # 7: Haste
-        for action in legal_actions.get('haste', []):
-            target = action['target']
+        for action in legal_actions.get("haste", []):
+            target = action["target"]
             idx = flat_idx(7, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'haste', 'action': action}
+                flat_map[idx] = {"key": "haste", "action": action}
 
         # 8: Defence buff
-        for action in legal_actions.get('defence_buff', []):
-            target = action['target']
+        for action in legal_actions.get("defence_buff", []):
+            target = action["target"]
             idx = flat_idx(8, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'defence_buff', 'action': action}
+                flat_map[idx] = {"key": "defence_buff", "action": action}
 
         # 9: Attack buff
-        for action in legal_actions.get('attack_buff', []):
-            target = action['target']
+        for action in legal_actions.get("attack_buff", []):
+            target = action["target"]
             idx = flat_idx(9, target.x, target.y)
             if idx not in flat_map:
-                flat_map[idx] = {'key': 'attack_buff', 'action': action}
+                flat_map[idx] = {"key": "attack_buff", "action": action}
 
         self._legal_actions_cache = flat_map
         return flat_map
@@ -177,101 +185,100 @@ def _resolve_action_refs(game_state, action_key: str, action_data: dict) -> dict
     This function creates a new action_data dict with references resolved against
     the new (deepcopied) game state.
     """
-    if action_key in ('create_unit', 'end_turn'):
+    if action_key in ("create_unit", "end_turn"):
         return action_data
 
     resolved = dict(action_data)
 
-    if action_key == 'move':
-        unit = _find_unit_at(game_state, action_data['unit'].x, action_data['unit'].y)
+    if action_key == "move":
+        unit = _find_unit_at(game_state, action_data["unit"].x, action_data["unit"].y)
         if unit is None:
             raise ValueError(f"Cannot resolve unit at ({action_data['unit'].x}, {action_data['unit'].y})")
-        resolved['unit'] = unit
+        resolved["unit"] = unit
 
-    elif action_key == 'attack':
-        attacker = _find_unit_at(game_state, action_data['attacker'].x, action_data['attacker'].y)
-        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+    elif action_key == "attack":
+        attacker = _find_unit_at(game_state, action_data["attacker"].x, action_data["attacker"].y)
+        target = _find_unit_at(game_state, action_data["target"].x, action_data["target"].y)
         if attacker is None or target is None:
             raise ValueError("Cannot resolve attacker or target for attack action")
-        resolved['attacker'] = attacker
-        resolved['target'] = target
+        resolved["attacker"] = attacker
+        resolved["target"] = target
 
-    elif action_key == 'seize':
-        unit = _find_unit_at(game_state, action_data['unit'].x, action_data['unit'].y)
+    elif action_key == "seize":
+        unit = _find_unit_at(game_state, action_data["unit"].x, action_data["unit"].y)
         if unit is None:
             raise ValueError("Cannot resolve unit for seize action")
-        resolved['unit'] = unit
-        tile = game_state.grid.get_tile(action_data['tile'].x, action_data['tile'].y)
-        resolved['tile'] = tile
+        resolved["unit"] = unit
+        tile = game_state.grid.get_tile(action_data["tile"].x, action_data["tile"].y)
+        resolved["tile"] = tile
 
-    elif action_key == 'heal':
-        healer = _find_unit_at(game_state, action_data['healer'].x, action_data['healer'].y)
-        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+    elif action_key == "heal":
+        healer = _find_unit_at(game_state, action_data["healer"].x, action_data["healer"].y)
+        target = _find_unit_at(game_state, action_data["target"].x, action_data["target"].y)
         if healer is None or target is None:
             raise ValueError("Cannot resolve healer or target for heal action")
-        resolved['healer'] = healer
-        resolved['target'] = target
+        resolved["healer"] = healer
+        resolved["target"] = target
 
-    elif action_key == 'cure':
-        curer = _find_unit_at(game_state, action_data['curer'].x, action_data['curer'].y)
-        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+    elif action_key == "cure":
+        curer = _find_unit_at(game_state, action_data["curer"].x, action_data["curer"].y)
+        target = _find_unit_at(game_state, action_data["target"].x, action_data["target"].y)
         if curer is None or target is None:
             raise ValueError("Cannot resolve curer or target for cure action")
-        resolved['curer'] = curer
-        resolved['target'] = target
+        resolved["curer"] = curer
+        resolved["target"] = target
 
-    elif action_key == 'paralyze':
-        paralyzer = _find_unit_at(game_state, action_data['paralyzer'].x, action_data['paralyzer'].y)
-        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+    elif action_key == "paralyze":
+        paralyzer = _find_unit_at(game_state, action_data["paralyzer"].x, action_data["paralyzer"].y)
+        target = _find_unit_at(game_state, action_data["target"].x, action_data["target"].y)
         if paralyzer is None or target is None:
             raise ValueError("Cannot resolve paralyzer or target for paralyze action")
-        resolved['paralyzer'] = paralyzer
-        resolved['target'] = target
+        resolved["paralyzer"] = paralyzer
+        resolved["target"] = target
 
-    elif action_key in ('haste', 'defence_buff', 'attack_buff'):
-        sorcerer = _find_unit_at(game_state, action_data['sorcerer'].x, action_data['sorcerer'].y)
-        target = _find_unit_at(game_state, action_data['target'].x, action_data['target'].y)
+    elif action_key in ("haste", "defence_buff", "attack_buff"):
+        sorcerer = _find_unit_at(game_state, action_data["sorcerer"].x, action_data["sorcerer"].y)
+        target = _find_unit_at(game_state, action_data["target"].x, action_data["target"].y)
         if sorcerer is None or target is None:
             raise ValueError(f"Cannot resolve sorcerer or target for {action_key} action")
-        resolved['sorcerer'] = sorcerer
-        resolved['target'] = target
+        resolved["sorcerer"] = sorcerer
+        resolved["target"] = target
 
     return resolved
 
 
 def _execute_action_on_state(game_state, action_key: str, action_data: dict) -> None:
     """Execute a structured action on a game state (mutates in place)."""
-    if action_key == 'create_unit':
+    if action_key == "create_unit":
         game_state.create_unit(
-            action_data['unit_type'],
-            action_data['x'],
-            action_data['y'],
+            action_data["unit_type"],
+            action_data["x"],
+            action_data["y"],
             player=game_state.current_player,
         )
-    elif action_key == 'move':
-        game_state.move_unit(action_data['unit'], action_data['to_x'], action_data['to_y'])
-    elif action_key == 'attack':
-        game_state.attack(action_data['attacker'], action_data['target'])
-    elif action_key == 'seize':
-        game_state.seize(action_data['unit'])
-    elif action_key == 'heal':
-        game_state.heal(action_data['healer'], action_data['target'])
-    elif action_key == 'cure':
-        game_state.cure(action_data['curer'], action_data['target'])
-    elif action_key == 'end_turn':
+    elif action_key == "move":
+        game_state.move_unit(action_data["unit"], action_data["to_x"], action_data["to_y"])
+    elif action_key == "attack":
+        game_state.attack(action_data["attacker"], action_data["target"])
+    elif action_key == "seize":
+        game_state.seize(action_data["unit"])
+    elif action_key == "heal":
+        game_state.heal(action_data["healer"], action_data["target"])
+    elif action_key == "cure":
+        game_state.cure(action_data["curer"], action_data["target"])
+    elif action_key == "end_turn":
         game_state.end_turn()
-    elif action_key == 'paralyze':
-        game_state.paralyze(action_data['paralyzer'], action_data['target'])
-    elif action_key == 'haste':
-        game_state.haste(action_data['sorcerer'], action_data['target'])
-    elif action_key == 'defence_buff':
-        game_state.defence_buff(action_data['sorcerer'], action_data['target'])
-    elif action_key == 'attack_buff':
-        game_state.attack_buff(action_data['sorcerer'], action_data['target'])
+    elif action_key == "paralyze":
+        game_state.paralyze(action_data["paralyzer"], action_data["target"])
+    elif action_key == "haste":
+        game_state.haste(action_data["sorcerer"], action_data["target"])
+    elif action_key == "defence_buff":
+        game_state.defence_buff(action_data["sorcerer"], action_data["target"])
+    elif action_key == "attack_buff":
+        game_state.attack_buff(action_data["sorcerer"], action_data["target"])
 
 
-def _obs_from_game_state(game_state, grid_width: int, grid_height: int,
-                         num_action_types: int = 10):
+def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_action_types: int = 10):
     """
     Extract observation tensors from a GameState for neural network evaluation.
 
@@ -279,17 +286,20 @@ def _obs_from_game_state(game_state, grid_width: int, grid_height: int,
         (grid, units, global_features, action_mask) as numpy arrays.
     """
     state_arrays = game_state.to_numpy()
-    grid = state_arrays['grid'].astype(np.float32)
-    units = state_arrays['units'].astype(np.float32)
+    grid = state_arrays["grid"].astype(np.float32)
+    units = state_arrays["units"].astype(np.float32)
 
-    global_features = np.array([
-        game_state.player_gold.get(1, 0),
-        game_state.player_gold.get(2, 0),
-        game_state.turn_number,
-        sum(1 for u in game_state.units if u.player == 1),
-        sum(1 for u in game_state.units if u.player == 2),
-        game_state.current_player,
-    ], dtype=np.float32)
+    global_features = np.array(
+        [
+            game_state.player_gold.get(1, 0),
+            game_state.player_gold.get(2, 0),
+            game_state.turn_number,
+            sum(1 for u in game_state.units if u.player == 1),
+            sum(1 for u in game_state.units if u.player == 2),
+            game_state.current_player,
+        ],
+        dtype=np.float32,
+    )
 
     # Build flat action mask
     area = grid_width * grid_height
@@ -303,28 +313,28 @@ def _obs_from_game_state(game_state, grid_width: int, grid_height: int,
         if 0 <= idx < mask_size:
             mask[idx] = 1.0
 
-    for action in legal_actions.get('create_unit', []):
-        set_mask(0, action['x'], action['y'])
-    for action in legal_actions.get('move', []):
-        set_mask(1, action['to_x'], action['to_y'])
-    for action in legal_actions.get('attack', []):
-        set_mask(2, action['target'].x, action['target'].y)
-    for action in legal_actions.get('seize', []):
-        set_mask(3, action['tile'].x, action['tile'].y)
-    for action in legal_actions.get('heal', []):
-        set_mask(4, action['target'].x, action['target'].y)
-    for action in legal_actions.get('cure', []):
-        set_mask(4, action['target'].x, action['target'].y)
+    for action in legal_actions.get("create_unit", []):
+        set_mask(0, action["x"], action["y"])
+    for action in legal_actions.get("move", []):
+        set_mask(1, action["to_x"], action["to_y"])
+    for action in legal_actions.get("attack", []):
+        set_mask(2, action["target"].x, action["target"].y)
+    for action in legal_actions.get("seize", []):
+        set_mask(3, action["tile"].x, action["tile"].y)
+    for action in legal_actions.get("heal", []):
+        set_mask(4, action["target"].x, action["target"].y)
+    for action in legal_actions.get("cure", []):
+        set_mask(4, action["target"].x, action["target"].y)
     # End turn: always valid at canonical position (0,0)
     set_mask(5, 0, 0)
-    for action in legal_actions.get('paralyze', []):
-        set_mask(6, action['target'].x, action['target'].y)
-    for action in legal_actions.get('haste', []):
-        set_mask(7, action['target'].x, action['target'].y)
-    for action in legal_actions.get('defence_buff', []):
-        set_mask(8, action['target'].x, action['target'].y)
-    for action in legal_actions.get('attack_buff', []):
-        set_mask(9, action['target'].x, action['target'].y)
+    for action in legal_actions.get("paralyze", []):
+        set_mask(6, action["target"].x, action["target"].y)
+    for action in legal_actions.get("haste", []):
+        set_mask(7, action["target"].x, action["target"].y)
+    for action in legal_actions.get("defence_buff", []):
+        set_mask(8, action["target"].x, action["target"].y)
+    for action in legal_actions.get("attack_buff", []):
+        set_mask(9, action["target"].x, action["target"].y)
 
     return grid, units, global_features, mask
 
@@ -341,14 +351,14 @@ class MCTS:
 
     def __init__(
         self,
-        network: 'torch.nn.Module',
+        network: "torch.nn.Module",
         grid_width: int = 20,
         grid_height: int = 20,
         num_simulations: int = 100,
         c_puct: float = 1.5,
         dirichlet_alpha: float = 0.3,
         dirichlet_epsilon: float = 0.25,
-        device: str = 'cpu',
+        device: str = "cpu",
     ):
         """
         Args:
@@ -379,9 +389,7 @@ class MCTS:
             (policy_probs, value) where policy_probs is over the flat action space
             and value is from the current player's perspective.
         """
-        grid, units, global_features, mask = _obs_from_game_state(
-            game_state, self.grid_width, self.grid_height
-        )
+        grid, units, global_features, mask = _obs_from_game_state(game_state, self.grid_width, self.grid_height)
 
         # To tensors with batch dim
         grid_t = torch.tensor(grid, device=self.device).unsqueeze(0)
@@ -419,14 +427,9 @@ class MCTS:
 
         # Add Dirichlet noise at root for exploration
         if add_noise and root.children:
-            noise = np.random.dirichlet(
-                [self.dirichlet_alpha] * len(root.children)
-            )
+            noise = np.random.dirichlet([self.dirichlet_alpha] * len(root.children))
             for i, child in enumerate(root.children.values()):
-                child.prior = (
-                    (1 - self.dirichlet_epsilon) * child.prior
-                    + self.dirichlet_epsilon * noise[i]
-                )
+                child.prior = (1 - self.dirichlet_epsilon) * child.prior + self.dirichlet_epsilon * noise[i]
 
         # Run simulations
         for _ in range(self.num_simulations):
@@ -445,9 +448,7 @@ class MCTS:
             else:
                 # Neural network evaluation
                 policy_probs, value = self._evaluate(node.game_state)
-                legal_flat = node.get_legal_flat_actions(
-                    self.grid_width, self.grid_height
-                )
+                legal_flat = node.get_legal_flat_actions(self.grid_width, self.grid_height)
                 if legal_flat:
                     self._expand_node(node, policy_probs, legal_flat)
                 # Value is from the node's current player's perspective.
@@ -468,8 +469,7 @@ class MCTS:
 
         return action_probs, root.q_value
 
-    def _expand_node(self, node: MCTSNode, policy_probs: np.ndarray,
-                     legal_flat: Dict[int, dict]) -> None:
+    def _expand_node(self, node: MCTSNode, policy_probs: np.ndarray, legal_flat: Dict[int, dict]) -> None:
         """Expand a node by creating child nodes for all legal actions."""
         for flat_idx, action_info in legal_flat.items():
             prior = policy_probs[flat_idx] if flat_idx < len(policy_probs) else 0.0
@@ -487,7 +487,7 @@ class MCTS:
 
     def _select_child(self, node: MCTSNode) -> Tuple[int, MCTSNode]:
         """Select the child with highest PUCT score."""
-        best_score = -float('inf')
+        best_score = -float("inf")
         best_action = -1
         best_child = None
 
@@ -518,17 +518,17 @@ class MCTS:
             try:
                 resolved = _resolve_action_refs(
                     best_child.game_state,
-                    action_info['key'],
-                    action_info['action'],
+                    action_info["key"],
+                    action_info["action"],
                 )
                 _execute_action_on_state(
                     best_child.game_state,
-                    action_info['key'],
+                    action_info["key"],
                     resolved,
                 )
             except Exception:
                 # If action fails, treat as terminal loss
-                logger.debug("MCTS action execution failed for %s", action_info['key'])
+                logger.debug("MCTS action execution failed for %s", action_info["key"])
                 best_child.is_terminal = True
 
             best_child.player = best_child.game_state.current_player
@@ -536,8 +536,7 @@ class MCTS:
 
         return best_action, best_child
 
-    def _backup(self, search_path: List[MCTSNode], value: float,
-                root_player: int) -> None:
+    def _backup(self, search_path: List[MCTSNode], value: float, root_player: int) -> None:
         """Propagate the value back up the search path."""
         for node in search_path:
             node.visit_count += 1
@@ -556,8 +555,7 @@ class MCTS:
             return 1.0
         return -1.0
 
-    def select_action(self, game_state, temperature: float = 1.0,
-                      add_noise: bool = True) -> Tuple[int, np.ndarray]:
+    def select_action(self, game_state, temperature: float = 1.0, add_noise: bool = True) -> Tuple[int, np.ndarray]:
         """
         Run MCTS and select an action.
 

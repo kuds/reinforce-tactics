@@ -54,9 +54,7 @@ class EloRatingSystem:
             self.initial_ratings[bot_name] = float(self.starting_elo)
             self.rating_history[bot_name] = [float(self.starting_elo)]
 
-    def calculate_expected_score(
-        self, player_elo: float, opponent_elo: float
-    ) -> float:
+    def calculate_expected_score(self, player_elo: float, opponent_elo: float) -> float:
         """
         Calculate expected score for a player against an opponent.
 
@@ -74,9 +72,7 @@ class EloRatingSystem:
         """
         return 1.0 / (1.0 + 10 ** ((opponent_elo - player_elo) / 400.0))
 
-    def update_ratings(
-        self, bot1_name: str, bot2_name: str, result: int
-    ) -> tuple[float, float]:
+    def update_ratings(self, bot1_name: str, bot2_name: str, result: int) -> tuple[float, float]:
         """
         Update Elo ratings after a game.
 
@@ -209,10 +205,7 @@ class EloRatingSystem:
         return {
             "ratings": self.ratings.copy(),
             "initial_ratings": self.initial_ratings.copy(),
-            "rating_history": {
-                name: history.copy()
-                for name, history in self.rating_history.items()
-            },
+            "rating_history": {name: history.copy() for name, history in self.rating_history.items()},
             "starting_elo": self.starting_elo,
             "k_factor": self.k_factor,
         }
@@ -237,9 +230,7 @@ class EloRatingSystem:
         system.rating_history = data.get("rating_history", {})
         return system
 
-    def merge_from(
-        self, other: "EloRatingSystem", strategy: str = "latest"
-    ) -> None:
+    def merge_from(self, other: "EloRatingSystem", strategy: str = "latest") -> None:
         """
         Merge ratings from another EloRatingSystem.
 
@@ -254,16 +245,12 @@ class EloRatingSystem:
         for bot_name, rating in other.ratings.items():
             if bot_name in self.ratings:
                 if strategy == "average":
-                    self.ratings[bot_name] = (
-                        self.ratings[bot_name] + rating
-                    ) / 2
+                    self.ratings[bot_name] = (self.ratings[bot_name] + rating) / 2
                 else:  # latest
                     self.ratings[bot_name] = rating
             else:
                 self.ratings[bot_name] = rating
-                self.initial_ratings[bot_name] = other.initial_ratings.get(
-                    bot_name, float(self.starting_elo)
-                )
+                self.initial_ratings[bot_name] = other.initial_ratings.get(bot_name, float(self.starting_elo))
 
             # Extend history
             if bot_name in other.rating_history:

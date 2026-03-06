@@ -1,6 +1,7 @@
 """Cross-platform clipboard utility with macOS fallback."""
-import sys
+
 import subprocess
+import sys
 from typing import Optional
 
 import pygame
@@ -21,20 +22,14 @@ def get_clipboard_text() -> Optional[str]:
             clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
             if clipboard_text:
                 # Decode bytes to string and strip null characters
-                return clipboard_text.decode('utf-8').rstrip('\x00')
+                return clipboard_text.decode("utf-8").rstrip("\x00")
     except (pygame.error, UnicodeDecodeError, AttributeError):
         pass
 
     # Fallback for macOS
-    if sys.platform == 'darwin':
+    if sys.platform == "darwin":
         try:
-            result = subprocess.run(
-                ['pbpaste'],
-                capture_output=True,
-                text=True,
-                timeout=1,
-                check=False
-            )
+            result = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=1, check=False)
             if result.returncode == 0:
                 return result.stdout
         except (subprocess.SubprocessError, FileNotFoundError):
@@ -58,20 +53,15 @@ def set_clipboard_text(text: str) -> bool:
     # Try pygame.scrap first
     try:
         if pygame.scrap.get_init():
-            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode('utf-8'))
+            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode("utf-8"))
             return True
     except (pygame.error, AttributeError):
         pass
 
     # Fallback for macOS
-    if sys.platform == 'darwin':
+    if sys.platform == "darwin":
         try:
-            subprocess.run(
-                ['pbcopy'],
-                input=text.encode('utf-8'),
-                timeout=1,
-                check=True
-            )
+            subprocess.run(["pbcopy"], input=text.encode("utf-8"), timeout=1, check=True)
             return True
         except (subprocess.SubprocessError, FileNotFoundError):
             pass

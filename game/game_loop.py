@@ -5,19 +5,24 @@ This module manages the main game loop, game session, and game modes.
 """
 # pylint: disable=cyclic-import
 
-import pygame
 import pandas as pd
-from reinforcetactics.core.game_state import GameState
-from reinforcetactics.ui.renderer import Renderer
-from reinforcetactics.ui.menus import (
-    MapSelectionMenu, SaveGameMenu, GameOverMenu, LoadGameMenu, ReplaySelectionMenu,
-    PauseMenu
-)
-from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.utils.settings import get_settings
-from reinforcetactics.utils.replay_player import ReplayPlayer
+import pygame
+
 from game.bot_factory import create_bots_from_config
 from game.input_handler import InputHandler
+from reinforcetactics.core.game_state import GameState
+from reinforcetactics.ui.menus import (
+    GameOverMenu,
+    LoadGameMenu,
+    MapSelectionMenu,
+    PauseMenu,
+    ReplaySelectionMenu,
+    SaveGameMenu,
+)
+from reinforcetactics.ui.renderer import Renderer
+from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.utils.replay_player import ReplayPlayer
+from reinforcetactics.utils.settings import get_settings
 
 
 class GameSession:  # pylint: disable=too-few-public-methods
@@ -58,7 +63,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
             'new_game', 'main_menu', or 'quit' based on game over menu selection
         """
         # Track why the loop exited (for mid-game exits)
-        self._exit_reason = 'quit'
+        self._exit_reason = "quit"
 
         print("\n🎮 Game started!")
         print("Controls:")
@@ -84,17 +89,17 @@ class GameSession:  # pylint: disable=too-few-public-methods
 
                 elif event.type == pygame.KEYDOWN:
                     result = self.input_handler.handle_keyboard_event(event)
-                    if result == 'pause':
+                    if result == "pause":
                         pause_result = self._handle_pause()
                         if pause_result:
                             return pause_result
-                    elif result == 'save':
+                    elif result == "save":
                         self._handle_save_game()
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
                         result = self.input_handler.handle_mouse_click(mouse_pos)
-                        if result == 'continue':
+                        if result == "continue":
                             continue
                     elif event.button == 3:  # Right click
                         self.input_handler.handle_right_click_press(mouse_pos)
@@ -135,21 +140,21 @@ class GameSession:  # pylint: disable=too-few-public-methods
         result = pause_menu.run()
         pygame.event.clear()
 
-        if result == 'resume':
+        if result == "resume":
             return None
-        elif result == 'save_quit':
+        elif result == "save_quit":
             self._handle_save_game()
             self.running = False
-            self._exit_reason = 'quit'
-            return 'quit'
-        elif result == 'quit':
+            self._exit_reason = "quit"
+            return "quit"
+        elif result == "quit":
             self.running = False
-            self._exit_reason = 'quit'
-            return 'quit'
-        elif result == 'main_menu':
+            self._exit_reason = "quit"
+            return "quit"
+        elif result == "main_menu":
             self.running = False
-            self._exit_reason = 'main_menu'
-            return 'main_menu'
+            self._exit_reason = "main_menu"
+            return "main_menu"
 
         return None
 
@@ -169,18 +174,12 @@ class GameSession:  # pylint: disable=too-few-public-methods
             self.renderer.draw_movement_overlay(self.input_handler.selected_unit)
 
         # Draw attack range preview if right-clicking on a unit
-        if (self.input_handler.right_click_preview_active and
-            self.input_handler.preview_positions):
-            self.renderer.draw_attack_range_overlay(
-                self.input_handler.preview_positions
-            )
+        if self.input_handler.right_click_preview_active and self.input_handler.preview_positions:
+            self.renderer.draw_attack_range_overlay(self.input_handler.preview_positions)
 
         # Draw target overlay if in target selection mode
-        if (self.input_handler.target_selection_mode and
-            self.input_handler.target_selection_action):
-            self.renderer.draw_target_overlay(
-                self.input_handler.target_selection_action['targets']
-            )
+        if self.input_handler.target_selection_mode and self.input_handler.target_selection_action:
+            self.renderer.draw_target_overlay(self.input_handler.target_selection_action["targets"])
 
         # Draw unit tooltip when hovering (only if no menu is open)
         if not self.input_handler.active_menu:
@@ -211,11 +210,10 @@ class GameSession:  # pylint: disable=too-few-public-methods
         game_over_menu = GameOverMenu(self.game.winner, self.game, self.renderer.screen)
         result = game_over_menu.run()
 
-        return result if result else 'quit'
+        return result if result else "quit"
 
 
-def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=None,
-                   fog_of_war=False):
+def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=None, fog_of_war=False):
     """
     Start a new game with the specified mode, map, and player configurations.
 
@@ -238,7 +236,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
 
     # Determine number of players
     num_players = 2
-    if mode == '2v2':
+    if mode == "2v2":
         num_players = 4
     elif player_configs:
         num_players = len(player_configs)
@@ -263,8 +261,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
         enabled_units = settings.get_enabled_units()
 
         # Create game state with enabled units from settings
-        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units,
-                         fog_of_war=fog_of_war)
+        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units, fog_of_war=fog_of_war)
 
         # Initialize visibility for fog of war games
         if fog_of_war:
@@ -283,17 +280,18 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
             game.player_configs = []
             for i in range(num_players):
                 if i == 0:
-                    game.player_configs.append({'type': 'human', 'bot_type': None})
+                    game.player_configs.append({"type": "human", "bot_type": None})
                 else:
-                    game.player_configs.append({'type': 'computer', 'bot_type': 'SimpleBot'})
+                    game.player_configs.append({"type": "computer", "bot_type": "SimpleBot"})
 
         # Create renderer
         renderer = Renderer(game)
         bots = create_bots_from_config(game, game.player_configs, settings)
 
         # Legacy mode: Ensure bot for player 2 in human_vs_computer
-        if mode == 'human_vs_computer' and 2 not in bots:
+        if mode == "human_vs_computer" and 2 not in bots:
             from reinforcetactics.game.bot import SimpleBot
+
             bots[2] = SimpleBot(game, player=2)
             print("Bot created for Player 2")
 
@@ -309,6 +307,7 @@ def start_new_game(mode='human_vs_computer', selected_map=None, player_configs=N
     except Exception as e:
         print(f"❌ Error during gameplay: {e}")
         import traceback
+
         traceback.print_exc()
 
 
@@ -326,13 +325,11 @@ def load_saved_game():
 
     try:
         # Load map
-        if 'map_file' in save_data:
-            map_data = FileIO.load_map(save_data['map_file'], for_ui=True, border_size=2)
+        if "map_file" in save_data:
+            map_data = FileIO.load_map(save_data["map_file"], for_ui=True, border_size=2)
         else:
             print("⚠️  Map file not in save, reconstructing from tiles...")
-            map_data = FileIO.generate_random_map(
-                20, 20, num_players=save_data.get('num_players', 2)
-            )
+            map_data = FileIO.generate_random_map(20, 20, num_players=save_data.get("num_players", 2))
 
         # Restore game state
         game = GameState.from_dict(save_data, map_data)
@@ -351,7 +348,7 @@ def load_saved_game():
             game_over_menu = GameOverMenu(game.winner, game, renderer.screen)
             result = game_over_menu.run()
             pygame.quit()
-            return result if result else 'quit'
+            return result if result else "quit"
 
         # Create bots
         settings = get_settings()
@@ -361,6 +358,7 @@ def load_saved_game():
         else:
             # Fallback for old saves
             from reinforcetactics.game.bot import SimpleBot
+
             for player_num in range(2, game.num_players + 1):
                 bots[player_num] = SimpleBot(game, player=player_num)
                 print(f"Bot created for Player {player_num} (loaded game - legacy)")
@@ -387,6 +385,7 @@ def load_saved_game():
     except Exception as e:
         print(f"❌ Error loading game: {e}")
         import traceback
+
         traceback.print_exc()
 
 
@@ -417,25 +416,24 @@ def watch_replay(replay_path=None):
             return
 
         # Load initial map
-        game_info = replay_data.get('game_info', {})
+        game_info = replay_data.get("game_info", {})
 
-        if 'initial_map' in game_info:
-            map_data = pd.DataFrame(game_info['initial_map'])
+        if "initial_map" in game_info:
+            map_data = pd.DataFrame(game_info["initial_map"])
             print("✅ Using stored map from replay")
         else:
             print("⚠️  Replay doesn't have stored map data. Generating random map...")
-            map_data = FileIO.generate_random_map(
-                20, 20, num_players=game_info.get('num_players', 2)
-            )
+            map_data = FileIO.generate_random_map(20, 20, num_players=game_info.get("num_players", 2))
 
         # Create and run replay player
         player = ReplayPlayer(replay_data, map_data)
         player.run()
 
         pygame.quit()
-        return 'main_menu'  # Return to main menu after watching replay
+        return "main_menu"  # Return to main menu after watching replay
 
     except Exception as e:
         print(f"❌ Error playing replay: {e}")
         import traceback
+
         traceback.print_exc()

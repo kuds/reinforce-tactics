@@ -1,6 +1,7 @@
 """
 File I/O utilities for maps, saves, and replays.
 """
+
 import json
 from datetime import datetime
 from pathlib import Path
@@ -30,7 +31,7 @@ class FileIO:
         result = FileIO.load_map_with_metadata(filepath, for_ui, border_size)
         if result is None:
             return None
-        return result['map_data']
+        return result["map_data"]
 
     @staticmethod
     def load_map_with_metadata(filepath, for_ui=False, border_size=2):
@@ -58,19 +59,19 @@ class FileIO:
                 filepath,
                 header=None,
                 dtype=str,  # Force everything to be strings
-                skipinitialspace=True  # Skip whitespace after delimiter
+                skipinitialspace=True,  # Skip whitespace after delimiter
             )
 
             # Strip whitespace from all cells and drop empty rows/columns
-            map_data = map_data.map(lambda x: str(x).strip() if pd.notna(x) else 'p')
+            map_data = map_data.map(lambda x: str(x).strip() if pd.notna(x) else "p")
 
             # Drop rows that are all 'p' (likely empty rows)
             # But keep at least some content
-            map_data = map_data.replace('nan', 'o')  # Replace any 'nan' strings with grass
+            map_data = map_data.replace("nan", "o")  # Replace any 'nan' strings with grass
 
             # Remove completely empty rows and columns
-            map_data = map_data.dropna(axis=0, how='all')  # Drop empty rows
-            map_data = map_data.dropna(axis=1, how='all')  # Drop empty columns
+            map_data = map_data.dropna(axis=0, how="all")  # Drop empty rows
+            map_data = map_data.dropna(axis=1, how="all")  # Drop empty columns
 
             # Reset index after dropping
             map_data = map_data.reset_index(drop=True)
@@ -85,14 +86,9 @@ class FileIO:
             if for_ui:
                 height, width = map_data.shape
                 if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-                    print(
-                        f"⚠️  Map size ({width}x{height}) is smaller than "
-                        f"minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})"
-                    )
+                    print(f"⚠️  Map size ({width}x{height}) is smaller than minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})")
                     print("   Padding map to minimum size for UI...")
-                    map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(
-                        map_data, MIN_MAP_SIZE, MIN_MAP_SIZE
-                    )
+                    map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
 
             # Add water borders if loading for UI (after ensuring minimum size)
             if for_ui:
@@ -102,13 +98,13 @@ class FileIO:
             print(f"✅ Map loaded: {width}x{height}")
 
             return {
-                'map_data': map_data,
-                'original_map_data': original_map_data,
-                'original_width': original_width,
-                'original_height': original_height,
-                'padding_offset_x': padding_offset_x,
-                'padding_offset_y': padding_offset_y,
-                'map_file': filepath
+                "map_data": map_data,
+                "original_map_data": original_map_data,
+                "original_width": original_width,
+                "original_height": original_height,
+                "padding_offset_x": padding_offset_x,
+                "padding_offset_y": padding_offset_y,
+                "map_file": filepath,
             }
 
         except FileNotFoundError:
@@ -117,6 +113,7 @@ class FileIO:
         except Exception as e:
             print(f"❌ Error loading map: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -141,9 +138,7 @@ class FileIO:
 
         if pad_width > 0 or pad_height > 0:
             # Pad with ocean tiles ('o')
-            padded = pd.DataFrame(
-                np.full((min_height, min_width), 'o', dtype=object)
-            )
+            padded = pd.DataFrame(np.full((min_height, min_width), "o", dtype=object))
 
             # Copy original data into center
             start_y = pad_height // 2
@@ -183,7 +178,7 @@ class FileIO:
         # Count consecutive ocean rows from top
         top_strip = 0
         for i in range(height):
-            if all(tile == 'o' for tile in result.iloc[i, :].values):
+            if all(tile == "o" for tile in result.iloc[i, :].values):
                 top_strip += 1
             else:
                 break
@@ -191,7 +186,7 @@ class FileIO:
         # Count consecutive ocean rows from bottom
         bottom_strip = 0
         for i in range(height - 1, -1, -1):
-            if all(tile == 'o' for tile in result.iloc[i, :].values):
+            if all(tile == "o" for tile in result.iloc[i, :].values):
                 bottom_strip += 1
             else:
                 break
@@ -199,7 +194,7 @@ class FileIO:
         # Count consecutive ocean columns from left
         left_strip = 0
         for j in range(width):
-            if all(tile == 'o' for tile in result.iloc[:, j].values):
+            if all(tile == "o" for tile in result.iloc[:, j].values):
                 left_strip += 1
             else:
                 break
@@ -207,7 +202,7 @@ class FileIO:
         # Count consecutive ocean columns from right
         right_strip = 0
         for j in range(width - 1, -1, -1):
-            if all(tile == 'o' for tile in result.iloc[:, j].values):
+            if all(tile == "o" for tile in result.iloc[:, j].values):
                 right_strip += 1
             else:
                 break
@@ -278,13 +273,10 @@ class FileIO:
         new_width = width + 2 * border_size
 
         # Create new map filled with ocean
-        bordered = pd.DataFrame(
-            np.full((new_height, new_width), 'o', dtype=object)
-        )
+        bordered = pd.DataFrame(np.full((new_height, new_width), "o", dtype=object))
 
         # Copy original data into center
-        bordered.iloc[border_size:border_size + height,
-                      border_size:border_size + width] = map_data.values
+        bordered.iloc[border_size : border_size + height, border_size : border_size + width] = map_data.values
 
         return bordered
 
@@ -306,7 +298,7 @@ class FileIO:
         height = max(height, MIN_MAP_SIZE)
 
         # Create base map with grass
-        map_data = np.full((height, width), 'o', dtype=object)
+        map_data = np.full((height, width), "o", dtype=object)
 
         # Add some variety - forests, mountains, water
         num_tiles = width * height
@@ -314,46 +306,46 @@ class FileIO:
         # Add forests (10% of tiles)
         for _ in range(num_tiles // 10):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
-            map_data[y, x] = 'f'
+            map_data[y, x] = "f"
 
         # Add mountains (5% of tiles)
         for _ in range(num_tiles // 20):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
-            map_data[y, x] = 'm'
+            map_data[y, x] = "m"
 
         # Add water (3% of tiles)
         for _ in range(num_tiles // 33):
             x, y = np.random.randint(0, width), np.random.randint(0, height)
-            map_data[y, x] = 'w'
+            map_data[y, x] = "w"
 
         # Place headquarters for each player in corners
         if num_players >= 1:
-            map_data[1, 1] = 'h_1'  # Player 1 HQ (top-left)
-            map_data[1, 2] = 'b_1'  # Player 1 Building
-            map_data[2, 1] = 'b_1'  # Player 1 Building
+            map_data[1, 1] = "h_1"  # Player 1 HQ (top-left)
+            map_data[1, 2] = "b_1"  # Player 1 Building
+            map_data[2, 1] = "b_1"  # Player 1 Building
 
         if num_players >= 2:
-            map_data[height-2, width-2] = 'h_2'  # Player 2 HQ (bottom-right)
-            map_data[height-2, width-3] = 'b_2'  # Player 2 Building
-            map_data[height-3, width-2] = 'b_2'  # Player 2 Building
+            map_data[height - 2, width - 2] = "h_2"  # Player 2 HQ (bottom-right)
+            map_data[height - 2, width - 3] = "b_2"  # Player 2 Building
+            map_data[height - 3, width - 2] = "b_2"  # Player 2 Building
 
         if num_players >= 3:
-            map_data[1, width-2] = 'h_3'  # Player 3 HQ (top-right)
-            map_data[1, width-3] = 'b_3'
-            map_data[2, width-2] = 'b_3'
+            map_data[1, width - 2] = "h_3"  # Player 3 HQ (top-right)
+            map_data[1, width - 3] = "b_3"
+            map_data[2, width - 2] = "b_3"
 
         if num_players >= 4:
-            map_data[height-2, 1] = 'h_4'  # Player 4 HQ (bottom-left)
-            map_data[height-2, 2] = 'b_4'
-            map_data[height-3, 1] = 'b_4'
+            map_data[height - 2, 1] = "h_4"  # Player 4 HQ (bottom-left)
+            map_data[height - 2, 2] = "b_4"
+            map_data[height - 3, 1] = "b_4"
 
         # Add some neutral towers in the center area
         center_x, center_y = width // 2, height // 2
         for dx, dy in [(0, 0), (3, 0), (0, 3), (3, 3)]:
             x, y = center_x + dx - 2, center_y + dy - 2
             if 0 <= x < width and 0 <= y < height:
-                if map_data[y, x] == 'p':  # Only place on grass
-                    map_data[y, x] = 't'
+                if map_data[y, x] == "p":  # Only place on grass
+                    map_data[y, x] = "t"
 
         return pd.DataFrame(map_data)
 
@@ -384,7 +376,7 @@ class FileIO:
             save_data = game_state.to_dict()
 
             # Save to JSON
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(save_data, f, indent=2)
 
             print(f"✅ Game saved: {filepath}")
@@ -406,7 +398,7 @@ class FileIO:
             Dictionary with game state data
         """
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 save_data = json.load(f)
 
             print(f"✅ Game loaded: {filepath}")
@@ -459,13 +451,9 @@ class FileIO:
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            replay_data = {
-                'timestamp': datetime.now().isoformat(),
-                'game_info': game_info,
-                'actions': action_history
-            }
+            replay_data = {"timestamp": datetime.now().isoformat(), "game_info": game_info, "actions": action_history}
 
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(replay_data, f, indent=2)
 
             print(f"✅ Replay saved: {filepath}")
@@ -487,7 +475,7 @@ class FileIO:
             Dictionary with replay data
         """
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 replay_data = json.load(f)
 
             print(f"✅ Replay loaded: {filepath}")
@@ -578,7 +566,7 @@ class FileIO:
             Path to the saved video file
         """
         try:
-            import cv2  # pylint: disable=unused-import,import-outside-toplevel
+            import cv2  # noqa: F401  # pylint: disable=unused-import,import-outside-toplevel
         except ImportError:
             print("❌ opencv-python not installed. Install with: pip install opencv-python")
             return None
@@ -600,17 +588,7 @@ class FileIO:
         """
         Ensure all necessary directories exist.
         """
-        directories = [
-            "maps/1v1",
-            "maps/2v2",
-            "saves",
-            "replays",
-            "models",
-            "checkpoints",
-            "tensorboard",
-            "logs",
-            "videos"
-        ]
+        directories = ["maps/1v1", "maps/2v2", "saves", "replays", "models", "checkpoints", "tensorboard", "logs", "videos"]
 
         for directory in directories:
             Path(directory).mkdir(parents=True, exist_ok=True)
@@ -636,23 +614,23 @@ class FileIO:
             tiles = map_data.values.flatten()
             unique_tiles = {}
             for tile in tiles:
-                tile_type = str(tile).split('_', maxsplit=1)[0]
+                tile_type = str(tile).split("_", maxsplit=1)[0]
                 unique_tiles[tile_type] = unique_tiles.get(tile_type, 0) + 1
 
             # Count players
             num_players = 0
             for tile in tiles:
-                if '_' in str(tile):
-                    parts = str(tile).split('_')
+                if "_" in str(tile):
+                    parts = str(tile).split("_")
                     if len(parts) >= 2 and parts[1].isdigit():
                         num_players = max(num_players, int(parts[1]))
 
             return {
-                'width': width,
-                'height': height,
-                'num_players': num_players,
-                'tile_counts': unique_tiles,
-                'total_tiles': width * height
+                "width": width,
+                "height": height,
+                "num_players": num_players,
+                "tile_counts": unique_tiles,
+                "total_tiles": width * height,
             }
 
         except Exception as e:

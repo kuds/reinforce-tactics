@@ -5,21 +5,19 @@ This test suite provides comprehensive coverage of the Gymnasium environment
 used for RL training, including observation spaces, action spaces, step/reset
 functions, reward calculations, and episode statistics.
 """
-import sys
-from unittest.mock import patch, MagicMock
-import pytest
+
 import numpy as np
 import pandas as pd
-import gymnasium as gym
+import pytest
 from gymnasium import spaces
 
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.utils.file_io import FileIO
 
-
 # ==============================================================================
 # FIXTURES
 # ==============================================================================
+
 
 @pytest.fixture
 def simple_map_data():
@@ -36,7 +34,7 @@ def simple_map_data():
 @pytest.fixture
 def env_default():
     """Create environment with default parameters."""
-    return StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+    return StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
 
 @pytest.fixture
@@ -48,20 +46,20 @@ def env_no_opponent():
 @pytest.fixture
 def env_hierarchical():
     """Create environment with hierarchical action space."""
-    return StrategyGameEnv(map_file=None, opponent='bot', render_mode=None, hierarchical=True)
+    return StrategyGameEnv(map_file=None, opponent="bot", render_mode=None, hierarchical=True)
 
 
 @pytest.fixture
 def custom_reward_config():
     """Custom reward configuration for testing."""
     return {
-        'win': 500.0,
-        'loss': -500.0,
-        'income_diff': 0.2,
-        'unit_diff': 2.0,
-        'structure_control': 10.0,
-        'invalid_action': -5.0,
-        'turn_penalty': -0.5
+        "win": 500.0,
+        "loss": -500.0,
+        "income_diff": 0.2,
+        "unit_diff": 2.0,
+        "structure_control": 10.0,
+        "invalid_action": -5.0,
+        "turn_penalty": -0.5,
     }
 
 
@@ -69,18 +67,19 @@ def custom_reward_config():
 # 1. ENVIRONMENT CREATION TESTS
 # ==============================================================================
 
+
 class TestEnvironmentCreation:
     """Test environment initialization with various configurations."""
 
     def test_initialization_default_params(self):
         """Test initialization with default parameters (no map file, random map generation)."""
-        env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
         assert env is not None
         assert env.game_state is not None
         assert env.grid_width > 0
         assert env.grid_height > 0
-        assert env.opponent_type == 'bot'
+        assert env.opponent_type == "bot"
         assert env.max_steps == 200
         assert env.current_step == 0
         assert env.hierarchical is False
@@ -93,7 +92,7 @@ class TestEnvironmentCreation:
         map_file = tmp_path / "test_map.csv"
         pd.DataFrame(simple_map_data).to_csv(map_file, index=False, header=False)
 
-        env = StrategyGameEnv(map_file=str(map_file), opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=str(map_file), opponent="bot", render_mode=None)
 
         assert env is not None
         assert env.game_state is not None
@@ -101,23 +100,23 @@ class TestEnvironmentCreation:
 
     def test_initialization_opponent_bot(self):
         """Test initialization with opponent='bot'."""
-        env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
-        assert env.opponent_type == 'bot'
+        assert env.opponent_type == "bot"
         env.close()
 
     def test_initialization_opponent_random(self):
         """Test initialization with opponent='random'."""
-        env = StrategyGameEnv(map_file=None, opponent='random', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="random", render_mode=None)
 
-        assert env.opponent_type == 'random'
+        assert env.opponent_type == "random"
         env.close()
 
     def test_initialization_opponent_self(self):
         """Test initialization with opponent='self' (self-play)."""
-        env = StrategyGameEnv(map_file=None, opponent='self', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="self", render_mode=None)
 
-        assert env.opponent_type == 'self'
+        assert env.opponent_type == "self"
         env.close()
 
     def test_initialization_opponent_none(self):
@@ -130,30 +129,25 @@ class TestEnvironmentCreation:
 
     def test_initialization_custom_reward_config(self, custom_reward_config):
         """Test initialization with custom reward_config."""
-        env = StrategyGameEnv(
-            map_file=None,
-            opponent='bot',
-            render_mode=None,
-            reward_config=custom_reward_config
-        )
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None, reward_config=custom_reward_config)
 
-        assert env.reward_config['win'] == 500.0
-        assert env.reward_config['loss'] == -500.0
-        assert env.reward_config['invalid_action'] == -5.0
+        assert env.reward_config["win"] == 500.0
+        assert env.reward_config["loss"] == -500.0
+        assert env.reward_config["invalid_action"] == -5.0
         env.close()
 
     def test_initialization_hierarchical_mode(self, env_hierarchical):
         """Test initialization with hierarchical=True for HRL mode."""
         assert env_hierarchical.hierarchical is True
         assert isinstance(env_hierarchical.action_space, spaces.Dict)
-        assert 'goal' in env_hierarchical.action_space.spaces
-        assert 'primitive' in env_hierarchical.action_space.spaces
+        assert "goal" in env_hierarchical.action_space.spaces
+        assert "primitive" in env_hierarchical.action_space.spaces
         env_hierarchical.close()
 
     def test_render_mode_none_no_pygame(self):
         """Test that render_mode=None does not import pygame (headless mode verification)."""
         # Create environment without rendering
-        env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
         # Check that renderer is not initialized
         assert env.renderer is None
@@ -165,6 +159,7 @@ class TestEnvironmentCreation:
 # 2. OBSERVATION SPACE TESTS
 # ==============================================================================
 
+
 class TestObservationSpace:
     """Test observation space structure and validity."""
 
@@ -175,7 +170,7 @@ class TestObservationSpace:
 
     def test_grid_shape_and_dtype(self, env_default):
         """Verify 'grid' shape is (grid_height, grid_width, 3) with dtype float32."""
-        grid_space = env_default.observation_space['grid']
+        grid_space = env_default.observation_space["grid"]
 
         expected_shape = (env_default.grid_height, env_default.grid_width, 3)
         assert grid_space.shape == expected_shape
@@ -184,7 +179,7 @@ class TestObservationSpace:
 
     def test_units_shape_and_dtype(self, env_default):
         """Verify 'units' shape is (grid_height, grid_width, 3) with dtype float32."""
-        units_space = env_default.observation_space['units']
+        units_space = env_default.observation_space["units"]
 
         expected_shape = (env_default.grid_height, env_default.grid_width, 3)
         assert units_space.shape == expected_shape
@@ -193,7 +188,7 @@ class TestObservationSpace:
 
     def test_global_features_shape_and_dtype(self, env_default):
         """Verify 'global_features' shape is (6,) with dtype float32."""
-        global_space = env_default.observation_space['global_features']
+        global_space = env_default.observation_space["global_features"]
 
         assert global_space.shape == (6,)
         assert global_space.dtype == np.float32
@@ -201,7 +196,7 @@ class TestObservationSpace:
 
     def test_action_mask_shape(self, env_default):
         """Verify 'action_mask' shape matches _get_action_space_size()."""
-        action_mask_space = env_default.observation_space['action_mask']
+        action_mask_space = env_default.observation_space["action_mask"]
 
         expected_size = env_default._get_action_space_size()
         assert action_mask_space.shape == (expected_size,)
@@ -213,22 +208,22 @@ class TestObservationSpace:
         obs, _ = env_default.reset()
 
         # Check that observation is in the observation space
-        assert 'grid' in obs
-        assert 'units' in obs
-        assert 'global_features' in obs
-        assert 'action_mask' in obs
+        assert "grid" in obs
+        assert "units" in obs
+        assert "global_features" in obs
+        assert "action_mask" in obs
 
         # Verify shapes
-        assert obs['grid'].shape == env_default.observation_space['grid'].shape
-        assert obs['units'].shape == env_default.observation_space['units'].shape
-        assert obs['global_features'].shape == env_default.observation_space['global_features'].shape
-        assert obs['action_mask'].shape == env_default.observation_space['action_mask'].shape
+        assert obs["grid"].shape == env_default.observation_space["grid"].shape
+        assert obs["units"].shape == env_default.observation_space["units"].shape
+        assert obs["global_features"].shape == env_default.observation_space["global_features"].shape
+        assert obs["action_mask"].shape == env_default.observation_space["action_mask"].shape
 
         # Verify dtypes
-        assert obs['grid'].dtype == np.float32
-        assert obs['units'].dtype == np.float32
-        assert obs['global_features'].dtype == np.float32
-        assert obs['action_mask'].dtype == np.float32
+        assert obs["grid"].dtype == np.float32
+        assert obs["units"].dtype == np.float32
+        assert obs["global_features"].dtype == np.float32
+        assert obs["action_mask"].dtype == np.float32
 
         env_default.close()
 
@@ -241,16 +236,16 @@ class TestObservationSpace:
         obs, _, _, _, _ = env_default.step(action)
 
         # Check that observation is in the observation space
-        assert 'grid' in obs
-        assert 'units' in obs
-        assert 'global_features' in obs
-        assert 'action_mask' in obs
+        assert "grid" in obs
+        assert "units" in obs
+        assert "global_features" in obs
+        assert "action_mask" in obs
 
         # Verify shapes match
-        assert obs['grid'].shape == env_default.observation_space['grid'].shape
-        assert obs['units'].shape == env_default.observation_space['units'].shape
-        assert obs['global_features'].shape == env_default.observation_space['global_features'].shape
-        assert obs['action_mask'].shape == env_default.observation_space['action_mask'].shape
+        assert obs["grid"].shape == env_default.observation_space["grid"].shape
+        assert obs["units"].shape == env_default.observation_space["units"].shape
+        assert obs["global_features"].shape == env_default.observation_space["global_features"].shape
+        assert obs["action_mask"].shape == env_default.observation_space["action_mask"].shape
 
         env_default.close()
 
@@ -258,6 +253,7 @@ class TestObservationSpace:
 # ==============================================================================
 # 3. ACTION SPACE TESTS
 # ==============================================================================
+
 
 class TestActionSpace:
     """Test action space structure and encoding."""
@@ -271,14 +267,14 @@ class TestActionSpace:
     def test_action_space_dict_hierarchical_mode(self, env_hierarchical):
         """Verify action space is gymnasium.spaces.Dict for hierarchical mode."""
         assert isinstance(env_hierarchical.action_space, spaces.Dict)
-        assert 'goal' in env_hierarchical.action_space.spaces
-        assert 'primitive' in env_hierarchical.action_space.spaces
+        assert "goal" in env_hierarchical.action_space.spaces
+        assert "primitive" in env_hierarchical.action_space.spaces
 
         # Check goal space
-        assert isinstance(env_hierarchical.action_space.spaces['goal'], spaces.Discrete)
+        assert isinstance(env_hierarchical.action_space.spaces["goal"], spaces.Discrete)
 
         # Check primitive space
-        assert isinstance(env_hierarchical.action_space.spaces['primitive'], spaces.MultiDiscrete)
+        assert isinstance(env_hierarchical.action_space.spaces["primitive"], spaces.MultiDiscrete)
 
         env_hierarchical.close()
 
@@ -288,10 +284,10 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 0
-        assert action_dict['unit_type'] == 'W'
-        assert action_dict['from_pos'] == (5, 5)
-        assert action_dict['to_pos'] == (8, 8)
+        assert action_dict["action_type"] == 0
+        assert action_dict["unit_type"] == "W"
+        assert action_dict["from_pos"] == (5, 5)
+        assert action_dict["to_pos"] == (8, 8)
 
         env_default.close()
 
@@ -301,9 +297,9 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 1
-        assert action_dict['from_pos'] == (2, 3)
-        assert action_dict['to_pos'] == (4, 5)
+        assert action_dict["action_type"] == 1
+        assert action_dict["from_pos"] == (2, 3)
+        assert action_dict["to_pos"] == (4, 5)
 
         env_default.close()
 
@@ -313,9 +309,9 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 2
-        assert action_dict['from_pos'] == (1, 1)
-        assert action_dict['to_pos'] == (2, 1)
+        assert action_dict["action_type"] == 2
+        assert action_dict["from_pos"] == (1, 1)
+        assert action_dict["to_pos"] == (2, 1)
 
         env_default.close()
 
@@ -325,8 +321,8 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 3
-        assert action_dict['from_pos'] == (5, 5)
+        assert action_dict["action_type"] == 3
+        assert action_dict["from_pos"] == (5, 5)
 
         env_default.close()
 
@@ -336,10 +332,10 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 4
-        assert action_dict['unit_type'] == 'C'  # Cleric
-        assert action_dict['from_pos'] == (3, 3)
-        assert action_dict['to_pos'] == (4, 3)
+        assert action_dict["action_type"] == 4
+        assert action_dict["unit_type"] == "C"  # Cleric
+        assert action_dict["from_pos"] == (3, 3)
+        assert action_dict["to_pos"] == (4, 3)
 
         env_default.close()
 
@@ -349,7 +345,7 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 5
+        assert action_dict["action_type"] == 5
 
         env_default.close()
 
@@ -359,9 +355,9 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 6
-        assert action_dict['from_pos'] == (3, 3)
-        assert action_dict['to_pos'] == (4, 3)
+        assert action_dict["action_type"] == 6
+        assert action_dict["from_pos"] == (3, 3)
+        assert action_dict["to_pos"] == (4, 3)
 
         env_default.close()
 
@@ -371,10 +367,10 @@ class TestActionSpace:
 
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['action_type'] == 7
-        assert action_dict['unit_type'] == 'S'  # Sorcerer
-        assert action_dict['from_pos'] == (2, 2)
-        assert action_dict['to_pos'] == (3, 2)
+        assert action_dict["action_type"] == 7
+        assert action_dict["unit_type"] == "S"  # Sorcerer
+        assert action_dict["from_pos"] == (2, 2)
+        assert action_dict["to_pos"] == (3, 2)
 
         env_default.close()
 
@@ -382,35 +378,35 @@ class TestActionSpace:
         """Test action encoding with all unit types."""
         # Test Warrior (0)
         action_w = np.array([0, 0, 0, 0, 1, 1])
-        assert env_default._encode_action(action_w)['unit_type'] == 'W'
+        assert env_default._encode_action(action_w)["unit_type"] == "W"
 
         # Test Mage (1)
         action_m = np.array([0, 1, 0, 0, 1, 1])
-        assert env_default._encode_action(action_m)['unit_type'] == 'M'
+        assert env_default._encode_action(action_m)["unit_type"] == "M"
 
         # Test Cleric (2)
         action_c = np.array([0, 2, 0, 0, 1, 1])
-        assert env_default._encode_action(action_c)['unit_type'] == 'C'
+        assert env_default._encode_action(action_c)["unit_type"] == "C"
 
         # Test Archer (3)
         action_a = np.array([0, 3, 0, 0, 1, 1])
-        assert env_default._encode_action(action_a)['unit_type'] == 'A'
+        assert env_default._encode_action(action_a)["unit_type"] == "A"
 
         # Test Knight (4)
         action_k = np.array([0, 4, 0, 0, 1, 1])
-        assert env_default._encode_action(action_k)['unit_type'] == 'K'
+        assert env_default._encode_action(action_k)["unit_type"] == "K"
 
         # Test Rogue (5)
         action_r = np.array([0, 5, 0, 0, 1, 1])
-        assert env_default._encode_action(action_r)['unit_type'] == 'R'
+        assert env_default._encode_action(action_r)["unit_type"] == "R"
 
         # Test Sorcerer (6)
         action_s = np.array([0, 6, 0, 0, 1, 1])
-        assert env_default._encode_action(action_s)['unit_type'] == 'S'
+        assert env_default._encode_action(action_s)["unit_type"] == "S"
 
         # Test Barbarian (7)
         action_b = np.array([0, 7, 0, 0, 1, 1])
-        assert env_default._encode_action(action_b)['unit_type'] == 'B'
+        assert env_default._encode_action(action_b)["unit_type"] == "B"
 
         env_default.close()
 
@@ -423,8 +419,8 @@ class TestActionSpace:
         action = np.array([1, 0, 0, 0, max_x, max_y])
         action_dict = env_default._encode_action(action)
 
-        assert action_dict['from_pos'] == (0, 0)
-        assert action_dict['to_pos'] == (max_x, max_y)
+        assert action_dict["from_pos"] == (0, 0)
+        assert action_dict["to_pos"] == (max_x, max_y)
 
         env_default.close()
 
@@ -432,6 +428,7 @@ class TestActionSpace:
 # ==============================================================================
 # 4. STEP FUNCTION TESTS
 # ==============================================================================
+
 
 class TestStepFunction:
     """Test step function behavior."""
@@ -463,7 +460,7 @@ class TestStepFunction:
         _, reward, _, _, info = env_default.step(action)
 
         # end_turn should be valid and apply turn penalty
-        assert info['valid_action'] is True
+        assert info["valid_action"] is True
         assert reward <= 0  # Turn penalty applied
 
         env_default.close()
@@ -478,7 +475,7 @@ class TestStepFunction:
         _, reward, _, _, info = env_default.step(action)
 
         # Should be marked as invalid
-        assert info['valid_action'] is False
+        assert info["valid_action"] is False
         # Should receive invalid action penalty
         assert reward < 0
 
@@ -496,7 +493,7 @@ class TestStepFunction:
         _, _, terminated, _, info = env_default.step(action)
 
         assert terminated is True
-        assert info['game_over'] is True
+        assert info["game_over"] is True
 
         env_default.close()
 
@@ -522,11 +519,11 @@ class TestStepFunction:
         _, _, _, _, info = env_default.step(action)
 
         # Check required keys
-        assert 'episode_stats' in info
-        assert 'game_over' in info
-        assert 'winner' in info
-        assert 'turn' in info
-        assert 'valid_action' in info
+        assert "episode_stats" in info
+        assert "game_over" in info
+        assert "winner" in info
+        assert "turn" in info
+        assert "valid_action" in info
 
         env_default.close()
 
@@ -534,6 +531,7 @@ class TestStepFunction:
 # ==============================================================================
 # 5. RESET FUNCTION TESTS
 # ==============================================================================
+
 
 class TestResetFunction:
     """Test reset function behavior."""
@@ -586,16 +584,16 @@ class TestResetFunction:
         env_default.step(np.array([5, 0, 0, 0, 0, 0]))
 
         # Modify stats
-        env_default.episode_stats['reward'] = 100.0
-        env_default.episode_stats['invalid_actions'] = 5
+        env_default.episode_stats["reward"] = 100.0
+        env_default.episode_stats["invalid_actions"] = 5
 
         # Reset
         env_default.reset()
 
         # Check stats are reset
-        assert env_default.episode_stats['reward'] == 0.0
-        assert env_default.episode_stats['invalid_actions'] == 0
-        assert env_default.episode_stats['winner'] is None
+        assert env_default.episode_stats["reward"] == 0.0
+        assert env_default.episode_stats["invalid_actions"] == 0
+        assert env_default.episode_stats["winner"] is None
 
         env_default.close()
 
@@ -606,14 +604,14 @@ class TestResetFunction:
         obs2, _ = env_default.reset(seed=42)
 
         # Observations should be identical with same seed
-        assert np.array_equal(obs1['grid'], obs2['grid'])
-        assert np.array_equal(obs1['units'], obs2['units'])
+        assert np.array_equal(obs1["grid"], obs2["grid"])
+        assert np.array_equal(obs1["units"], obs2["units"])
 
         env_default.close()
 
     def test_opponent_reinitialized_on_reset(self):
         """Test that opponent is re-initialized on reset (functional behavior)."""
-        env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
         env.reset()
         # Opponent should be initialized after reset
@@ -634,6 +632,7 @@ class TestResetFunction:
 # ==============================================================================
 # 6. REWARD CALCULATION TESTS
 # ==============================================================================
+
 
 class TestRewardCalculation:
     """Test reward calculation components."""
@@ -696,7 +695,7 @@ class TestRewardCalculation:
         _, reward, _, _, info = env_default.step(action)
 
         # Should apply invalid action penalty
-        assert info['valid_action'] is False
+        assert info["valid_action"] is False
         assert reward < 0
 
         env_default.close()
@@ -705,7 +704,7 @@ class TestRewardCalculation:
         """Test cumulative episode_stats['reward'] tracking."""
         env_default.reset()
 
-        assert env_default.episode_stats['reward'] == 0.0
+        assert env_default.episode_stats["reward"] == 0.0
 
         # Take multiple steps
         for _ in range(3):
@@ -713,18 +712,13 @@ class TestRewardCalculation:
             env_default.step(action)
 
         # Cumulative reward should be tracked
-        assert env_default.episode_stats['reward'] != 0.0
+        assert env_default.episode_stats["reward"] != 0.0
 
         env_default.close()
 
     def test_custom_reward_config(self, custom_reward_config):
         """Test reward calculation with custom reward_config."""
-        env = StrategyGameEnv(
-            map_file=None,
-            opponent=None,
-            render_mode=None,
-            reward_config=custom_reward_config
-        )
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None, reward_config=custom_reward_config)
         env.reset()
 
         # Set game to won state
@@ -743,6 +737,7 @@ class TestRewardCalculation:
 # ==============================================================================
 # 7. RENDER AND CLOSE TESTS
 # ==============================================================================
+
 
 class TestRenderAndClose:
     """Test rendering and cleanup."""
@@ -768,7 +763,7 @@ class TestRenderAndClose:
     def test_headless_mode_works(self):
         """Test that headless mode works without any rendering dependencies."""
         # Create environment in headless mode
-        env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
         # Should be able to reset and step without rendering
         obs, info = env.reset()
@@ -785,6 +780,7 @@ class TestRenderAndClose:
 # 8. EPISODE STATISTICS TESTS
 # ==============================================================================
 
+
 class TestEpisodeStatistics:
     """Test episode statistics tracking."""
 
@@ -792,13 +788,13 @@ class TestEpisodeStatistics:
         """Verify episode_stats['invalid_actions'] increments on invalid actions."""
         env_default.reset()
 
-        initial_count = env_default.episode_stats['invalid_actions']
+        initial_count = env_default.episode_stats["invalid_actions"]
 
         # Perform invalid action
         action = np.array([1, 0, 0, 0, 1, 1])  # move non-existent unit
         obs, reward, terminated, truncated, info = env_default.step(action)
 
-        assert env_default.episode_stats['invalid_actions'] > initial_count
+        assert env_default.episode_stats["invalid_actions"] > initial_count
 
         env_default.close()
 
@@ -814,7 +810,7 @@ class TestEpisodeStatistics:
         action = np.array([5, 0, 0, 0, 0, 0])
         obs, reward, terminated, truncated, info = env.step(action)
 
-        assert env.episode_stats['winner'] == 1
+        assert env.episode_stats["winner"] == 1
 
         env.close()
 
@@ -831,8 +827,8 @@ class TestEpisodeStatistics:
         obs, reward, terminated, truncated, info = env.step(action)
 
         assert terminated is True
-        assert 'episode_stats' in info
-        assert len(info['episode_stats']) > 0
+        assert "episode_stats" in info
+        assert len(info["episode_stats"]) > 0
 
         env.close()
 
@@ -847,8 +843,8 @@ class TestEpisodeStatistics:
         obs, reward, terminated, truncated, info = env_default.step(action)
 
         assert truncated is True
-        assert 'episode_stats' in info
-        assert len(info['episode_stats']) > 0
+        assert "episode_stats" in info
+        assert len(info["episode_stats"]) > 0
 
         env_default.close()
 
@@ -856,6 +852,7 @@ class TestEpisodeStatistics:
 # ==============================================================================
 # 9. INTEGRATION TESTS
 # ==============================================================================
+
 
 class TestIntegration:
     """Integration tests for full episode workflows."""
@@ -934,7 +931,7 @@ class TestIntegration:
 
     def test_environment_with_various_opponents(self):
         """Test environment works with different opponent types."""
-        opponent_types = ['bot', 'random', 'self', None]
+        opponent_types = ["bot", "random", "self", None]
 
         for opp_type in opponent_types:
             env = StrategyGameEnv(map_file=None, opponent=opp_type, render_mode=None)
@@ -957,7 +954,7 @@ class TestIntegration:
 
         # Should match action_mask shape
         obs, _ = env_default.reset()
-        assert obs['action_mask'].shape[0] == size
+        assert obs["action_mask"].shape[0] == size
 
         env_default.close()
 
@@ -966,13 +963,14 @@ class TestIntegration:
 # 10. ACTION MASKING TESTS (for MaskablePPO compatibility)
 # ==============================================================================
 
+
 class TestActionMasking:
     """Test action masking functionality for MaskablePPO (sb3-contrib)."""
 
     def test_action_masks_method_exists(self, env_default):
         """Test that action_masks() method exists on environment."""
         env_default.reset()
-        assert hasattr(env_default, 'action_masks')
+        assert hasattr(env_default, "action_masks")
         assert callable(env_default.action_masks)
         env_default.close()
 
@@ -992,12 +990,12 @@ class TestActionMasking:
 
         # Expected shapes based on action space
         expected_shapes = [
-            10,                         # action_type (0-9: create, move, attack, seize, heal, end_turn, paralyze, haste, defence_buff, attack_buff)
-            8,                          # unit_type
-            env_default.grid_width,     # from_x
-            env_default.grid_height,    # from_y
-            env_default.grid_width,     # to_x
-            env_default.grid_height     # to_y
+            10,  # action_type (0-9: create, move, attack, seize, heal, end_turn, paralyze, haste, defence_buff, attack_buff)
+            8,  # unit_type
+            env_default.grid_width,  # from_x
+            env_default.grid_height,  # from_y
+            env_default.grid_width,  # to_x
+            env_default.grid_height,  # to_y
         ]
 
         for i, (mask, expected_size) in enumerate(zip(masks, expected_shapes)):
@@ -1012,7 +1010,7 @@ class TestActionMasking:
         masks = env_default.action_masks()
 
         action_type_mask = masks[0]
-        assert action_type_mask[5] == True, "End turn should always be valid"
+        assert action_type_mask[5], "End turn should always be valid"
 
         env_default.close()
 
@@ -1021,7 +1019,7 @@ class TestActionMasking:
         env_default.reset()
         masks = env_default.action_masks()
 
-        dimension_names = ['action_type', 'unit_type', 'from_x', 'from_y', 'to_x', 'to_y']
+        dimension_names = ["action_type", "unit_type", "from_x", "from_y", "to_x", "to_y"]
 
         for i, (mask, name) in enumerate(zip(masks, dimension_names)):
             assert mask.any(), f"Dimension '{name}' has no valid options"
@@ -1037,23 +1035,23 @@ class TestActionMasking:
         action_type_mask = masks[0]
 
         # If there are create_unit actions, action_type 0 should be valid
-        if legal_actions.get('create_unit'):
-            assert action_type_mask[0] == True, "Create unit mask mismatch"
+        if legal_actions.get("create_unit"):
+            assert action_type_mask[0], "Create unit mask mismatch"
 
         # If there are move actions, action_type 1 should be valid
-        if legal_actions.get('move'):
-            assert action_type_mask[1] == True, "Move mask mismatch"
+        if legal_actions.get("move"):
+            assert action_type_mask[1], "Move mask mismatch"
 
         # If there are attack actions, action_type 2 should be valid
-        if legal_actions.get('attack'):
-            assert action_type_mask[2] == True, "Attack mask mismatch"
+        if legal_actions.get("attack"):
+            assert action_type_mask[2], "Attack mask mismatch"
 
         env_default.close()
 
     def test_action_masks_update_after_step(self, env_default):
         """Test that action masks update after taking a step."""
         env_default.reset()
-        masks_before = env_default.action_masks()
+        _masks_before = env_default.action_masks()
 
         # Take end turn action
         action = np.array([5, 0, 0, 0, 0, 0])
@@ -1080,7 +1078,7 @@ class TestActionMasking:
         # Should be valid
         assert isinstance(masks, tuple)
         assert len(masks) == 6
-        assert masks[0][5] == True  # End turn always valid
+        assert masks[0][5]  # End turn always valid
 
         env_default.close()
 
@@ -1088,7 +1086,7 @@ class TestActionMasking:
         """Test that get_action_mask_flat() method exists and works."""
         env_default.reset()
 
-        assert hasattr(env_default, 'get_action_mask_flat')
+        assert hasattr(env_default, "get_action_mask_flat")
         flat_mask = env_default.get_action_mask_flat()
 
         expected_size = env_default._get_action_space_size()
@@ -1103,21 +1101,15 @@ class TestActionMaskingWrapper:
 
     def test_wrapper_import(self):
         """Test that masking module can be imported."""
-        from reinforcetactics.rl.masking import (
-            ActionMaskedEnv,
-            make_maskable_env,
-            make_maskable_vec_env,
-            validate_action_mask
-        )
 
     def test_make_maskable_env(self):
         """Test make_maskable_env creates wrapped environment."""
         from reinforcetactics.rl.masking import make_maskable_env
 
-        env = make_maskable_env(opponent='bot')
+        env = make_maskable_env(opponent="bot")
 
         assert env is not None
-        assert hasattr(env, 'action_masks')
+        assert hasattr(env, "action_masks")
 
         # Should be able to reset and get masks
         env.reset()
@@ -1130,7 +1122,7 @@ class TestActionMaskingWrapper:
         """Test ActionMaskedEnv wrapper functionality."""
         from reinforcetactics.rl.masking import ActionMaskedEnv
 
-        base_env = StrategyGameEnv(opponent='bot', render_mode=None)
+        base_env = StrategyGameEnv(opponent="bot", render_mode=None)
         wrapped_env = ActionMaskedEnv(base_env)
 
         wrapped_env.reset()
@@ -1152,18 +1144,18 @@ class TestActionMaskingWrapper:
         """Test action mask validation utility."""
         from reinforcetactics.rl.masking import validate_action_mask
 
-        env = StrategyGameEnv(opponent='bot', render_mode=None)
+        env = StrategyGameEnv(opponent="bot", render_mode=None)
         env.reset()
 
         validation = validate_action_mask(env)
 
-        assert 'valid' in validation
-        assert 'errors' in validation
-        assert 'warnings' in validation
-        assert 'mask_summary' in validation
+        assert "valid" in validation
+        assert "errors" in validation
+        assert "warnings" in validation
+        assert "mask_summary" in validation
 
         # Should be valid for a fresh game
-        assert validation['valid'] == True, f"Validation errors: {validation['errors']}"
+        assert validation["valid"], f"Validation errors: {validation['errors']}"
 
         env.close()
 
@@ -1171,7 +1163,7 @@ class TestActionMaskingWrapper:
         """Test curriculum environment creation."""
         from reinforcetactics.rl.masking import make_curriculum_env
 
-        for difficulty in ['easy', 'medium', 'hard']:
+        for difficulty in ["easy", "medium", "hard"]:
             env = make_curriculum_env(difficulty=difficulty)
 
             assert env is not None
@@ -1185,7 +1177,7 @@ class TestActionMaskingWrapper:
         """Test ActionMaskedEnv with stats tracking enabled."""
         from reinforcetactics.rl.masking import ActionMaskedEnv
 
-        base_env = StrategyGameEnv(opponent='bot', render_mode=None)
+        base_env = StrategyGameEnv(opponent="bot", render_mode=None)
         wrapped_env = ActionMaskedEnv(base_env, track_stats=True)
 
         wrapped_env.reset()
@@ -1197,8 +1189,8 @@ class TestActionMaskingWrapper:
 
         stats = wrapped_env.get_masking_stats()
 
-        assert 'total_actions' in stats
-        assert stats['total_actions'] == 3
-        assert 'action_type_distribution' in stats
+        assert "total_actions" in stats
+        assert stats["total_actions"] == 3
+        assert "action_type_distribution" in stats
 
         wrapped_env.close()

@@ -1,29 +1,21 @@
 """Tile palette component for the map editor."""
+
 from typing import Tuple
+
 import pygame
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
-from reinforcetactics.utils.language import get_language
+
+from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 
 class TilePalette:
     """Tile palette for selecting tiles to place on the map."""
 
     # Define available tiles
-    TERRAIN_TILES = [
-        ('p', 'Grass'),
-        ('o', 'Ocean'),
-        ('w', 'Water'),
-        ('m', 'Mountain'),
-        ('f', 'Forest'),
-        ('r', 'Road')
-    ]
+    TERRAIN_TILES = [("p", "Grass"), ("o", "Ocean"), ("w", "Water"), ("m", "Mountain"), ("f", "Forest"), ("r", "Road")]
 
-    STRUCTURE_TILES = [
-        ('t', 'Tower'),
-        ('b', 'Building'),
-        ('h', 'Headquarters')
-    ]
+    STRUCTURE_TILES = [("t", "Tower"), ("b", "Building"), ("h", "Headquarters")]
 
     def __init__(self, x: int, y: int, width: int, height: int, num_players: int = 2) -> None:
         """
@@ -43,7 +35,7 @@ class TilePalette:
         self.num_players = num_players
 
         # Selected tile
-        self.selected_tile = 'p'  # Default to grass
+        self.selected_tile = "p"  # Default to grass
         self.selected_player = 0  # For structures (0 = neutral)
 
         # Fonts
@@ -98,7 +90,7 @@ class TilePalette:
             Tile code (e.g., 'p', 'h_1', 'b_2', 't', 'b', 'h')
         """
         # If it's a structure, append player number (unless neutral)
-        if self.selected_tile in ('t', 'b', 'h'):
+        if self.selected_tile in ("t", "b", "h"):
             # Player 0 means neutral (no suffix)
             if self.selected_player == 0:
                 return self.selected_tile
@@ -121,7 +113,7 @@ class TilePalette:
         pygame.draw.rect(screen, self.border_color, bg_rect, width=2)
 
         # Draw title
-        title_text = lang.get('map_editor.tile_palette.title', 'Tile Palette')
+        title_text = lang.get("map_editor.tile_palette.title", "Tile Palette")
         title_surface = self.title_font.render(title_text, True, self.text_color)
         title_rect = title_surface.get_rect(centerx=self.x + self.width // 2, y=self.y + 10)
         screen.blit(title_surface, title_rect)
@@ -137,7 +129,7 @@ class TilePalette:
         current_y += self.section_spacing
 
         # Draw player selection for structures
-        if self.selected_tile in ('t', 'b', 'h'):
+        if self.selected_tile in ("t", "b", "h"):
             self._draw_player_selection(screen, current_y, lang)
 
     def _draw_terrain_section(self, screen: pygame.Surface, start_y: int, lang) -> int:
@@ -153,7 +145,7 @@ class TilePalette:
             Next Y position
         """
         # Section label
-        label_text = lang.get('map_editor.tile_palette.terrain', 'Terrain')
+        label_text = lang.get("map_editor.tile_palette.terrain", "Terrain")
         label_surface = self.label_font.render(label_text, True, self.text_color)
         label_rect = label_surface.get_rect(x=self.x + self.padding, y=start_y)
         screen.blit(label_surface, label_rect)
@@ -203,7 +195,7 @@ class TilePalette:
             Next Y position
         """
         # Section label
-        label_text = lang.get('map_editor.tile_palette.structures', 'Structures')
+        label_text = lang.get("map_editor.tile_palette.structures", "Structures")
         label_surface = self.label_font.render(label_text, True, self.text_color)
         label_rect = label_surface.get_rect(x=self.x + self.padding, y=start_y)
         screen.blit(label_surface, label_rect)
@@ -282,8 +274,8 @@ class TilePalette:
         pygame.draw.rect(screen, border_color, button_rect, width=border_width)
 
         # Draw "N" for Neutral
-        neutral_label = lang.get('map_editor.tile_palette.neutral', 'Neutral')
-        neutral_text = neutral_label[0] if neutral_label else 'N'  # First letter, fallback to 'N'
+        neutral_label = lang.get("map_editor.tile_palette.neutral", "Neutral")
+        neutral_text = neutral_label[0] if neutral_label else "N"  # First letter, fallback to 'N'
         num_surface = self.tile_font.render(neutral_text, True, (0, 0, 0))
         num_rect = num_surface.get_rect(center=button_rect.center)
         screen.blit(num_surface, num_rect)

@@ -1,22 +1,20 @@
 """
 Evaluation script for trained agents.
 """
+
 import argparse
 from pathlib import Path
-import numpy as np
-from tqdm import tqdm
-import pandas as pd
 
+import numpy as np
+import pandas as pd
 from stable_baselines3 import PPO
+from tqdm import tqdm
+
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 
 def evaluate_agent(
-    model_path: str,
-    n_episodes: int = 100,
-    opponent: str = 'bot',
-    render: bool = False,
-    save_replays: bool = False
+    model_path: str, n_episodes: int = 100, opponent: str = "bot", render: bool = False, save_replays: bool = False
 ):
     """
     Evaluate a trained agent.
@@ -31,19 +29,16 @@ def evaluate_agent(
     Returns:
         Dict with evaluation statistics
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Evaluating Agent: {Path(model_path).name}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # Load model
     print("Loading model...")
     model = PPO.load(model_path)
 
     # Create environment
-    env = StrategyGameEnv(
-        opponent=opponent,
-        render_mode='human' if render else None
-    )
+    env = StrategyGameEnv(opponent=opponent, render_mode="human" if render else None)
 
     # Evaluation statistics
     wins = 0
@@ -67,7 +62,7 @@ def evaluate_agent(
             episode_reward += reward
             episode_length += 1
 
-            if not info.get('valid_action', True):
+            if not info.get("valid_action", True):
                 episode_invalid += 1
 
             done = terminated or truncated
@@ -80,7 +75,7 @@ def evaluate_agent(
         episode_lengths.append(episode_length)
         invalid_actions.append(episode_invalid)
 
-        if info.get('winner') == 1:
+        if info.get("winner") == 1:
             wins += 1
         else:
             losses += 1
@@ -101,40 +96,40 @@ def evaluate_agent(
     avg_invalid = np.mean(invalid_actions)
 
     # Print results
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("📊 Evaluation Results")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Episodes:        {n_episodes}")
-    print(f"Win Rate:        {win_rate*100:.1f}% ({wins}/{n_episodes})")
+    print(f"Win Rate:        {win_rate * 100:.1f}% ({wins}/{n_episodes})")
     print(f"Avg Reward:      {avg_reward:.2f} ± {std_reward:.2f}")
     print(f"Avg Length:      {avg_length:.1f} steps")
     print(f"Avg Invalid:     {avg_invalid:.1f} per episode")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     results = {
-        'model_path': model_path,
-        'n_episodes': n_episodes,
-        'opponent': opponent,
-        'win_rate': win_rate,
-        'wins': wins,
-        'losses': losses,
-        'avg_reward': avg_reward,
-        'std_reward': std_reward,
-        'avg_length': avg_length,
-        'avg_invalid': avg_invalid,
-        'rewards': total_rewards,
-        'lengths': episode_lengths,
-        'invalid_actions': invalid_actions
+        "model_path": model_path,
+        "n_episodes": n_episodes,
+        "opponent": opponent,
+        "win_rate": win_rate,
+        "wins": wins,
+        "losses": losses,
+        "avg_reward": avg_reward,
+        "std_reward": std_reward,
+        "avg_length": avg_length,
+        "avg_invalid": avg_invalid,
+        "rewards": total_rewards,
+        "lengths": episode_lengths,
+        "invalid_actions": invalid_actions,
     }
 
     return results
 
 
-def compare_agents(model_paths: list, n_episodes: int = 100, opponent: str = 'bot'):
+def compare_agents(model_paths: list, n_episodes: int = 100, opponent: str = "bot"):
     """Compare multiple agents."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Comparing {len(model_paths)} Agents")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     results = []
     for model_path in model_paths:
@@ -142,22 +137,24 @@ def compare_agents(model_paths: list, n_episodes: int = 100, opponent: str = 'bo
         results.append(result)
 
     # Create comparison table
-    df = pd.DataFrame([
-        {
-            'Model': Path(r['model_path']).stem,
-            'Win Rate': f"{r['win_rate']*100:.1f}%",
-            'Avg Reward': f"{r['avg_reward']:.2f}",
-            'Avg Length': f"{r['avg_length']:.1f}",
-            'Avg Invalid': f"{r['avg_invalid']:.1f}"
-        }
-        for r in results
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Model": Path(r["model_path"]).stem,
+                "Win Rate": f"{r['win_rate'] * 100:.1f}%",
+                "Avg Reward": f"{r['avg_reward']:.2f}",
+                "Avg Length": f"{r['avg_length']:.1f}",
+                "Avg Invalid": f"{r['avg_invalid']:.1f}",
+            }
+            for r in results
+        ]
+    )
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("📊 Comparison Results")
-    print("="*60)
+    print("=" * 60)
     print(df.to_string(index=False))
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     return results
 
@@ -165,19 +162,12 @@ def compare_agents(model_paths: list, n_episodes: int = 100, opponent: str = 'bo
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained RL agents")
 
-    parser.add_argument('--model', type=str, required=True,
-                       help='Path to trained model (or directory for comparison)')
-    parser.add_argument('--n-episodes', type=int, default=100,
-                       help='Number of evaluation episodes')
-    parser.add_argument('--opponent', type=str, default='bot',
-                       choices=['bot', 'random'],
-                       help='Opponent type')
-    parser.add_argument('--render', action='store_true',
-                       help='Render episodes')
-    parser.add_argument('--save-replays', action='store_true',
-                       help='Save game replays')
-    parser.add_argument('--compare', action='store_true',
-                       help='Compare multiple models in directory')
+    parser.add_argument("--model", type=str, required=True, help="Path to trained model (or directory for comparison)")
+    parser.add_argument("--n-episodes", type=int, default=100, help="Number of evaluation episodes")
+    parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random"], help="Opponent type")
+    parser.add_argument("--render", action="store_true", help="Render episodes")
+    parser.add_argument("--save-replays", action="store_true", help="Save game replays")
+    parser.add_argument("--compare", action="store_true", help="Compare multiple models in directory")
 
     args = parser.parse_args()
 
@@ -196,14 +186,8 @@ def main():
         compare_agents(model_paths, args.n_episodes, args.opponent)
     else:
         # Evaluate single model
-        evaluate_agent(
-            args.model,
-            args.n_episodes,
-            args.opponent,
-            args.render,
-            args.save_replays
-        )
+        evaluate_agent(args.model, args.n_episodes, args.opponent, args.render, args.save_replays)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

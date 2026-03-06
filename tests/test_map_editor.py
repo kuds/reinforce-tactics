@@ -1,6 +1,7 @@
 """
 Tests for the map editor functionality.
 """
+
 import os
 
 import numpy as np
@@ -8,20 +9,20 @@ import pandas as pd
 import pygame
 import pytest
 
-from reinforcetactics.ui.menus.map_editor.new_map_dialog import NewMapDialog
-from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
+from reinforcetactics.constants import MIN_MAP_SIZE, MIN_STRIP_SIZE
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
 from reinforcetactics.ui.menus.map_editor.map_editor import MapEditor
 from reinforcetactics.ui.menus.map_editor.map_editor_menu import MapEditorMenu
-from reinforcetactics.constants import MIN_MAP_SIZE, MIN_STRIP_SIZE
+from reinforcetactics.ui.menus.map_editor.new_map_dialog import NewMapDialog
+from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.utils.file_io import FileIO
 
 
 @pytest.fixture
 def dummy_display():
     """Set up dummy display for headless testing."""
-    os.environ['SDL_VIDEODRIVER'] = 'dummy'
-    os.environ['SDL_AUDIODRIVER'] = 'dummy'
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    os.environ["SDL_AUDIODRIVER"] = "dummy"
     pygame.init()
     screen = pygame.display.set_mode((1500, 1000))
     yield screen
@@ -43,11 +44,11 @@ class TestNewMapDialog:
         dialog = NewMapDialog(dummy_display)
         result = dialog._create()
         assert result is not None
-        assert 'width' in result
-        assert 'height' in result
-        assert 'num_players' in result
-        assert result['width'] >= MIN_MAP_SIZE
-        assert result['height'] >= MIN_MAP_SIZE
+        assert "width" in result
+        assert "height" in result
+        assert "num_players" in result
+        assert result["width"] >= MIN_MAP_SIZE
+        assert result["height"] >= MIN_MAP_SIZE
 
 
 class TestTilePalette:
@@ -56,64 +57,63 @@ class TestTilePalette:
     def test_initialization(self, dummy_display):
         """Test palette initialization."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
-        assert palette.selected_tile == 'p'
+        assert palette.selected_tile == "p"
         assert palette.selected_player == 0  # Defaults to neutral
 
     def test_terrain_tile_selection(self, dummy_display):
         """Test terrain tile selection."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
-        palette.selected_tile = 'p'
-        assert palette.get_selected_tile() == 'p'
+        palette.selected_tile = "p"
+        assert palette.get_selected_tile() == "p"
 
-        palette.selected_tile = 'w'
-        assert palette.get_selected_tile() == 'w'
+        palette.selected_tile = "w"
+        assert palette.get_selected_tile() == "w"
 
     def test_structure_tile_selection(self, dummy_display):
         """Test structure tile with player ownership."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
 
         # Headquarters with player 1
-        palette.selected_tile = 'h'
+        palette.selected_tile = "h"
         palette.selected_player = 1
-        assert palette.get_selected_tile() == 'h_1'
+        assert palette.get_selected_tile() == "h_1"
 
         # Building with player 2
-        palette.selected_tile = 'b'
+        palette.selected_tile = "b"
         palette.selected_player = 2
-        assert palette.get_selected_tile() == 'b_2'
+        assert palette.get_selected_tile() == "b_2"
 
     def test_neutral_structure_selection(self, dummy_display):
         """Test neutral structure selection (player 0)."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
 
         # Neutral tower
-        palette.selected_tile = 't'
+        palette.selected_tile = "t"
         palette.selected_player = 0
-        assert palette.get_selected_tile() == 't'
+        assert palette.get_selected_tile() == "t"
 
         # Neutral building
-        palette.selected_tile = 'b'
+        palette.selected_tile = "b"
         palette.selected_player = 0
-        assert palette.get_selected_tile() == 'b'
+        assert palette.get_selected_tile() == "b"
 
         # Neutral headquarters
-        palette.selected_tile = 'h'
+        palette.selected_tile = "h"
         palette.selected_player = 0
-        assert palette.get_selected_tile() == 'h'
+        assert palette.get_selected_tile() == "h"
 
     def test_player_owned_vs_neutral_tower(self, dummy_display):
         """Test that towers can be neutral or player-owned."""
         palette = TilePalette(20, 20, 250, 500, num_players=2)
 
         # Tower with player 1
-        palette.selected_tile = 't'
+        palette.selected_tile = "t"
         palette.selected_player = 1
-        assert palette.get_selected_tile() == 't_1'
+        assert palette.get_selected_tile() == "t_1"
 
         # Neutral tower (player 0)
         palette.selected_player = 0
-        assert palette.get_selected_tile() == 't'
-
+        assert palette.get_selected_tile() == "t"
 
 
 class TestEditorCanvas:
@@ -121,14 +121,14 @@ class TestEditorCanvas:
 
     def test_initialization(self, dummy_display):
         """Test canvas initialization."""
-        map_data = pd.DataFrame(np.full((30, 30), 'p', dtype=object))
+        map_data = pd.DataFrame(np.full((30, 30), "p", dtype=object))
         canvas = EditorCanvas(20, 20, 600, 500, map_data)
         assert canvas.tile_size == 24
         assert canvas.grid_enabled is True
 
     def test_grid_toggle(self, dummy_display):
         """Test grid toggle."""
-        map_data = pd.DataFrame(np.full((30, 30), 'p', dtype=object))
+        map_data = pd.DataFrame(np.full((30, 30), "p", dtype=object))
         canvas = EditorCanvas(20, 20, 600, 500, map_data)
         assert canvas.grid_enabled is True
         canvas.toggle_grid()
@@ -138,7 +138,7 @@ class TestEditorCanvas:
 
     def test_zoom(self, dummy_display):
         """Test zoom functionality."""
-        map_data = pd.DataFrame(np.full((30, 30), 'p', dtype=object))
+        map_data = pd.DataFrame(np.full((30, 30), "p", dtype=object))
         canvas = EditorCanvas(20, 20, 600, 500, map_data)
         initial_size = canvas.tile_size
 
@@ -154,9 +154,9 @@ class TestMapEditor:
 
     def test_initialization(self, dummy_display):
         """Test editor initialization."""
-        map_data = pd.DataFrame(np.full((25, 25), 'o', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[23, 23] = 'h_2'
+        map_data = pd.DataFrame(np.full((25, 25), "o", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[23, 23] = "h_2"
 
         editor = MapEditor(dummy_display, map_data, None, num_players=2)
         assert editor.map_data is not None
@@ -164,9 +164,9 @@ class TestMapEditor:
 
     def test_valid_map_validation(self, dummy_display):
         """Test validation of a valid map."""
-        map_data = pd.DataFrame(np.full((25, 25), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[23, 23] = 'h_2'
+        map_data = pd.DataFrame(np.full((25, 25), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[23, 23] = "h_2"
 
         editor = MapEditor(dummy_display, map_data, None, num_players=2)
         errors = editor._validate_map()
@@ -174,8 +174,8 @@ class TestMapEditor:
 
     def test_missing_hq_validation(self, dummy_display):
         """Test validation fails when HQ is missing."""
-        map_data = pd.DataFrame(np.full((25, 25), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
+        map_data = pd.DataFrame(np.full((25, 25), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
         # Player 2 HQ missing
 
         editor = MapEditor(dummy_display, map_data, None, num_players=2)
@@ -184,9 +184,9 @@ class TestMapEditor:
 
     def test_small_map_validation(self, dummy_display):
         """Test validation fails for maps smaller than minimum size."""
-        map_data = pd.DataFrame(np.full((10, 10), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[8, 8] = 'h_2'
+        map_data = pd.DataFrame(np.full((10, 10), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[8, 8] = "h_2"
 
         editor = MapEditor(dummy_display, map_data, None, num_players=2)
         errors = editor._validate_map()
@@ -194,9 +194,9 @@ class TestMapEditor:
 
     def test_save_map(self, dummy_display, tmp_path):
         """Test map saving functionality."""
-        map_data = pd.DataFrame(np.full((25, 25), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[23, 23] = 'h_2'
+        map_data = pd.DataFrame(np.full((25, 25), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[23, 23] = "h_2"
 
         editor = MapEditor(dummy_display, map_data, None, num_players=2)
 
@@ -212,8 +212,8 @@ class TestMapEditor:
         # Load and verify
         loaded_map = FileIO.load_map(str(save_path))
         assert loaded_map is not None
-        assert loaded_map.iloc[1, 1] == 'h_1'
-        assert loaded_map.iloc[23, 23] == 'h_2'
+        assert loaded_map.iloc[1, 1] == "h_1"
+        assert loaded_map.iloc[23, 23] == "h_2"
 
 
 class TestMapEditorMenu:
@@ -224,22 +224,22 @@ class TestMapEditorMenu:
         menu = MapEditorMenu(dummy_display)
         assert len(menu.options) > 0
         option_names = [opt[0] for opt in menu.options]
-        assert 'New Map' in option_names
-        assert 'Edit Existing Map' in option_names
+        assert "New Map" in option_names
+        assert "Edit Existing Map" in option_names
 
     def test_detect_num_players(self, dummy_display):
         """Test player detection from map."""
         menu = MapEditorMenu(dummy_display)
 
         # 2-player map
-        map_data = pd.DataFrame(np.full((25, 25), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[23, 23] = 'h_2'
+        map_data = pd.DataFrame(np.full((25, 25), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[23, 23] = "h_2"
         assert menu._detect_num_players(map_data) == 2
 
         # 4-player map
-        map_data.iloc[1, 23] = 'h_3'
-        map_data.iloc[23, 1] = 'h_4'
+        map_data.iloc[1, 23] = "h_3"
+        map_data.iloc[23, 1] = "h_4"
         assert menu._detect_num_players(map_data) == 4
 
 
@@ -249,25 +249,25 @@ class TestWaterBorderStripping:
     def test_strip_water_border_fully_surrounded(self, dummy_display):
         """Test stripping when map is fully surrounded by ocean."""
         # Create a 10x10 map with 2 layers of ocean border
-        map_data = pd.DataFrame(np.full((10, 10), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((10, 10), "o", dtype=object))
         # Inner 6x6 area has grass
         for i in range(2, 8):
             for j in range(2, 8):
-                map_data.iloc[i, j] = 'p'
+                map_data.iloc[i, j] = "p"
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
         # Should strip to 6x6
         assert stripped.shape == (6, 6)
         # All tiles should be grass
-        assert (stripped == 'p').all().all()
+        assert (stripped == "p").all().all()
 
     def test_strip_water_border_partial_ocean(self, dummy_display):
         """Test stripping with partial ocean borders - strips each side independently."""
         # Create map with partial ocean border
-        map_data = pd.DataFrame(np.full((10, 10), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((10, 10), "o", dtype=object))
         # Make one tile on the border not ocean
-        map_data.iloc[0, 5] = 'p'  # Top row has one grass tile
+        map_data.iloc[0, 5] = "p"  # Top row has one grass tile
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
@@ -276,12 +276,12 @@ class TestWaterBorderStripping:
         assert stripped.shape[0] >= MIN_STRIP_SIZE  # Height at least min_size
         assert stripped.shape[1] >= MIN_STRIP_SIZE  # Width at least min_size
         # The non-ocean tile should still be present in the result
-        assert 'p' in stripped.values
+        assert "p" in stripped.values
 
     def test_strip_water_border_respects_min_size(self, dummy_display):
         """Test that stripping stops at minimum size."""
         # Create an 8x8 map fully of ocean
-        map_data = pd.DataFrame(np.full((8, 8), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((8, 8), "o", dtype=object))
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
@@ -291,7 +291,7 @@ class TestWaterBorderStripping:
     def test_strip_water_border_no_ocean_border(self, dummy_display):
         """Test map with no ocean borders."""
         # Create map with grass borders
-        map_data = pd.DataFrame(np.full((10, 10), 'p', dtype=object))
+        map_data = pd.DataFrame(np.full((10, 10), "p", dtype=object))
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
@@ -301,51 +301,51 @@ class TestWaterBorderStripping:
     def test_strip_water_border_iterative(self, dummy_display):
         """Test iterative stripping of multiple layers."""
         # Create a 14x14 map with 4 layers of ocean border
-        map_data = pd.DataFrame(np.full((14, 14), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((14, 14), "o", dtype=object))
         # Inner 6x6 area has grass
         for i in range(4, 10):
             for j in range(4, 10):
-                map_data.iloc[i, j] = 'p'
+                map_data.iloc[i, j] = "p"
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
         # Should strip all 4 layers to get to 6x6
         assert stripped.shape == (6, 6)
-        assert (stripped == 'p').all().all()
+        assert (stripped == "p").all().all()
 
     def test_strip_water_border_mixed_tiles(self, dummy_display):
         """Test stripping with various tile types inside."""
         # Create map with ocean border
-        map_data = pd.DataFrame(np.full((12, 12), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((12, 12), "o", dtype=object))
         # Inner area has various tiles
-        map_data.iloc[2:10, 2:10] = 'p'
-        map_data.iloc[3, 3] = 'h_1'
-        map_data.iloc[8, 8] = 'h_2'
-        map_data.iloc[5, 5] = 'w'  # Water (not ocean)
-        map_data.iloc[6, 6] = 'm'  # Mountain
+        map_data.iloc[2:10, 2:10] = "p"
+        map_data.iloc[3, 3] = "h_1"
+        map_data.iloc[8, 8] = "h_2"
+        map_data.iloc[5, 5] = "w"  # Water (not ocean)
+        map_data.iloc[6, 6] = "m"  # Mountain
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
         # Should strip 2 layers
         assert stripped.shape == (8, 8)
         # Check that interior tiles are preserved
-        assert stripped.iloc[1, 1] == 'h_1'
-        assert stripped.iloc[6, 6] == 'h_2'
-        assert stripped.iloc[3, 3] == 'w'
-        assert stripped.iloc[4, 4] == 'm'
+        assert stripped.iloc[1, 1] == "h_1"
+        assert stripped.iloc[6, 6] == "h_2"
+        assert stripped.iloc[3, 3] == "w"
+        assert stripped.iloc[4, 4] == "m"
 
     def test_strip_water_border_off_center_map(self, dummy_display):
         """Test stripping an off-center map strips each side independently."""
         # Create a 14x14 map with content offset to the top-left
         # More ocean on bottom and right than on top and left
-        map_data = pd.DataFrame(np.full((14, 14), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((14, 14), "o", dtype=object))
         # Place content in top-left area (1 row from top, 1 col from left)
         # Content is 6x6 starting at (1,1)
         for i in range(1, 7):
             for j in range(1, 7):
-                map_data.iloc[i, j] = 'p'
-        map_data.iloc[2, 2] = 'h_1'
-        map_data.iloc[5, 5] = 'h_2'
+                map_data.iloc[i, j] = "p"
+        map_data.iloc[2, 2] = "h_1"
+        map_data.iloc[5, 5] = "h_2"
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
@@ -354,11 +354,11 @@ class TestWaterBorderStripping:
         assert stripped.shape[0] >= MIN_STRIP_SIZE
         assert stripped.shape[1] >= MIN_STRIP_SIZE
         # The HQ tiles should be preserved
-        assert 'h_1' in stripped.values
-        assert 'h_2' in stripped.values
+        assert "h_1" in stripped.values
+        assert "h_2" in stripped.values
         # The first row/column should not be all ocean (content is at edge)
-        assert not all(tile == 'o' for tile in stripped.iloc[0, :])
-        assert not all(tile == 'o' for tile in stripped.iloc[:, 0])
+        assert not all(tile == "o" for tile in stripped.iloc[0, :])
+        assert not all(tile == "o" for tile in stripped.iloc[:, 0])
 
     def test_strip_water_border_asymmetric(self, dummy_display):
         """Test stripping with different amounts of ocean on each side."""
@@ -368,13 +368,13 @@ class TestWaterBorderStripping:
         # - 2 cols of ocean at left
         # - 2 cols of ocean at right
         # Inner content is 8x6
-        map_data = pd.DataFrame(np.full((12, 10), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((12, 10), "o", dtype=object))
         # Fill inner area with grass (rows 1-8, cols 2-7)
         for i in range(1, 9):
             for j in range(2, 8):
-                map_data.iloc[i, j] = 'p'
-        map_data.iloc[2, 3] = 'h_1'
-        map_data.iloc[7, 6] = 'h_2'
+                map_data.iloc[i, j] = "p"
+        map_data.iloc[2, 3] = "h_1"
+        map_data.iloc[7, 6] = "h_2"
 
         stripped = FileIO.strip_water_border(map_data, min_size=MIN_STRIP_SIZE)
 
@@ -382,15 +382,15 @@ class TestWaterBorderStripping:
         # Result should be 8x6
         assert stripped.shape == (8, 6)
         # HQ positions should be adjusted
-        assert stripped.iloc[1, 1] == 'h_1'  # Was at (2,3), shifted by (1,2)
-        assert stripped.iloc[6, 4] == 'h_2'  # Was at (7,6), shifted by (1,2)
+        assert stripped.iloc[1, 1] == "h_1"  # Was at (2,3), shifted by (1,2)
+        assert stripped.iloc[6, 4] == "h_2"  # Was at (7,6), shifted by (1,2)
 
     def test_add_water_border(self, dummy_display):
         """Test adding water borders."""
         # Create a small 6x6 map
-        map_data = pd.DataFrame(np.full((6, 6), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[4, 4] = 'h_2'
+        map_data = pd.DataFrame(np.full((6, 6), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[4, 4] = "h_2"
 
         bordered = FileIO.add_water_border(map_data, border_size=2)
 
@@ -398,34 +398,34 @@ class TestWaterBorderStripping:
         assert bordered.shape == (10, 10)
 
         # Check borders are ocean
-        assert all(bordered.iloc[0, :] == 'o')  # Top row
-        assert all(bordered.iloc[-1, :] == 'o')  # Bottom row
-        assert all(bordered.iloc[:, 0] == 'o')  # Left column
-        assert all(bordered.iloc[:, -1] == 'o')  # Right column
+        assert all(bordered.iloc[0, :] == "o")  # Top row
+        assert all(bordered.iloc[-1, :] == "o")  # Bottom row
+        assert all(bordered.iloc[:, 0] == "o")  # Left column
+        assert all(bordered.iloc[:, -1] == "o")  # Right column
 
         # Check interior is preserved with offset
-        assert bordered.iloc[3, 3] == 'h_1'  # 1,1 + 2 offset
-        assert bordered.iloc[6, 6] == 'h_2'  # 4,4 + 2 offset
+        assert bordered.iloc[3, 3] == "h_1"  # 1,1 + 2 offset
+        assert bordered.iloc[6, 6] == "h_2"  # 4,4 + 2 offset
 
     def test_add_water_border_zero_size(self, dummy_display):
         """Test adding zero-size border returns unchanged map."""
-        map_data = pd.DataFrame(np.full((6, 6), 'p', dtype=object))
+        map_data = pd.DataFrame(np.full((6, 6), "p", dtype=object))
 
         bordered = FileIO.add_water_border(map_data, border_size=0)
 
         assert bordered.shape == (6, 6)
-        assert (bordered == 'p').all().all()
+        assert (bordered == "p").all().all()
 
     def test_save_map_strips_border(self, dummy_display, tmp_path):
         """Test that saving a map strips ocean borders."""
         # Create map with ocean border (larger than MIN_MAP_SIZE)
-        map_data = pd.DataFrame(np.full((24, 24), 'o', dtype=object))
+        map_data = pd.DataFrame(np.full((24, 24), "o", dtype=object))
         # Inner 20x20 area
         for i in range(2, 22):
             for j in range(2, 22):
-                map_data.iloc[i, j] = 'p'
-        map_data.iloc[3, 3] = 'h_1'
-        map_data.iloc[20, 20] = 'h_2'
+                map_data.iloc[i, j] = "p"
+        map_data.iloc[3, 3] = "h_1"
+        map_data.iloc[20, 20] = "h_2"
 
         # Save the map
         save_path = tmp_path / "test_strip.csv"
@@ -437,15 +437,15 @@ class TestWaterBorderStripping:
         # Should be stripped to 20x20
         assert loaded.shape == (20, 20)
         # Check HQs are at correct positions after stripping
-        assert loaded.iloc[1, 1] == 'h_1'
-        assert loaded.iloc[18, 18] == 'h_2'
+        assert loaded.iloc[1, 1] == "h_1"
+        assert loaded.iloc[18, 18] == "h_2"
 
     def test_load_map_for_ui(self, dummy_display, tmp_path):
         """Test loading map with UI borders."""
         # Create and save a map that's already at MIN_MAP_SIZE
-        map_data = pd.DataFrame(np.full((20, 20), 'p', dtype=object))
-        map_data.iloc[1, 1] = 'h_1'
-        map_data.iloc[18, 18] = 'h_2'
+        map_data = pd.DataFrame(np.full((20, 20), "p", dtype=object))
+        map_data.iloc[1, 1] = "h_1"
+        map_data.iloc[18, 18] = "h_2"
 
         save_path = tmp_path / "test_ui_load.csv"
         # Save directly without borders
@@ -458,24 +458,24 @@ class TestWaterBorderStripping:
         assert loaded_ui.shape == (24, 24)
 
         # Check borders are ocean
-        assert all(loaded_ui.iloc[0, :] == 'o')
-        assert all(loaded_ui.iloc[-1, :] == 'o')
+        assert all(loaded_ui.iloc[0, :] == "o")
+        assert all(loaded_ui.iloc[-1, :] == "o")
 
         # Check interior is offset correctly
-        assert loaded_ui.iloc[3, 3] == 'h_1'  # 1,1 + 2 offset
-        assert loaded_ui.iloc[20, 20] == 'h_2'  # 18,18 + 2 offset
+        assert loaded_ui.iloc[3, 3] == "h_1"  # 1,1 + 2 offset
+        assert loaded_ui.iloc[20, 20] == "h_2"  # 18,18 + 2 offset
 
     def test_round_trip_save_load(self, dummy_display, tmp_path):
         """Test that save and load preserve map content."""
         # Create original map with borders (larger than MIN_MAP_SIZE)
-        original = pd.DataFrame(np.full((24, 24), 'o', dtype=object))
+        original = pd.DataFrame(np.full((24, 24), "o", dtype=object))
         for i in range(2, 22):
             for j in range(2, 22):
-                original.iloc[i, j] = 'p'
-        original.iloc[5, 5] = 'h_1'
-        original.iloc[20, 20] = 'h_2'
-        original.iloc[10, 10] = 'm'
-        original.iloc[12, 12] = 'w'
+                original.iloc[i, j] = "p"
+        original.iloc[5, 5] = "h_1"
+        original.iloc[20, 20] = "h_2"
+        original.iloc[10, 10] = "m"
+        original.iloc[12, 12] = "w"
 
         # Save (will strip borders)
         save_path = tmp_path / "test_round_trip.csv"
@@ -488,7 +488,7 @@ class TestWaterBorderStripping:
         assert loaded.shape == original.shape
 
         # Check critical tiles match
-        assert loaded.iloc[5, 5] == 'h_1'
-        assert loaded.iloc[20, 20] == 'h_2'
-        assert loaded.iloc[10, 10] == 'm'
-        assert loaded.iloc[12, 12] == 'w'
+        assert loaded.iloc[5, 5] == "h_1"
+        assert loaded.iloc[20, 20] == "h_2"
+        assert loaded.iloc[10, 10] == "m"
+        assert loaded.iloc[12, 12] == "w"

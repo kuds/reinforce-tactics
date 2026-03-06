@@ -3,7 +3,7 @@
 Generate PNG map previews for the documentation site.
 Uses PIL instead of Pygame to avoid display requirements.
 """
-import os
+
 import sys
 from pathlib import Path
 
@@ -11,40 +11,39 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from PIL import Image, ImageDraw
-import pandas as pd
-
+import pandas as pd  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 
 # Color definitions from constants.py
 TILE_COLORS = {
-    'p': (100, 200, 100),      # Plains/Grass - Bright green
-    'w': (50, 120, 200),       # Water - Blue
-    'm': (150, 150, 150),      # Mountain - Light gray
-    'f': (34, 139, 34),        # Forest - Forest green
-    'r': (160, 130, 80),       # Road - Brown/tan
-    'b': (180, 180, 180),      # Building - Light gray
-    'h': (200, 200, 50),       # HQ - Yellow
-    't': (220, 220, 220),      # Tower - Light gray
-    'o': (0, 39, 232),         # Ocean - Dark Blue
+    "p": (100, 200, 100),  # Plains/Grass - Bright green
+    "w": (50, 120, 200),  # Water - Blue
+    "m": (150, 150, 150),  # Mountain - Light gray
+    "f": (34, 139, 34),  # Forest - Forest green
+    "r": (160, 130, 80),  # Road - Brown/tan
+    "b": (180, 180, 180),  # Building - Light gray
+    "h": (200, 200, 50),  # HQ - Yellow
+    "t": (220, 220, 220),  # Tower - Light gray
+    "o": (0, 39, 232),  # Ocean - Dark Blue
 }
 
 PLAYER_COLORS = {
-    1: (255, 50, 50),     # Red
-    2: (77, 121, 255),    # Blue
-    3: (50, 255, 50),     # Green
-    4: (255, 255, 50)     # Yellow
+    1: (255, 50, 50),  # Red
+    2: (77, 121, 255),  # Blue
+    3: (50, 255, 50),  # Green
+    4: (255, 255, 50),  # Yellow
 }
 
 TERRAIN_DISPLAY_NAMES = {
-    'p': 'Plains',
-    'o': 'Ocean',
-    'w': 'Water',
-    'm': 'Mountain',
-    'f': 'Forest',
-    'r': 'Road',
-    't': 'Tower',
-    'h': 'HQ',
-    'b': 'Building',
+    "p": "Plains",
+    "o": "Ocean",
+    "w": "Water",
+    "m": "Mountain",
+    "f": "Forest",
+    "r": "Road",
+    "t": "Tower",
+    "h": "HQ",
+    "b": "Building",
 }
 
 
@@ -59,8 +58,8 @@ def load_map(filepath: str) -> pd.DataFrame:
 
 def get_tile_color(tile: str) -> tuple:
     """Get the RGB color for a tile type."""
-    if '_' in tile:
-        parts = tile.split('_')
+    if "_" in tile:
+        parts = tile.split("_")
         base_type = parts[0]
         if len(parts) > 1 and parts[1].isdigit():
             player_num = int(parts[1])
@@ -88,7 +87,7 @@ def generate_preview(map_path: str, width: int = 300, height: int = 300) -> Imag
     actual_height = int(tile_size * map_height)
 
     # Create image
-    img = Image.new('RGB', (actual_width, actual_height), (0, 0, 0))
+    img = Image.new("RGB", (actual_width, actual_height), (0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     # Draw each tile
@@ -125,24 +124,19 @@ def extract_metadata(map_path: str) -> dict:
         for x in range(map_width):
             tile = str(map_data.iloc[y, x])
 
-            if '_' in tile:
-                parts = tile.split('_')
+            if "_" in tile:
+                parts = tile.split("_")
                 base_type = parts[0]
                 if len(parts) > 1 and parts[1].isdigit():
                     player_num = int(parts[1])
                     player_count = max(player_count, player_num)
-                    terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, 'Unknown')
+                    terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, "Unknown")
                     terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
             else:
-                terrain_name = TERRAIN_DISPLAY_NAMES.get(tile, 'Unknown')
+                terrain_name = TERRAIN_DISPLAY_NAMES.get(tile, "Unknown")
                 terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
 
-    return {
-        'width': map_width,
-        'height': map_height,
-        'player_count': player_count,
-        'terrain_counts': terrain_counts
-    }
+    return {"width": map_width, "height": map_height, "player_count": player_count, "terrain_counts": terrain_counts}
 
 
 def main():
@@ -150,27 +144,27 @@ def main():
     # All maps organized by category
     all_maps = [
         # 1v1 Maps
-        'maps/1v1/beginner.csv',
-        'maps/1v1/center_mountains.csv',
-        'maps/1v1/corner_points.csv',
-        'maps/1v1/crossroads.csv',
-        'maps/1v1/demo_map_editor.csv',
-        'maps/1v1/difficult_terrain.csv',
-        'maps/1v1/funnel_point.csv',
-        'maps/1v1/island_fortress.csv',
-        'maps/1v1/the_narrows.csv',
-        'maps/1v1/tower_rush.csv',
+        "maps/1v1/beginner.csv",
+        "maps/1v1/center_mountains.csv",
+        "maps/1v1/corner_points.csv",
+        "maps/1v1/crossroads.csv",
+        "maps/1v1/demo_map_editor.csv",
+        "maps/1v1/difficult_terrain.csv",
+        "maps/1v1/funnel_point.csv",
+        "maps/1v1/island_fortress.csv",
+        "maps/1v1/the_narrows.csv",
+        "maps/1v1/tower_rush.csv",
         # 1v1v1 Maps
-        'maps/1v1v1/triangle_arena.csv',
-        'maps/1v1v1/three_islands.csv',
-        'maps/1v1v1/the_trident.csv',
-        'maps/1v1v1/disputed_crossroads.csv',
+        "maps/1v1v1/triangle_arena.csv",
+        "maps/1v1v1/three_islands.csv",
+        "maps/1v1v1/the_trident.csv",
+        "maps/1v1v1/disputed_crossroads.csv",
         # 2v2 Maps
-        'maps/2v2/beginner.csv',
+        "maps/2v2/beginner.csv",
     ]
 
     # Output directory
-    output_dir = project_root / 'docs-site' / 'static' / 'img' / 'maps'
+    output_dir = project_root / "docs-site" / "static" / "img" / "maps"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Generating map previews in {output_dir}")
@@ -199,7 +193,7 @@ def main():
         else:
             output_name = map_name
         output_path = output_dir / f"{output_name}.png"
-        preview.save(str(output_path), 'PNG')
+        preview.save(str(output_path), "PNG")
 
         print(f"Generated: {output_path}")
         print(f"  Size: {metadata['width']}x{metadata['height']}")
@@ -209,5 +203,5 @@ def main():
     print("\nDone!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,26 +1,27 @@
 """Map preview generator for creating thumbnails of maps."""
+
 import os
 import re
-from typing import Dict, Tuple, Optional
-import pygame
-import pandas as pd
+from typing import Dict, Optional, Tuple
 
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
+import pandas as pd
+import pygame
+
+from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
 from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.fonts import get_font
 
-
 # Mapping of terrain codes to display names
 TERRAIN_DISPLAY_NAMES = {
-    'p': 'Plains',
-    'o': 'Ocean',
-    'w': 'Water',
-    'm': 'Mountain',
-    'f': 'Forest',
-    'r': 'Road',
-    't': 'Tower',
-    'h': 'HQ',
-    'b': 'Building',
+    "p": "Plains",
+    "o": "Ocean",
+    "w": "Water",
+    "m": "Mountain",
+    "f": "Forest",
+    "r": "Road",
+    "t": "Tower",
+    "h": "HQ",
+    "b": "Building",
 }
 
 
@@ -31,8 +32,9 @@ class MapPreviewGenerator:
         """Initialize the map preview generator."""
         self._cache: Dict[str, Tuple[pygame.Surface, dict]] = {}
 
-    def generate_preview(self, map_path: str, width: int = 150, height: int = 150,
-                        force_regenerate: bool = False) -> Tuple[Optional[pygame.Surface], dict]:
+    def generate_preview(
+        self, map_path: str, width: int = 150, height: int = 150, force_regenerate: bool = False
+    ) -> Tuple[Optional[pygame.Surface], dict]:
         """
         Generate a preview thumbnail and metadata for a map.
 
@@ -54,12 +56,12 @@ class MapPreviewGenerator:
         # Handle random map case
         if map_path == "random":
             metadata = {
-                'name': "Random Map",
-                'width': 0,
-                'height': 0,
-                'player_count': 0,
-                'terrain_breakdown': {},
-                'difficulty': 'N/A'
+                "name": "Random Map",
+                "width": 0,
+                "height": 0,
+                "player_count": 0,
+                "terrain_breakdown": {},
+                "difficulty": "N/A",
             }
             # Create a simple preview for random map
             preview = pygame.Surface((width, height))
@@ -104,7 +106,7 @@ class MapPreviewGenerator:
         map_height, map_width = map_data.shape
 
         # Count terrain types and player structures
-        terrain_counts = {}
+        terrain_counts: dict[str, int] = {}
         player_count = 0
 
         for y in range(map_height):
@@ -112,19 +114,19 @@ class MapPreviewGenerator:
                 tile = str(map_data.iloc[y, x])
 
                 # Handle player structures (e.g., "h_1", "b_2")
-                if '_' in tile:
-                    parts = tile.split('_')
+                if "_" in tile:
+                    parts = tile.split("_")
                     base_type = parts[0]
                     if len(parts) > 1 and parts[1].isdigit():
                         player_num = int(parts[1])
                         player_count = max(player_count, player_num)
 
                         # Count as the base type with player prefix
-                        terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, 'Unknown')
+                        terrain_name = TERRAIN_DISPLAY_NAMES.get(base_type, "Unknown")
                         terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
                 else:
                     # Map terrain codes to readable names
-                    terrain_name = TERRAIN_DISPLAY_NAMES.get(tile, 'Unknown')
+                    terrain_name = TERRAIN_DISPLAY_NAMES.get(tile, "Unknown")
                     terrain_counts[terrain_name] = terrain_counts.get(terrain_name, 0) + 1
 
         # Calculate percentages
@@ -132,10 +134,7 @@ class MapPreviewGenerator:
         terrain_breakdown = {}
         for terrain, count in terrain_counts.items():
             percentage = (count / total_tiles) * 100
-            terrain_breakdown[terrain] = {
-                'count': count,
-                'percentage': percentage
-            }
+            terrain_breakdown[terrain] = {"count": count, "percentage": percentage}
 
         # Calculate difficulty based on map complexity
         difficulty = self._calculate_difficulty(map_width, map_height, terrain_breakdown)
@@ -145,16 +144,15 @@ class MapPreviewGenerator:
         friendly_name = self._format_display_name(filename)
 
         return {
-            'name': friendly_name,
-            'width': map_width,
-            'height': map_height,
-            'player_count': player_count,
-            'terrain_breakdown': terrain_breakdown,
-            'difficulty': difficulty
+            "name": friendly_name,
+            "width": map_width,
+            "height": map_height,
+            "player_count": player_count,
+            "terrain_breakdown": terrain_breakdown,
+            "difficulty": difficulty,
         }
 
-    def _calculate_difficulty(self, width: int, height: int,
-                             terrain_breakdown: dict) -> str:
+    def _calculate_difficulty(self, width: int, height: int, terrain_breakdown: dict) -> str:
         """
         Calculate difficulty indicator based on map complexity.
 
@@ -194,14 +192,14 @@ class MapPreviewGenerator:
         name = os.path.splitext(filename)[0]
 
         # Replace underscores with spaces
-        name = name.replace('_', ' ')
+        name = name.replace("_", " ")
 
         # Replace lowercase x with multiplication symbol in dimensions
         # Match patterns like "6x6" or "10x10"
-        name = re.sub(r'(\d+)x(\d+)', r'\1×\2', name)
+        name = re.sub(r"(\d+)x(\d+)", r"\1×\2", name)
 
         # Capitalize each word
-        name = ' '.join(word.capitalize() for word in name.split())
+        name = " ".join(word.capitalize() for word in name.split())
 
         return name
 
@@ -240,7 +238,7 @@ class MapPreviewGenerator:
                     int(x * tile_width),
                     int(y * tile_height),
                     int(tile_width) + 1,  # +1 to avoid gaps
-                    int(tile_height) + 1
+                    int(tile_height) + 1,
                 )
                 pygame.draw.rect(preview, color, rect)
 
@@ -257,8 +255,8 @@ class MapPreviewGenerator:
             RGB color tuple
         """
         # Handle player structures (e.g., "h_1", "b_2")
-        if '_' in tile:
-            parts = tile.split('_')
+        if "_" in tile:
+            parts = tile.split("_")
             base_type = parts[0]
 
             if len(parts) > 1 and parts[1].isdigit():

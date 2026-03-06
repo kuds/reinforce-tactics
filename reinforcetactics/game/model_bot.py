@@ -1,9 +1,10 @@
 """
 Model-based bot that uses trained Stable-Baselines3 models.
 """
+
 import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -17,7 +18,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
     """Bot that uses a trained Stable-Baselines3 model for decision-making."""
 
     # Canonical unit type ordering — must match StrategyGameEnv action space indices
-    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
 
     # Number of action types in the environment (0-9)
     NUM_ACTION_TYPES = 10
@@ -49,27 +50,28 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         """
         try:
             # Import here to avoid dependency issues if SB3 not installed
-            from stable_baselines3 import PPO, A2C, DQN
+            from stable_baselines3 import A2C, DQN, PPO
+
             from reinforcetactics.rl.gym_env import StrategyGameEnv
 
             # Also try MaskablePPO from sb3-contrib
             algorithm_classes = [PPO, A2C, DQN]
             try:
                 from sb3_contrib import MaskablePPO
+
                 algorithm_classes.insert(0, MaskablePPO)
             except ImportError:
                 pass
 
-            model_path = Path(model_path)
-            if not model_path.exists():
-                raise FileNotFoundError(f"Model file not found: {model_path}")
+            model_path_resolved = Path(model_path)
+            if not model_path_resolved.exists():
+                raise FileNotFoundError(f"Model file not found: {model_path_resolved}")
 
             # Try to load with different algorithms
             for algorithm_class in algorithm_classes:
                 try:
-                    self.model = algorithm_class.load(str(model_path))
-                    logger.info("Successfully loaded model as %s: %s",
-                               algorithm_class.__name__, model_path)
+                    self.model = algorithm_class.load(str(model_path_resolved))
+                    logger.info("Successfully loaded model as %s: %s", algorithm_class.__name__, model_path)
                     break
                 except Exception as e:
                     logger.debug("Failed to load as %s: %s", algorithm_class.__name__, e)
@@ -80,16 +82,11 @@ class ModelBot:  # pylint: disable=too-few-public-methods
 
             # Create a dummy environment for observation space info
             # We'll use the actual game state for observations
-            self.env = StrategyGameEnv(
-                map_file=None,
-                opponent=None,
-                render_mode=None
-            )
+            self.env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
 
         except ImportError as e:
             raise ImportError(
-                "stable-baselines3 is required for ModelBot. "
-                "Install it with: pip install stable-baselines3"
+                "stable-baselines3 is required for ModelBot. Install it with: pip install stable-baselines3"
             ) from e
         except Exception as e:
             logger.error("Error loading model: %s", e)
@@ -144,17 +141,20 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         state_arrays = self.game_state.to_numpy()
 
         obs = {
-            'grid': state_arrays['grid'].astype(np.float32),
-            'units': state_arrays['units'].astype(np.float32),
-            'global_features': np.array([
-                self.game_state.player_gold.get(1, 0),
-                self.game_state.player_gold.get(2, 0),
-                self.game_state.turn_number,
-                len([u for u in self.game_state.units if u.player == 1]),
-                len([u for u in self.game_state.units if u.player == 2]),
-                self.game_state.current_player
-            ], dtype=np.float32),
-            'action_mask': self._compute_action_mask()
+            "grid": state_arrays["grid"].astype(np.float32),
+            "units": state_arrays["units"].astype(np.float32),
+            "global_features": np.array(
+                [
+                    self.game_state.player_gold.get(1, 0),
+                    self.game_state.player_gold.get(2, 0),
+                    self.game_state.turn_number,
+                    len([u for u in self.game_state.units if u.player == 1]),
+                    len([u for u in self.game_state.units if u.player == 2]),
+                    self.game_state.current_player,
+                ],
+                dtype=np.float32,
+            ),
+            "action_mask": self._compute_action_mask(),
         }
 
         return obs
@@ -175,68 +175,68 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                     mask[5 * w * h + y * w + x] = 1.0
 
             # Create unit actions (action_type=0)
-            for action in legal_actions.get('create_unit', []):
-                idx = 0 * w * h + action['y'] * w + action['x']
+            for action in legal_actions.get("create_unit", []):
+                idx = 0 * w * h + action["y"] * w + action["x"]
                 if 0 <= idx < mask_size:
                     mask[idx] = 1.0
 
             # Move actions (action_type=1)
-            for action in legal_actions.get('move', []):
-                for tx, ty in action.get('positions', []):
+            for action in legal_actions.get("move", []):
+                for tx, ty in action.get("positions", []):
                     idx = 1 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Attack actions (action_type=2)
-            for action in legal_actions.get('attack', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("attack", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 2 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Seize actions (action_type=3)
-            for action in legal_actions.get('seize', []):
-                idx = 3 * w * h + action['y'] * w + action['x']
+            for action in legal_actions.get("seize", []):
+                idx = 3 * w * h + action["y"] * w + action["x"]
                 if 0 <= idx < mask_size:
                     mask[idx] = 1.0
 
             # Heal/cure actions (action_type=4)
-            for action in legal_actions.get('heal', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("heal", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 4 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Paralyze (action_type=6)
-            for action in legal_actions.get('paralyze', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("paralyze", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 6 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Haste (action_type=7)
-            for action in legal_actions.get('haste', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("haste", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 7 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Defence buff (action_type=8)
-            for action in legal_actions.get('defence_buff', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("defence_buff", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 8 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
 
             # Attack buff (action_type=9)
-            for action in legal_actions.get('attack_buff', []):
-                for target in action.get('targets', []):
-                    tx, ty = target['x'], target['y']
+            for action in legal_actions.get("attack_buff", []):
+                for target in action.get("targets", []):
+                    tx, ty = target["x"], target["y"]
                     idx = 9 * w * h + ty * w + tx
                     if 0 <= idx < mask_size:
                         mask[idx] = 1.0
@@ -291,11 +291,11 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if action_type == 6:  # Paralyze (Mage/Sorcerer)
                 return self._paralyze(from_x, from_y, to_x, to_y)
             if action_type == 7:  # Haste (Sorcerer)
-                return self._buff(from_x, from_y, to_x, to_y, 'haste')
+                return self._buff(from_x, from_y, to_x, to_y, "haste")
             if action_type == 8:  # Defence Buff (Sorcerer)
-                return self._buff(from_x, from_y, to_x, to_y, 'defence_buff')
+                return self._buff(from_x, from_y, to_x, to_y, "defence_buff")
             if action_type == 9:  # Attack Buff (Sorcerer)
-                return self._buff(from_x, from_y, to_x, to_y, 'attack_buff')
+                return self._buff(from_x, from_y, to_x, to_y, "attack_buff")
 
             logger.warning("Unknown action type: %s", action_type)
             return False
@@ -314,12 +314,12 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             unit_code = self.ALL_UNIT_TYPES[unit_type]
 
             # Check if this unit type is enabled in the current game
-            if hasattr(self.game_state, 'is_unit_type_enabled'):
+            if hasattr(self.game_state, "is_unit_type_enabled"):
                 if not self.game_state.is_unit_type_enabled(unit_code):
                     return False
 
             # Check if we have enough gold
-            cost = UNIT_DATA[unit_code]['cost']
+            cost = UNIT_DATA[unit_code]["cost"]
             if self.game_state.player_gold.get(self.bot_player, 0) < cost:
                 return False
 
@@ -328,7 +328,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 return False
 
             tile = self.game_state.grid.get_tile(x, y)
-            if tile.player != self.bot_player or tile.type != 'b':
+            if tile.player != self.bot_player or tile.type != "b":
                 return False
 
             # Check if location is occupied
@@ -409,7 +409,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if healer.player != self.bot_player or target.player != self.bot_player:
                 return False
 
-            if healer.type != 'C':  # Only clerics can heal/cure
+            if healer.type != "C":  # Only clerics can heal/cure
                 return False
 
             # Priority: cure if paralyzed, otherwise heal (matches gym_env logic)
@@ -437,7 +437,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if unit.player != self.bot_player or target.player == self.bot_player:
                 return False
 
-            if unit.type != 'M':  # Only Mages can paralyze
+            if unit.type != "M":  # Only Mages can paralyze
                 return False
 
             return self.game_state.paralyze(unit, target)
@@ -446,8 +446,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             logger.debug("Failed to paralyze: %s", e)
             return False
 
-    def _buff(self, from_x: int, from_y: int, to_x: int, to_y: int,
-              buff_type: str) -> bool:
+    def _buff(self, from_x: int, from_y: int, to_x: int, to_y: int, buff_type: str) -> bool:
         """Apply a Sorcerer buff (haste, defence_buff, or attack_buff) to a friendly unit."""
         try:
             unit = self.game_state.get_unit_at_position(from_x, from_y)
@@ -459,7 +458,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             if unit.player != self.bot_player or target.player != self.bot_player:
                 return False
 
-            if unit.type != 'S':  # Only Sorcerers can buff
+            if unit.type != "S":  # Only Sorcerers can buff
                 return False
 
             buff_fn = getattr(self.game_state, buff_type, None)

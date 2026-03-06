@@ -1,24 +1,29 @@
 """Main map editor class that coordinates all components."""
-from typing import Optional, Dict, Any
-from pathlib import Path
-import pygame
-import pandas as pd
 
-from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
-from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
-from reinforcetactics.utils.language import get_language
-from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.utils.file_io import FileIO
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import pandas as pd
+import pygame
+
 from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
+from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
+from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 
 class MapEditor:
     """Main map editor class."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None,
-                 map_data: Optional[pd.DataFrame] = None,
-                 map_filename: Optional[str] = None,
-                 num_players: int = 2) -> None:
+    def __init__(
+        self,
+        screen: Optional[pygame.Surface] = None,
+        map_data: Optional[pd.DataFrame] = None,
+        map_filename: Optional[str] = None,
+        num_players: int = 2,
+    ) -> None:
         """
         Initialize the map editor.
 
@@ -53,24 +58,12 @@ class MapEditor:
         # Tile palette on the right side
         palette_width = 250
         palette_height = screen_height - 150
-        self.palette = TilePalette(
-            screen_width - palette_width - 20,
-            100,
-            palette_width,
-            palette_height,
-            num_players
-        )
+        self.palette = TilePalette(screen_width - palette_width - 20, 100, palette_width, palette_height, num_players)
 
         # Canvas on the left side
         canvas_width = screen_width - palette_width - 60
         canvas_height = screen_height - 150
-        self.canvas = EditorCanvas(
-            20,
-            100,
-            canvas_width,
-            canvas_height,
-            self.map_data
-        )
+        self.canvas = EditorCanvas(20, 100, canvas_width, canvas_height, self.map_data)
 
         # Fonts
         self.title_font = get_font(28)
@@ -103,7 +96,7 @@ class MapEditor:
                     if self.modified:
                         # TODO: Add save confirmation dialog
                         pass
-                    return {'type': 'exit'}
+                    return {"type": "exit"}
 
                 self._handle_event(event)
 
@@ -161,23 +154,23 @@ class MapEditor:
             self.canvas.zoom_out()
         # Quick tile selection with number keys
         elif event.key == pygame.K_1:
-            self.palette.selected_tile = 'p'  # Grass
+            self.palette.selected_tile = "p"  # Grass
         elif event.key == pygame.K_2:
-            self.palette.selected_tile = 'o'  # Ocean
+            self.palette.selected_tile = "o"  # Ocean
         elif event.key == pygame.K_3:
-            self.palette.selected_tile = 'w'  # Water
+            self.palette.selected_tile = "w"  # Water
         elif event.key == pygame.K_4:
-            self.palette.selected_tile = 'm'  # Mountain
+            self.palette.selected_tile = "m"  # Mountain
         elif event.key == pygame.K_5:
-            self.palette.selected_tile = 'f'  # Forest
+            self.palette.selected_tile = "f"  # Forest
         elif event.key == pygame.K_6:
-            self.palette.selected_tile = 'r'  # Road
+            self.palette.selected_tile = "r"  # Road
         elif event.key == pygame.K_7:
-            self.palette.selected_tile = 't'  # Tower
+            self.palette.selected_tile = "t"  # Tower
         elif event.key == pygame.K_8:
-            self.palette.selected_tile = 'b'  # Building
+            self.palette.selected_tile = "b"  # Building
         elif event.key == pygame.K_9:
-            self.palette.selected_tile = 'h'  # Headquarters
+            self.palette.selected_tile = "h"  # Headquarters
 
     def _handle_keyup(self, event: pygame.event.Event) -> None:
         """
@@ -222,7 +215,7 @@ class MapEditor:
                 self.modified = True
 
         elif event.button == 3:  # Right click - erase
-            if self.canvas.handle_mouse_click(event.pos, 'p'):  # Replace with grass
+            if self.canvas.handle_mouse_click(event.pos, "p"):  # Replace with grass
                 self.modified = True
 
         elif event.button == 4:  # Mouse wheel up
@@ -268,6 +261,7 @@ class MapEditor:
 
             # Generate filename
             import datetime
+
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             save_path = save_dir / f"custom_map_{timestamp}.csv"
 
@@ -279,7 +273,7 @@ class MapEditor:
             print(f"✅ Map saved: {save_path}")
             return True
         else:
-            print(f"❌ Failed to save map")
+            print("❌ Failed to save map")
             return False
 
     def _validate_map(self) -> list:
@@ -296,8 +290,7 @@ class MapEditor:
         height, width = self.map_data.shape
         if width < MIN_MAP_SIZE or height < MIN_MAP_SIZE:
             errors.append(
-                lang.get('map_editor.validation.min_size', 'Map must be at least {size}x{size}')
-                .format(size=MIN_MAP_SIZE)
+                lang.get("map_editor.validation.min_size", "Map must be at least {size}x{size}").format(size=MIN_MAP_SIZE)
             )
 
         # Check headquarters for each player
@@ -307,9 +300,9 @@ class MapEditor:
 
             if hq_count != 1:
                 errors.append(
-                    lang.get('map_editor.validation.invalid_hq',
-                            'Player {player} needs exactly one Headquarters')
-                    .format(player=player_num)
+                    lang.get("map_editor.validation.invalid_hq", "Player {player} needs exactly one Headquarters").format(
+                        player=player_num
+                    )
                 )
 
         return errors
@@ -322,7 +315,7 @@ class MapEditor:
         screen_width = self.screen.get_width()
 
         # Draw title
-        title_text = lang.get('map_editor.title', 'Map Editor')
+        title_text = lang.get("map_editor.title", "Map Editor")
         if self.map_filename:
             title_text += f" - {Path(self.map_filename).name}"
         if self.modified:
@@ -339,8 +332,8 @@ class MapEditor:
             f"[Ctrl+S] {lang.get('map_editor.shortcuts.save', 'Save')}",
             f"[G] {lang.get('map_editor.shortcuts.grid', 'Toggle Grid')}",
             f"[Esc] {lang.get('map_editor.shortcuts.esc', 'Exit')}",
-            f"[1-9] Quick tile select",
-            f"[+/-] Zoom",
+            "[1-9] Quick tile select",
+            "[+/-] Zoom",
         ]
 
         current_x = shortcuts_x

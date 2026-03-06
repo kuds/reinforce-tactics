@@ -1,20 +1,29 @@
 """
 Pygame rendering for the strategy game.
 """
+
 import os
 import time
-import pygame
+
 import numpy as np
+import pygame
+
 from reinforcetactics.constants import (
-    TILE_SIZE, TILE_TYPES, TILE_IMAGES,
-    PLAYER_COLORS, UNIT_COLORS, UNIT_DATA,
-    BASE_SPRITE_COLORS, TEAM_PALETTES,
-    NEUTRAL_STRUCTURE_PALETTE, STRUCTURE_TILE_TYPES,
+    BASE_SPRITE_COLORS,
+    NEUTRAL_STRUCTURE_PALETTE,
+    PLAYER_COLORS,
+    STRUCTURE_TILE_TYPES,
+    TEAM_PALETTES,
+    TILE_IMAGES,
+    TILE_SIZE,
+    TILE_TYPES,
+    UNIT_COLORS,
+    UNIT_DATA,
 )
-from reinforcetactics.core.visibility import UNEXPLORED, SHROUDED, VISIBLE
+from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
+from reinforcetactics.ui.sprite_animator import SpriteAnimator
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.settings import get_settings
-from reinforcetactics.ui.sprite_animator import SpriteAnimator
 
 
 class Renderer:
@@ -87,11 +96,11 @@ class Renderer:
         position on the map deterministically picks one variant so the
         terrain looks varied but stays stable across frames.
         """
-        tile_images = {}      # type_name -> base surface (single)
-        tile_variants = {}    # type_name -> [surface, ...]
+        tile_images = {}  # type_name -> base surface (single)
+        tile_variants = {}  # type_name -> [surface, ...]
 
-        use_tile_sprites = self.settings.get('graphics.use_tile_sprites', False)
-        tile_sprites_path = self.settings.get_sprites_path('tiles')
+        use_tile_sprites = self.settings.get("graphics.use_tile_sprites", False)
+        tile_sprites_path = self.settings.get_sprites_path("tiles")
 
         for tile_type, filename in TILE_IMAGES.items():
             variants = []
@@ -123,9 +132,7 @@ class Renderer:
                         img = pygame.image.load(variant_path)
                         if not self.headless:
                             img = img.convert_alpha()
-                        variants.append(
-                            pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
-                        )
+                        variants.append(pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE)))
                         num += 1
                     except (pygame.error, FileNotFoundError):
                         break
@@ -161,9 +168,7 @@ class Renderer:
 
             # Neutral variants (player=None)
             self.team_tile_variants[(tile_type_name, None)] = [
-                self._recolor_tile(s, BASE_SPRITE_COLORS,
-                                   NEUTRAL_STRUCTURE_PALETTE)
-                for s in base_list
+                self._recolor_tile(s, BASE_SPRITE_COLORS, NEUTRAL_STRUCTURE_PALETTE) for s in base_list
             ]
 
             # Per-team variants
@@ -172,8 +177,7 @@ class Renderer:
                     self.team_tile_variants[(tile_type_name, player)] = base_list
                 else:
                     self.team_tile_variants[(tile_type_name, player)] = [
-                        self._recolor_tile(s, BASE_SPRITE_COLORS, palette)
-                        for s in base_list
+                        self._recolor_tile(s, BASE_SPRITE_COLORS, palette) for s in base_list
                     ]
 
     @staticmethod
@@ -201,13 +205,13 @@ class Renderer:
         unit_images = {}
 
         # Get the configured unit sprites path
-        unit_sprites_path = self.settings.get_sprites_path('units')
+        unit_sprites_path = self.settings.get_sprites_path("units")
         if not unit_sprites_path:
             return unit_images
 
         # Load sprite for each unit type
         for unit_type, unit_data in UNIT_DATA.items():
-            static_path = unit_data.get('static_path', '')
+            static_path = unit_data.get("static_path", "")
             if static_path:
                 try:
                     full_path = os.path.join(unit_sprites_path, static_path)
@@ -222,7 +226,7 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        animation_path = self.settings.get_sprites_path('animation')
+        animation_path = self.settings.get_sprites_path("animation")
         if not animation_path:
             return None
 
@@ -300,7 +304,7 @@ class Renderer:
         # Check visibility state for fog of war
         vis_state = self._get_visibility_state(tile.x, tile.y, fow_player)
 
-        tile_type_name = TILE_TYPES.get(tile.type, 'OCEAN')
+        tile_type_name = TILE_TYPES.get(tile.type, "OCEAN")
 
         # Draw tile image or color (always draw terrain, even in fog)
         # For structures, pick from team-coloured variants; for terrain,
@@ -308,9 +312,7 @@ class Renderer:
         # position so each tile always shows the same variant.
         variants = None
         if tile_type_name in STRUCTURE_TILE_TYPES:
-            variants = self.team_tile_variants.get(
-                (tile_type_name, tile.player)
-            )
+            variants = self.team_tile_variants.get((tile_type_name, tile.player))
         if variants is None:
             variants = self.tile_variants.get(tile_type_name)
 
@@ -328,28 +330,29 @@ class Renderer:
             pygame.draw.rect(self.screen, color, rect)
 
             # Add visual variety to tiles
-            if tile.type == 'p':  # Grass - checkerboard pattern
+            if tile.type == "p":  # Grass - checkerboard pattern
                 if (tile.x + tile.y) % 2 == 0:
                     lighter = tuple(min(c + 15, 255) for c in color)
                     pygame.draw.rect(self.screen, lighter, rect)
 
-            elif tile.type == 'o':  # Ocean - checkerboard pattern
+            elif tile.type == "o":  # Ocean - checkerboard pattern
                 if (tile.x + tile.y) % 2 == 0:
                     lighter = tuple(min(c + 15, 255) for c in color)
                     pygame.draw.rect(self.screen, lighter, rect)
 
-            elif tile.type == 'w':  # Water - darker edges
+            elif tile.type == "w":  # Water - darker edges
                 darker = tuple(max(c - 30, 0) for c in color)
                 pygame.draw.line(self.screen, darker, rect.topleft, rect.topright, 2)
                 pygame.draw.line(self.screen, darker, rect.topleft, rect.bottomleft, 2)
 
-            elif tile.type == 'm':  # Mountain - lighter top
+            elif tile.type == "m":  # Mountain - lighter top
                 lighter = tuple(min(c + 40, 255) for c in color)
                 top_rect = pygame.Rect(rect.x, rect.y, rect.width, rect.height // 2)
                 pygame.draw.rect(self.screen, lighter, top_rect)
 
-            elif tile.type == 'f':  # Forest - random dots for texture
+            elif tile.type == "f":  # Forest - random dots for texture
                 import random
+
                 random.seed(tile.x * 1000 + tile.y)  # Deterministic randomness
                 for _ in range(3):
                     x = rect.x + random.randint(5, rect.width - 5)
@@ -357,17 +360,16 @@ class Renderer:
                     darker = tuple(max(c - 20, 0) for c in color)
                     pygame.draw.circle(self.screen, darker, (x, y), 2)
 
-            elif tile.type == 'r':  # Road - center stripe
+            elif tile.type == "r":  # Road - center stripe
                 stripe_color = tuple(min(c + 30, 255) for c in color)
                 center_y = rect.centery
-                pygame.draw.line(self.screen, stripe_color,
-                            (rect.left, center_y), (rect.right, center_y), 2)
+                pygame.draw.line(self.screen, stripe_color, (rect.left, center_y), (rect.right, center_y), 2)
 
-            elif tile.type in ['h', 'b', 't']:  # Structures - border highlight
+            elif tile.type in ["h", "b", "t"]:  # Structures - border highlight
                 # HQ ownership is always visible (players know where enemy HQs are)
                 # Buildings and towers only show ownership when visible
                 if tile.player:
-                    if tile.type == 'h' or vis_state == VISIBLE:
+                    if tile.type == "h" or vis_state == VISIBLE:
                         player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
                         pygame.draw.rect(self.screen, player_color, rect, 3)
 
@@ -399,9 +401,9 @@ class Renderer:
         health_percentage = tile.health / tile.max_health
         current_bar_width = int(bar_width * health_percentage)
 
-        if tile.type == 'h':
+        if tile.type == "h":
             health_color = (255, 200, 0)
-        elif tile.type == 'b':
+        elif tile.type == "b":
             health_color = (0, 200, 200)
         else:
             health_color = (200, 200, 200)
@@ -435,8 +437,8 @@ class Renderer:
         3. Letter representation (always available as fallback)
         """
         # Check settings for what's disabled
-        animations_disabled = self.settings.get('graphics.disable_animations', False)
-        static_sprites_disabled = self.settings.get('graphics.disable_unit_sprites', False)
+        animations_disabled = self.settings.get("graphics.disable_animations", False)
+        static_sprites_disabled = self.settings.get("graphics.disable_unit_sprites", False)
 
         # Try animated sprite first (if not disabled)
         if not animations_disabled:
@@ -475,10 +477,7 @@ class Renderer:
 
         indicator_font = get_font(24)
         indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, (148, 0, 211))
-        indicator_rect = indicator_text.get_rect(topright=(
-            unit.x * TILE_SIZE + TILE_SIZE - 2,
-            unit.y * TILE_SIZE + 2
-        ))
+        indicator_rect = indicator_text.get_rect(topright=(unit.x * TILE_SIZE + TILE_SIZE - 2, unit.y * TILE_SIZE + 2))
         bg_rect = indicator_rect.inflate(4, 2)
         pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
         pygame.draw.rect(self.screen, (148, 0, 211), bg_rect, 1)
@@ -491,10 +490,7 @@ class Renderer:
 
         indicator_font = get_font(16)
         indicator_text = indicator_font.render("h", True, (0, 200, 255))
-        indicator_rect = indicator_text.get_rect(bottomleft=(
-            unit.x * TILE_SIZE + 2,
-            unit.y * TILE_SIZE + TILE_SIZE - 2
-        ))
+        indicator_rect = indicator_text.get_rect(bottomleft=(unit.x * TILE_SIZE + 2, unit.y * TILE_SIZE + TILE_SIZE - 2))
         bg_rect = indicator_rect.inflate(4, 2)
         pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)
         pygame.draw.rect(self.screen, (0, 200, 255), bg_rect, 1)
@@ -502,10 +498,7 @@ class Renderer:
 
     def _draw_unit_sprite(self, unit, sprite):
         """Draw a unit using its sprite image."""
-        needs_effect = (
-            (not unit.can_move and not unit.can_attack)
-            or unit.is_paralyzed()
-        )
+        needs_effect = (not unit.can_move and not unit.can_attack) or unit.is_paralyzed()
 
         if needs_effect:
             # Only copy when we actually need to tint
@@ -514,37 +507,33 @@ class Renderer:
             if not unit.can_move and not unit.can_attack:
                 display_sprite.blit(
                     self._get_overlay(sprite.get_size(), (128, 128, 128)),
-                    (0, 0), special_flags=pygame.BLEND_MULT,
+                    (0, 0),
+                    special_flags=pygame.BLEND_MULT,
                 )
 
             if unit.is_paralyzed():
                 display_sprite.blit(
                     self._get_overlay(sprite.get_size(), (200, 150, 255)),
-                    (0, 0), special_flags=pygame.BLEND_MULT,
+                    (0, 0),
+                    special_flags=pygame.BLEND_MULT,
                 )
         else:
             display_sprite = sprite
 
         # Draw player-colored border around sprite
         player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
-        border_rect = pygame.Rect(
-            unit.x * TILE_SIZE + 1,
-            unit.y * TILE_SIZE + 1,
-            TILE_SIZE - 2,
-            TILE_SIZE - 2
-        )
+        border_rect = pygame.Rect(unit.x * TILE_SIZE + 1, unit.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2)
         pygame.draw.rect(self.screen, player_color, border_rect, 2)
 
         # Center the sprite in the tile
-        sprite_rect = display_sprite.get_rect(center=(
-            unit.x * TILE_SIZE + TILE_SIZE // 2,
-            unit.y * TILE_SIZE + TILE_SIZE // 2
-        ))
+        sprite_rect = display_sprite.get_rect(
+            center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2)
+        )
         self.screen.blit(display_sprite, sprite_rect)
 
     def _get_overlay(self, size, color):
         """Return a cached solid-colour overlay surface for blend effects."""
-        if not hasattr(self, '_overlay_cache'):
+        if not hasattr(self, "_overlay_cache"):
             self._overlay_cache = {}
 
         key = (size, color)
@@ -570,10 +559,7 @@ class Renderer:
 
         # Draw unit letter with outline
         text = font.render(unit.type, True, color)
-        text_rect = text.get_rect(center=(
-            unit.x * TILE_SIZE + TILE_SIZE // 2,
-            unit.y * TILE_SIZE + TILE_SIZE // 2
-        ))
+        text_rect = text.get_rect(center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2))
 
         # Black outline
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)]:
@@ -615,7 +601,9 @@ class Renderer:
         player_color = PLAYER_COLORS.get(self.game_state.current_player, (255, 255, 255))
 
         # Draw player info and gold
-        gold_text = f"Player {self.game_state.current_player} Gold: ${self.game_state.player_gold[self.game_state.current_player]}"
+        gold_text = (
+            f"Player {self.game_state.current_player} Gold: ${self.game_state.player_gold[self.game_state.current_player]}"
+        )
         text_surface = font.render(gold_text, True, (255, 215, 0))
         text_rect = text_surface.get_rect(topleft=(10, 10))
         bg_rect = text_rect.inflate(10, 5)
@@ -681,9 +669,8 @@ class Renderer:
             self.game_state.grid.width,
             self.game_state.grid.height,
             lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units,
-                moving_unit=unit, is_destination=False
-            )
+                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
+            ),
         )
 
         if movement_positions:
@@ -744,8 +731,7 @@ class Renderer:
         grid_y = mouse_pos[1] // TILE_SIZE
 
         # Check bounds
-        if not (0 <= grid_x < self.game_state.grid.width and
-                0 <= grid_y < self.game_state.grid.height):
+        if not (0 <= grid_x < self.game_state.grid.width and 0 <= grid_y < self.game_state.grid.height):
             return
 
         # Find unit at position
@@ -755,7 +741,7 @@ class Renderer:
 
         # Get unit data
         unit_data = UNIT_DATA.get(unit.type, {})
-        unit_name = unit_data.get('name', unit.type)
+        unit_name = unit_data.get("name", unit.type)
 
         # Build tooltip lines
         # Handle attack display - can be int or dict (for ranged units like Mage/Sorcerer)
@@ -836,10 +822,7 @@ class Renderer:
     def get_rgb_array(self):
         """Get the current screen as RGB array."""
         # Convert pygame surface to numpy array
-        return np.transpose(
-            np.array(pygame.surfarray.pixels3d(self.screen)),
-            axes=(1, 0, 2)
-        )
+        return np.transpose(np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2))
 
     def set_unit_animation_state(self, unit, state):
         """

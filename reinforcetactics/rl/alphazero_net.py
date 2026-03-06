@@ -79,9 +79,7 @@ class AlphaZeroNet(nn.Module):
         )
 
         # Residual tower
-        self.res_blocks = nn.Sequential(
-            *[ResidualBlock(channels) for _ in range(num_res_blocks)]
-        )
+        self.res_blocks = nn.Sequential(*[ResidualBlock(channels) for _ in range(num_res_blocks)])
 
         # Policy head
         self.policy_head = nn.Sequential(
@@ -104,8 +102,7 @@ class AlphaZeroNet(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, grid: torch.Tensor, units: torch.Tensor,
-                global_features: torch.Tensor):
+    def forward(self, grid: torch.Tensor, units: torch.Tensor, global_features: torch.Tensor):
         """
         Forward pass.
 
@@ -125,9 +122,7 @@ class AlphaZeroNet(nn.Module):
 
         # Broadcast global features to spatial dims: (B, 6) -> (B, 6, H, W)
         global_expanded = global_features.unsqueeze(-1).unsqueeze(-1)
-        global_expanded = global_expanded.expand(
-            batch_size, self.global_features_dim, self.grid_height, self.grid_width
-        )
+        global_expanded = global_expanded.expand(batch_size, self.global_features_dim, self.grid_height, self.grid_width)
 
         # Concatenate: (B, 12, H, W)
         x = torch.cat([spatial, global_expanded], dim=1)
@@ -148,8 +143,7 @@ class AlphaZeroNet(nn.Module):
 
         return policy_logits, value
 
-    def predict(self, grid: torch.Tensor, units: torch.Tensor,
-                global_features: torch.Tensor, action_mask: torch.Tensor):
+    def predict(self, grid: torch.Tensor, units: torch.Tensor, global_features: torch.Tensor, action_mask: torch.Tensor):
         """
         Predict policy probabilities and value, applying action mask.
 

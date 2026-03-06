@@ -1,6 +1,7 @@
 """Menu for selecting game mode."""
+
 import os
-from typing import Optional, List
+from typing import List, Optional
 
 import pygame
 
@@ -19,7 +20,7 @@ class GameModeMenu(Menu):
             screen: Optional pygame surface. If None, creates its own.
             maps_dir: Directory containing map subdirectories
         """
-        super().__init__(screen, get_language().get('new_game.select_mode', 'Select Game Mode'))
+        super().__init__(screen, get_language().get("new_game.select_mode", "Select Game Mode"))
         self.maps_dir = maps_dir
         self.available_modes: List[str] = []
         self._load_modes()
@@ -33,7 +34,7 @@ class GameModeMenu(Menu):
                 if os.path.isdir(item_path):
                     # Check if folder contains .csv maps
                     try:
-                        if any(f.endswith('.csv') for f in os.listdir(item_path)):
+                        if any(f.endswith(".csv") for f in os.listdir(item_path)):
                             self.available_modes.append(item)
                     except (OSError, PermissionError):
                         # Skip directories that can't be read
@@ -44,7 +45,7 @@ class GameModeMenu(Menu):
         """Setup menu options for available game modes."""
         for mode in self.available_modes:
             self.add_option(mode, lambda m=mode: m)
-        self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+        self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
     def run(self) -> Optional[str]:
         """

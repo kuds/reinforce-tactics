@@ -1,12 +1,13 @@
 """Menu for configuring LLM API keys."""
+
 from typing import Optional
 
 import pygame
 
-from reinforcetactics.utils.language import get_language
-from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.utils.clipboard import get_clipboard_text
 from reinforcetactics.ui.icons import get_checkmark_icon, get_x_icon
+from reinforcetactics.utils.clipboard import get_clipboard_text
+from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 
 class APIKeysMenu:
@@ -58,12 +59,13 @@ class APIKeysMenu:
 
         # Load current API keys from settings
         from reinforcetactics.utils.settings import get_settings
+
         self.settings = get_settings()
 
         self.api_keys = {
-            'openai': self.settings.get_api_key('openai'),
-            'anthropic': self.settings.get_api_key('anthropic'),
-            'google': self.settings.get_api_key('google')
+            "openai": self.settings.get_api_key("openai"),
+            "anthropic": self.settings.get_api_key("anthropic"),
+            "google": self.settings.get_api_key("google"),
         }
 
         # Input tracking
@@ -74,15 +76,11 @@ class APIKeysMenu:
 
         # Test connection status
         self.test_status = {
-            'openai': None,  # None, 'testing', 'success', 'failed'
-            'anthropic': None,
-            'google': None
+            "openai": None,  # None, 'testing', 'success', 'failed'
+            "anthropic": None,
+            "google": None,
         }
-        self.test_messages = {
-            'openai': '',
-            'anthropic': '',
-            'google': ''
-        }
+        self.test_messages = {"openai": "", "anthropic": "", "google": ""}
 
     def handle_input(self, event: pygame.event.Event) -> Optional[bool]:
         """
@@ -109,7 +107,7 @@ class APIKeysMenu:
                     clipboard_text = get_clipboard_text()
                     if clipboard_text:
                         # Filter to only include printable characters
-                        filtered = ''.join(c for c in clipboard_text if c.isprintable())
+                        filtered = "".join(c for c in clipboard_text if c.isprintable())
                         self.api_keys[self.active_input] += filtered
                 elif event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
                     # Move to next field or finish
@@ -133,15 +131,15 @@ class APIKeysMenu:
                         return None
 
                 # Check buttons
-                if 'save' in self.button_rects and self.button_rects['save'].collidepoint(mouse_pos):
+                if "save" in self.button_rects and self.button_rects["save"].collidepoint(mouse_pos):
                     return True
-                if 'back' in self.button_rects and self.button_rects['back'].collidepoint(mouse_pos):
+                if "back" in self.button_rects and self.button_rects["back"].collidepoint(mouse_pos):
                     self.running = False
                     return False
 
                 # Check test buttons
-                for provider in ['openai', 'anthropic', 'google']:
-                    test_button_key = f'test_{provider}'
+                for provider in ["openai", "anthropic", "google"]:
+                    test_button_key = f"test_{provider}"
                     if test_button_key in self.button_rects and self.button_rects[test_button_key].collidepoint(mouse_pos):
                         self._test_connection(provider)
                         return None
@@ -169,21 +167,22 @@ class APIKeysMenu:
         screen_width = self.screen.get_width()
 
         # Draw title
-        title = self.lang.get('api_keys.title', 'LLM API Keys Configuration')
+        title = self.lang.get("api_keys.title", "LLM API Keys Configuration")
         title_surface = self.title_font.render(title, True, self.title_color)
         title_rect = title_surface.get_rect(centerx=screen_width // 2, y=30)
         self.screen.blit(title_surface, title_rect)
 
         # Instructions
-        instructions = self.lang.get('api_keys.instructions',
-                                     'Enter your API keys for LLM providers (leave blank to use environment variables)')
+        instructions = self.lang.get(
+            "api_keys.instructions", "Enter your API keys for LLM providers (leave blank to use environment variables)"
+        )
         inst_surface = self.label_font.render(instructions, True, self.text_color)
         inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=80)
         # Ensure the instruction text doesn't overflow
         if inst_rect.width > screen_width - 40:
             # Split into two lines
-            line1 = 'Enter your API keys for LLM providers'
-            line2 = '(leave blank to use environment variables)'
+            line1 = "Enter your API keys for LLM providers"
+            line2 = "(leave blank to use environment variables)"
             inst1_surface = self.input_font.render(line1, True, self.text_color)
             inst2_surface = self.input_font.render(line2, True, self.text_color)
             inst1_rect = inst1_surface.get_rect(centerx=screen_width // 2, y=80)
@@ -197,9 +196,9 @@ class APIKeysMenu:
 
         # Draw input fields for each provider
         providers = [
-            ('openai', 'OpenAI API Key (GPT)'),
-            ('anthropic', 'Anthropic API Key (Claude)'),
-            ('google', 'Google API Key (Gemini)')
+            ("openai", "OpenAI API Key (GPT)"),
+            ("anthropic", "Anthropic API Key (Claude)"),
+            ("google", "Google API Key (Gemini)"),
         ]
 
         y_pos = start_y
@@ -225,7 +224,7 @@ class APIKeysMenu:
             # Display masked key (show only last 4 chars)
             display_text = self.api_keys[provider_key]
             if len(display_text) > 8 and self.active_input != provider_key:
-                display_text = '*' * (len(display_text) - 4) + display_text[-4:]
+                display_text = "*" * (len(display_text) - 4) + display_text[-4:]
 
             # Render text
             if display_text or self.active_input == provider_key:
@@ -248,24 +247,24 @@ class APIKeysMenu:
             # Draw Test Connection button
             test_button_x = input_x + input_width - 100
             test_button_y = input_y + input_height + 5
-            test_button_key = f'test_{provider_key}'
+            test_button_key = f"test_{provider_key}"
 
             # Determine button text, color, and icon based on test status
             status = self.test_status[provider_key]
             test_icon = None
-            if status == 'testing':
-                test_text = 'Testing...'
+            if status == "testing":
+                test_text = "Testing..."
                 test_color = (150, 150, 150)
-            elif status == 'success':
-                test_text = 'Test'
+            elif status == "success":
+                test_text = "Test"
                 test_color = (50, 150, 50)
                 test_icon = get_checkmark_icon(size=16, color=(255, 255, 255))
-            elif status == 'failed':
-                test_text = 'Test'
+            elif status == "failed":
+                test_text = "Test"
                 test_color = (150, 50, 50)
                 test_icon = get_x_icon(size=16, color=(255, 255, 255))
             else:
-                test_text = 'Test'
+                test_text = "Test"
                 test_color = self.button_color
 
             # Draw test button
@@ -284,14 +283,14 @@ class APIKeysMenu:
         button_y = y_pos + 20
 
         # Save button
-        save_text = self.lang.get('common.save', 'Save')
-        save_rect = self._draw_button(screen_width // 2 - 120, button_y, save_text, 'save')
-        self.button_rects['save'] = save_rect
+        save_text = self.lang.get("common.save", "Save")
+        save_rect = self._draw_button(screen_width // 2 - 120, button_y, save_text, "save")
+        self.button_rects["save"] = save_rect
 
         # Back button
-        back_text = self.lang.get('common.back', 'Back')
-        back_rect = self._draw_button(screen_width // 2 + 20, button_y, back_text, 'back')
-        self.button_rects['back'] = back_rect
+        back_text = self.lang.get("common.back", "Back")
+        back_rect = self._draw_button(screen_width // 2 + 20, button_y, back_text, "back")
+        self.button_rects["back"] = back_rect
 
         pygame.display.flip()
 
@@ -317,8 +316,9 @@ class APIKeysMenu:
 
         return button_rect
 
-    def _draw_test_button(self, x: int, y: int, text: str, button_name: str, bg_color: tuple,
-                          icon: pygame.Surface = None) -> pygame.Rect:
+    def _draw_test_button(
+        self, x: int, y: int, text: str, button_name: str, bg_color: tuple, icon: pygame.Surface = None
+    ) -> pygame.Rect:
         """Draw a test button with custom color and optional icon, return its rect."""
         padding_x = 15
         padding_y = 8
@@ -366,32 +366,32 @@ class APIKeysMenu:
         """
         api_key = self.api_keys[provider]
         if not api_key:
-            self.test_status[provider] = 'failed'
-            self.test_messages[provider] = 'No API key provided'
+            self.test_status[provider] = "failed"
+            self.test_messages[provider] = "No API key provided"
             return
 
-        self.test_status[provider] = 'testing'
-        self.test_messages[provider] = 'Testing...'
+        self.test_status[provider] = "testing"
+        self.test_messages[provider] = "Testing..."
         self.draw()  # Redraw to show testing status
         pygame.display.flip()
 
         try:
-            if provider == 'openai':
+            if provider == "openai":
                 self._test_openai(api_key)
-            elif provider == 'anthropic':
+            elif provider == "anthropic":
                 self._test_anthropic(api_key)
-            elif provider == 'google':
+            elif provider == "google":
                 self._test_google(api_key)
 
-            self.test_status[provider] = 'success'
-            self.test_messages[provider] = 'Connection successful!'
+            self.test_status[provider] = "success"
+            self.test_messages[provider] = "Connection successful!"
         except Exception as e:
-            self.test_status[provider] = 'failed'
+            self.test_status[provider] = "failed"
             error_msg = str(e)
             # Truncate long error messages
             if len(error_msg) > 50:
-                error_msg = error_msg[:47] + '...'
-            self.test_messages[provider] = f'Error: {error_msg}'
+                error_msg = error_msg[:47] + "..."
+            self.test_messages[provider] = f"Error: {error_msg}"
 
     def _test_openai(self, api_key: str) -> None:
         """Test OpenAI API connection."""
@@ -403,9 +403,7 @@ class APIKeysMenu:
         client = openai.OpenAI(api_key=api_key)
         # Make a minimal API call to test the connection
         response = client.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[{'role': 'user', 'content': 'Hello'}],
-            max_completion_tokens=5
+            model="gpt-4o-mini", messages=[{"role": "user", "content": "Hello"}], max_completion_tokens=5
         )
         if not response.choices:
             raise ValueError("Invalid response from OpenAI")
@@ -420,9 +418,7 @@ class APIKeysMenu:
         client = anthropic.Anthropic(api_key=api_key)
         # Make a minimal API call to test the connection
         response = client.messages.create(
-            model='claude-3-haiku-20240307',
-            max_tokens=5,
-            messages=[{'role': 'user', 'content': 'Hello'}]
+            model="claude-3-haiku-20240307", max_tokens=5, messages=[{"role": "user", "content": "Hello"}]
         )
         if not response.content:
             raise ValueError("Invalid response from Anthropic")
@@ -435,12 +431,9 @@ class APIKeysMenu:
             raise ImportError("google-generativeai package not installed") from exc
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel("gemini-1.5-flash")
         # Make a minimal API call to test the connection
-        response = model.generate_content(
-            'Hello',
-            generation_config=genai.types.GenerationConfig(max_output_tokens=5)
-        )
+        response = model.generate_content("Hello", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
         if not response.text:
             raise ValueError("Invalid response from Google")
 

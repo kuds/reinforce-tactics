@@ -1,4 +1,5 @@
 """Test module for verifying action masking in the gym environment."""
+
 import os
 import sys
 import unittest
@@ -8,15 +9,16 @@ import numpy as np
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.core.unit import Unit
+from reinforcetactics.rl.gym_env import StrategyGameEnv
+
 
 class TestActionMasking(unittest.TestCase):
     """Test action masking correctness."""
 
     def setUp(self):
         """Create environment for testing."""
-        self.env = StrategyGameEnv(map_file=None, opponent='bot', render_mode=None)
+        self.env = StrategyGameEnv(map_file=None, opponent="bot", render_mode=None)
 
     def tearDown(self):
         self.env.close()
@@ -28,11 +30,11 @@ class TestActionMasking(unittest.TestCase):
         self.env.game_state._invalidate_cache()
 
         # Unit at 0,0
-        unit = Unit('W', 0, 0, player=1)
+        unit = Unit("W", 0, 0, player=1)
         unit.can_move = True
         self.env.game_state.units.append(unit)
-        self.env.game_state.grid.get_tile(0,0).type = 'p'
-        self.env.game_state.grid.get_tile(1,0).type = 'p'
+        self.env.game_state.grid.get_tile(0, 0).type = "p"
+        self.env.game_state.grid.get_tile(1, 0).type = "p"
         self.env.game_state.current_player = 1
 
         # 1. Check initial mask (Move to 1,0 is valid)
@@ -58,7 +60,6 @@ class TestActionMasking(unittest.TestCase):
         move_layer_end = 2 * area
         self.assertTrue(np.all(mask2[move_layer_start:move_layer_end] == 0.0), "No moves should be valid after unit moves")
 
-
     def test_cure_masking_and_execution(self):
         """Test that Cure action is correctly masked and executed."""
         self.env.reset()
@@ -66,10 +67,10 @@ class TestActionMasking(unittest.TestCase):
         self.env.game_state._invalidate_cache()
 
         # Setup: Cleric (Player 1) and Paralyzed Ally (Player 1)
-        cleric = Unit('C', 5, 5, player=1)
-        cleric.can_attack = True # Enable unit to act
-        ally = Unit('W', 5, 6, player=1)
-        ally.paralyzed_turns = 2 # Paralyzed
+        cleric = Unit("C", 5, 5, player=1)
+        cleric.can_attack = True  # Enable unit to act
+        ally = Unit("W", 5, 6, player=1)
+        ally.paralyzed_turns = 2  # Paralyzed
 
         self.env.game_state.units.append(cleric)
         self.env.game_state.units.append(ally)
@@ -86,12 +87,7 @@ class TestActionMasking(unittest.TestCase):
 
         # 2. Execute Cure
         # Action: Type 4 (Heal/Cure), Cleric, From(5,5), To(5,6)
-        action_dict = {
-            'action_type': 4,
-            'unit_type': 'C',
-            'from_pos': (5, 5),
-            'to_pos': (5, 6)
-        }
+        action_dict = {"action_type": 4, "unit_type": "C", "from_pos": (5, 5), "to_pos": (5, 6)}
 
         reward, is_valid = self.env._execute_action(action_dict)
 
@@ -99,5 +95,6 @@ class TestActionMasking(unittest.TestCase):
         self.assertFalse(ally.is_paralyzed(), "Ally should be cured (paralyzed_turns=0)")
         self.assertTrue(reward > 0, "Should receive reward for curing")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

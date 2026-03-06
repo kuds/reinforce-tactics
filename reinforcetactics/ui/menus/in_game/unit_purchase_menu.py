@@ -1,5 +1,6 @@
 """In-game overlay menu for purchasing units on buildings."""
-from typing import Optional, Dict, Any, List, Tuple
+
+from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
@@ -41,7 +42,7 @@ class UnitPurchaseMenu:
         # Unit types to display (filtered by enabled units)
         # Basic: Warrior, Mage, Cleric, Archer
         # Advanced: Knight, Rogue, Sorcerer, Barbarian
-        all_unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        all_unit_types = ["W", "M", "C", "A", "K", "R", "S", "B"]
         self.unit_types = [ut for ut in all_unit_types if ut in game_state.enabled_units]
 
         # Interactive elements
@@ -100,26 +101,23 @@ class UnitPurchaseMenu:
         """
         # Check if click is outside menu (close menu)
         if not self.menu_rect.collidepoint(mouse_pos):
-            return {'type': 'close'}
+            return {"type": "close"}
 
         # Check interactive elements
         for element in self.interactive_elements:
-            if element['rect'].collidepoint(mouse_pos):
-                if element['type'] == 'close_button':
-                    return {'type': 'close'}
-                elif element['type'] == 'unit_button' and not element['disabled']:
-                    unit_type = element['unit_type']
+            if element["rect"].collidepoint(mouse_pos):
+                if element["type"] == "close_button":
+                    return {"type": "close"}
+                elif element["type"] == "unit_button" and not element["disabled"]:
+                    unit_type = element["unit_type"]
                     # Try to create the unit
-                    unit = self.game_state.create_unit(
-                        unit_type,
-                        self.building_pos[0],
-                        self.building_pos[1]
-                    )
+                    unit = self.game_state.create_unit(unit_type, self.building_pos[0], self.building_pos[1])
                     if unit:
-                        return {'type': 'unit_created', 'unit': unit}
+                        return {"type": "unit_created", "unit": unit}
                     # Failed to create - position occupied or insufficient gold
                     # This shouldn't happen if UI logic is correct
                     import logging
+
                     logger = logging.getLogger(__name__)
                     logger.warning("Failed to create unit %s at %s", unit_type, self.building_pos)
                     return None
@@ -135,7 +133,7 @@ class UnitPurchaseMenu:
         """
         self.hover_element = None
         for element in self.interactive_elements:
-            if element['rect'].collidepoint(mouse_pos):
+            if element["rect"].collidepoint(mouse_pos):
                 self.hover_element = element
                 break
 
@@ -152,7 +150,7 @@ class UnitPurchaseMenu:
             Dict with action result, or None
         """
         if event.key == pygame.K_ESCAPE:
-            return {'type': 'close'}
+            return {"type": "close"}
 
         # Arrow key navigation
         if event.key == pygame.K_UP:
@@ -169,8 +167,7 @@ class UnitPurchaseMenu:
             return None
 
         # Number keys 1-8 for direct unit selection
-        number_keys = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4,
-                       pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8]
+        number_keys = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8]
         for i, key in enumerate(number_keys):
             if event.key == key and i < len(self.unit_types):
                 return self._try_purchase(i)
@@ -192,16 +189,12 @@ class UnitPurchaseMenu:
         current_player = self.game_state.current_player
         player_gold = self.game_state.player_gold[current_player]
 
-        if player_gold < unit_data['cost']:
+        if player_gold < unit_data["cost"]:
             return None  # Can't afford
 
-        unit = self.game_state.create_unit(
-            unit_type,
-            self.building_pos[0],
-            self.building_pos[1]
-        )
+        unit = self.game_state.create_unit(unit_type, self.building_pos[0], self.building_pos[1])
         if unit:
-            return {'type': 'unit_created', 'unit': unit}
+            return {"type": "unit_created", "unit": unit}
         return None
 
     def draw(self, screen: pygame.Surface) -> None:
@@ -223,26 +216,17 @@ class UnitPurchaseMenu:
         # Draw title
         title = "Purchase Unit"
         title_surface = self.title_font.render(title, True, self.text_color)
-        title_rect = title_surface.get_rect(
-            centerx=self.menu_rect.centerx,
-            y=self.menu_rect.y + 10
-        )
+        title_rect = title_surface.get_rect(centerx=self.menu_rect.centerx, y=self.menu_rect.y + 10)
         screen.blit(title_surface, title_rect)
 
         # Draw close button (X) in upper right
         close_button_size = 20
         close_button_x = self.menu_rect.right - close_button_size - 10
         close_button_y = self.menu_rect.y + 10
-        close_button_rect = pygame.Rect(
-            close_button_x,
-            close_button_y,
-            close_button_size,
-            close_button_size
-        )
+        close_button_rect = pygame.Rect(close_button_x, close_button_y, close_button_size, close_button_size)
 
         # Check if hovering over close button
-        is_close_hover = (self.hover_element and
-                         self.hover_element.get('type') == 'close_button')
+        is_close_hover = self.hover_element and self.hover_element.get("type") == "close_button"
         close_color = self.close_button_hover_color if is_close_hover else self.close_button_color
 
         pygame.draw.rect(screen, close_color, close_button_rect, border_radius=3)
@@ -254,20 +238,17 @@ class UnitPurchaseMenu:
             (255, 255, 255),
             (close_button_rect.left + x_margin, close_button_rect.top + x_margin),
             (close_button_rect.right - x_margin, close_button_rect.bottom - x_margin),
-            2
+            2,
         )
         pygame.draw.line(
             screen,
             (255, 255, 255),
             (close_button_rect.right - x_margin, close_button_rect.top + x_margin),
             (close_button_rect.left + x_margin, close_button_rect.bottom - x_margin),
-            2
+            2,
         )
 
-        self.interactive_elements.append({
-            'type': 'close_button',
-            'rect': close_button_rect
-        })
+        self.interactive_elements.append({"type": "close_button", "rect": close_button_rect})
 
         # Draw unit options
         start_y = self.menu_rect.y + 50
@@ -277,8 +258,8 @@ class UnitPurchaseMenu:
 
         for i, unit_type in enumerate(self.unit_types):
             unit_data = UNIT_DATA[unit_type]
-            unit_name = unit_data['name']
-            unit_cost = unit_data['cost']
+            unit_name = unit_data["name"]
+            unit_cost = unit_data["cost"]
 
             # Check if player can afford
             can_afford = player_gold >= unit_cost
@@ -292,10 +273,8 @@ class UnitPurchaseMenu:
             button_rect = pygame.Rect(button_x, y_pos, button_width, button_height)
 
             # Check if hovering or keyboard-selected
-            is_hovered = (self.hover_element and
-                         self.hover_element.get('rect') == button_rect and
-                         can_afford)
-            is_selected = (i == self.selected_index and can_afford)
+            is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect and can_afford
+            is_selected = i == self.selected_index and can_afford
 
             # Choose colors
             if not can_afford:
@@ -317,16 +296,10 @@ class UnitPurchaseMenu:
             # Draw text: "Unit Name - Cost"
             text = f"{unit_name} - {unit_cost}g"
             text_surface = self.option_font.render(text, True, text_color)
-            text_rect = text_surface.get_rect(
-                left=button_rect.left + 10,
-                centery=button_rect.centery
-            )
+            text_rect = text_surface.get_rect(left=button_rect.left + 10, centery=button_rect.centery)
             screen.blit(text_surface, text_rect)
 
             # Register as interactive element
-            self.interactive_elements.append({
-                'type': 'unit_button',
-                'rect': button_rect,
-                'unit_type': unit_type,
-                'disabled': not can_afford
-            })
+            self.interactive_elements.append(
+                {"type": "unit_button", "rect": button_rect, "unit_type": unit_type, "disabled": not can_afford}
+            )

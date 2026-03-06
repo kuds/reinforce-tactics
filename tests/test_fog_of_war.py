@@ -1,16 +1,16 @@
 """Tests for Fog of War visibility system."""
 
-import pytest
 import numpy as np
+import pytest
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.core.visibility import (
-    VisibilityMap,
-    UNEXPLORED,
     SHROUDED,
-    VISIBLE,
-    UNIT_VISION_RANGES,
     STRUCTURE_VISION_RANGES,
+    UNEXPLORED,
+    UNIT_VISION_RANGES,
+    VISIBLE,
+    VisibilityMap,
     get_visible_units,
 )
 
@@ -18,9 +18,9 @@ from reinforcetactics.core.visibility import (
 @pytest.fixture
 def simple_map():
     """Create a simple 10x10 map for testing."""
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
-    map_data[0][0] = 'h_1'  # HQ for player 1
-    map_data[9][9] = 'h_2'  # HQ for player 2
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data[0][0] = "h_1"  # HQ for player 1
+    map_data[9][9] = "h_2"  # HQ for player 2
     return map_data
 
 
@@ -118,7 +118,7 @@ class TestGameStateWithFOW:
     def test_unit_provides_visibility(self, game_with_fow):
         """Test that units provide visibility around them."""
         # Create a unit in the middle of the map
-        unit = game_with_fow.create_unit('W', 5, 5, player=1)
+        _unit = game_with_fow.create_unit("W", 5, 5, player=1)
         game_with_fow.update_visibility(player=1)
 
         # Unit position and nearby tiles should be visible
@@ -132,7 +132,7 @@ class TestGameStateWithFOW:
     def test_different_unit_vision_ranges(self, game_with_fow):
         """Test that different unit types have different vision ranges."""
         # Archer has vision range 4, Barbarian has range 2
-        archer = game_with_fow.create_unit('A', 5, 5, player=1)
+        archer = game_with_fow.create_unit("A", 5, 5, player=1)
         game_with_fow.update_visibility(player=1)
 
         # Archer can see 4 tiles away
@@ -140,7 +140,7 @@ class TestGameStateWithFOW:
 
         # Remove archer, add barbarian
         game_with_fow.units.remove(archer)
-        barbarian = game_with_fow.create_unit('B', 5, 5, player=1)
+        _barbarian = game_with_fow.create_unit("B", 5, 5, player=1)
         game_with_fow.update_visibility(player=1)
 
         # Barbarian can only see 2 tiles away
@@ -150,7 +150,7 @@ class TestGameStateWithFOW:
     def test_visibility_updates_on_move(self, game_with_fow):
         """Test that visibility updates when unit moves."""
         # Create unit at (5, 1) - away from HQ
-        unit = game_with_fow.create_unit('W', 5, 1, player=1)
+        unit = game_with_fow.create_unit("W", 5, 1, player=1)
         game_with_fow.update_visibility(player=1)
 
         # Position (5, 5) is not visible initially
@@ -173,11 +173,11 @@ class TestFOWActionFiltering:
     def test_cannot_attack_hidden_enemy(self, game_with_fow):
         """Test that player cannot attack enemies they cannot see."""
         # Player 1 unit near their HQ
-        attacker = game_with_fow.create_unit('W', 1, 1, player=1)
+        attacker = game_with_fow.create_unit("W", 1, 1, player=1)
         attacker.can_attack = True  # Enable attack for testing
 
         # Player 2 unit far away (not visible to player 1)
-        target = game_with_fow.create_unit('W', 8, 8, player=2)
+        target = game_with_fow.create_unit("W", 8, 8, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -188,17 +188,17 @@ class TestFOWActionFiltering:
         legal_actions = game_with_fow.get_legal_actions(player=1)
 
         # Attack actions should not include the hidden enemy
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target not in attack_targets
 
     def test_can_attack_visible_enemy(self, game_with_fow):
         """Test that player can attack enemies they can see."""
         # Player 1 unit
-        attacker = game_with_fow.create_unit('W', 3, 3, player=1)
+        attacker = game_with_fow.create_unit("W", 3, 3, player=1)
         attacker.can_attack = True  # Enable attack for testing
 
         # Player 2 unit adjacent (definitely visible)
-        target = game_with_fow.create_unit('W', 4, 3, player=2)
+        target = game_with_fow.create_unit("W", 4, 3, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -209,17 +209,17 @@ class TestFOWActionFiltering:
         legal_actions = game_with_fow.get_legal_actions(player=1)
 
         # Attack actions should include the visible enemy
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target in attack_targets
 
     def test_ranged_attack_requires_visibility(self, game_with_fow):
         """Test that ranged attacks require visibility of target."""
         # Archer for player 1
-        archer = game_with_fow.create_unit('A', 2, 2, player=1)
+        archer = game_with_fow.create_unit("A", 2, 2, player=1)
         archer.can_attack = True  # Enable attack for testing
 
         # Enemy at range 2 (within attack range but check visibility)
-        target = game_with_fow.create_unit('W', 4, 2, player=2)
+        target = game_with_fow.create_unit("W", 4, 2, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -227,7 +227,7 @@ class TestFOWActionFiltering:
         assert game_with_fow.is_position_visible(4, 2, player=1)
 
         legal_actions = game_with_fow.get_legal_actions(player=1)
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target in attack_targets
 
 
@@ -237,12 +237,12 @@ class TestPreMoveAttackFiltering:
     def test_cannot_attack_enemy_discovered_after_move(self, game_with_fow):
         """Test that a unit cannot attack an enemy it discovers by moving."""
         # Player 1 unit starts near HQ
-        attacker = game_with_fow.create_unit('W', 1, 1, player=1)
+        attacker = game_with_fow.create_unit("W", 1, 1, player=1)
         attacker.can_move = True
         attacker.can_attack = True
 
         # Player 2 unit is hidden (far from player 1's vision)
-        target = game_with_fow.create_unit('W', 6, 6, player=2)
+        target = game_with_fow.create_unit("W", 6, 6, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -270,18 +270,18 @@ class TestPreMoveAttackFiltering:
 
         # Get legal actions - should NOT include the discovered enemy
         legal_actions = game_with_fow.get_legal_actions(player=1)
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target not in attack_targets
 
     def test_can_attack_enemy_visible_before_move(self, game_with_fow):
         """Test that a unit can attack an enemy that was visible before moving."""
         # Player 1 unit near HQ
-        attacker = game_with_fow.create_unit('W', 2, 2, player=1)
+        attacker = game_with_fow.create_unit("W", 2, 2, player=1)
         attacker.can_move = True
         attacker.can_attack = True
 
         # Player 2 unit visible but not adjacent
-        target = game_with_fow.create_unit('W', 4, 2, player=2)
+        target = game_with_fow.create_unit("W", 4, 2, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -299,12 +299,12 @@ class TestPreMoveAttackFiltering:
 
         # Get legal actions - should include the target
         legal_actions = game_with_fow.get_legal_actions(player=1)
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target in attack_targets
 
     def test_snapshot_cleared_on_turn_end(self, game_with_fow):
         """Test that visibility snapshot is cleared when unit's turn ends."""
-        unit = game_with_fow.create_unit('W', 2, 2, player=1)
+        unit = game_with_fow.create_unit("W", 2, 2, player=1)
         unit.can_move = True
         unit.can_attack = True
 
@@ -322,7 +322,7 @@ class TestPreMoveAttackFiltering:
 
     def test_no_snapshot_in_non_fow_game(self, game_without_fow):
         """Test that snapshot is None in non-FOW games."""
-        unit = game_without_fow.create_unit('W', 2, 2, player=1)
+        unit = game_without_fow.create_unit("W", 2, 2, player=1)
 
         # Capture should set snapshot to None (no FOW)
         game_without_fow.capture_visible_enemies_for_unit(unit)
@@ -330,9 +330,9 @@ class TestPreMoveAttackFiltering:
 
     def test_all_enemies_attackable_without_fow(self, game_without_fow):
         """Test that all adjacent enemies are attackable without FOW."""
-        attacker = game_without_fow.create_unit('W', 5, 5, player=1)
+        attacker = game_without_fow.create_unit("W", 5, 5, player=1)
         attacker.can_attack = True
-        target = game_without_fow.create_unit('W', 6, 5, player=2)
+        target = game_without_fow.create_unit("W", 6, 5, player=2)
 
         # Without FOW, all enemies should be attackable
         assert game_without_fow.is_enemy_attackable_by_unit(attacker, target)
@@ -344,10 +344,10 @@ class TestFOWObservation:
     def test_observation_hides_enemy_units(self, game_with_fow):
         """Test that observation hides non-visible enemy units."""
         # Player 1 unit near HQ
-        game_with_fow.create_unit('W', 1, 1, player=1)
+        game_with_fow.create_unit("W", 1, 1, player=1)
 
         # Player 2 unit far away
-        game_with_fow.create_unit('W', 8, 8, player=2)
+        game_with_fow.create_unit("W", 8, 8, player=2)
 
         game_with_fow.update_visibility(player=1)
 
@@ -355,28 +355,28 @@ class TestFOWObservation:
         obs = game_with_fow.to_numpy(for_player=1)
 
         # Player 1's unit should be visible in observation
-        assert obs['units'][1, 1, 0] > 0  # Unit type encoded
-        assert obs['units'][1, 1, 1] == 1  # Owner is player 1
+        assert obs["units"][1, 1, 0] > 0  # Unit type encoded
+        assert obs["units"][1, 1, 1] == 1  # Owner is player 1
 
         # Player 2's unit should be hidden (not visible)
-        assert obs['units'][8, 8, 0] == 0  # No unit type
-        assert obs['units'][8, 8, 1] == 0  # No owner
+        assert obs["units"][8, 8, 0] == 0  # No unit type
+        assert obs["units"][8, 8, 1] == 0  # No owner
 
     def test_observation_shows_visible_enemy(self, game_with_fow):
         """Test that observation shows visible enemy units."""
         # Player 1 unit
-        game_with_fow.create_unit('W', 3, 3, player=1)
+        game_with_fow.create_unit("W", 3, 3, player=1)
 
         # Player 2 unit nearby (visible)
-        game_with_fow.create_unit('W', 4, 3, player=2)
+        game_with_fow.create_unit("W", 4, 3, player=2)
 
         game_with_fow.update_visibility(player=1)
 
         obs = game_with_fow.to_numpy(for_player=1)
 
         # Both units should be visible
-        assert obs['units'][3, 3, 0] > 0
-        assert obs['units'][3, 4, 0] > 0  # Note: y, x ordering
+        assert obs["units"][3, 3, 0] > 0
+        assert obs["units"][3, 4, 0] > 0  # Note: y, x ordering
 
     def test_visibility_layer_in_observation(self, game_with_fow):
         """Test that visibility layer is included in observation."""
@@ -384,11 +384,11 @@ class TestFOWObservation:
 
         obs = game_with_fow.to_numpy(for_player=1)
 
-        assert 'visibility' in obs
-        assert obs['visibility'].shape == (10, 10)
+        assert "visibility" in obs
+        assert obs["visibility"].shape == (10, 10)
 
         # HQ area should be visible
-        assert obs['visibility'][0, 0] == VISIBLE
+        assert obs["visibility"][0, 0] == VISIBLE
 
 
 class TestFOWWithoutFOW:
@@ -402,20 +402,20 @@ class TestFOWWithoutFOW:
 
     def test_all_units_visible_without_fow(self, game_without_fow):
         """Test that all units are visible without FOW."""
-        game_without_fow.create_unit('W', 0, 0, player=1)
-        game_without_fow.create_unit('W', 9, 9, player=2)
+        game_without_fow.create_unit("W", 0, 0, player=1)
+        game_without_fow.create_unit("W", 9, 9, player=2)
 
         visible_to_p1 = get_visible_units(game_without_fow, player=1)
         assert len(visible_to_p1) == 2
 
     def test_can_attack_any_adjacent_enemy_without_fow(self, game_without_fow):
         """Test that attacks work normally without FOW."""
-        attacker = game_without_fow.create_unit('W', 5, 5, player=1)
+        attacker = game_without_fow.create_unit("W", 5, 5, player=1)
         attacker.can_attack = True  # Enable attack for testing
-        target = game_without_fow.create_unit('W', 6, 5, player=2)
+        target = game_without_fow.create_unit("W", 6, 5, player=2)
 
         legal_actions = game_without_fow.get_legal_actions(player=1)
-        attack_targets = [a['target'] for a in legal_actions['attack']]
+        attack_targets = [a["target"] for a in legal_actions["attack"]]
         assert target in attack_targets
 
 
@@ -425,7 +425,7 @@ class TestShroudedState:
     def test_explored_tiles_become_shrouded(self, game_with_fow):
         """Test that previously visible tiles become shrouded when unit moves away."""
         # Create unit and update visibility
-        unit = game_with_fow.create_unit('W', 5, 5, player=1)
+        unit = game_with_fow.create_unit("W", 5, 5, player=1)
         game_with_fow.update_visibility(player=1)
 
         # Check that nearby tile is visible
@@ -439,7 +439,7 @@ class TestShroudedState:
         game_with_fow.update_visibility(player=1)
 
         # The old position should be explored but not visible
-        vis_map = game_with_fow.visibility_maps[1]
+        _vis_map = game_with_fow.visibility_maps[1]
 
         # Far position should be shrouded (was visible, now not)
         # Note: This depends on whether (6,6) is still in range of HQ + new unit position
@@ -454,10 +454,10 @@ class TestStructureVision:
 
     def test_tower_provides_extended_vision(self):
         """Test that towers provide larger vision radius than other structures."""
-        map_data = np.array([['p' for _ in range(15)] for _ in range(15)], dtype=object)
-        map_data[0][0] = 'h_1'  # HQ for player 1
-        map_data[7][7] = 't_1'  # Tower for player 1
-        map_data[14][14] = 'h_2'  # HQ for player 2
+        map_data = np.array([["p" for _ in range(15)] for _ in range(15)], dtype=object)
+        map_data[0][0] = "h_1"  # HQ for player 1
+        map_data[7][7] = "t_1"  # Tower for player 1
+        map_data[14][14] = "h_2"  # HQ for player 2
 
         game = GameState(map_data, num_players=2, fog_of_war=True)
         game.update_visibility()
@@ -469,10 +469,10 @@ class TestStructureVision:
 
     def test_building_provides_vision(self):
         """Test that buildings provide vision."""
-        map_data = np.array([['p' for _ in range(15)] for _ in range(15)], dtype=object)
-        map_data[0][0] = 'h_1'
-        map_data[7][7] = 'b_1'  # Building for player 1
-        map_data[14][14] = 'h_2'
+        map_data = np.array([["p" for _ in range(15)] for _ in range(15)], dtype=object)
+        map_data[0][0] = "h_1"
+        map_data[7][7] = "b_1"  # Building for player 1
+        map_data[14][14] = "h_2"
 
         game = GameState(map_data, num_players=2, fog_of_war=True)
         game.update_visibility()
@@ -486,24 +486,24 @@ class TestVisionRangeConstants:
 
     def test_unit_vision_ranges_defined(self):
         """Test that all unit types have vision ranges defined."""
-        unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        unit_types = ["W", "M", "C", "A", "K", "R", "S", "B"]
         for unit_type in unit_types:
             assert unit_type in UNIT_VISION_RANGES
             assert UNIT_VISION_RANGES[unit_type] > 0
 
     def test_structure_vision_ranges_defined(self):
         """Test that all structure types have vision ranges defined."""
-        structure_types = ['h', 'b', 't']
+        structure_types = ["h", "b", "t"]
         for struct_type in structure_types:
             assert struct_type in STRUCTURE_VISION_RANGES
             assert STRUCTURE_VISION_RANGES[struct_type] > 0
 
     def test_scout_units_have_extended_vision(self):
         """Test that Archer and Rogue have extended vision."""
-        assert UNIT_VISION_RANGES['A'] > UNIT_VISION_RANGES['W']
-        assert UNIT_VISION_RANGES['R'] > UNIT_VISION_RANGES['W']
+        assert UNIT_VISION_RANGES["A"] > UNIT_VISION_RANGES["W"]
+        assert UNIT_VISION_RANGES["R"] > UNIT_VISION_RANGES["W"]
 
     def test_tower_has_best_vision(self):
         """Test that Tower has the best structure vision."""
-        assert STRUCTURE_VISION_RANGES['t'] > STRUCTURE_VISION_RANGES['h']
-        assert STRUCTURE_VISION_RANGES['t'] > STRUCTURE_VISION_RANGES['b']
+        assert STRUCTURE_VISION_RANGES["t"] > STRUCTURE_VISION_RANGES["h"]
+        assert STRUCTURE_VISION_RANGES["t"] > STRUCTURE_VISION_RANGES["b"]

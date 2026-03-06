@@ -1,7 +1,10 @@
 """Tests for InputHandler class, specifically bot turn processing."""
+
 from unittest.mock import Mock
+
 import pygame
 import pytest
+
 from game.input_handler import InputHandler
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
@@ -79,15 +82,17 @@ class TestInputHandlerBotTurns:
         handler._process_bot_turns()
 
         # Verify bot's take_turn was called once
-        assert simple_bot.take_turn.call_count == 1, \
+        assert simple_bot.take_turn.call_count == 1, (
             f"Bot's take_turn should be called once, but was called {simple_bot.take_turn.call_count} times"
+        )
 
         # Verify end_turn is only called once (by the bot internally)
         # Before the fix: end_turn was called twice (once by bot, once by InputHandler)
         # After the fix: end_turn is called once (only by bot)
-        assert end_turn_call_count == 1, \
-            f"end_turn should be called once (by bot only), but was called {end_turn_call_count} times. " \
+        assert end_turn_call_count == 1, (
+            f"end_turn should be called once (by bot only), but was called {end_turn_call_count} times. "
             f"This indicates InputHandler is also calling end_turn(), which is a bug."
+        )
 
     def test_process_bot_turns_handles_multiple_consecutive_bots(self, mock_game, mock_renderer):
         """Test that multiple consecutive bot turns are processed correctly."""
@@ -134,8 +139,9 @@ class TestInputHandlerBotTurns:
         # Verify end_turn is called the correct number of times
         # After fix: end_turn is called 2 times (once by each bot internally)
         # Before fix: was called 4 times (2 by InputHandler + 2 by bots)
-        assert mock_game.end_turn.call_count == 2, \
+        assert mock_game.end_turn.call_count == 2, (
             f"end_turn should be called 2 times (once by each bot), but was called {mock_game.end_turn.call_count} times"
+        )
 
     def test_process_bot_turns_stops_on_game_over(self, mock_game, mock_renderer, simple_bot):
         """Test that bot turn processing stops when game is over."""

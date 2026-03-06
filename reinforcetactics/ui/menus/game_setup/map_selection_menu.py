@@ -1,20 +1,22 @@
 """Menu for selecting a map when starting a new game."""
+
 import os
-from typing import Optional, List
+from typing import List, Optional
 
 import pygame
 
-from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
-from reinforcetactics.utils.language import get_language
+from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 
 class MapSelectionMenu(Menu):
     """Menu for selecting a map when starting a new game with visual previews."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps",
-                 game_mode: Optional[str] = None) -> None:
+    def __init__(
+        self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps", game_mode: Optional[str] = None
+    ) -> None:
         """
         Initialize map selection menu.
 
@@ -23,7 +25,7 @@ class MapSelectionMenu(Menu):
             maps_dir: Directory containing map files
             game_mode: Optional game mode to filter maps (e.g., "1v1", "2v2")
         """
-        super().__init__(screen, get_language().get('new_game.title', 'Select Map'))
+        super().__init__(screen, get_language().get("new_game.title", "Select Map"))
         self.maps_dir = maps_dir
         self.game_mode = game_mode
         self.available_maps: List[str] = []
@@ -42,17 +44,17 @@ class MapSelectionMenu(Menu):
                 subdir_path = os.path.join(self.maps_dir, self.game_mode)
                 if os.path.exists(subdir_path):
                     for f in os.listdir(subdir_path):
-                        if f.endswith('.csv'):
+                        if f.endswith(".csv"):
                             # Store full path including maps/ prefix
                             map_path = os.path.join(self.maps_dir, self.game_mode, f)
                             self.available_maps.append(map_path)
             else:
                 # Load maps from all subdirectories (backward compatibility)
-                for subdir in ['1v1', '2v2']:
+                for subdir in ["1v1", "2v2"]:
                     subdir_path = os.path.join(self.maps_dir, subdir)
                     if os.path.exists(subdir_path):
                         for f in os.listdir(subdir_path):
-                            if f.endswith('.csv'):
+                            if f.endswith(".csv"):
                                 # Store full path including maps/ prefix
                                 self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
 
@@ -64,14 +66,14 @@ class MapSelectionMenu(Menu):
         for map_file in self.available_maps:
             # Use MapPreviewGenerator to format display names
             if map_file == "random":
-                display_name = get_language().get('new_game.random_map', 'Random Map')
+                display_name = get_language().get("new_game.random_map", "Random Map")
             else:
                 _, metadata = self.preview_generator.generate_preview(map_file, 50, 50)
-                display_name = metadata.get('name', os.path.basename(map_file))
+                display_name = metadata.get("name", os.path.basename(map_file))
 
             self.add_option(display_name, lambda m=map_file: m)
 
-        self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+        self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
     def _preload_previews(self) -> None:
         """Preload map previews for better responsiveness."""
@@ -147,12 +149,7 @@ class MapSelectionMenu(Menu):
 
             # Calculate item position
             item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(
-                panel_rect.x + list_padding,
-                item_y,
-                panel_rect.width - 2 * list_padding,
-                item_height - 5
-            )
+            item_rect = pygame.Rect(panel_rect.x + list_padding, item_y, panel_rect.width - 2 * list_padding, item_height - 5)
 
             # Determine styling
             is_selected = i == self.selected_index
@@ -192,9 +189,7 @@ class MapSelectionMenu(Menu):
             text_x = item_rect.x + thumbnail_size + 15
             text_font = get_font(28)
             text_surface = text_font.render(text, True, text_color)
-            text_rect = text_surface.get_rect(
-                midleft=(text_x, item_rect.centery)
-            )
+            text_rect = text_surface.get_rect(midleft=(text_x, item_rect.centery))
             self.screen.blit(text_surface, text_rect)
 
             # Store rect for click detection
@@ -241,26 +236,26 @@ class MapSelectionMenu(Menu):
         label_font = get_font(24)
 
         # Map name
-        name_surface = info_font.render(metadata['name'], True, self.title_color)
+        name_surface = info_font.render(metadata["name"], True, self.title_color)
         self.screen.blit(name_surface, (info_x, info_y))
         info_y += 35
 
         # Dimensions
-        if metadata['width'] > 0:
+        if metadata["width"] > 0:
             dim_text = f"Size: {metadata['width']}×{metadata['height']}"
             dim_surface = label_font.render(dim_text, True, self.text_color)
             self.screen.blit(dim_surface, (info_x, info_y))
             info_y += 28
 
         # Player count
-        if metadata['player_count'] > 0:
+        if metadata["player_count"] > 0:
             player_text = f"Players: {metadata['player_count']}"
             player_surface = label_font.render(player_text, True, self.text_color)
             self.screen.blit(player_surface, (info_x, info_y))
             info_y += 28
 
         # Difficulty
-        if metadata.get('difficulty'):
+        if metadata.get("difficulty"):
             diff_text = f"Difficulty: {metadata['difficulty']}"
             diff_surface = label_font.render(diff_text, True, self.text_color)
             self.screen.blit(diff_surface, (info_x, info_y))

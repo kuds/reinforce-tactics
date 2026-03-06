@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 if TYPE_CHECKING:
     from reinforcetactics.core.game_state import GameState
@@ -386,9 +386,7 @@ def discover_llm_bots(
     return bots
 
 
-def discover_model_bots(
-    models_dir: str, test_models: bool = True
-) -> List[BotDescriptor]:
+def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDescriptor]:
     """
     Discover trained model bots from a directory.
 
@@ -492,8 +490,8 @@ def _test_google_key(api_key: str) -> bool:
 def _test_model_file(model_path: Path) -> bool:
     """Test if a model file can be loaded."""
     try:
-        from reinforcetactics.game.model_bot import ModelBot
         from reinforcetactics.core.game_state import GameState
+        from reinforcetactics.game.model_bot import ModelBot
         from reinforcetactics.utils.file_io import FileIO
 
         # Create a dummy game state for testing

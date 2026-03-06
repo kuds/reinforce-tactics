@@ -2,15 +2,16 @@
 Base menu class and helper functions for the menu system.
 Self-contained menus that manage their own pygame screen and navigation.
 """
+
 from __future__ import annotations
-from typing import Optional, List, Tuple, Callable, Any
+
+from typing import Any, Callable, List, Optional, Tuple
 
 import pygame
 
-from reinforcetactics.utils.language import get_language, TRANSLATIONS
+from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.ui.icons import get_arrow_up_icon, get_arrow_down_icon
-
+from reinforcetactics.utils.language import TRANSLATIONS, get_language
 
 # Cache all "Back" button translations from the language system
 _BACK_TRANSLATIONS_CACHE = None
@@ -27,7 +28,7 @@ def _get_back_translations() -> set:
     if _BACK_TRANSLATIONS_CACHE is None:
         back_translations = set()
         for lang_dict in TRANSLATIONS.values():
-            back_text = lang_dict.get('common.back')
+            back_text = lang_dict.get("common.back")
             if back_text:
                 # Strip whitespace to match the checking logic
                 back_translations.add(back_text.lower().strip())
@@ -220,14 +221,10 @@ class Menu:
             display_text = f"> {text}" if is_selected else f"  {text}"
 
             text_surface = self.option_font.render(display_text, True, self.text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2,
-                                              y=start_y + display_i * spacing)
+            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
 
             bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2,
-                text_rect.y - padding_y,
-                uniform_width,
-                text_rect.height + 2 * padding_y
+                (screen_width - uniform_width) // 2, text_rect.y - padding_y, uniform_width, text_rect.height + 2 * padding_y
             )
 
             self.option_rects.append(bg_rect)
@@ -301,15 +298,14 @@ class Menu:
 
             # Render text
             text_surface = self.option_font.render(display_text, True, text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2,
-                                              y=start_y + display_i * spacing)
+            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
 
             # Create background rectangle with uniform width
             bg_rect = pygame.Rect(
                 (screen_width - uniform_width) // 2,  # Center the uniform-width box
                 text_rect.y - padding_y,
                 uniform_width,
-                text_rect.height + 2 * padding_y
+                text_rect.height + 2 * padding_y,
             )
 
             # Draw rounded background rectangle
@@ -354,8 +350,7 @@ class Menu:
 
             # Show position indicator (e.g., "3 / 15")
             pos_text = self.indicator_font.render(
-                f"{self.scroll_offset + 1}-{end_index} / {total_options}",
-                True, self.text_color
+                f"{self.scroll_offset + 1}-{end_index} / {total_options}", True, self.text_color
             )
             pos_rect = pos_text.get_rect(right=screen_width - 20, bottom=screen_height - 20)
             self.screen.blit(pos_text, pos_rect)

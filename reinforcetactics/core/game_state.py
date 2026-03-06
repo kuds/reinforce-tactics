@@ -2,19 +2,21 @@
 Core game state management without rendering dependencies.
 Fixed version: removed duplicate methods, added type hints, controlled logging.
 """
+
 from __future__ import annotations
+
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.core.unit import Unit
-from reinforcetactics.core.grid import TileGrid
-from reinforcetactics.core.visibility import VisibilityMap, get_visible_units, VISIBLE
-from reinforcetactics.game.mechanics import GameMechanics
 from reinforcetactics.constants import STARTING_GOLD, UNIT_DATA, TileType
+from reinforcetactics.core.grid import TileGrid
+from reinforcetactics.core.unit import Unit
+from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
+from reinforcetactics.game.mechanics import GameMechanics
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,11 +26,16 @@ class GameState:
     """Manages the core game state without rendering."""
 
     # All available unit types
-    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
 
-    def __init__(self, map_data, num_players: int = 2, max_turns: Optional[int] = None,
-                 enabled_units: Optional[List[str]] = None,
-                 fog_of_war: bool = False) -> None:
+    def __init__(
+        self,
+        map_data,
+        num_players: int = 2,
+        max_turns: Optional[int] = None,
+        enabled_units: Optional[List[str]] = None,
+        fog_of_war: bool = False,
+    ) -> None:
         """
         Initialize the game state.
 
@@ -54,13 +61,11 @@ class GameState:
         # FOW method for future compatibility when different algorithms are added
         # Current options: 'simple_radius' (Option A from proposal)
         # Future options: 'line_of_sight', 'hybrid'
-        self.fog_of_war_method: str = 'simple_radius' if fog_of_war else 'none'
+        self.fog_of_war_method: str = "simple_radius" if fog_of_war else "none"
         self.visibility_maps: Dict[int, VisibilityMap] = {}
         if fog_of_war:
             for player in range(1, num_players + 1):
-                self.visibility_maps[player] = VisibilityMap(
-                    self.grid.width, self.grid.height, player
-                )
+                self.visibility_maps[player] = VisibilityMap(self.grid.width, self.grid.height, player)
 
         # Enabled unit types (defaults to all if not specified)
         self.enabled_units: List[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
@@ -108,10 +113,15 @@ class GameState:
         """Reset the game state."""
         self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units, self.fog_of_war)
 
-    def set_map_metadata(self, original_width: int, original_height: int,
-                         padding_offset_x: int, padding_offset_y: int,
-                         map_file: Optional[str] = None,
-                         original_map_data: Optional[List[List[str]]] = None) -> None:
+    def set_map_metadata(
+        self,
+        original_width: int,
+        original_height: int,
+        padding_offset_x: int,
+        padding_offset_y: int,
+        map_file: Optional[str] = None,
+        original_map_data: Optional[List[List[str]]] = None,
+    ) -> None:
         """
         Set metadata about the original map before padding.
 
@@ -338,32 +348,32 @@ class GameState:
         # Convert coordinate parameters from padded to original
         converted_kwargs = {}
         for key, value in kwargs.items():
-            if key in ['x', 'y', 'from_x', 'from_y', 'to_x', 'to_y']:
+            if key in ["x", "y", "from_x", "from_y", "to_x", "to_y"]:
                 # Single coordinate value
-                if key.endswith('_x'):
+                if key.endswith("_x"):
                     # Store x coordinate to pair with y
                     converted_kwargs[key] = value
-                elif key.endswith('_y'):
+                elif key.endswith("_y"):
                     # Convert the x,y pair
-                    x_key = key.replace('_y', '_x')
+                    x_key = key.replace("_y", "_x")
                     if x_key in kwargs:
                         orig_x, orig_y = self.padded_to_original_coords(kwargs[x_key], value)
                         converted_kwargs[x_key] = orig_x
                         converted_kwargs[key] = orig_y
                     else:
                         converted_kwargs[key] = value
-                elif key == 'x':
+                elif key == "x":
                     # Will be converted when we see 'y'
                     converted_kwargs[key] = value
-                elif key == 'y':
+                elif key == "y":
                     # Convert x,y pair
-                    if 'x' in kwargs:
-                        orig_x, orig_y = self.padded_to_original_coords(kwargs['x'], value)
-                        converted_kwargs['x'] = orig_x
+                    if "x" in kwargs:
+                        orig_x, orig_y = self.padded_to_original_coords(kwargs["x"], value)
+                        converted_kwargs["x"] = orig_x
                         converted_kwargs[key] = orig_y
                     else:
                         converted_kwargs[key] = value
-            elif key in ['position', 'attacker_pos', 'target_pos', 'healer_pos', 'paralyzer_pos', 'curer_pos']:
+            elif key in ["position", "attacker_pos", "target_pos", "healer_pos", "paralyzer_pos", "curer_pos"]:
                 # Tuple/list of (x, y) coordinates
                 if isinstance(value, (tuple, list)) and len(value) == 2:
                     orig_x, orig_y = self.padded_to_original_coords(value[0], value[1])
@@ -375,16 +385,15 @@ class GameState:
                 converted_kwargs[key] = value
 
         action_record = {
-            'turn': self.turn_number,
-            'player': self.current_player,
-            'type': action_type,
-            'timestamp': datetime.now().isoformat(),
-            **converted_kwargs
+            "turn": self.turn_number,
+            "player": self.current_player,
+            "type": action_type,
+            "timestamp": datetime.now().isoformat(),
+            **converted_kwargs,
         }
         self.action_history.append(action_record)
 
-    def create_unit(self, unit_type: str, x: int, y: int,
-                    player: Optional[int] = None) -> Optional[Unit]:
+    def create_unit(self, unit_type: str, x: int, y: int, player: Optional[int] = None) -> Optional[Unit]:
         """
         Create a unit at the specified position.
 
@@ -410,7 +419,7 @@ class GameState:
             logger.warning(f"Unknown unit type: {unit_type}")
             return None
 
-        cost = UNIT_DATA[unit_type]['cost']
+        cost = UNIT_DATA[unit_type]["cost"]
         if self.player_gold[player] < cost:
             logger.debug(f"Cannot create unit: insufficient gold ({self.player_gold[player]} < {cost})")
             return None
@@ -422,7 +431,7 @@ class GameState:
         self._invalidate_cache()
 
         # Record action
-        self.record_action('create_unit', unit_type=unit_type, x=x, y=y, player=player)
+        self.record_action("create_unit", unit_type=unit_type, x=x, y=y, player=player)
 
         logger.debug(f"Player {player} created {unit_type} at ({x}, {y})")
         return unit
@@ -447,16 +456,14 @@ class GameState:
             self.grid.height,
             lambda x, y: self.mechanics.can_move_to_position(
                 x, y, self.grid, self.units, moving_unit=unit, is_destination=False
-            )
+            ),
         )
 
         if (to_x, to_y) not in reachable:
             logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable")
             return False
 
-        if not self.mechanics.can_move_to_position(
-            to_x, to_y, self.grid, self.units, moving_unit=unit, is_destination=True
-        ):
+        if not self.mechanics.can_move_to_position(to_x, to_y, self.grid, self.units, moving_unit=unit, is_destination=True):
             logger.debug(f"Cannot move to ({to_x}, {to_y}): position blocked")
             return False
 
@@ -465,8 +472,7 @@ class GameState:
         unit.can_move = False  # Consume move action
 
         # Record action
-        self.record_action('move', unit_type=unit.type, from_x=from_x, from_y=from_y,
-                          to_x=to_x, to_y=to_y, player=unit.player)
+        self.record_action("move", unit_type=unit.type, from_x=from_x, from_y=from_y, to_x=to_x, to_y=to_y, player=unit.player)
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
         self._invalidate_cache()
@@ -490,17 +496,19 @@ class GameState:
         result = self.mechanics.attack_unit(attacker, target, self.grid, self.units)
 
         # Record action
-        self.record_action('attack',
-                          attacker_type=attacker.type,
-                          attacker_pos=(attacker.x, attacker.y),
-                          target_type=target.type,
-                          target_pos=(target.x, target.y),
-                          damage=result['damage'],
-                          target_killed=not result['target_alive'],
-                          player=attacker.player)
+        self.record_action(
+            "attack",
+            attacker_type=attacker.type,
+            attacker_pos=(attacker.x, attacker.y),
+            target_type=target.type,
+            target_pos=(target.x, target.y),
+            damage=result["damage"],
+            target_killed=not result["target_alive"],
+            player=attacker.player,
+        )
 
         # Handle unit deaths
-        if not result['target_alive']:
+        if not result["target_alive"]:
             target_tile = self.grid.get_tile(target.x, target.y)
             if target_tile.is_capturable() and target_tile.health < target_tile.max_health:
                 target_tile.regenerating = True
@@ -509,7 +517,7 @@ class GameState:
             self._invalidate_cache()
             self._check_player_eliminated(defeated_player)
 
-        if not result['attacker_alive']:
+        if not result["attacker_alive"]:
             attacker_tile = self.grid.get_tile(attacker.x, attacker.y)
             if attacker_tile.is_capturable() and attacker_tile.health < attacker_tile.max_health:
                 attacker_tile.regenerating = True
@@ -520,7 +528,7 @@ class GameState:
             self._check_player_eliminated(defeated_player)
 
         # Disable attacker actions after combat (only if still alive)
-        if result['attacker_alive']:
+        if result["attacker_alive"]:
             attacker.can_move = False
             attacker.can_attack = False
         self._invalidate_cache()
@@ -533,10 +541,9 @@ class GameState:
         if result:
             paralyzer.can_move = False
             paralyzer.can_attack = False
-            self.record_action('paralyze',
-                              paralyzer_pos=(paralyzer.x, paralyzer.y),
-                              target_pos=(target.x, target.y),
-                              player=paralyzer.player)
+            self.record_action(
+                "paralyze", paralyzer_pos=(paralyzer.x, paralyzer.y), target_pos=(target.x, target.y), player=paralyzer.player
+            )
             self._invalidate_cache()
         return result
 
@@ -546,11 +553,9 @@ class GameState:
         if amount > 0:
             healer.can_move = False
             healer.can_attack = False
-            self.record_action('heal',
-                              healer_pos=(healer.x, healer.y),
-                              target_pos=(target.x, target.y),
-                              amount=amount,
-                              player=healer.player)
+            self.record_action(
+                "heal", healer_pos=(healer.x, healer.y), target_pos=(target.x, target.y), amount=amount, player=healer.player
+            )
             self._invalidate_cache()
         return amount
 
@@ -560,10 +565,7 @@ class GameState:
         if result:
             curer.can_move = False
             curer.can_attack = False
-            self.record_action('cure',
-                              curer_pos=(curer.x, curer.y),
-                              target_pos=(target.x, target.y),
-                              player=curer.player)
+            self.record_action("cure", curer_pos=(curer.x, curer.y), target_pos=(target.x, target.y), player=curer.player)
             self._invalidate_cache()
         return result
 
@@ -582,11 +584,13 @@ class GameState:
         if result:
             sorcerer.can_move = False
             sorcerer.can_attack = False
-            self.record_action('haste',
-                              sorcerer_pos=(sorcerer.x, sorcerer.y),
-                              target_pos=(target.x, target.y),
-                              target_type=target.type,
-                              player=sorcerer.player)
+            self.record_action(
+                "haste",
+                sorcerer_pos=(sorcerer.x, sorcerer.y),
+                target_pos=(target.x, target.y),
+                target_type=target.type,
+                player=sorcerer.player,
+            )
             self._invalidate_cache()
         return result
 
@@ -605,11 +609,13 @@ class GameState:
         if result:
             sorcerer.can_move = False
             sorcerer.can_attack = False
-            self.record_action('defence_buff',
-                              sorcerer_pos=(sorcerer.x, sorcerer.y),
-                              target_pos=(target.x, target.y),
-                              target_type=target.type,
-                              player=sorcerer.player)
+            self.record_action(
+                "defence_buff",
+                sorcerer_pos=(sorcerer.x, sorcerer.y),
+                target_pos=(target.x, target.y),
+                target_type=target.type,
+                player=sorcerer.player,
+            )
             self._invalidate_cache()
         return result
 
@@ -628,11 +634,13 @@ class GameState:
         if result:
             sorcerer.can_move = False
             sorcerer.can_attack = False
-            self.record_action('attack_buff',
-                              sorcerer_pos=(sorcerer.x, sorcerer.y),
-                              target_pos=(target.x, target.y),
-                              target_type=target.type,
-                              player=sorcerer.player)
+            self.record_action(
+                "attack_buff",
+                sorcerer_pos=(sorcerer.x, sorcerer.y),
+                target_pos=(target.x, target.y),
+                target_type=target.type,
+                player=sorcerer.player,
+            )
             self._invalidate_cache()
         return result
 
@@ -642,14 +650,16 @@ class GameState:
         result = self.mechanics.seize_structure(unit, tile)
 
         # Record action
-        self.record_action('seize',
-                          unit_type=unit.type,
-                          position=(unit.x, unit.y),
-                          structure_type=tile.type,
-                          captured=result['captured'],
-                          player=unit.player)
+        self.record_action(
+            "seize",
+            unit_type=unit.type,
+            position=(unit.x, unit.y),
+            structure_type=tile.type,
+            captured=result["captured"],
+            player=unit.player,
+        )
 
-        if result['game_over']:
+        if result["game_over"]:
             self.game_over = True
             self.winner = unit.player
 
@@ -675,7 +685,7 @@ class GameState:
         Returns:
             Dict with healing statistics
         """
-        stats = {'total_healed': 0, 'total_cost': 0, 'units_healed': []}
+        stats = {"total_healed": 0, "total_cost": 0, "units_healed": []}
 
         # Find enemy HQ for distance calculations
         enemy_hq_pos = None
@@ -715,30 +725,27 @@ class GameState:
                 structure_name = "Building"
 
             if heal_amount > 0:
-                distance = float('inf')
+                distance = float("inf")
                 if enemy_hq_pos:
                     distance = abs(unit.x - enemy_hq_pos[0]) + abs(unit.y - enemy_hq_pos[1])
 
-                units_to_heal.append({
-                    'unit': unit,
-                    'heal_amount': heal_amount,
-                    'structure_name': structure_name,
-                    'distance': distance
-                })
+                units_to_heal.append(
+                    {"unit": unit, "heal_amount": heal_amount, "structure_name": structure_name, "distance": distance}
+                )
 
         # Sort by distance to enemy HQ (closest first - priority)
-        units_to_heal.sort(key=lambda x: x['distance'])
+        units_to_heal.sort(key=lambda x: x["distance"])
 
         # Process healing for each unit
         for heal_data in units_to_heal:
-            unit = heal_data['unit']
-            requested_heal = heal_data['heal_amount']
-            structure_name = heal_data['structure_name']
+            unit = heal_data["unit"]
+            requested_heal = heal_data["heal_amount"]
+            structure_name = heal_data["structure_name"]
 
             max_possible_heal = unit.max_health - unit.health
             desired_heal = min(requested_heal, max_possible_heal)
 
-            unit_cost = UNIT_DATA[unit.type]['cost']
+            unit_cost = UNIT_DATA[unit.type]["cost"]
             cost_per_hp = unit_cost / unit.max_health
 
             actual_heal = 0
@@ -763,27 +770,31 @@ class GameState:
                 unit.health = min(unit.health + actual_heal, unit.max_health)
                 self.player_gold[player] -= actual_cost
 
-                stats['total_healed'] += actual_heal
-                stats['total_cost'] += actual_cost
-                stats['units_healed'].append({
-                    'unit_type': unit.type,
-                    'position': (unit.x, unit.y),
-                    'structure': structure_name,
-                    'healed': actual_heal,
-                    'cost': actual_cost,
-                    'old_health': old_health,
-                    'new_health': unit.health
-                })
+                stats["total_healed"] += actual_heal
+                stats["total_cost"] += actual_cost
+                stats["units_healed"].append(
+                    {
+                        "unit_type": unit.type,
+                        "position": (unit.x, unit.y),
+                        "structure": structure_name,
+                        "healed": actual_heal,
+                        "cost": actual_cost,
+                        "old_health": old_health,
+                        "new_health": unit.health,
+                    }
+                )
 
-                logger.debug(f"Healed {unit.type} on {structure_name} at ({unit.x}, {unit.y}): "
-                           f"{actual_heal} HP ({old_health} → {unit.health}) for ${actual_cost}")
+                logger.debug(
+                    f"Healed {unit.type} on {structure_name} at ({unit.x}, {unit.y}): "
+                    f"{actual_heal} HP ({old_health} → {unit.health}) for ${actual_cost}"
+                )
 
         return stats
 
     def end_turn(self) -> Dict[str, Any]:
         """End the current player's turn and pass to the next player."""
         # Record action
-        self.record_action('end_turn', player=self.current_player)
+        self.record_action("end_turn", player=self.current_player)
 
         # Reset structures that were vacated this turn
         for unit in self.units:
@@ -806,7 +817,7 @@ class GameState:
                 self.game_over = True
                 # No winner on max_turns draw
                 self.winner = None
-                return {'total': 0, 'healing': {'total_healed': 0, 'total_cost': 0, 'units_healed': []}}
+                return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
 
         # Handle paralysis and enable units
         self.mechanics.decrement_paralysis(self.units, self.current_player)
@@ -841,11 +852,11 @@ class GameState:
 
         # Calculate and apply income
         income_data = self.mechanics.calculate_income(self.current_player, self.grid)
-        self.player_gold[self.current_player] += income_data['total']
+        self.player_gold[self.current_player] += income_data["total"]
 
         # Heal units on structures after income collection
         healing_stats = self.heal_units_on_structures(self.current_player)
-        income_data['healing'] = healing_stats
+        income_data["healing"] = healing_stats
 
         # Update visibility for the new current player
         self.update_visibility(self.current_player)
@@ -857,7 +868,7 @@ class GameState:
         if player is None:
             player = self.current_player
 
-        self.record_action('resign', player=player)
+        self.record_action("resign", player=player)
 
         # Remove resigning player's units
         self.units = [u for u in self.units if u.player != player]
@@ -887,17 +898,17 @@ class GameState:
             return self._legal_actions_cache[player]
 
         legal_actions = {
-            'create_unit': [],
-            'move': [],
-            'attack': [],
-            'paralyze': [],
-            'heal': [],
-            'cure': [],
-            'haste': [],
-            'defence_buff': [],
-            'attack_buff': [],
-            'seize': [],
-            'end_turn': True
+            "create_unit": [],
+            "move": [],
+            "attack": [],
+            "paralyze": [],
+            "heal": [],
+            "cure": [],
+            "haste": [],
+            "defence_buff": [],
+            "attack_buff": [],
+            "seize": [],
+            "end_turn": True,
         }
 
         # Building units (only at Buildings, not HQ)
@@ -905,12 +916,8 @@ class GameState:
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
                 for unit_type in self.enabled_units:
-                    if self.player_gold[player] >= UNIT_DATA[unit_type]['cost']:
-                        legal_actions['create_unit'].append({
-                            'unit_type': unit_type,
-                            'x': tile.x,
-                            'y': tile.y
-                        })
+                    if self.player_gold[player] >= UNIT_DATA[unit_type]["cost"]:
+                        legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
 
         # Unit actions
         for unit in self.units:
@@ -920,31 +927,25 @@ class GameState:
                     reachable = unit.get_reachable_positions(
                         self.grid.width,
                         self.grid.height,
-                        lambda x, y, _u=unit: self.mechanics.can_move_to_position(
-                            x, y, self.grid, self.units, moving_unit=_u)
+                        lambda x, y, _u=unit: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=_u),
                     )
                     for pos in reachable:
                         # Only include positions that are valid as final destinations
                         # (not occupied by any unit)
                         if self.mechanics.can_move_to_position(
-                            pos[0], pos[1], self.grid, self.units,
-                            moving_unit=unit, is_destination=True
+                            pos[0], pos[1], self.grid, self.units, moving_unit=unit, is_destination=True
                         ):
-                            legal_actions['move'].append({
-                                'unit': unit,
-                                'from_x': unit.x,
-                                'from_y': unit.y,
-                                'to_x': pos[0],
-                                'to_y': pos[1]
-                            })
+                            legal_actions["move"].append(
+                                {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
+                            )
 
                 # Combat actions
                 if unit.can_attack:
                     # For Archers, Mages, and Sorcerers, find enemies within range (not just adjacent)
-                    if unit.type in ['M', 'A', 'S']:
+                    if unit.type in ["M", "A", "S"]:
                         # Check if unit is on mountain (for Archer range bonus)
                         unit_tile = self.grid.get_tile(unit.x, unit.y)
-                        on_mountain = (unit_tile.type == 'm')
+                        on_mountain = unit_tile.type == "m"
 
                         for enemy in self.units:
                             if enemy.player != player:
@@ -954,19 +955,13 @@ class GameState:
 
                                 damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
                                 if damage > 0:
-                                    legal_actions['attack'].append({
-                                        'attacker': unit,
-                                        'target': enemy
-                                    })
+                                    legal_actions["attack"].append({"attacker": unit, "target": enemy})
 
-                                    if unit.type == 'M' and unit.can_use_paralyze():
+                                    if unit.type == "M" and unit.can_use_paralyze():
                                         # Mages can also paralyze at range (if not on cooldown)
                                         distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
                                         if distance <= 2:
-                                            legal_actions['paralyze'].append({
-                                                'paralyzer': unit,
-                                                'target': enemy
-                                            })
+                                            legal_actions["paralyze"].append({"paralyzer": unit, "target": enemy})
                     else:
                         # For other units, only adjacent enemies
                         adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
@@ -975,61 +970,40 @@ class GameState:
                             if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
                                 continue
 
-                            legal_actions['attack'].append({
-                                'attacker': unit,
-                                'target': enemy
-                            })
+                            legal_actions["attack"].append({"attacker": unit, "target": enemy})
 
                     # Healing (Cleric only) - range 1-2
-                    if unit.type == 'C':
+                    if unit.type == "C":
                         healable_allies = self.mechanics.get_healable_allies(unit, self.units)
                         for ally in healable_allies:
-                            legal_actions['heal'].append({
-                                'healer': unit,
-                                'target': ally
-                            })
+                            legal_actions["heal"].append({"healer": unit, "target": ally})
 
                         curable_allies = self.mechanics.get_curable_allies(unit, self.units)
                         for ally in curable_allies:
-                            legal_actions['cure'].append({
-                                'curer': unit,
-                                'target': ally
-                            })
+                            legal_actions["cure"].append({"curer": unit, "target": ally})
 
                     # Haste (Sorcerer only)
-                    if unit.type == 'S' and unit.can_use_haste():
+                    if unit.type == "S" and unit.can_use_haste():
                         hasteable_allies = self.mechanics.get_hasteable_allies(unit, self.units)
                         for ally in hasteable_allies:
-                            legal_actions['haste'].append({
-                                'sorcerer': unit,
-                                'target': ally
-                            })
+                            legal_actions["haste"].append({"sorcerer": unit, "target": ally})
 
                     # Defence Buff (Sorcerer only)
-                    if unit.type == 'S' and unit.can_use_defence_buff():
+                    if unit.type == "S" and unit.can_use_defence_buff():
                         buffable_allies = self.mechanics.get_defence_buffable_allies(unit, self.units)
                         for ally in buffable_allies:
-                            legal_actions['defence_buff'].append({
-                                'sorcerer': unit,
-                                'target': ally
-                            })
+                            legal_actions["defence_buff"].append({"sorcerer": unit, "target": ally})
 
                     # Attack Buff (Sorcerer only)
-                    if unit.type == 'S' and unit.can_use_attack_buff():
+                    if unit.type == "S" and unit.can_use_attack_buff():
                         buffable_allies = self.mechanics.get_attack_buffable_allies(unit, self.units)
                         for ally in buffable_allies:
-                            legal_actions['attack_buff'].append({
-                                'sorcerer': unit,
-                                'target': ally
-                            })
+                            legal_actions["attack_buff"].append({"sorcerer": unit, "target": ally})
 
                     # Seizing
                     tile = self.grid.get_tile(unit.x, unit.y)
                     if tile.is_capturable() and tile.player != player:
-                        legal_actions['seize'].append({
-                            'unit': unit,
-                            'tile': tile
-                        })
+                        legal_actions["seize"].append({"unit": unit, "tile": tile})
 
         # Cache the result
         self._legal_actions_cache[player] = legal_actions
@@ -1040,21 +1014,21 @@ class GameState:
     def to_dict(self) -> Dict[str, Any]:
         """Convert game state to dictionary for serialization."""
         return {
-            'timestamp': self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
-            'current_player': self.current_player,
-            'num_players': self.num_players,
-            'player_gold': self.player_gold,
-            'turn_number': self.turn_number,
-            'game_over': self.game_over,
-            'winner': self.winner,
-            'map_file': self.map_file_used,
-            'player_configs': self.player_configs,
-            'enabled_units': self.enabled_units,
-            'fog_of_war': self.fog_of_war,
-            'fog_of_war_method': self.fog_of_war_method,
-            'units': [unit.to_dict() for unit in self.units],
-            'tiles': self.grid.to_dict()['tiles'],
-            'action_history': self.action_history,
+            "timestamp": self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
+            "current_player": self.current_player,
+            "num_players": self.num_players,
+            "player_gold": self.player_gold,
+            "turn_number": self.turn_number,
+            "game_over": self.game_over,
+            "winner": self.winner,
+            "map_file": self.map_file_used,
+            "player_configs": self.player_configs,
+            "enabled_units": self.enabled_units,
+            "fog_of_war": self.fog_of_war,
+            "fog_of_war_method": self.fog_of_war_method,
+            "units": [unit.to_dict() for unit in self.units],
+            "tiles": self.grid.to_dict()["tiles"],
+            "action_history": self.action_history,
         }
 
     def to_numpy(self, for_player: Optional[int] = None) -> Dict[str, np.ndarray]:
@@ -1075,7 +1049,7 @@ class GameState:
         unit_state = np.zeros((self.grid.height, self.grid.width, 3), dtype=np.float32)
 
         # Encoding for all 8 unit types: W, M, C, A, K, R, S, B
-        unit_type_encoding = {'W': 1, 'M': 2, 'C': 3, 'A': 4, 'K': 5, 'R': 6, 'S': 7, 'B': 8}
+        unit_type_encoding = {"W": 1, "M": 2, "C": 3, "A": 4, "K": 5, "R": 6, "S": 7, "B": 8}
 
         # Visibility mask for FOW
         visibility_state = np.full((self.grid.height, self.grid.width), VISIBLE, dtype=np.uint8)
@@ -1110,16 +1084,16 @@ class GameState:
                             grid_state[y, x, 2] = 0  # Hide health
 
         result = {
-            'grid': grid_state,
-            'units': unit_state,
-            'gold': np.array([self.player_gold[i] for i in range(1, self.num_players + 1)], dtype=np.float32),
-            'current_player': self.current_player,
-            'turn_number': self.turn_number
+            "grid": grid_state,
+            "units": unit_state,
+            "gold": np.array([self.player_gold[i] for i in range(1, self.num_players + 1)], dtype=np.float32),
+            "current_player": self.current_player,
+            "turn_number": self.turn_number,
         }
 
         # Add visibility layer when FOW is enabled
         if self.fog_of_war:
-            result['visibility'] = visibility_state
+            result["visibility"] = visibility_state
 
         return result
 
@@ -1134,6 +1108,7 @@ class GameState:
             Path to saved file
         """
         from reinforcetactics.utils.file_io import FileIO
+
         return FileIO.save_game(self, filepath)
 
     def _get_player_type(self, config: Dict[str, Any]) -> str:
@@ -1146,29 +1121,25 @@ class GameState:
         Returns:
             Player type string: 'human', 'bot', 'llm', or 'rl'
         """
-        if config.get('type') == 'human':
-            return 'human'
+        if config.get("type") == "human":
+            return "human"
 
-        bot_type = config.get('bot_type', '')
+        bot_type = config.get("bot_type", "")
 
         # LLM bots
-        if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
-            return 'llm'
+        if bot_type in ("OpenAIBot", "ClaudeBot", "GeminiBot"):
+            return "llm"
 
         # RL model bots
-        if bot_type == 'ModelBot':
-            return 'rl'
+        if bot_type == "ModelBot":
+            return "rl"
 
         # Standard bots (SimpleBot, MediumBot, AdvancedBot)
-        return 'bot'
+        return "bot"
 
     @staticmethod
     def build_player_config(
-        player_no: int,
-        name: str,
-        player_type: str,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        player_no: int, name: str, player_type: str, temperature: Optional[float] = None, max_tokens: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Build a standardized player config for replay logs.
@@ -1183,16 +1154,12 @@ class GameState:
         Returns:
             Standardized player config dictionary
         """
-        config: Dict[str, Any] = {
-            'player_no': player_no,
-            'type': player_type,
-            'name': name
-        }
+        config: Dict[str, Any] = {"player_no": player_no, "type": player_type, "name": name}
 
         # Add LLM-specific fields
-        if player_type == 'llm':
-            config['temperature'] = temperature
-            config['max_tokens'] = max_tokens
+        if player_type == "llm":
+            config["temperature"] = temperature
+            config["max_tokens"] = max_tokens
 
         return config
 
@@ -1220,48 +1187,44 @@ class GameState:
             player_num = i + 1
 
             # Check if already in standardized format
-            if 'player_no' in config:
+            if "player_no" in config:
                 enhanced_player_configs.append(config)
             else:
                 # Transform from old format (player_name, player_type, bot_type, etc.)
-                player_name = config.get('player_name', config.get('name', 'Unknown'))
+                player_name = config.get("player_name", config.get("name", "Unknown"))
 
                 # Always use _get_player_type to map old format types (e.g., 'computer' -> 'bot')
                 player_type = self._get_player_type(config)
 
-                enhanced_config = {
-                    'player_no': player_num,
-                    'type': player_type,
-                    'name': player_name
-                }
+                enhanced_config = {"player_no": player_num, "type": player_type, "name": player_name}
 
                 # Add LLM-specific fields if applicable
-                if player_type == 'llm':
-                    enhanced_config['temperature'] = config.get('temperature', None)
-                    enhanced_config['max_tokens'] = config.get('max_tokens', None)
+                if player_type == "llm":
+                    enhanced_config["temperature"] = config.get("temperature", None)
+                    enhanced_config["max_tokens"] = config.get("max_tokens", None)
 
                 enhanced_player_configs.append(enhanced_config)
 
         game_info = {
-            'num_players': self.num_players,
-            'max_turns': self.max_turns,
-            'total_turns': self.turn_number,
-            'winner': self.winner,
-            'game_over': self.game_over,
-            'start_time': self.game_start_time.isoformat(),
-            'end_time': datetime.now().isoformat(),
-            'map_file': self.map_file_used,
-            'initial_map': map_to_save,
-            'player_configs': enhanced_player_configs,
-            'enabled_units': self.enabled_units,
-            'fog_of_war': self.fog_of_war,
-            'fog_of_war_method': self.fog_of_war_method
+            "num_players": self.num_players,
+            "max_turns": self.max_turns,
+            "total_turns": self.turn_number,
+            "winner": self.winner,
+            "game_over": self.game_over,
+            "start_time": self.game_start_time.isoformat(),
+            "end_time": datetime.now().isoformat(),
+            "map_file": self.map_file_used,
+            "initial_map": map_to_save,
+            "player_configs": enhanced_player_configs,
+            "enabled_units": self.enabled_units,
+            "fog_of_war": self.fog_of_war,
+            "fog_of_war_method": self.fog_of_war_method,
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
 
     @classmethod
-    def from_dict(cls, save_data: Dict[str, Any], map_data) -> 'GameState':
+    def from_dict(cls, save_data: Dict[str, Any], map_data) -> "GameState":
         """
         Restore game state from dictionary.
 
@@ -1273,54 +1236,56 @@ class GameState:
             Restored GameState instance
         """
         # Extract enabled_units from save data (default to all if not present for backward compatibility)
-        enabled_units = save_data.get('enabled_units', cls.ALL_UNIT_TYPES)
+        enabled_units = save_data.get("enabled_units", cls.ALL_UNIT_TYPES)
 
         # Extract fog_of_war from save data (default to False for backward compatibility)
-        fog_of_war = save_data.get('fog_of_war', False)
+        fog_of_war = save_data.get("fog_of_war", False)
 
         # Extract fog_of_war_method (default to 'simple_radius' if FOW enabled, 'none' otherwise)
-        fog_of_war_method = save_data.get('fog_of_war_method', 'simple_radius' if fog_of_war else 'none')
+        fog_of_war_method = save_data.get("fog_of_war_method", "simple_radius" if fog_of_war else "none")
 
-        max_turns = save_data.get('max_turns')
-        game = cls(map_data, save_data.get('num_players', 2), max_turns=max_turns, enabled_units=enabled_units, fog_of_war=fog_of_war)
+        max_turns = save_data.get("max_turns")
+        game = cls(
+            map_data, save_data.get("num_players", 2), max_turns=max_turns, enabled_units=enabled_units, fog_of_war=fog_of_war
+        )
 
         # Restore the fog of war method
         game.fog_of_war_method = fog_of_war_method
 
-        game.current_player = save_data.get('current_player', 1)
-        game.turn_number = save_data.get('turn_number', 0)
-        game.game_over = save_data.get('game_over', False)
-        game.winner = save_data.get('winner')
+        game.current_player = save_data.get("current_player", 1)
+        game.turn_number = save_data.get("turn_number", 0)
+        game.game_over = save_data.get("game_over", False)
+        game.winner = save_data.get("winner")
 
         # Fix player_gold dictionary key type (JSON serializes as strings)
-        saved_gold = save_data.get('player_gold', {})
+        saved_gold = save_data.get("player_gold", {})
         game.player_gold = {int(k): v for k, v in saved_gold.items()}
 
-        game.map_file_used = save_data.get('map_file')
+        game.map_file_used = save_data.get("map_file")
 
         # Restore player_configs (backward compatible with old saves)
-        game.player_configs = save_data.get('player_configs', [])
+        game.player_configs = save_data.get("player_configs", [])
 
         # Restore units
         game.units = []
-        for unit_data in save_data.get('units', []):
+        for unit_data in save_data.get("units", []):
             unit = Unit.from_dict(unit_data)
             game.units.append(unit)
 
         # Restore tile states
-        for tile_data in save_data.get('tiles', []):
-            x, y = tile_data['x'], tile_data['y']
+        for tile_data in save_data.get("tiles", []):
+            x, y = tile_data["x"], tile_data["y"]
             if 0 <= x < game.grid.width and 0 <= y < game.grid.height:
                 tile = game.grid.tiles[y][x]
-                if tile_data.get('player'):
-                    tile.player = tile_data['player']
-                if tile_data.get('health') is not None:
-                    tile.health = tile_data['health']
-                if tile_data.get('regenerating') is not None:
-                    tile.regenerating = tile_data['regenerating']
+                if tile_data.get("player"):
+                    tile.player = tile_data["player"]
+                if tile_data.get("health") is not None:
+                    tile.health = tile_data["health"]
+                if tile_data.get("regenerating") is not None:
+                    tile.regenerating = tile_data["regenerating"]
 
         # Restore action history (for continuing replay recording from a loaded save)
-        game.action_history = save_data.get('action_history', [])
+        game.action_history = save_data.get("action_history", [])
 
         game._invalidate_cache()
         return game

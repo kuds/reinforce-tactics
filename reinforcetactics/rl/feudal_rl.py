@@ -2,11 +2,13 @@
 Feudal Reinforcement Learning Architecture
 Manager-Worker hierarchy for strategy games
 """
-from typing import Tuple, Dict, Optional
-import torch
-from torch import nn
+
+from typing import Dict, Optional, Tuple
+
 import numpy as np
+import torch
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from torch import nn
 
 
 class SpatialFeatureExtractor(BaseFeaturesExtractor):
@@ -33,24 +35,21 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         )
 
         # Determine global_features size if present in observation space
-        if 'global_features' in observation_space.spaces:
-            self.n_global = observation_space['global_features'].shape[0]
+        if "global_features" in observation_space.spaces:
+            self.n_global = observation_space["global_features"].shape[0]
         else:
             self.n_global = 0
 
         # Compute CNN output shape by doing one forward pass
         with torch.no_grad():
             sample_obs = observation_space.sample()
-            grid = torch.as_tensor(sample_obs['grid']).float()
-            units = torch.as_tensor(sample_obs['units']).float()
+            grid = torch.as_tensor(sample_obs["grid"]).float()
+            units = torch.as_tensor(sample_obs["units"]).float()
             combined = torch.cat([grid, units], dim=-1).permute(2, 0, 1).unsqueeze(0)
             n_flatten = self.cnn(combined).flatten(1).shape[1]
 
         # Linear projection: CNN output + global features -> features_dim
-        self.linear = nn.Sequential(
-            nn.Linear(n_flatten + self.n_global, features_dim),
-            nn.ReLU()
-        )
+        self.linear = nn.Sequential(nn.Linear(n_flatten + self.n_global, features_dim), nn.ReLU())
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
@@ -62,8 +61,8 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         Returns:
             Feature tensor of shape (batch, features_dim)
         """
-        grid = observations['grid']  # (B, H, W, 3)
-        units = observations['units']  # (B, H, W, 3)
+        grid = observations["grid"]  # (B, H, W, 3)
+        units = observations["units"]  # (B, H, W, 3)
 
         # Combine and permute to (B, C, H, W)
         combined = torch.cat([grid, units], dim=-1)  # (B, H, W, 6)
@@ -74,8 +73,8 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         features = features.flatten(1)  # (B, 64*H*W)
 
         # Concatenate global features (gold, turn, unit counts, current player)
-        if self.n_global > 0 and 'global_features' in observations:
-            global_feat = observations['global_features']  # (B, 6)
+        if self.n_global > 0 and "global_features" in observations:
+            global_feat = observations["global_features"]  # (B, 6)
             features = torch.cat([features, global_feat], dim=1)  # (B, 64*H*W + 6)
 
         # Linear projection
@@ -95,7 +94,7 @@ class ManagerNetwork(nn.Module):
         feature_dim: int = 512,
         grid_width: int = 20,
         grid_height: int = 20,
-        num_goal_types: int = 4  # attack, defend, capture, expand
+        num_goal_types: int = 4,  # attack, defend, capture, expand
     ):
         super().__init__()
 
@@ -104,12 +103,7 @@ class ManagerNetwork(nn.Module):
         self.num_goal_types = num_goal_types
 
         # Process features
-        self.mlp = nn.Sequential(
-            nn.Linear(feature_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU()
-        )
+        self.mlp = nn.Sequential(nn.Linear(feature_dim, 512), nn.ReLU(), nn.Linear(512, 256), nn.ReLU())
 
         # Goal heads
         self.goal_x_head = nn.Linear(256, grid_width)
@@ -161,11 +155,7 @@ class ManagerNetwork(nn.Module):
         goal_type = goal_type_dist.sample()
 
         # Compute log probability
-        log_prob = (
-            goal_x_dist.log_prob(goal_x) +
-            goal_y_dist.log_prob(goal_y) +
-            goal_type_dist.log_prob(goal_type)
-        )
+        log_prob = goal_x_dist.log_prob(goal_x) + goal_y_dist.log_prob(goal_y) + goal_type_dist.log_prob(goal_type)
 
         goal = torch.stack([goal_x, goal_y, goal_type], dim=1)
 
@@ -192,17 +182,9 @@ class ManagerNetwork(nn.Module):
 
         goal_x, goal_y, goal_type = goal[:, 0].long(), goal[:, 1].long(), goal[:, 2].long()
 
-        log_prob = (
-            goal_x_dist.log_prob(goal_x) +
-            goal_y_dist.log_prob(goal_y) +
-            goal_type_dist.log_prob(goal_type)
-        )
+        log_prob = goal_x_dist.log_prob(goal_x) + goal_y_dist.log_prob(goal_y) + goal_type_dist.log_prob(goal_type)
 
-        entropy = (
-            goal_x_dist.entropy() +
-            goal_y_dist.entropy() +
-            goal_type_dist.entropy()
-        )
+        entropy = goal_x_dist.entropy() + goal_y_dist.entropy() + goal_type_dist.entropy()
 
         return log_prob, entropy, value
 
@@ -217,7 +199,7 @@ class WorkerNetwork(nn.Module):
         self,
         feature_dim: int = 512,
         goal_embedding_dim: int = 64,
-        action_space_dims: list = [10, 8, 20, 20, 20, 20]  # 10 action types, 8 unit types
+        action_space_dims: list = [10, 8, 20, 20, 20, 20],  # 10 action types, 8 unit types
     ):
         super().__init__()
 
@@ -228,22 +210,15 @@ class WorkerNetwork(nn.Module):
             nn.Linear(3, goal_embedding_dim),  # goal is (x, y, type)
             nn.ReLU(),
             nn.Linear(goal_embedding_dim, goal_embedding_dim),
-            nn.ReLU()
+            nn.ReLU(),
         )
 
         # Combined processing
         combined_dim = feature_dim + goal_embedding_dim
-        self.mlp = nn.Sequential(
-            nn.Linear(combined_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU()
-        )
+        self.mlp = nn.Sequential(nn.Linear(combined_dim, 512), nn.ReLU(), nn.Linear(512, 256), nn.ReLU())
 
         # Action heads (one for each dimension)
-        self.action_heads = nn.ModuleList([
-            nn.Linear(256, dim) for dim in action_space_dims
-        ])
+        self.action_heads = nn.ModuleList([nn.Linear(256, dim) for dim in action_space_dims])
 
         # Value head
         self.value_head = nn.Linear(256, 1)
@@ -301,10 +276,7 @@ class WorkerNetwork(nn.Module):
         return action, log_prob
 
     def evaluate_action(
-        self,
-        features: torch.Tensor,
-        goal: torch.Tensor,
-        action: torch.Tensor
+        self, features: torch.Tensor, goal: torch.Tensor, action: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Evaluate a given action.
@@ -331,8 +303,7 @@ class WorkerNetwork(nn.Module):
         return log_prob, entropy, value
 
 
-def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda,
-                  segment_lengths=None):
+def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda, segment_lengths=None):
     """
     Compute Generalized Advantage Estimation.
 
@@ -383,13 +354,13 @@ class FeudalRolloutBuffer:
         self.m_dones = []
         self.m_segment_lengths = []
 
-    def add_worker_step(self, obs, action, log_prob, value, goal,
-                        extrinsic_reward, intrinsic_reward, done,
-                        worker_reward_alpha):
+    def add_worker_step(
+        self, obs, action, log_prob, value, goal, extrinsic_reward, intrinsic_reward, done, worker_reward_alpha
+    ):
         """Add a single worker step to the buffer."""
-        self.w_obs_grid.append(obs['grid'])
-        self.w_obs_units.append(obs['units'])
-        self.w_obs_global.append(obs['global_features'])
+        self.w_obs_grid.append(obs["grid"])
+        self.w_obs_units.append(obs["units"])
+        self.w_obs_global.append(obs["global_features"])
         self.w_actions.append(action)
         self.w_log_probs.append(log_prob)
         self.w_values.append(value)
@@ -399,9 +370,9 @@ class FeudalRolloutBuffer:
 
     def add_manager_step(self, obs, goal, log_prob, value):
         """Record a goal-setting event (reward/done filled later)."""
-        self.m_obs_grid.append(obs['grid'])
-        self.m_obs_units.append(obs['units'])
-        self.m_obs_global.append(obs['global_features'])
+        self.m_obs_grid.append(obs["grid"])
+        self.m_obs_units.append(obs["units"])
+        self.m_obs_global.append(obs["global_features"])
         self.m_goals.append(goal)
         self.m_log_probs.append(log_prob)
         self.m_values.append(value)
@@ -437,13 +408,16 @@ class FeudalRolloutBuffer:
     def compute_advantages(self, last_w_value, last_m_value, gamma, gae_lambda):
         """Compute GAE advantages for both worker and manager."""
         self.w_advantages, self.w_returns = _compute_gae(
-            self.w_rewards, self.w_values, self.w_dones,
-            last_w_value, gamma, gae_lambda
+            self.w_rewards, self.w_values, self.w_dones, last_w_value, gamma, gae_lambda
         )
         self.m_advantages, self.m_returns = _compute_gae(
-            self.m_rewards, self.m_values, self.m_dones,
-            last_m_value, gamma, gae_lambda,
-            segment_lengths=self.m_segment_lengths
+            self.m_rewards,
+            self.m_values,
+            self.m_dones,
+            last_m_value,
+            gamma,
+            gae_lambda,
+            segment_lengths=self.m_segment_lengths,
         )
 
 
@@ -458,31 +432,23 @@ class FeudalRLAgent:
         observation_space,
         grid_width: int = 20,
         grid_height: int = 20,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
         self.device = device
         self.grid_width = grid_width
         self.grid_height = grid_height
 
         # Feature extractor (shared)
-        self.feature_extractor = SpatialFeatureExtractor(
-            observation_space,
-            features_dim=512
-        ).to(device)
+        self.feature_extractor = SpatialFeatureExtractor(observation_space, features_dim=512).to(device)
 
         # Manager network
-        self.manager = ManagerNetwork(
-            feature_dim=512,
-            grid_width=grid_width,
-            grid_height=grid_height,
-            num_goal_types=4
-        ).to(device)
+        self.manager = ManagerNetwork(feature_dim=512, grid_width=grid_width, grid_height=grid_height, num_goal_types=4).to(
+            device
+        )
 
         # Worker network
         self.worker = WorkerNetwork(
-            feature_dim=512,
-            goal_embedding_dim=64,
-            action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height]
+            feature_dim=512, goal_embedding_dim=64, action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height]
         ).to(device)
 
         # Current goal (maintained across steps)
@@ -491,9 +457,7 @@ class FeudalRLAgent:
         self.manager_horizon = 10  # Update goal every N steps
 
     def select_action(
-        self,
-        observation: Dict[str, np.ndarray],
-        deterministic: bool = False
+        self, observation: Dict[str, np.ndarray], deterministic: bool = False
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Select action using manager-worker hierarchy.
@@ -506,7 +470,7 @@ class FeudalRLAgent:
         obs_tensor = {
             k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
             for k, v in observation.items()
-            if k in ['grid', 'units', 'global_features']
+            if k in ["grid", "units", "global_features"]
         }
 
         # Extract features
@@ -547,15 +511,15 @@ class FeudalRLAgent:
     # Training methods
     # ------------------------------------------------------------------
 
-    def setup_training(self, learning_rate: float = 3e-4,
-                       manager_lr_scale: float = 1.0,
-                       worker_lr_scale: float = 1.0):
+    def setup_training(self, learning_rate: float = 3e-4, manager_lr_scale: float = 1.0, worker_lr_scale: float = 1.0):
         """Initialize optimizer with per-component learning rates."""
-        self.optimizer = torch.optim.Adam([
-            {'params': self.feature_extractor.parameters(), 'lr': learning_rate},
-            {'params': self.manager.parameters(), 'lr': learning_rate * manager_lr_scale},
-            {'params': self.worker.parameters(), 'lr': learning_rate * worker_lr_scale},
-        ])
+        self.optimizer = torch.optim.Adam(
+            [
+                {"params": self.feature_extractor.parameters(), "lr": learning_rate},
+                {"params": self.manager.parameters(), "lr": learning_rate * manager_lr_scale},
+                {"params": self.worker.parameters(), "lr": learning_rate * worker_lr_scale},
+            ]
+        )
         self.feature_extractor.train()
         self.manager.train()
         self.worker.train()
@@ -566,19 +530,20 @@ class FeudalRLAgent:
         return {
             k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
             for k, v in obs.items()
-            if k in ['grid', 'units', 'global_features']
+            if k in ["grid", "units", "global_features"]
         }
 
     def _batch_obs_to_tensor(self, grid, units, global_feat):
         """Convert pre-stacked numpy arrays to tensor dict on device."""
         return {
-            'grid': torch.as_tensor(grid).float().to(self.device),
-            'units': torch.as_tensor(units).float().to(self.device),
-            'global_features': torch.as_tensor(global_feat).float().to(self.device),
+            "grid": torch.as_tensor(grid).float().to(self.device),
+            "units": torch.as_tensor(units).float().to(self.device),
+            "global_features": torch.as_tensor(global_feat).float().to(self.device),
         }
 
-    def collect_rollout(self, env, n_steps: int, gamma: float, gae_lambda: float,
-                        worker_reward_alpha: float = 0.5) -> FeudalRolloutBuffer:
+    def collect_rollout(
+        self, env, n_steps: int, gamma: float, gae_lambda: float, worker_reward_alpha: float = 0.5
+    ) -> FeudalRolloutBuffer:
         """
         Collect n_steps of experience using the feudal hierarchy.
 
@@ -608,30 +573,25 @@ class FeudalRLAgent:
                 features = self.feature_extractor(obs_tensor)
 
                 # Check if manager needs to set a new goal
-                need_new_goal = (self.current_goal is None
-                                 or self.goal_step_counter >= self.manager_horizon)
+                need_new_goal = self.current_goal is None or self.goal_step_counter >= self.manager_horizon
 
                 if need_new_goal:
                     # Close previous manager segment if one exists
                     if self.current_goal is not None and manager_step_count > 0:
-                        buf.end_manager_segment(manager_reward_accum,
-                                                done=False,
-                                                segment_length=manager_step_count)
+                        buf.end_manager_segment(manager_reward_accum, done=False, segment_length=manager_step_count)
                         manager_reward_accum = 0.0
                         manager_step_count = 0
 
                     # Sample new goal
                     goal, m_log_prob = self.manager.sample_goal(features)
                     _, _, m_value = self.manager.evaluate_goal(features, goal)
-                    buf.add_manager_step(obs, goal.cpu().numpy()[0],
-                                         m_log_prob.item(), m_value.item())
+                    buf.add_manager_step(obs, goal.cpu().numpy()[0], m_log_prob.item(), m_value.item())
                     self.current_goal = goal
                     self.goal_step_counter = 0
 
                 # Worker selects action conditioned on goal
                 action, w_log_prob = self.worker.sample_action(features, self.current_goal)
-                _, _, w_value = self.worker.evaluate_action(
-                    features, self.current_goal, action)
+                _, _, w_value = self.worker.evaluate_action(features, self.current_goal, action)
 
             # Step environment
             action_np = action.cpu().numpy()[0]
@@ -643,17 +603,16 @@ class FeudalRLAgent:
             int_reward = compute_intrinsic_reward(obs, goal_np, next_obs)
 
             # Store worker transition
-            buf.add_worker_step(obs, action_np, w_log_prob.item(), w_value.item(),
-                                goal_np, ext_reward, int_reward, done,
-                                worker_reward_alpha)
+            buf.add_worker_step(
+                obs, action_np, w_log_prob.item(), w_value.item(), goal_np, ext_reward, int_reward, done, worker_reward_alpha
+            )
 
             manager_reward_accum += ext_reward
             manager_step_count += 1
             self.goal_step_counter += 1
 
             if done:
-                buf.end_manager_segment(manager_reward_accum, done=True,
-                                        segment_length=manager_step_count)
+                buf.end_manager_segment(manager_reward_accum, done=True, segment_length=manager_step_count)
                 manager_reward_accum = 0.0
                 manager_step_count = 0
                 obs, _ = env.reset()
@@ -663,8 +622,7 @@ class FeudalRLAgent:
 
         # Close any pending manager segment
         if manager_step_count > 0:
-            buf.end_manager_segment(manager_reward_accum, done=False,
-                                    segment_length=manager_step_count)
+            buf.end_manager_segment(manager_reward_accum, done=False, segment_length=manager_step_count)
 
         # Bootstrap last values for GAE
         with torch.no_grad():
@@ -679,8 +637,7 @@ class FeudalRLAgent:
         self._last_obs = obs
 
         buf.finalize()
-        buf.compute_advantages(last_w_value.item(), last_m_value.item(),
-                               gamma, gae_lambda)
+        buf.compute_advantages(last_w_value.item(), last_m_value.item(), gamma, gae_lambda)
 
         self.feature_extractor.train()
         self.manager.train()
@@ -688,9 +645,16 @@ class FeudalRLAgent:
 
         return buf
 
-    def update(self, buf: FeudalRolloutBuffer, n_epochs: int, batch_size: int,
-               clip_range: float, ent_coef: float, vf_coef: float,
-               max_grad_norm: float) -> Dict[str, float]:
+    def update(
+        self,
+        buf: FeudalRolloutBuffer,
+        n_epochs: int,
+        batch_size: int,
+        clip_range: float,
+        ent_coef: float,
+        vf_coef: float,
+        max_grad_norm: float,
+    ) -> Dict[str, float]:
         """
         Run PPO update for both manager and worker.
 
@@ -698,9 +662,9 @@ class FeudalRLAgent:
         """
         import torch.nn.functional as F  # pylint: disable=import-outside-toplevel
 
-        all_params = (list(self.feature_extractor.parameters())
-                      + list(self.manager.parameters())
-                      + list(self.worker.parameters()))
+        all_params = (
+            list(self.feature_extractor.parameters()) + list(self.manager.parameters()) + list(self.worker.parameters())
+        )
 
         n_worker = len(buf.w_rewards)
         n_manager = len(buf.m_rewards)
@@ -730,9 +694,8 @@ class FeudalRLAgent:
             # --- Worker update ---
             w_indices = np.random.permutation(n_worker)
             for start in range(0, n_worker, w_batch_size):
-                idx = w_indices[start:start + w_batch_size]
-                b_obs = self._batch_obs_to_tensor(
-                    buf.w_obs_grid[idx], buf.w_obs_units[idx], buf.w_obs_global[idx])
+                idx = w_indices[start : start + w_batch_size]
+                b_obs = self._batch_obs_to_tensor(buf.w_obs_grid[idx], buf.w_obs_units[idx], buf.w_obs_global[idx])
                 b_actions = w_actions_t[idx]
                 b_old_lp = w_old_lp[idx]
                 b_adv = w_adv[idx]
@@ -740,8 +703,7 @@ class FeudalRLAgent:
                 b_goals = w_goals_t[idx]
 
                 features = self.feature_extractor(b_obs)
-                new_lp, entropy, values = self.worker.evaluate_action(
-                    features, b_goals, b_actions)
+                new_lp, entropy, values = self.worker.evaluate_action(features, b_goals, b_actions)
 
                 ratio = torch.exp(new_lp - b_old_lp)
                 surr1 = ratio * b_adv
@@ -757,24 +719,22 @@ class FeudalRLAgent:
                 torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
                 self.optimizer.step()
 
-            metrics['worker_policy_loss'] = policy_loss.item()
-            metrics['worker_value_loss'] = value_loss.item()
-            metrics['worker_entropy'] = -entropy_loss.item()
+            metrics["worker_policy_loss"] = policy_loss.item()
+            metrics["worker_value_loss"] = value_loss.item()
+            metrics["worker_entropy"] = -entropy_loss.item()
 
             # --- Manager update ---
             m_indices = np.random.permutation(n_manager)
             for start in range(0, n_manager, m_batch_size):
-                idx = m_indices[start:start + m_batch_size]
-                b_obs = self._batch_obs_to_tensor(
-                    buf.m_obs_grid[idx], buf.m_obs_units[idx], buf.m_obs_global[idx])
+                idx = m_indices[start : start + m_batch_size]
+                b_obs = self._batch_obs_to_tensor(buf.m_obs_grid[idx], buf.m_obs_units[idx], buf.m_obs_global[idx])
                 b_goals = m_goals_t[idx]
                 b_old_lp = m_old_lp[idx]
                 b_adv = m_adv[idx]
                 b_ret = m_ret[idx]
 
                 features = self.feature_extractor(b_obs)
-                new_lp, entropy, values = self.manager.evaluate_goal(
-                    features, b_goals)
+                new_lp, entropy, values = self.manager.evaluate_goal(features, b_goals)
 
                 ratio = torch.exp(new_lp - b_old_lp)
                 surr1 = ratio * b_adv
@@ -790,32 +750,35 @@ class FeudalRLAgent:
                 torch.nn.utils.clip_grad_norm_(all_params, max_grad_norm)
                 self.optimizer.step()
 
-            metrics['manager_policy_loss'] = policy_loss.item()
-            metrics['manager_value_loss'] = value_loss.item()
-            metrics['manager_entropy'] = -entropy_loss.item()
+            metrics["manager_policy_loss"] = policy_loss.item()
+            metrics["manager_value_loss"] = value_loss.item()
+            metrics["manager_entropy"] = -entropy_loss.item()
 
         return metrics
 
     def save_checkpoint(self, path):
         """Save all network weights and optimizer state."""
         from pathlib import Path as _Path  # pylint: disable=import-outside-toplevel
+
         _Path(path).parent.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            'feature_extractor': self.feature_extractor.state_dict(),
-            'manager': self.manager.state_dict(),
-            'worker': self.worker.state_dict(),
-            'optimizer': self.optimizer.state_dict()
-                       if hasattr(self, 'optimizer') else None,
-        }, path)
+        torch.save(
+            {
+                "feature_extractor": self.feature_extractor.state_dict(),
+                "manager": self.manager.state_dict(),
+                "worker": self.worker.state_dict(),
+                "optimizer": self.optimizer.state_dict() if hasattr(self, "optimizer") else None,
+            },
+            path,
+        )
 
     def load_checkpoint(self, path):
         """Load network weights and optionally optimizer state."""
         checkpoint = torch.load(path, map_location=self.device)
-        self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
-        self.manager.load_state_dict(checkpoint['manager'])
-        self.worker.load_state_dict(checkpoint['worker'])
-        if checkpoint.get('optimizer') and hasattr(self, 'optimizer'):
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.feature_extractor.load_state_dict(checkpoint["feature_extractor"])
+        self.manager.load_state_dict(checkpoint["manager"])
+        self.worker.load_state_dict(checkpoint["worker"])
+        if checkpoint.get("optimizer") and hasattr(self, "optimizer"):
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
 
     def evaluate(self, env, n_episodes: int = 10) -> Dict[str, float]:
         """
@@ -843,7 +806,7 @@ class FeudalRLAgent:
                 done = terminated or truncated
 
             rewards.append(ep_reward)
-            if info.get('winner') == 1:
+            if info.get("winner") == 1:
                 wins += 1
 
         self.feature_extractor.train()
@@ -852,17 +815,13 @@ class FeudalRLAgent:
 
         rewards_arr = np.array(rewards)
         return {
-            'mean_reward': float(rewards_arr.mean()),
-            'std_reward': float(rewards_arr.std()),
-            'win_rate': wins / max(n_episodes, 1),
+            "mean_reward": float(rewards_arr.mean()),
+            "std_reward": float(rewards_arr.std()),
+            "win_rate": wins / max(n_episodes, 1),
         }
 
 
-def compute_intrinsic_reward(
-    state: Dict[str, np.ndarray],
-    goal: np.ndarray,
-    next_state: Dict[str, np.ndarray]
-) -> float:
+def compute_intrinsic_reward(state: Dict[str, np.ndarray], goal: np.ndarray, next_state: Dict[str, np.ndarray]) -> float:
     """
     Compute intrinsic reward for worker based on goal achievement.
 
@@ -879,10 +838,10 @@ def compute_intrinsic_reward(
     # Goal types: 0=attack, 1=defend, 2=capture, 3=expand
 
     # Distance-based reward (encourage moving toward goal location)
-    units = next_state['units']  # (H, W, 3)
+    units = next_state["units"]  # (H, W, 3)
 
     # Find player's units (assuming player 1)
-    player_units = (units[:, :, 1] == 1)
+    player_units = units[:, :, 1] == 1
 
     if player_units.any():
         # Get positions of player units

@@ -11,6 +11,7 @@ Examples:
 
 Output files are named {stem}_{row}_{col}.png (0-indexed).
 """
+
 import argparse
 import os
 import sys
@@ -28,16 +29,14 @@ def split_image(input_path, output_dir, tile_size=32):
 
     if width % tile_size != 0:
         print(
-            f"Error: image width {width}px is not divisible by {tile_size}. "
-            f"Remainder: {width % tile_size}px",
+            f"Error: image width {width}px is not divisible by {tile_size}. Remainder: {width % tile_size}px",
             file=sys.stderr,
         )
         sys.exit(1)
 
     if height % tile_size != 0:
         print(
-            f"Error: image height {height}px is not divisible by {tile_size}. "
-            f"Remainder: {height % tile_size}px",
+            f"Error: image height {height}px is not divisible by {tile_size}. Remainder: {height % tile_size}px",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -63,17 +62,17 @@ def split_image(input_path, output_dir, tile_size=32):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Split a PNG image into a grid of 32x32 tiles."
-    )
+    parser = argparse.ArgumentParser(description="Split a PNG image into a grid of 32x32 tiles.")
     parser.add_argument("input", help="Path to input PNG file")
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         default=None,
         help="Output directory (default: {input_stem}_tiles/)",
     )
     parser.add_argument(
-        "--size", "-s",
+        "--size",
+        "-s",
         type=int,
         default=32,
         help="Tile size in pixels (default: 32)",

@@ -1,23 +1,32 @@
 """
 Replay player for watching recorded games
 """
+
 import time
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pygame
 
-from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
 from reinforcetactics.ui.icons import (
-    get_play_icon, get_pause_icon, get_arrow_left_icon, get_arrow_right_icon,
-    get_restart_icon, get_skip_back_icon, get_skip_forward_icon, get_x_icon
+    get_arrow_left_icon,
+    get_arrow_right_icon,
+    get_pause_icon,
+    get_play_icon,
+    get_restart_icon,
+    get_skip_back_icon,
+    get_skip_forward_icon,
+    get_x_icon,
 )
+from reinforcetactics.utils.fonts import get_font
 
 # Optional OpenCV import for video export
 try:
     import cv2
+
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
@@ -38,8 +47,8 @@ class ReplayPlayer:
             initial_map_data: Initial map data for creating game state
         """
         self.replay_data = replay_data
-        self.actions = replay_data.get('actions', [])
-        self.game_info = replay_data.get('game_info', {})
+        self.actions = replay_data.get("actions", [])
+        self.game_info = replay_data.get("game_info", {})
 
         # Pad the map for UI display (same as gameplay)
         padded_map, offset_x, offset_y = self._pad_map_for_replay(initial_map_data)
@@ -67,11 +76,12 @@ class ReplayPlayer:
 
         # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
-        self.game_state = GameState(padded_map,
-                                    num_players=self.game_info.get('num_players', 2))
+
+        self.game_state = GameState(padded_map, num_players=self.game_info.get("num_players", 2))
 
         # Create renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
+
         self.renderer = Renderer(self.game_state, replay_mode=True)
 
         # UI elements
@@ -111,9 +121,7 @@ class ReplayPlayer:
             pad_height = max(0, min_height - height)
 
             if pad_width > 0 or pad_height > 0:
-                padded = pd.DataFrame(
-                    np.full((min_height, min_width), 'o', dtype=object)
-                )
+                padded = pd.DataFrame(np.full((min_height, min_width), "o", dtype=object))
                 start_y = pad_height // 2
                 start_x = pad_width // 2
                 end_y = start_y + height
@@ -129,11 +137,8 @@ class ReplayPlayer:
         new_height = height + 2 * border_size
         new_width = width + 2 * border_size
 
-        bordered = pd.DataFrame(
-            np.full((new_height, new_width), 'o', dtype=object)
-        )
-        bordered.iloc[border_size:border_size + height,
-                      border_size:border_size + width] = df.values
+        bordered = pd.DataFrame(np.full((new_height, new_width), "o", dtype=object))
+        bordered.iloc[border_size : border_size + height, border_size : border_size + width] = df.values
 
         # Update offsets to include border
         offset_x += border_size
@@ -203,8 +208,7 @@ class ReplayPlayer:
         progress_start = x_pos + 90
         progress_end = screen_width - 80
         progress_width = max(progress_end - progress_start, 100)
-        self.progress_bar_rect = pygame.Rect(progress_start, self.control_y + 20,
-                                             progress_width, 20)
+        self.progress_bar_rect = pygame.Rect(progress_start, self.control_y + 20, progress_width, 20)
 
     def execute_action(self, action):
         """
@@ -216,32 +220,27 @@ class ReplayPlayer:
         Args:
             action: Action dictionary to execute
         """
-        action_type = action.get('type')
+        action_type = action.get("type")
 
         try:
-            if action_type == 'create_unit':
+            if action_type == "create_unit":
                 # Translate coordinates from original to padded
-                padded_x, padded_y = self._translate_coords(action['x'], action['y'])
-                self.game_state.create_unit(
-                    action['unit_type'],
-                    padded_x,
-                    padded_y,
-                    action['player']
-                )
+                padded_x, padded_y = self._translate_coords(action["x"], action["y"])
+                self.game_state.create_unit(action["unit_type"], padded_x, padded_y, action["player"])
 
-            elif action_type == 'move':
+            elif action_type == "move":
                 # Translate coordinates from original to padded
-                from_x, from_y = self._translate_coords(action['from_x'], action['from_y'])
-                to_x, to_y = self._translate_coords(action['to_x'], action['to_y'])
+                from_x, from_y = self._translate_coords(action["from_x"], action["from_y"])
+                to_x, to_y = self._translate_coords(action["to_x"], action["to_y"])
                 # Find the unit at the translated position
                 unit = self.game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == action['player']:
+                if unit and unit.player == action["player"]:
                     self.game_state.move_unit(unit, to_x, to_y)
 
-            elif action_type == 'attack':
+            elif action_type == "attack":
                 # Translate coordinates from original to padded
-                orig_attacker_pos = action['attacker_pos']
-                orig_target_pos = action['target_pos']
+                orig_attacker_pos = action["attacker_pos"]
+                orig_target_pos = action["target_pos"]
                 attacker_pos = self._translate_coords(*orig_attacker_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 attacker = self.game_state.get_unit_at_position(*attacker_pos)
@@ -250,18 +249,18 @@ class ReplayPlayer:
                 if attacker and target:
                     self.game_state.attack(attacker, target)
 
-            elif action_type == 'seize':
+            elif action_type == "seize":
                 # Translate coordinates from original to padded
-                orig_position = action['position']
+                orig_position = action["position"]
                 position = self._translate_coords(*orig_position)
                 unit = self.game_state.get_unit_at_position(*position)
                 if unit:
                     self.game_state.seize(unit)
 
-            elif action_type == 'paralyze':
+            elif action_type == "paralyze":
                 # Translate coordinates from original to padded
-                orig_paralyzer_pos = action['paralyzer_pos']
-                orig_target_pos = action['target_pos']
+                orig_paralyzer_pos = action["paralyzer_pos"]
+                orig_target_pos = action["target_pos"]
                 paralyzer_pos = self._translate_coords(*orig_paralyzer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 paralyzer = self.game_state.get_unit_at_position(*paralyzer_pos)
@@ -269,10 +268,10 @@ class ReplayPlayer:
                 if paralyzer and target:
                     self.game_state.paralyze(paralyzer, target)
 
-            elif action_type == 'heal':
+            elif action_type == "heal":
                 # Translate coordinates from original to padded
-                orig_healer_pos = action['healer_pos']
-                orig_target_pos = action['target_pos']
+                orig_healer_pos = action["healer_pos"]
+                orig_target_pos = action["target_pos"]
                 healer_pos = self._translate_coords(*orig_healer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 healer = self.game_state.get_unit_at_position(*healer_pos)
@@ -280,10 +279,10 @@ class ReplayPlayer:
                 if healer and target:
                     self.game_state.heal(healer, target)
 
-            elif action_type == 'cure':
+            elif action_type == "cure":
                 # Translate coordinates from original to padded
-                orig_curer_pos = action['curer_pos']
-                orig_target_pos = action['target_pos']
+                orig_curer_pos = action["curer_pos"]
+                orig_target_pos = action["target_pos"]
                 curer_pos = self._translate_coords(*orig_curer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 curer = self.game_state.get_unit_at_position(*curer_pos)
@@ -291,10 +290,10 @@ class ReplayPlayer:
                 if curer and target:
                     self.game_state.cure(curer, target)
 
-            elif action_type == 'haste':
+            elif action_type == "haste":
                 # Translate coordinates from original to padded
-                orig_sorcerer_pos = action['sorcerer_pos']
-                orig_target_pos = action['target_pos']
+                orig_sorcerer_pos = action["sorcerer_pos"]
+                orig_target_pos = action["target_pos"]
                 sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
@@ -302,10 +301,10 @@ class ReplayPlayer:
                 if sorcerer and target:
                     self.game_state.haste(sorcerer, target)
 
-            elif action_type == 'defence_buff':
+            elif action_type == "defence_buff":
                 # Translate coordinates from original to padded
-                orig_sorcerer_pos = action['sorcerer_pos']
-                orig_target_pos = action['target_pos']
+                orig_sorcerer_pos = action["sorcerer_pos"]
+                orig_target_pos = action["target_pos"]
                 sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
@@ -313,10 +312,10 @@ class ReplayPlayer:
                 if sorcerer and target:
                     self.game_state.defence_buff(sorcerer, target)
 
-            elif action_type == 'attack_buff':
+            elif action_type == "attack_buff":
                 # Translate coordinates from original to padded
-                orig_sorcerer_pos = action['sorcerer_pos']
-                orig_target_pos = action['target_pos']
+                orig_sorcerer_pos = action["sorcerer_pos"]
+                orig_target_pos = action["target_pos"]
                 sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
                 target_pos = self._translate_coords(*orig_target_pos)
                 sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
@@ -324,10 +323,10 @@ class ReplayPlayer:
                 if sorcerer and target:
                     self.game_state.attack_buff(sorcerer, target)
 
-            elif action_type == 'resign':
-                self.game_state.resign(action['player'])
+            elif action_type == "resign":
+                self.game_state.resign(action["player"])
 
-            elif action_type == 'end_turn':
+            elif action_type == "end_turn":
                 # Don't record this action again
                 old_history = self.game_state.action_history
                 self.game_state.action_history = []
@@ -363,11 +362,12 @@ class ReplayPlayer:
 
         # Recreate game state
         from reinforcetactics.core.game_state import GameState
-        self.game_state = GameState(self.initial_map_data,
-                                    num_players=self.game_info.get('num_players', 2))
+
+        self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
 
         # Recreate renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
+
         self.renderer = Renderer(self.game_state, replay_mode=True)
         self.setup_ui()
 
@@ -416,11 +416,12 @@ class ReplayPlayer:
         """Replay from beginning to target action index."""
         # Reset game state
         from reinforcetactics.core.game_state import GameState
-        self.game_state = GameState(self.initial_map_data,
-                                    num_players=self.game_info.get('num_players', 2))
+
+        self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
 
         # Recreate renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
+
         self.renderer = Renderer(self.game_state, replay_mode=True)
         self.setup_ui()
 
@@ -473,37 +474,37 @@ class ReplayPlayer:
         """Get the turn number for an action index."""
         if action_index < 0 or action_index >= len(self.actions):
             return 0
-        return self.actions[action_index].get('turn', 0)
+        return self.actions[action_index].get("turn", 0)
 
     def _get_action_description(self, action):
         """Get a human-readable description of an action."""
-        action_type = action.get('type', 'unknown')
-        player = action.get('player', '?')
+        action_type = action.get("type", "unknown")
+        player = action.get("player", "?")
 
-        if action_type == 'create_unit':
-            unit_type = action.get('unit_type', 'unit')
+        if action_type == "create_unit":
+            unit_type = action.get("unit_type", "unit")
             return f"P{player} creates {unit_type}"
-        elif action_type == 'move':
+        elif action_type == "move":
             return f"P{player} moves unit"
-        elif action_type == 'attack':
+        elif action_type == "attack":
             return f"P{player} attacks"
-        elif action_type == 'paralyze':
+        elif action_type == "paralyze":
             return f"P{player} paralyzes target"
-        elif action_type == 'heal':
+        elif action_type == "heal":
             return f"P{player} heals unit"
-        elif action_type == 'cure':
+        elif action_type == "cure":
             return f"P{player} cures unit"
-        elif action_type == 'haste':
+        elif action_type == "haste":
             return f"P{player} hastes ally"
-        elif action_type == 'defence_buff':
+        elif action_type == "defence_buff":
             return f"P{player} defence buffs ally"
-        elif action_type == 'attack_buff':
+        elif action_type == "attack_buff":
             return f"P{player} attack buffs ally"
-        elif action_type == 'seize':
+        elif action_type == "seize":
             return f"P{player} seizes structure"
-        elif action_type == 'resign':
+        elif action_type == "resign":
             return f"P{player} resigns"
-        elif action_type == 'end_turn':
+        elif action_type == "end_turn":
             return f"P{player} ends turn"
         else:
             return f"P{player}: {action_type}"
@@ -543,7 +544,7 @@ class ReplayPlayer:
             height, width, _ = self.recorded_frames[0].shape
 
             # Create video writer
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             fps = 30  # 30 FPS for smooth playback
             writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
@@ -571,10 +572,10 @@ class ReplayPlayer:
         running = True
 
         # Show initial notification with game info
-        player_configs = self.game_info.get('player_configs', [])
+        player_configs = self.game_info.get("player_configs", [])
         if player_configs:
-            p1_name = player_configs[0].get('name', 'P1') if len(player_configs) > 0 else 'P1'
-            p2_name = player_configs[1].get('name', 'P2') if len(player_configs) > 1 else 'P2'
+            p1_name = player_configs[0].get("name", "P1") if len(player_configs) > 0 else "P1"
+            p2_name = player_configs[1].get("name", "P2") if len(player_configs) > 1 else "P2"
             self.show_notification(f"{p1_name} vs {p2_name}")
 
         while running:
@@ -667,9 +668,7 @@ class ReplayPlayer:
         # Draw control panel background
         panel_rect = pygame.Rect(0, self.control_y, screen_width, 60)
         pygame.draw.rect(screen, (40, 40, 50), panel_rect)
-        pygame.draw.line(screen, (200, 200, 220),
-                        (0, self.control_y),
-                        (screen_width, self.control_y), 2)
+        pygame.draw.line(screen, (200, 200, 220), (0, self.control_y), (screen_width, self.control_y), 2)
 
         # Draw buttons
         font = get_font(24)
@@ -719,8 +718,7 @@ class ReplayPlayer:
         # Save Video button
         save_video_text = "Rec" if not self.recording else "Save"
         save_video_color = (200, 50, 50) if self.recording else (70, 70, 150)
-        self._draw_button(self.save_video_button, save_video_text, mouse_pos,
-                         save_video_color, small_font)
+        self._draw_button(self.save_video_button, save_video_text, mouse_pos, save_video_color, small_font)
 
         # Progress bar (only if there's space)
         if self.progress_bar_rect.width > 50:
@@ -729,8 +727,9 @@ class ReplayPlayer:
                 progress = self.current_action_index / len(self.actions)
                 progress_width = int(self.progress_bar_rect.width * progress)
                 if progress_width > 0:
-                    progress_rect = pygame.Rect(self.progress_bar_rect.x, self.progress_bar_rect.y,
-                                                progress_width, self.progress_bar_rect.height)
+                    progress_rect = pygame.Rect(
+                        self.progress_bar_rect.x, self.progress_bar_rect.y, progress_width, self.progress_bar_rect.height
+                    )
                     pygame.draw.rect(screen, (100, 200, 100), progress_rect, border_radius=4)
             pygame.draw.rect(screen, (160, 160, 180), self.progress_bar_rect, 2, border_radius=4)
 
@@ -777,7 +776,7 @@ class ReplayPlayer:
         elif self.current_action_index == 0 and len(self.actions) > 0:
             current_turn = self._get_action_turn(0)
 
-        total_turns = self.game_info.get('total_turns', '?')
+        total_turns = self.game_info.get("total_turns", "?")
 
         # Layout: Turn/Action on left, Action description in center, Player info on right
         # All on a single row for compact display
@@ -796,16 +795,16 @@ class ReplayPlayer:
             screen.blit(desc_surface, desc_rect)
 
         # Player info on right
-        player_configs = self.game_info.get('player_configs', [])
-        winner = self.game_info.get('winner', None)
-        num_players = self.game_info.get('num_players', 2)
+        player_configs = self.game_info.get("player_configs", [])
+        winner = self.game_info.get("winner", None)
+        num_players = self.game_info.get("num_players", 2)
 
         if player_configs:
             # Build player name segments with their colors
             segments = []
             for p_idx in range(min(num_players, len(player_configs))):
                 p_num = p_idx + 1
-                p_name = player_configs[p_idx].get('name', f'P{p_num}')[:12]
+                p_name = player_configs[p_idx].get("name", f"P{p_num}")[:12]
                 if winner == p_num:
                     p_color = (100, 255, 100)
                 else:

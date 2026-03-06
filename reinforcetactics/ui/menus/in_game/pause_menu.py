@@ -1,4 +1,5 @@
 """In-game pause menu with sub-menu navigation."""
+
 from typing import Any
 
 import pygame
@@ -24,17 +25,17 @@ class PauseMenu(Menu):
             screen: Pygame surface to draw on (the game screen).
             game: The GameState instance (needed for saving).
         """
-        super().__init__(screen, get_language().get('pause.title', 'Paused'))
+        super().__init__(screen, get_language().get("pause.title", "Paused"))
         self.game = game
         self._setup_options()
 
     def _setup_options(self) -> None:
         lang = get_language()
-        self.add_option(lang.get('pause.resume', 'Resume'), lambda: 'resume')
-        self.add_option(lang.get('pause.save', 'Save Game'), lambda: 'save')
-        self.add_option(lang.get('pause.settings', 'Settings'), lambda: 'settings')
-        self.add_option(lang.get('pause.main_menu', 'Main Menu'), lambda: 'main_menu')
-        self.add_option(lang.get('pause.quit', 'Quit'), lambda: 'quit')
+        self.add_option(lang.get("pause.resume", "Resume"), lambda: "resume")
+        self.add_option(lang.get("pause.save", "Save Game"), lambda: "save")
+        self.add_option(lang.get("pause.settings", "Settings"), lambda: "settings")
+        self.add_option(lang.get("pause.main_menu", "Main Menu"), lambda: "main_menu")
+        self.add_option(lang.get("pause.quit", "Quit"), lambda: "quit")
 
     def run(self) -> str:
         """
@@ -59,30 +60,30 @@ class PauseMenu(Menu):
 
                 result = self.handle_input(event)
                 if result is not None:
-                    if result == 'resume':
-                        return 'resume'
+                    if result == "resume":
+                        return "resume"
 
-                    elif result == 'save':
+                    elif result == "save":
                         self._handle_save_option()
                         # Stay in pause menu after saving
                         self._populate_option_rects()
 
-                    elif result == 'settings':
+                    elif result == "settings":
                         self._handle_settings_option()
                         # Stay in pause menu after settings
                         self._populate_option_rects()
 
-                    elif result == 'main_menu':
+                    elif result == "main_menu":
                         confirmed = self._handle_main_menu_option()
                         if confirmed:
-                            return 'main_menu'
+                            return "main_menu"
                         # User cancelled -> stay in pause menu
                         self.running = True
                         self._populate_option_rects()
 
-                    elif result == 'quit':
+                    elif result == "quit":
                         quit_result = self._handle_quit_option()
-                        if quit_result in ('save_quit', 'quit'):
+                        if quit_result in ("save_quit", "quit"):
                             return quit_result
                         # 'cancel' -> stay in pause menu
                         self.running = True
@@ -92,7 +93,7 @@ class PauseMenu(Menu):
             clock.tick(30)
 
         # Loop exited via ESC (base class sets self.running = False)
-        return 'resume'
+        return "resume"
 
     def _handle_save_option(self) -> None:
         """Open the SaveGameMenu as a sub-menu."""
@@ -125,11 +126,10 @@ class PauseMenu(Menu):
         lang = get_language()
         dialog = ConfirmationDialog(
             self.screen,
-            lang.get('pause.main_menu_confirm_title', 'Return to Main Menu'),
-            lang.get('pause.main_menu_confirm_msg',
-                      'Unsaved progress will be lost. Continue?'),
-            confirm_text=lang.get('common.confirm', 'Confirm'),
-            cancel_text=lang.get('common.cancel', 'Cancel')
+            lang.get("pause.main_menu_confirm_title", "Return to Main Menu"),
+            lang.get("pause.main_menu_confirm_msg", "Unsaved progress will be lost. Continue?"),
+            confirm_text=lang.get("common.confirm", "Confirm"),
+            cancel_text=lang.get("common.cancel", "Cancel"),
         )
         confirmed = dialog.run()
         pygame.event.clear()

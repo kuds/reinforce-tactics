@@ -61,12 +61,7 @@ class OpponentPool:
         selection_strategy: How to select opponents ('uniform', 'recent', 'prioritized')
     """
 
-    def __init__(
-        self,
-        max_size: int = 10,
-        selection_strategy: str = 'uniform',
-        save_dir: Optional[str] = None
-    ):
+    def __init__(self, max_size: int = 10, selection_strategy: str = "uniform", save_dir: Optional[str] = None):
         """
         Initialize the opponent pool.
 
@@ -86,13 +81,7 @@ class OpponentPool:
         if self.save_dir:
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
-    def add_model(
-        self,
-        model: Any,
-        timestep: int = 0,
-        win_rate: float = 0.5,
-        save_to_disk: bool = True
-    ) -> None:
+    def add_model(self, model: Any, timestep: int = 0, win_rate: float = 0.5, save_to_disk: bool = True) -> None:
         """
         Add a model to the pool.
 
@@ -105,11 +94,7 @@ class OpponentPool:
         # Deep copy the model's policy parameters
         model_copy = self._copy_model_params(model)
 
-        metadata = {
-            'timestep': timestep,
-            'win_rate': win_rate,
-            'index': len(self.models)
-        }
+        metadata = {"timestep": timestep, "win_rate": win_rate, "index": len(self.models)}
 
         self.models.append(model_copy)
         self.metadata.append(metadata)
@@ -139,10 +124,8 @@ class OpponentPool:
         """Load parameters into a model's policy."""
         try:
             import torch
-            state_dict = {
-                name: torch.tensor(param)
-                for name, param in params.items()
-            }
+
+            state_dict = {name: torch.tensor(param) for name, param in params.items()}
             model.policy.load_state_dict(state_dict)
         except Exception as exc:
             logger.warning("Could not load model params: %s", exc)
@@ -154,18 +137,18 @@ class OpponentPool:
             self._selection_weights = []
             return
 
-        if self.selection_strategy == 'uniform':
+        if self.selection_strategy == "uniform":
             self._selection_weights = [1.0 / num_models] * num_models
 
-        elif self.selection_strategy == 'recent':
+        elif self.selection_strategy == "recent":
             # Exponentially favor more recent models
-            weights = [2.0 ** i for i in range(num_models)]
+            weights = [2.0**i for i in range(num_models)]
             total = sum(weights)
             self._selection_weights = [w / total for w in weights]
 
-        elif self.selection_strategy == 'prioritized':
+        elif self.selection_strategy == "prioritized":
             # Favor models with higher win rates
-            win_rates = [m.get('win_rate', 0.5) for m in self.metadata]
+            win_rates = [m.get("win_rate", 0.5) for m in self.metadata]
             # Add small epsilon to avoid zero weights
             weights = [max(0.1, wr) for wr in win_rates]
             total = sum(weights)
@@ -181,11 +164,7 @@ class OpponentPool:
         if not self.models:
             return None
 
-        idx = random.choices(
-            range(len(self.models)),
-            weights=self._selection_weights,
-            k=1
-        )[0]
+        idx = random.choices(range(len(self.models)), weights=self._selection_weights, k=1)[0]
 
         return self.models[idx]
 
@@ -194,18 +173,14 @@ class OpponentPool:
         if not self.models:
             return None
 
-        idx = random.choices(
-            range(len(self.models)),
-            weights=self._selection_weights,
-            k=1
-        )[0]
+        idx = random.choices(range(len(self.models)), weights=self._selection_weights, k=1)[0]
 
         return self.models[idx], self.metadata[idx]
 
     def update_win_rate(self, model_idx: int, new_win_rate: float) -> None:
         """Update a model's win rate in the pool."""
         if 0 <= model_idx < len(self.metadata):
-            self.metadata[model_idx]['win_rate'] = new_win_rate
+            self.metadata[model_idx]["win_rate"] = new_win_rate
             self._update_selection_weights()
 
     def load_from_disk(self, model_class: Any) -> int:
@@ -226,13 +201,9 @@ class OpponentPool:
             try:
                 model = model_class.load(str(path))
                 params = self._copy_model_params(model)
-                timestep = int(path.stem.split('_')[1])
+                timestep = int(path.stem.split("_")[1])
                 self.models.append(params)
-                self.metadata.append({
-                    'timestep': timestep,
-                    'win_rate': 0.5,
-                    'index': len(self.models) - 1
-                })
+                self.metadata.append({"timestep": timestep, "win_rate": 0.5, "index": len(self.models) - 1})
                 loaded += 1
             except Exception as exc:
                 logger.warning("Failed to load opponent %s: %s", path, exc)
@@ -276,7 +247,7 @@ class SelfPlayEnv(gym.Wrapper):
         opponent_model: Optional[Any] = None,
         opponent_pool: Optional[OpponentPool] = None,
         swap_players: bool = True,
-        opponent_deterministic: bool = False
+        opponent_deterministic: bool = False,
     ):
         """
         Initialize the self-play environment.
@@ -299,12 +270,7 @@ class SelfPlayEnv(gym.Wrapper):
         self._opponent_params: Optional[Dict] = None
 
         # Statistics
-        self.stats = {
-            'agent_wins': 0,
-            'opponent_wins': 0,
-            'draws': 0,
-            'total_games': 0
-        }
+        self.stats = {"agent_wins": 0, "opponent_wins": 0, "draws": 0, "total_games": 0}
 
     def set_opponent_model(self, model: Any) -> None:
         """Set or update the opponent model."""
@@ -352,32 +318,24 @@ class SelfPlayEnv(gym.Wrapper):
             original_params = None
             if self._opponent_params:
                 import torch
+
                 original_params = {
-                    name: param.cpu().numpy().copy()
-                    for name, param in self.opponent_model.policy.state_dict().items()
+                    name: param.cpu().numpy().copy() for name, param in self.opponent_model.policy.state_dict().items()
                 }
                 # Load opponent params
-                state_dict = {
-                    name: torch.tensor(param)
-                    for name, param in self._opponent_params.items()
-                }
+                state_dict = {name: torch.tensor(param) for name, param in self._opponent_params.items()}
                 self.opponent_model.policy.load_state_dict(state_dict)
 
             try:
                 # Get action from model
-                action, _ = self.opponent_model.predict(
-                    obs,
-                    deterministic=self.opponent_deterministic
-                )
+                action, _ = self.opponent_model.predict(obs, deterministic=self.opponent_deterministic)
                 return action
             finally:
                 # Always restore original params if we swapped
                 if original_params:
                     import torch
-                    state_dict = {
-                        name: torch.tensor(param)
-                        for name, param in original_params.items()
-                    }
+
+                    state_dict = {name: torch.tensor(param) for name, param in original_params.items()}
                     self.opponent_model.policy.load_state_dict(state_dict)
 
         except Exception as exc:
@@ -412,27 +370,25 @@ class SelfPlayEnv(gym.Wrapper):
         flipped = {}
 
         # Grid: swap player ownership (channel 1)
-        if 'grid' in obs:
-            grid = obs['grid'].copy()
+        if "grid" in obs:
+            grid = obs["grid"].copy()
             # Ownership channel: 1 -> 2, 2 -> 1
             ownership = grid[:, :, 1]
-            new_ownership = np.where(ownership == 1, 2,
-                                     np.where(ownership == 2, 1, ownership))
+            new_ownership = np.where(ownership == 1, 2, np.where(ownership == 2, 1, ownership))
             grid[:, :, 1] = new_ownership
-            flipped['grid'] = grid
+            flipped["grid"] = grid
 
         # Units: swap ownership (channel 1)
-        if 'units' in obs:
-            units = obs['units'].copy()
+        if "units" in obs:
+            units = obs["units"].copy()
             ownership = units[:, :, 1]
-            new_ownership = np.where(ownership == 1, 2,
-                                     np.where(ownership == 2, 1, ownership))
+            new_ownership = np.where(ownership == 1, 2, np.where(ownership == 2, 1, ownership))
             units[:, :, 1] = new_ownership
-            flipped['units'] = units
+            flipped["units"] = units
 
         # Global features: swap player-specific features
-        if 'global_features' in obs:
-            global_feats = obs['global_features'].copy()
+        if "global_features" in obs:
+            global_feats = obs["global_features"].copy()
             # [gold_p1, gold_p2, turn, units_p1, units_p2, current_player]
             # Swap gold
             global_feats[0], global_feats[1] = global_feats[1], global_feats[0]
@@ -440,12 +396,12 @@ class SelfPlayEnv(gym.Wrapper):
             global_feats[3], global_feats[4] = global_feats[4], global_feats[3]
             # Flip current player
             global_feats[5] = 3 - global_feats[5]  # 1 -> 2, 2 -> 1
-            flipped['global_features'] = global_feats
+            flipped["global_features"] = global_feats
 
         # Action mask: recalculate from the game state for the current player.
         # The mask from _get_obs() may be for the agent, not the opponent.
-        if 'action_mask' in obs:
-            flipped['action_mask'] = self.env._get_action_mask()
+        if "action_mask" in obs:
+            flipped["action_mask"] = self.env._get_action_mask()
 
         return flipped
 
@@ -460,10 +416,7 @@ class SelfPlayEnv(gym.Wrapper):
         consecutive_invalid = 0
         max_consecutive_invalid = 5
 
-        while (game_state.current_player == opponent_player and
-               not game_state.game_over and
-               actions_taken < max_actions):
-
+        while game_state.current_player == opponent_player and not game_state.game_over and actions_taken < max_actions:
             # Get observation from opponent's perspective
             obs = self._get_obs_for_player(opponent_player)
 
@@ -514,7 +467,7 @@ class SelfPlayEnv(gym.Wrapper):
         from_x, from_y = int(action[2]), int(action[3])
         to_x, to_y = int(action[4]), int(action[5])
 
-        unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        unit_types = ["W", "M", "C", "A", "K", "R", "S", "B"]
         unit_type = unit_types[unit_type_idx % 8]
 
         try:
@@ -546,7 +499,7 @@ class SelfPlayEnv(gym.Wrapper):
             elif action_type == 4:  # Heal/Cure
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'C' and unit.player == opp:
+                if unit and target and unit.type == "C" and unit.player == opp:
                     if target.is_paralyzed():
                         return game_state.cure(unit, target)
                     return game_state.heal(unit, target) > 0
@@ -558,28 +511,28 @@ class SelfPlayEnv(gym.Wrapper):
             elif action_type == 6:  # Paralyze
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'M' and unit.player == opp:
+                if unit and target and unit.type == "M" and unit.player == opp:
                     return game_state.paralyze(unit, target)
                 return False
 
             elif action_type == 7:  # Haste
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == opp:
+                if unit and target and unit.type == "S" and unit.player == opp:
                     return game_state.haste(unit, target)
                 return False
 
             elif action_type == 8:  # Defence buff
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == opp:
+                if unit and target and unit.type == "S" and unit.player == opp:
                     return game_state.defence_buff(unit, target)
                 return False
 
             elif action_type == 9:  # Attack buff
                 unit = game_state.get_unit_at_position(from_x, from_y)
                 target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == 'S' and unit.player == opp:
+                if unit and target and unit.type == "S" and unit.player == opp:
                     return game_state.attack_buff(unit, target)
                 return False
 
@@ -615,24 +568,20 @@ class SelfPlayEnv(gym.Wrapper):
             if terminated:
                 winner = self.env.game_state.winner
                 if winner == self.agent_player:
-                    reward += self.env.reward_config['win']
-                    self.stats['agent_wins'] += 1
+                    reward += self.env.reward_config["win"]
+                    self.stats["agent_wins"] += 1
                 elif winner is not None:
-                    reward += self.env.reward_config['loss']
-                    self.stats['opponent_wins'] += 1
+                    reward += self.env.reward_config["loss"]
+                    self.stats["opponent_wins"] += 1
                 else:
-                    self.stats['draws'] += 1
-                self.stats['total_games'] += 1
+                    self.stats["draws"] += 1
+                self.stats["total_games"] += 1
 
-        info['self_play_stats'] = self.stats.copy()
+        info["self_play_stats"] = self.stats.copy()
 
         return obs, reward, terminated, truncated, info
 
-    def reset(
-        self,
-        seed: Optional[int] = None,
-        options: Optional[Dict] = None
-    ) -> Tuple[Dict, Dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
         """
         Reset the environment.
 
@@ -660,16 +609,16 @@ class SelfPlayEnv(gym.Wrapper):
     def action_masks(self) -> Tuple[np.ndarray, ...]:
         """Get action masks for agent."""
         # Check if wrapped env has get_action_masks_tuple (ActionMaskedEnv)
-        if hasattr(self.env, 'get_action_masks_tuple'):
+        if hasattr(self.env, "get_action_masks_tuple"):
             return self.env.get_action_masks_tuple()
         return self.env.action_masks()
 
     def get_win_rate(self) -> float:
         """Get agent's win rate against opponents."""
-        total = self.stats['total_games']
+        total = self.stats["total_games"]
         if total == 0:
             return 0.5
-        return self.stats['agent_wins'] / total
+        return self.stats["agent_wins"] / total
 
 
 def _make_callback_class():
@@ -706,7 +655,7 @@ def _make_callback_class():
             update_freq: int = 10000,
             add_to_pool_freq: int = 50000,
             min_win_rate_for_pool: float = 0.55,
-            verbose: int = 1
+            verbose: int = 1,
         ):
             """
             Initialize the callback.
@@ -737,15 +686,15 @@ def _make_callback_class():
             envs = []
 
             # Handle vectorized environments
-            if hasattr(self.env, 'envs'):
+            if hasattr(self.env, "envs"):
                 for env in self.env.envs:
                     if isinstance(env, SelfPlayEnv):
                         envs.append(env)
-                    elif hasattr(env, 'env') and isinstance(env.env, SelfPlayEnv):
+                    elif hasattr(env, "env") and isinstance(env.env, SelfPlayEnv):
                         envs.append(env.env)
             elif isinstance(self.env, SelfPlayEnv):
                 envs.append(self.env)
-            elif hasattr(self.env, 'env') and isinstance(self.env.env, SelfPlayEnv):
+            elif hasattr(self.env, "env") and isinstance(self.env.env, SelfPlayEnv):
                 envs.append(self.env.env)
 
             return envs
@@ -774,10 +723,7 @@ def _make_callback_class():
             if self.verbose >= 1:
                 win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
                 avg_win_rate = np.mean(win_rates) if win_rates else 0.5
-                logger.info(
-                    "Step %d: Updated opponents. Avg win rate: %.2f%%",
-                    self.n_calls, avg_win_rate * 100
-                )
+                logger.info("Step %d: Updated opponents. Avg win rate: %.2f%%", self.n_calls, avg_win_rate * 100)
 
         def _add_to_pool(self) -> None:
             """Add current model to opponent pool if win rate is good enough."""
@@ -792,15 +738,13 @@ def _make_callback_class():
             if avg_win_rate >= self.min_win_rate_for_pool:
                 for env in envs:
                     if env.opponent_pool is not None:
-                        env.opponent_pool.add_model(
-                            self.model,
-                            timestep=self.n_calls,
-                            win_rate=avg_win_rate
-                        )
+                        env.opponent_pool.add_model(self.model, timestep=self.n_calls, win_rate=avg_win_rate)
                         if self.verbose >= 1:
                             logger.info(
                                 "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
-                                self.n_calls, avg_win_rate * 100, env.opponent_pool.size
+                                self.n_calls,
+                                avg_win_rate * 100,
+                                env.opponent_pool.size,
                             )
                         break  # Only add once
 
@@ -816,7 +760,7 @@ def make_self_play_env(
     reward_config: Optional[Dict[str, float]] = None,
     opponent_pool: Optional[OpponentPool] = None,
     swap_players: bool = True,
-    enabled_units: Optional[List[str]] = None
+    enabled_units: Optional[List[str]] = None,
 ) -> SelfPlayEnv:
     """
     Create a single self-play environment.
@@ -850,18 +794,14 @@ def make_self_play_env(
         render_mode=None,
         max_steps=max_steps,
         reward_config=reward_config,
-        enabled_units=enabled_units
+        enabled_units=enabled_units,
     )
 
     # Wrap with action masking first
     masked_env = ActionMaskedEnv(base_env)
 
     # Then wrap with self-play
-    self_play_env = SelfPlayEnv(
-        masked_env,
-        opponent_pool=opponent_pool,
-        swap_players=swap_players
-    )
+    self_play_env = SelfPlayEnv(masked_env, opponent_pool=opponent_pool, swap_players=swap_players)
 
     return self_play_env
 
@@ -874,7 +814,7 @@ def _make_self_play_env_fn(
     reward_config: Optional[Dict[str, float]],
     opponent_pool: Optional[OpponentPool],
     swap_players: bool,
-    enabled_units: Optional[List[str]]
+    enabled_units: Optional[List[str]],
 ) -> Callable[[], SelfPlayEnv]:
     """Create a function that creates a self-play environment."""
     from reinforcetactics.rl.masking import ActionMaskedEnv
@@ -886,16 +826,12 @@ def _make_self_play_env_fn(
             render_mode=None,
             max_steps=max_steps,
             reward_config=reward_config,
-            enabled_units=enabled_units
+            enabled_units=enabled_units,
         )
         base_env.reset(seed=seed + rank)
 
         masked_env = ActionMaskedEnv(base_env)
-        self_play_env = SelfPlayEnv(
-            masked_env,
-            opponent_pool=opponent_pool,
-            swap_players=swap_players
-        )
+        self_play_env = SelfPlayEnv(masked_env, opponent_pool=opponent_pool, swap_players=swap_players)
         return self_play_env
 
     return _init
@@ -910,7 +846,7 @@ def make_self_play_vec_env(
     use_subprocess: bool = True,
     opponent_pool: Optional[OpponentPool] = None,
     swap_players: bool = True,
-    enabled_units: Optional[List[str]] = None
+    enabled_units: Optional[List[str]] = None,
 ):
     """
     Create vectorized self-play environments for parallel training.
@@ -943,10 +879,7 @@ def make_self_play_vec_env(
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     env_fns = [
-        _make_self_play_env_fn(
-            i, seed, map_file, max_steps, reward_config,
-            opponent_pool, swap_players, enabled_units
-        )
+        _make_self_play_env_fn(i, seed, map_file, max_steps, reward_config, opponent_pool, swap_players, enabled_units)
         for i in range(n_envs)
     ]
 

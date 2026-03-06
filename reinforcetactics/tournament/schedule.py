@@ -8,7 +8,7 @@ and managing map configurations.
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from .bots import BotDescriptor
@@ -28,9 +28,7 @@ class MapConfig:
     max_turns: Optional[int] = None
 
     @classmethod
-    def from_config(
-        cls, config_entry: Any, default_max_turns: int = 500
-    ) -> "MapConfig":
+    def from_config(cls, config_entry: Any, default_max_turns: int = 500) -> "MapConfig":
         """
         Create MapConfig from config entry.
 
@@ -103,10 +101,7 @@ class ScheduledGame:
         return self.map_config.max_turns
 
     def __repr__(self) -> str:
-        return (
-            f"ScheduledGame({self.game_id}: "
-            f"{self.bot1.name} vs {self.bot2.name} on {self.map_name})"
-        )
+        return f"ScheduledGame({self.game_id}: {self.bot1.name} vs {self.bot2.name} on {self.map_name})"
 
 
 @dataclass
@@ -177,7 +172,7 @@ def generate_round_robin_schedule(
     if map_pool_mode == "all" and len(map_configs) > 1:
         # Play each map for all matchups before moving to next map
         for round_idx, map_config in enumerate(map_configs):
-            round_games = []
+            round_games: list[ScheduledGame] = []
             map_name = map_config.name
 
             for bot1, bot2 in matchups:
@@ -195,8 +190,8 @@ def generate_round_robin_schedule(
                     bot2_needed = games_per_side
 
                 # Track skipped games
-                skipped_games += (games_per_side - bot1_needed)
-                skipped_games += (games_per_side - bot2_needed)
+                skipped_games += games_per_side - bot1_needed
+                skipped_games += games_per_side - bot2_needed
 
                 # Add games with bot1 as player 1
                 for _ in range(bot1_needed):
@@ -237,9 +232,7 @@ def generate_round_robin_schedule(
         for bot1, bot2 in matchups:
             # Games with bot1 as player 1
             for game_num in range(games_per_side):
-                map_config = _select_map(
-                    map_configs, map_pool_mode, map_idx + game_num
-                )
+                map_config = _select_map(map_configs, map_pool_mode, map_idx + game_num)
                 round_games.append(
                     ScheduledGame(
                         game_id=game_id,
@@ -256,9 +249,7 @@ def generate_round_robin_schedule(
 
             # Games with bot2 as player 1
             for game_num in range(games_per_side):
-                map_config = _select_map(
-                    map_configs, map_pool_mode, map_idx + game_num
-                )
+                map_config = _select_map(map_configs, map_pool_mode, map_idx + game_num)
                 round_games.append(
                     ScheduledGame(
                         game_id=game_id,
@@ -279,9 +270,7 @@ def generate_round_robin_schedule(
     return schedule_by_round, skipped_games
 
 
-def _select_map(
-    map_configs: List[MapConfig], mode: str, index: int
-) -> MapConfig:
+def _select_map(map_configs: List[MapConfig], mode: str, index: int) -> MapConfig:
     """Select a map based on mode and index."""
     if len(map_configs) == 1:
         return map_configs[0]

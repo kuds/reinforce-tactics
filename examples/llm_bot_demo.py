@@ -19,8 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from reinforcetactics.core.game_state import GameState  # pylint: disable=wrong-import-position
+from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, OpenAIBot  # pylint: disable=wrong-import-position
 from reinforcetactics.utils.file_io import FileIO  # pylint: disable=wrong-import-position
-from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot  # pylint: disable=wrong-import-position
 
 
 def main():
@@ -54,7 +54,7 @@ def main():
     # Load a map
     print("\nLoading map...")
     try:
-        map_data = FileIO.load_map('maps/1v1/simple.csv')
+        map_data = FileIO.load_map("maps/1v1/simple.csv")
         if map_data is None:
             print("Map not found, generating random map...")
             map_data = FileIO.generate_random_map(10, 10, num_players=2)

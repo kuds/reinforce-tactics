@@ -5,12 +5,18 @@ Handles loading sprite sheets and managing frame-by-frame animations
 including directional walking, smooth transitions between animation
 states during multi-step movement paths, and per-team palette swaps.
 """
+
 import os
 from collections import deque
+
 import pygame
+
 from reinforcetactics.constants import (
-    TILE_SIZE, UNIT_DATA, ANIMATION_CONFIG,
-    BASE_SPRITE_COLORS, TEAM_PALETTES,
+    ANIMATION_CONFIG,
+    BASE_SPRITE_COLORS,
+    TEAM_PALETTES,
+    TILE_SIZE,
+    UNIT_DATA,
 )
 
 
@@ -52,14 +58,14 @@ class SpriteAnimator:
         self.team_sheets = {}
 
         self.animation_timers = {}  # unit_id -> {current_time, current_frame}
-        self.unit_states = {}       # unit_id -> current animation state
+        self.unit_states = {}  # unit_id -> current animation state
 
         # Movement path queues for multi-step animation transitions
-        self.movement_queues = {}   # unit_id -> deque of state strings
+        self.movement_queues = {}  # unit_id -> deque of state strings
 
         # Frame dimensions (can be overridden per unit type)
-        self.frame_width = ANIMATION_CONFIG.get('frame_width', 32)
-        self.frame_height = ANIMATION_CONFIG.get('frame_height', 32)
+        self.frame_width = ANIMATION_CONFIG.get("frame_width", 32)
+        self.frame_height = ANIMATION_CONFIG.get("frame_height", 32)
 
         self._load_all_sprite_sheets()
 
@@ -73,7 +79,7 @@ class SpriteAnimator:
             return
 
         for unit_type, unit_data in UNIT_DATA.items():
-            animation_path = unit_data.get('animation_path', '')
+            animation_path = unit_data.get("animation_path", "")
             if animation_path:
                 self._load_sprite_sheet(unit_type, animation_path)
 
@@ -130,34 +136,29 @@ class SpriteAnimator:
         """
         frames = {}
 
-        unit_cfg = ANIMATION_CONFIG.get('units', {}).get(unit_type, {})
-        fw = unit_cfg.get('frame_width', self.frame_width)
-        fh = unit_cfg.get('frame_height', self.frame_height)
+        unit_cfg = ANIMATION_CONFIG.get("units", {}).get(unit_type, {})
+        fw = unit_cfg.get("frame_width", self.frame_width)
+        fh = unit_cfg.get("frame_height", self.frame_height)
 
         # Crop dimensions (defaults to full frame if not configured)
-        cw = unit_cfg.get('crop_width',
-                          ANIMATION_CONFIG.get('crop_width', fw))
-        ch = unit_cfg.get('crop_height',
-                          ANIMATION_CONFIG.get('crop_height', fh))
+        cw = unit_cfg.get("crop_width", ANIMATION_CONFIG.get("crop_width", fw))
+        ch = unit_cfg.get("crop_height", ANIMATION_CONFIG.get("crop_height", fh))
 
         sprite_size = TILE_SIZE - 4
 
-        frame_map = ANIMATION_CONFIG.get('frame_map', {})
+        frame_map = ANIMATION_CONFIG.get("frame_map", {})
 
         for state_name, coords in frame_map.items():
             state_frames = []
             for row, col in coords:
                 rect = pygame.Rect(col * fw, row * fh, fw, fh)
-                if (rect.right <= sheet_surface.get_width() and
-                        rect.bottom <= sheet_surface.get_height()):
+                if rect.right <= sheet_surface.get_width() and rect.bottom <= sheet_surface.get_height():
                     frame = sheet_surface.subsurface(rect).copy()
                     # Centre-crop to the target crop size
                     if cw < fw or ch < fh:
                         cx = (fw - cw) // 2
                         cy = (fh - ch) // 2
-                        frame = frame.subsurface(
-                            pygame.Rect(cx, cy, cw, ch)
-                        ).copy()
+                        frame = frame.subsurface(pygame.Rect(cx, cy, cw, ch)).copy()
                     frame = pygame.transform.scale(frame, (sprite_size, sprite_size))
                     state_frames.append(frame)
 
@@ -165,13 +166,10 @@ class SpriteAnimator:
                 frames[state_name] = state_frames
 
         # Generate mirrored states (e.g. move_right from move_left)
-        mirror_states = ANIMATION_CONFIG.get('mirror_states', {})
+        mirror_states = ANIMATION_CONFIG.get("mirror_states", {})
         for target_state, source_state in mirror_states.items():
             if source_state in frames and target_state not in frames:
-                frames[target_state] = [
-                    pygame.transform.flip(f, True, False)
-                    for f in frames[source_state]
-                ]
+                frames[target_state] = [pygame.transform.flip(f, True, False) for f in frames[source_state]]
 
         return frames
 
@@ -200,10 +198,7 @@ class SpriteAnimator:
 
             recoloured = {}
             for state, frames in base_frames.items():
-                recoloured[state] = [
-                    self._recolor_frame(f, BASE_SPRITE_COLORS, palette)
-                    for f in frames
-                ]
+                recoloured[state] = [self._recolor_frame(f, BASE_SPRITE_COLORS, palette) for f in frames]
             self.team_sheets[(unit_type, player)] = recoloured
 
     @staticmethod
@@ -258,7 +253,7 @@ class SpriteAnimator:
             return None
 
         # Prefer team-coloured frames, fall back to base
-        player = getattr(unit, 'player', None)
+        player = getattr(unit, "player", None)
         unit_frames = self.team_sheets.get((unit_type, player))
         if unit_frames is None:
             unit_frames = self.sprite_sheets.get(unit_type)
@@ -266,11 +261,11 @@ class SpriteAnimator:
             return None
 
         unit_id = id(unit)
-        state = self.unit_states.get(unit_id, 'idle')
+        state = self.unit_states.get(unit_id, "idle")
 
         # Fallback chain
         if state not in unit_frames:
-            state = 'idle'
+            state = "idle"
             if state not in unit_frames:
                 first_state = next(iter(unit_frames.keys()))
                 return unit_frames[first_state][0]
@@ -279,30 +274,30 @@ class SpriteAnimator:
         if not anim_frames:
             return None
 
-        state_config = ANIMATION_CONFIG.get('states', {}).get(state, {})
-        frame_duration = state_config.get('speed', 0.15)
+        state_config = ANIMATION_CONFIG.get("states", {}).get(state, {})
+        frame_duration = state_config.get("speed", 0.15)
 
         # Initialise timer
         if unit_id not in self.animation_timers:
             self.animation_timers[unit_id] = {
-                'current_time': 0.0,
-                'current_frame': 0,
+                "current_time": 0.0,
+                "current_frame": 0,
             }
 
         timer = self.animation_timers[unit_id]
 
         if delta_time is not None:
-            timer['current_time'] += delta_time
-            if timer['current_time'] >= frame_duration:
-                timer['current_time'] = 0.0
-                next_frame = (timer['current_frame'] + 1) % len(anim_frames)
-                timer['current_frame'] = next_frame
+            timer["current_time"] += delta_time
+            if timer["current_time"] >= frame_duration:
+                timer["current_time"] = 0.0
+                next_frame = (timer["current_frame"] + 1) % len(anim_frames)
+                timer["current_frame"] = next_frame
 
                 # If we looped back to 0, check movement queue
                 if next_frame == 0:
                     self._advance_movement_queue(unit)
 
-        return anim_frames[timer['current_frame']]
+        return anim_frames[timer["current_frame"]]
 
     # ------------------------------------------------------------------
     # State management
@@ -326,8 +321,8 @@ class SpriteAnimator:
             self.unit_states[unit_id] = state
             if unit_id in self.animation_timers:
                 self.animation_timers[unit_id] = {
-                    'current_time': 0.0,
-                    'current_frame': 0,
+                    "current_time": 0.0,
+                    "current_frame": 0,
                 }
 
     def update_unit_state_from_movement(self, unit, from_pos, to_pos):
@@ -346,7 +341,7 @@ class SpriteAnimator:
         """Set a unit to idle animation state and clear any movement queue."""
         unit_id = id(unit)
         self.movement_queues.pop(unit_id, None)
-        self.set_unit_state(unit, 'idle')
+        self.set_unit_state(unit, "idle")
 
     # ------------------------------------------------------------------
     # Movement path animation
@@ -396,7 +391,7 @@ class SpriteAnimator:
         if not queue:
             if unit_id in self.movement_queues:
                 del self.movement_queues[unit_id]
-                self.set_unit_state(unit, 'idle')
+                self.set_unit_state(unit, "idle")
             return
 
         next_state = queue.popleft()
@@ -455,7 +450,7 @@ class SpriteAnimator:
         dy = to_pos[1] - from_pos[1]
 
         if abs(dx) > abs(dy):
-            return 'move_right' if dx > 0 else 'move_left'
+            return "move_right" if dx > 0 else "move_left"
         elif dy != 0:
-            return 'move_down' if dy > 0 else 'move_up'
-        return 'idle'
+            return "move_down" if dy > 0 else "move_up"
+        return "idle"

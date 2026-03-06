@@ -21,15 +21,15 @@ def get_player_name(bot, bot_type, model_path=None):
         String name for the player
     """
     # For basic bots (SimpleBot, MediumBot, AdvancedBot), use the class name
-    if bot_type in ('SimpleBot', 'MediumBot', 'AdvancedBot'):
+    if bot_type in ("SimpleBot", "MediumBot", "AdvancedBot"):
         return bot_type
 
     # For LLM bots (OpenAIBot, ClaudeBot, GeminiBot), use the model name
-    if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
-        return getattr(bot, 'model', bot_type)
+    if bot_type in ("OpenAIBot", "ClaudeBot", "GeminiBot"):
+        return getattr(bot, "model", bot_type)
 
     # For ModelBot, use the base filename from model_path
-    if bot_type == 'ModelBot' and model_path:
+    if bot_type == "ModelBot" and model_path:
         return Path(model_path).stem
 
     # Fallback to bot_type
@@ -47,15 +47,15 @@ def get_player_type(bot_type):
         Player type string: 'bot', 'llm', or 'rl'
     """
     # LLM bots
-    if bot_type in ('OpenAIBot', 'ClaudeBot', 'GeminiBot'):
-        return 'llm'
+    if bot_type in ("OpenAIBot", "ClaudeBot", "GeminiBot"):
+        return "llm"
 
     # RL model bots
-    if bot_type == 'ModelBot':
-        return 'rl'
+    if bot_type == "ModelBot":
+        return "rl"
 
     # Standard bots (SimpleBot, MediumBot, AdvancedBot)
-    return 'bot'
+    return "bot"
 
 
 def create_bot(game, player_num, bot_type, settings, model_path=None):
@@ -76,26 +76,27 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         ValueError: If bot creation fails due to configuration issues
         ImportError: If required dependencies for bot type are missing
     """
-    from reinforcetactics.game.bot import SimpleBot, MediumBot, AdvancedBot
-    from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
+    from reinforcetactics.game.bot import AdvancedBot, MediumBot, SimpleBot
+    from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, OpenAIBot
 
-    if bot_type == 'SimpleBot':
+    if bot_type == "SimpleBot":
         return SimpleBot(game, player=player_num)
-    if bot_type == 'MediumBot':
+    if bot_type == "MediumBot":
         return MediumBot(game, player=player_num)
-    if bot_type == 'AdvancedBot':
+    if bot_type == "AdvancedBot":
         return AdvancedBot(game, player=player_num)
-    if bot_type == 'OpenAIBot':
-        api_key = settings.get_api_key('openai') or None
+    if bot_type == "OpenAIBot":
+        api_key = settings.get_api_key("openai") or None
         return OpenAIBot(game, player=player_num, api_key=api_key)
-    if bot_type == 'ClaudeBot':
-        api_key = settings.get_api_key('anthropic') or None
+    if bot_type == "ClaudeBot":
+        api_key = settings.get_api_key("anthropic") or None
         return ClaudeBot(game, player=player_num, api_key=api_key)
-    if bot_type == 'GeminiBot':
-        api_key = settings.get_api_key('google') or None
+    if bot_type == "GeminiBot":
+        api_key = settings.get_api_key("google") or None
         return GeminiBot(game, player=player_num, api_key=api_key)
-    if bot_type == 'ModelBot':
+    if bot_type == "ModelBot":
         from reinforcetactics.game.model_bot import ModelBot
+
         if not model_path:
             raise ValueError("model_path is required for ModelBot")
         return ModelBot(game, player=player_num, model_path=model_path)
@@ -133,38 +134,38 @@ def create_bots_from_config(game, player_configs, settings):
 
     for i, config in enumerate(player_configs):
         player_num = i + 1
-        if config['type'] == 'computer':
-            bot_type = config.get('bot_type', 'SimpleBot')
-            model_path = config.get('model_path', None)
+        if config["type"] == "computer":
+            bot_type = config.get("bot_type", "SimpleBot")
+            model_path = config.get("model_path", None)
             try:
                 bot = create_bot(game, player_num, bot_type, settings, model_path)
                 bots[player_num] = bot
-                config['player_name'] = get_player_name(bot, bot_type, model_path)
-                config['player_type'] = get_player_type(bot_type)
+                config["player_name"] = get_player_name(bot, bot_type, model_path)
+                config["player_type"] = get_player_type(bot_type)
 
                 # Add LLM-specific fields
-                if config['player_type'] == 'llm':
-                    config['temperature'] = getattr(bot, 'temperature', None)
-                    config['max_tokens'] = getattr(bot, 'max_tokens', None)
+                if config["player_type"] == "llm":
+                    config["temperature"] = getattr(bot, "temperature", None)
+                    config["max_tokens"] = getattr(bot, "max_tokens", None)
 
                 print(f"Bot created for Player {player_num} ({bot_type})")
             except ValueError as e:
                 print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
                 print("   Falling back to SimpleBot")
-                bot = create_bot(game, player_num, 'SimpleBot', settings)
+                bot = create_bot(game, player_num, "SimpleBot", settings)
                 bots[player_num] = bot
-                config['player_name'] = 'SimpleBot'
-                config['player_type'] = 'bot'
+                config["player_name"] = "SimpleBot"
+                config["player_type"] = "bot"
             except ImportError as e:
                 print(f"❌ Missing dependency for {bot_type}: {e}")
                 print("   Falling back to SimpleBot")
-                bot = create_bot(game, player_num, 'SimpleBot', settings)
+                bot = create_bot(game, player_num, "SimpleBot", settings)
                 bots[player_num] = bot
-                config['player_name'] = 'SimpleBot'
-                config['player_type'] = 'bot'
+                config["player_name"] = "SimpleBot"
+                config["player_type"] = "bot"
         else:
             # Human player
-            config['player_name'] = 'Human'
-            config['player_type'] = 'human'
+            config["player_name"] = "Human"
+            config["player_type"] = "human"
 
     return bots
