@@ -333,7 +333,7 @@ def _write_frames_to_video(frames: list, output_path: str, fps: int) -> str:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     height, width = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     for frame in frames:
