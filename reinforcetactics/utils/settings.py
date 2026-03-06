@@ -2,6 +2,7 @@
 Settings manager for game configuration
 """
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -51,16 +52,16 @@ class Settings:
             except Exception as e:
                 print(f"⚠️  Error loading settings: {e}")
                 print("Using default settings")
-                return self.DEFAULT_SETTINGS.copy()
+                return copy.deepcopy(self.DEFAULT_SETTINGS)
         else:
             print("No settings file found, creating defaults...")
-            settings = self.DEFAULT_SETTINGS.copy()
+            settings = copy.deepcopy(self.DEFAULT_SETTINGS)
             self.save(settings)
             return settings
 
     def _merge_with_defaults(self, loaded):
         """Merge loaded settings with defaults to ensure all keys exist."""
-        result = self.DEFAULT_SETTINGS.copy()
+        result = copy.deepcopy(self.DEFAULT_SETTINGS)
 
         for key, value in loaded.items():
             if key in result and isinstance(result[key], dict):
@@ -177,7 +178,7 @@ class Settings:
 
     def reset_to_defaults(self):
         """Reset all settings to defaults."""
-        self.settings = self.DEFAULT_SETTINGS.copy()
+        self.settings = copy.deepcopy(self.DEFAULT_SETTINGS)
         self.save()
         print("✅ Settings reset to defaults")
 

@@ -219,6 +219,10 @@ class AlphaZeroTrainer:
         self.grid_height = temp_gs.grid.height
         self.grid_width = temp_gs.grid.width
 
+        # Store architecture params for checkpoint saving
+        self.num_res_blocks = num_res_blocks
+        self.channels = channels
+
         # Create network
         self.network = AlphaZeroNet(
             grid_height=self.grid_height,
@@ -483,10 +487,12 @@ class AlphaZeroTrainer:
         Returns:
             Win rate of the current network (0.0 to 1.0).
         """
-        # Create opponent network with the best weights
+        # Create opponent network with the best weights (matching architecture)
         opponent_net = AlphaZeroNet(
             grid_height=self.grid_height,
             grid_width=self.grid_width,
+            num_res_blocks=self.num_res_blocks,
+            channels=self.channels,
         ).to(self.device)
         opponent_net.load_state_dict(best_state_dict)
         opponent_net.eval()
@@ -569,6 +575,8 @@ class AlphaZeroTrainer:
                     "grid_height": self.grid_height,
                     "grid_width": self.grid_width,
                     "num_simulations": self.num_simulations,
+                    "num_res_blocks": self.num_res_blocks,
+                    "channels": self.channels,
                 },
             },
             path,
