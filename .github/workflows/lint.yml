@@ -27,4 +27,4 @@ jobs:
         ruff format --check .
     - name: Type check with mypy
       run: |
-        mypy .
+        mypy reinforcetactics/

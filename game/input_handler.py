@@ -5,9 +5,10 @@ This module manages user input state and event handling for the game loop.
 """
 
 import pygame
-from reinforcetactics.constants import TILE_SIZE
-from reinforcetactics.ui.menus import UnitActionMenu, UnitPurchaseMenu, ConfirmationDialog
+
 from game.action_executor import handle_action_menu_result
+from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
 
 
 class InputHandler:
@@ -83,7 +84,7 @@ class InputHandler:
                 self.active_menu = None
                 return None
             else:
-                return 'pause'
+                return "pause"
 
         # Handle keyboard shortcuts for UnitActionMenu
         elif self.active_menu and isinstance(self.active_menu, UnitActionMenu):
@@ -94,8 +95,7 @@ class InputHandler:
                 selected_unit_ref = [self.selected_unit]
 
                 result = handle_action_menu_result(
-                    self.game, menu_result, active_menu_ref,
-                    target_selection_unit_ref, selected_unit_ref
+                    self.game, menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref
                 )
 
                 self.active_menu = active_menu_ref[0]
@@ -113,7 +113,7 @@ class InputHandler:
 
         elif event.key == pygame.K_s and not self.active_menu:
             # Save game
-            return 'save'
+            return "save"
 
         elif event.key == pygame.K_SPACE and not self.active_menu:
             # End turn
@@ -146,12 +146,12 @@ class InputHandler:
         if self.active_menu:
             # Ignore clicks for 200ms after menu opens
             if current_time - self.menu_opened_time < 200:
-                return 'continue'
+                return "continue"
 
             menu_result = self.active_menu.handle_click(mouse_pos)
             if menu_result:
                 return self._handle_menu_result(menu_result, current_time)
-            return 'continue'
+            return "continue"
 
         # Priority 2: Check if clicking on UI buttons
         if self.renderer.end_turn_button.collidepoint(mouse_pos):
@@ -159,7 +159,7 @@ class InputHandler:
             self.selected_unit = None
             self.game.end_turn()
             self._process_bot_turns()
-            return 'continue'
+            return "continue"
 
         if self.renderer.resign_button.collidepoint(mouse_pos):
             # Show confirmation dialog before resigning
@@ -168,12 +168,12 @@ class InputHandler:
                 "Resign Game",
                 f"Player {self.game.current_player}, are you sure you want to resign?",
                 confirm_text="Resign",
-                cancel_text="Cancel"
+                cancel_text="Cancel",
             )
             if dialog.run():
                 print(f"\nPlayer {self.game.current_player} resigned")
                 self.game.resign()
-            return 'continue'
+            return "continue"
 
         # Priority 3: Handle grid clicks
         return self._handle_grid_click(mouse_pos, current_time)
@@ -185,7 +185,7 @@ class InputHandler:
         Args:
             mouse_pos: Tuple of (x, y) mouse position
         """
-        if self.active_menu and hasattr(self.active_menu, 'handle_mouse_motion'):
+        if self.active_menu and hasattr(self.active_menu, "handle_mouse_motion"):
             self.active_menu.handle_mouse_motion(mouse_pos)
 
     def handle_right_click_press(self, mouse_pos):
@@ -238,9 +238,8 @@ class InputHandler:
 
             # Get all attackable positions (enemy unit positions)
             from reinforcetactics.game.mechanics import GameMechanics
-            attackable_enemies = GameMechanics.get_attackable_enemies(
-                clicked_unit, self.game.units, self.game.grid
-            )
+
+            attackable_enemies = GameMechanics.get_attackable_enemies(clicked_unit, self.game.units, self.game.grid)
 
             # Convert to positions list
             self.preview_positions = [(enemy.x, enemy.y) for enemy in attackable_enemies]
@@ -259,29 +258,28 @@ class InputHandler:
         grid_y = mouse_pos[1] // TILE_SIZE
 
         clicked_unit = self.game.get_unit_at_position(grid_x, grid_y)
-        if (clicked_unit and self.target_selection_action and
-            clicked_unit in self.target_selection_action['targets']):
+        if clicked_unit and self.target_selection_action and clicked_unit in self.target_selection_action["targets"]:
             # Execute the action on the clicked target
-            action_type = self.target_selection_action['type']
-            if action_type == 'attack':
+            action_type = self.target_selection_action["type"]
+            if action_type == "attack":
                 self.game.attack(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} attacked {clicked_unit.type}")
-            elif action_type == 'paralyze':
+            elif action_type == "paralyze":
                 self.game.paralyze(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} paralyzed {clicked_unit.type}")
-            elif action_type == 'heal':
+            elif action_type == "heal":
                 self.game.heal(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} healed {clicked_unit.type}")
-            elif action_type == 'cure':
+            elif action_type == "cure":
                 self.game.cure(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} cured {clicked_unit.type}")
-            elif action_type == 'haste':
+            elif action_type == "haste":
                 self.game.haste(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} hasted {clicked_unit.type}")
-            elif action_type == 'defence_buff':
+            elif action_type == "defence_buff":
                 self.game.defence_buff(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} granted defence buff to {clicked_unit.type}")
-            elif action_type == 'attack_buff':
+            elif action_type == "attack_buff":
                 self.game.attack_buff(self.target_selection_unit, clicked_unit)
                 print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
 
@@ -305,23 +303,21 @@ class InputHandler:
             self.target_selection_mode = False
             self.target_selection_action = None
             # Reopen the unit action menu
-            self.active_menu = UnitActionMenu(
-                self.renderer.screen, self.game, self.target_selection_unit
-            )
+            self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.target_selection_unit)
             self.menu_opened_time = current_time
             print("Target selection cancelled, returning to menu")
 
-        return 'continue'
+        return "continue"
 
     def _handle_menu_result(self, menu_result, current_time):
         """Handle menu interaction results."""
-        if menu_result['type'] == 'close':
+        if menu_result["type"] == "close":
             self.active_menu = None
-        elif menu_result['type'] == 'unit_created':
-            unit = menu_result['unit']
+        elif menu_result["type"] == "unit_created":
+            unit = menu_result["unit"]
             print(f"Created {unit.type} at ({unit.x}, {unit.y})")
             self.active_menu = None
-        elif menu_result['type'] in ['cancel', 'action_selected']:
+        elif menu_result["type"] in ["cancel", "action_selected"]:
             # Handle UnitActionMenu results
             if isinstance(self.active_menu, UnitActionMenu):
                 active_menu_ref = [self.active_menu]
@@ -329,8 +325,7 @@ class InputHandler:
                 selected_unit_ref = [self.selected_unit]
 
                 result = handle_action_menu_result(
-                    self.game, menu_result, active_menu_ref,
-                    target_selection_unit_ref, selected_unit_ref
+                    self.game, menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref
                 )
 
                 self.active_menu = active_menu_ref[0]
@@ -340,7 +335,7 @@ class InputHandler:
                 if result:
                     self.target_selection_mode, self.target_selection_action = result
 
-        return 'continue'
+        return "continue"
 
     def _handle_grid_click(self, mouse_pos, current_time):
         """Handle clicks on the game grid."""
@@ -359,9 +354,7 @@ class InputHandler:
             if self.selected_unit == clicked_unit:
                 # Open unit action menu if unit can perform actions
                 if not clicked_unit.is_paralyzed() and (clicked_unit.can_move or clicked_unit.can_attack):
-                    self.active_menu = UnitActionMenu(
-                        self.renderer.screen, self.game, clicked_unit
-                    )
+                    self.active_menu = UnitActionMenu(self.renderer.screen, self.game, clicked_unit)
                     self.target_selection_unit = clicked_unit
                     self.menu_opened_time = current_time
                     print(f"Opened unit action menu for {clicked_unit.type}")
@@ -373,34 +366,29 @@ class InputHandler:
                 # FOW: Capture visible enemies at the start of this unit's action
                 self.game.capture_visible_enemies_for_unit(clicked_unit)
                 print(f"Selected {clicked_unit.type} at ({grid_x}, {grid_y})")
-            return 'continue'
+            return "continue"
 
         # Priority 2: Building clicked for unit purchase
-        if (not clicked_unit and clicked_tile.player == self.game.current_player and
-            clicked_tile.type == 'b'):
-            self.active_menu = UnitPurchaseMenu(
-                self.renderer.screen, self.game, (grid_x, grid_y)
-            )
+        if not clicked_unit and clicked_tile.player == self.game.current_player and clicked_tile.type == "b":
+            self.active_menu = UnitPurchaseMenu(self.renderer.screen, self.game, (grid_x, grid_y))
             self.menu_opened_time = current_time
             print(f"Opened unit purchase menu at ({grid_x}, {grid_y})")
-            return 'continue'
+            return "continue"
 
         # Priority 3: Movement with selected unit
         if self.selected_unit and self.selected_unit.can_move:
             if self.game.move_unit(self.selected_unit, grid_x, grid_y):
                 print(f"Moved {self.selected_unit.type} to ({grid_x}, {grid_y})")
                 # After movement, open unit action menu
-                self.active_menu = UnitActionMenu(
-                    self.renderer.screen, self.game, self.selected_unit
-                )
+                self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.selected_unit)
                 self.target_selection_unit = self.selected_unit
                 self.menu_opened_time = current_time
                 self.selected_unit = None
-            return 'continue'
+            return "continue"
 
         # Priority 4: Deselect
         self.selected_unit = None
-        return 'continue'
+        return "continue"
 
     def _process_bot_turns(self):
         """Process consecutive bot turns."""
@@ -408,9 +396,7 @@ class InputHandler:
         max_bot_turns = self.num_players * 2
         bot_turn_count = 0
 
-        while (self.game.current_player in self.bots and
-               not self.game.game_over and
-               bot_turn_count < max_bot_turns):
+        while self.game.current_player in self.bots and not self.game.game_over and bot_turn_count < max_bot_turns:
             current_bot = self.bots[self.game.current_player]
             print(f"Bot (Player {self.game.current_player}) is thinking...")
             current_bot.take_turn()

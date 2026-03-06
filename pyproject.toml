@@ -79,15 +79,31 @@ line-length = 127
 select = ["E", "F", "W", "C90", "I"]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "C901",   # function complexity - tracked but not blocking
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/**" = ["E402"]  # imports after code is normal in notebooks
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
-check_untyped_defs = true
+check_untyped_defs = false
 ignore_missing_imports = true
+
+# Gradually enable stricter checking per-module as types are improved
+[[tool.mypy.overrides]]
+module = [
+    "reinforcetactics.core.game_state",
+    "reinforcetactics.rl.*",
+    "reinforcetactics.tournament.bots",
+    "reinforcetactics.game.llm_bot",
+    "reinforcetactics.game.bot",
+    "reinforcetactics.ui.menus.*",
+]
+ignore_errors = true

@@ -1,8 +1,11 @@
 """Map editing canvas component."""
+
 from typing import Tuple
-import pygame
+
 import pandas as pd
-from reinforcetactics.constants import TILE_COLORS, PLAYER_COLORS
+import pygame
+
+from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
 from reinforcetactics.utils.fonts import get_font
 
 
@@ -147,8 +150,7 @@ class EditorCanvas:
         Returns:
             True if mouse is over canvas, False otherwise
         """
-        return (self.x <= mouse_pos[0] < self.x + self.width and
-                self.y <= mouse_pos[1] < self.y + self.height)
+        return self.x <= mouse_pos[0] < self.x + self.width and self.y <= mouse_pos[1] < self.y + self.height
 
     def draw(self, screen: pygame.Surface) -> None:
         """
@@ -204,14 +206,14 @@ class EditorCanvas:
                 screen_y = self.y + row * self.tile_size - self.offset_y
 
                 # Get base tile code (without player number)
-                base_code = tile_code.split('_')[0] if '_' in tile_code else tile_code
+                base_code = tile_code.split("_")[0] if "_" in tile_code else tile_code
 
                 # Get tile color
                 tile_color = TILE_COLORS.get(base_code, (50, 50, 50))
 
                 # For structures with ownership, blend with player color
-                if '_' in tile_code:
-                    parts = tile_code.split('_')
+                if "_" in tile_code:
+                    parts = tile_code.split("_")
                     if len(parts) == 2 and parts[1].isdigit():
                         player_num = int(parts[1])
                         player_color = PLAYER_COLORS.get(player_num, (255, 255, 255))
@@ -240,24 +242,12 @@ class EditorCanvas:
         # Draw vertical lines
         for col in range(start_col, end_col + 1):
             screen_x = self.x + col * self.tile_size - self.offset_x
-            pygame.draw.line(
-                screen,
-                self.grid_color,
-                (screen_x, self.y),
-                (screen_x, self.y + self.height),
-                1
-            )
+            pygame.draw.line(screen, self.grid_color, (screen_x, self.y), (screen_x, self.y + self.height), 1)
 
         # Draw horizontal lines
         for row in range(start_row, end_row + 1):
             screen_y = self.y + row * self.tile_size - self.offset_y
-            pygame.draw.line(
-                screen,
-                self.grid_color,
-                (self.x, screen_y),
-                (self.x + self.width, screen_y),
-                1
-            )
+            pygame.draw.line(screen, self.grid_color, (self.x, screen_y), (self.x + self.width, screen_y), 1)
 
     def _draw_hover_highlight(self, screen: pygame.Surface) -> None:
         """

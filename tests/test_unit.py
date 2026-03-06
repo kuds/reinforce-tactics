@@ -1,4 +1,5 @@
 """Tests for the Unit class."""
+
 from reinforcetactics.core.unit import Unit
 
 
@@ -7,8 +8,8 @@ class TestUnitInitialization:
 
     def test_warrior_initialization(self):
         """Test warrior unit initialization."""
-        warrior = Unit('W', 5, 5, 1)
-        assert warrior.type == 'W'
+        warrior = Unit("W", 5, 5, 1)
+        assert warrior.type == "W"
         assert warrior.x == 5
         assert warrior.y == 5
         assert warrior.player == 1
@@ -19,8 +20,8 @@ class TestUnitInitialization:
 
     def test_mage_initialization(self):
         """Test mage unit initialization."""
-        mage = Unit('M', 3, 3, 2)
-        assert mage.type == 'M'
+        mage = Unit("M", 3, 3, 2)
+        assert mage.type == "M"
         assert mage.x == 3
         assert mage.y == 3
         assert mage.player == 2
@@ -30,8 +31,8 @@ class TestUnitInitialization:
 
     def test_cleric_initialization(self):
         """Test cleric unit initialization."""
-        cleric = Unit('C', 4, 4, 1)
-        assert cleric.type == 'C'
+        cleric = Unit("C", 4, 4, 1)
+        assert cleric.type == "C"
         assert cleric.x == 4
         assert cleric.y == 4
         assert cleric.player == 1
@@ -41,8 +42,8 @@ class TestUnitInitialization:
 
     def test_archer_initialization(self):
         """Test archer unit initialization."""
-        archer = Unit('A', 5, 5, 1)
-        assert archer.type == 'A'
+        archer = Unit("A", 5, 5, 1)
+        assert archer.type == "A"
         assert archer.x == 5
         assert archer.y == 5
         assert archer.player == 1
@@ -216,17 +217,14 @@ class TestMovement:
 
     def test_get_reachable_positions(self, warrior, mock_grid):
         """Test getting reachable positions within movement range."""
+
         def can_move_func(x, y):
             if not (0 <= x < mock_grid.width and 0 <= y < mock_grid.height):
                 return False
             tile = mock_grid.get_tile(x, y)
             return tile.is_walkable()
 
-        reachable = warrior.get_reachable_positions(
-            mock_grid.width,
-            mock_grid.height,
-            can_move_func
-        )
+        reachable = warrior.get_reachable_positions(mock_grid.width, mock_grid.height, can_move_func)
 
         # Warrior at (5,5) with movement 3 should have several reachable positions
         assert len(reachable) > 0
@@ -302,31 +300,31 @@ class TestSerialization:
 
         data = warrior.to_dict()
 
-        assert data['type'] == 'W'
-        assert data['x'] == 5
-        assert data['y'] == 5
-        assert data['player'] == 1
-        assert data['health'] == 12
-        assert data['paralyzed_turns'] == 1
-        assert data['can_move'] is True
-        assert data['can_attack'] is False
+        assert data["type"] == "W"
+        assert data["x"] == 5
+        assert data["y"] == 5
+        assert data["player"] == 1
+        assert data["health"] == 12
+        assert data["paralyzed_turns"] == 1
+        assert data["can_move"] is True
+        assert data["can_attack"] is False
 
     def test_from_dict(self):
         """Test unit deserialization from dictionary."""
         data = {
-            'type': 'M',
-            'x': 3,
-            'y': 4,
-            'player': 2,
-            'health': 8,
-            'paralyzed_turns': 2,
-            'can_move': False,
-            'can_attack': True
+            "type": "M",
+            "x": 3,
+            "y": 4,
+            "player": 2,
+            "health": 8,
+            "paralyzed_turns": 2,
+            "can_move": False,
+            "can_attack": True,
         }
 
         unit = Unit.from_dict(data)
 
-        assert unit.type == 'M'
+        assert unit.type == "M"
         assert unit.x == 3
         assert unit.y == 4
         assert unit.player == 2

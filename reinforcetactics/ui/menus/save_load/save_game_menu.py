@@ -1,13 +1,14 @@
 """Menu for saving the game."""
+
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
-from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.clipboard import get_clipboard_text
+from reinforcetactics.utils.language import get_language
 
 
 class SaveGameMenu(Menu):
@@ -21,7 +22,7 @@ class SaveGameMenu(Menu):
             game: Game state object to save
             screen: Optional pygame surface. If None, creates its own.
         """
-        super().__init__(screen, get_language().get('save_game.title', 'Save Game'))
+        super().__init__(screen, get_language().get("save_game.title", "Save Game"))
         self.game = game
         self.input_text = f"save_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.input_active = True
@@ -40,15 +41,18 @@ class SaveGameMenu(Menu):
                 if clipboard_text:
                     # Filter to only include printable characters and respect max length
                     remaining = 50 - len(self.input_text)
-                    filtered = ''.join(c for c in clipboard_text[:remaining] if c.isprintable())
+                    filtered = "".join(c for c in clipboard_text[:remaining] if c.isprintable())
                     self.input_text += filtered
             elif event.key == pygame.K_BACKSPACE:
                 self.input_text = self.input_text[:-1]
             else:
                 # Add character if printable and no modifier keys are pressed
                 # This prevents Cmd+V from adding 'v' on macOS
-                if (event.unicode.isprintable() and len(self.input_text) < 50 and
-                        not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT))):
+                if (
+                    event.unicode.isprintable()
+                    and len(self.input_text) < 50
+                    and not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT))
+                ):
                     self.input_text += event.unicode
 
         return None
@@ -83,7 +87,7 @@ class SaveGameMenu(Menu):
         self.screen.blit(title_surface, title_rect)
 
         # Draw input prompt
-        prompt = get_language().get('save_game.enter_name', 'Enter save name:')
+        prompt = get_language().get("save_game.enter_name", "Enter save name:")
         prompt_surface = self.option_font.render(prompt, True, self.text_color)
         prompt_rect = prompt_surface.get_rect(centerx=screen_width // 2, y=screen_height // 3)
         self.screen.blit(prompt_surface, prompt_rect)
@@ -91,12 +95,7 @@ class SaveGameMenu(Menu):
         # Draw input box
         input_width = 400
         input_height = 40
-        input_rect = pygame.Rect(
-            (screen_width - input_width) // 2,
-            screen_height // 3 + 50,
-            input_width,
-            input_height
-        )
+        input_rect = pygame.Rect((screen_width - input_width) // 2, screen_height // 3 + 50, input_width, input_height)
         pygame.draw.rect(self.screen, (50, 50, 60), input_rect)
         pygame.draw.rect(self.screen, self.selected_color, input_rect, 2)
 
@@ -108,17 +107,12 @@ class SaveGameMenu(Menu):
         # Draw cursor
         cursor_x = text_rect.right + 2
         pygame.draw.line(
-            self.screen,
-            self.text_color,
-            (cursor_x, input_rect.y + 5),
-            (cursor_x, input_rect.y + input_height - 5),
-            2
+            self.screen, self.text_color, (cursor_x, input_rect.y + 5), (cursor_x, input_rect.y + input_height - 5), 2
         )
 
         # Draw instructions
         lang = get_language()
-        instructions = lang.get('save_game.instructions',
-                               'Press ENTER to save, ESC to cancel')
+        instructions = lang.get("save_game.instructions", "Press ENTER to save, ESC to cancel")
         inst_surface = self.option_font.render(instructions, True, (150, 150, 150))
         inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=screen_height // 2 + 50)
         self.screen.blit(inst_surface, inst_rect)

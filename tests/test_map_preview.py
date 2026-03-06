@@ -1,6 +1,8 @@
 """Tests for the map preview generator."""
+
 import os
 import unittest
+
 import pygame
 
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
@@ -46,7 +48,7 @@ class TestMapPreviewGenerator(unittest.TestCase):
         self.assertIsInstance(preview, pygame.Surface)
         self.assertEqual(preview.get_width(), 150)
         self.assertEqual(preview.get_height(), 150)
-        self.assertEqual(metadata['name'], "Random Map")
+        self.assertEqual(metadata["name"], "Random Map")
 
     def test_generate_preview_real_map(self):
         """Test preview generation for real map file."""
@@ -61,18 +63,18 @@ class TestMapPreviewGenerator(unittest.TestCase):
         self.assertEqual(preview.get_height(), 150)
 
         # Check metadata
-        self.assertIn('name', metadata)
-        self.assertIn('width', metadata)
-        self.assertIn('height', metadata)
-        self.assertIn('player_count', metadata)
-        self.assertIn('terrain_breakdown', metadata)
-        self.assertIn('difficulty', metadata)
+        self.assertIn("name", metadata)
+        self.assertIn("width", metadata)
+        self.assertIn("height", metadata)
+        self.assertIn("player_count", metadata)
+        self.assertIn("terrain_breakdown", metadata)
+        self.assertIn("difficulty", metadata)
 
         # For beginner map
-        self.assertEqual(metadata['name'], "Beginner")
-        self.assertGreater(metadata['width'], 0)
-        self.assertGreater(metadata['height'], 0)
-        self.assertGreater(metadata['player_count'], 0)
+        self.assertEqual(metadata["name"], "Beginner")
+        self.assertGreater(metadata["width"], 0)
+        self.assertGreater(metadata["height"], 0)
+        self.assertGreater(metadata["player_count"], 0)
 
     def test_cache_functionality(self):
         """Test that preview caching works."""
@@ -103,18 +105,17 @@ class TestMapPreviewGenerator(unittest.TestCase):
     def test_difficulty_calculation(self):
         """Test difficulty calculation based on map size."""
         test_cases = [
-            (6, 6, "Beginner"),     # 36 tiles
-            (10, 10, "Easy"),       # 100 tiles
-            (14, 14, "Medium"),     # 196 tiles
-            (24, 24, "Medium"),     # 576 tiles
-            (32, 32, "Expert"),     # 1024 tiles
+            (6, 6, "Beginner"),  # 36 tiles
+            (10, 10, "Easy"),  # 100 tiles
+            (14, 14, "Medium"),  # 196 tiles
+            (24, 24, "Medium"),  # 576 tiles
+            (32, 32, "Expert"),  # 1024 tiles
         ]
 
         for width, height, expected_difficulty in test_cases:
             difficulty = self.generator._calculate_difficulty(width, height, {})
-            self.assertEqual(difficulty, expected_difficulty,
-                           f"Failed for {width}×{height}")
+            self.assertEqual(difficulty, expected_difficulty, f"Failed for {width}×{height}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

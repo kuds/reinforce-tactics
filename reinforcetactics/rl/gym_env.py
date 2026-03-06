@@ -2,13 +2,16 @@
 Gymnasium environment for Reinforce Tactics
 Supports both flat and hierarchical RL training
 """
+
 import logging
 import random
 import traceback
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Any, Dict, List, Optional, Tuple
+
 import gymnasium as gym
-from gymnasium import spaces
 import numpy as np
+from gymnasium import spaces
+
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
@@ -38,15 +41,15 @@ class StrategyGameEnv(gym.Env):
         - to_y: [0, grid_height)
     """
 
-    metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 4}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
     # All available unit types
-    ALL_UNIT_TYPES = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
 
     def __init__(
         self,
         map_file: Optional[str] = None,
-        opponent: str = 'bot',  # 'bot', 'random', 'self', or None
+        opponent: str = "bot",  # 'bot', 'random', 'self', or None
         render_mode: Optional[str] = None,
         max_steps: int = 200,
         reward_config: Optional[Dict[str, float]] = None,
@@ -54,8 +57,8 @@ class StrategyGameEnv(gym.Env):
         goal_space_size: int = 64,  # For HRL goal space
         enabled_units: Optional[List[str]] = None,  # List of enabled unit types
         fog_of_war: bool = False,  # Enable fog of war
-        action_space_type: str = 'multi_discrete',  # 'multi_discrete' or 'flat_discrete'
-        max_flat_actions: int = 512  # Max actions for flat_discrete mode
+        action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
+        max_flat_actions: int = 512,  # Max actions for flat_discrete mode
     ):
         """
         Initialize environment.
@@ -104,27 +107,27 @@ class StrategyGameEnv(gym.Env):
 
         # Reward configuration with defaults
         default_reward_config = {
-            'win': 1000.0,
-            'loss': -1000.0,
-            'draw': -200.0,
-            'income_diff': 0.05,
-            'unit_diff': 0.3,
-            'structure_control': 1.0,
-            'invalid_action': -10.0,
-            'turn_penalty': -1.0,
+            "win": 1000.0,
+            "loss": -1000.0,
+            "draw": -200.0,
+            "income_diff": 0.05,
+            "unit_diff": 0.3,
+            "structure_control": 1.0,
+            "invalid_action": -10.0,
+            "turn_penalty": -1.0,
             # Action rewards (moved from hardcoded values for tunability)
-            'create_unit': 2.0,
-            'move': 0.1,
-            'damage_scale': 0.2,       # reward per damage point (was damage/5.0)
-            'kill': 10.0,
-            'seize_progress': 1.0,
-            'capture': 20.0,
-            'cure': 5.0,
-            'heal_scale': 0.5,         # reward per HP healed (was heal/2.0)
-            'paralyze': 8.0,
-            'haste': 6.0,
-            'defence_buff': 5.0,
-            'attack_buff': 5.0,
+            "create_unit": 2.0,
+            "move": 0.1,
+            "damage_scale": 0.2,  # reward per damage point (was damage/5.0)
+            "kill": 10.0,
+            "seize_progress": 1.0,
+            "capture": 20.0,
+            "cure": 5.0,
+            "heal_scale": 0.5,  # reward per HP healed (was heal/2.0)
+            "paralyze": 8.0,
+            "haste": 6.0,
+            "defence_buff": 5.0,
+            "attack_buff": 5.0,
         }
         if reward_config:
             default_reward_config.update(reward_config)
@@ -144,34 +147,19 @@ class StrategyGameEnv(gym.Env):
 
         # Define observation space
         obs_dict = {
-            'grid': spaces.Box(
-                low=0, high=255,
-                shape=(self.grid_height, self.grid_width, 3),
-                dtype=np.float32
-            ),
-            'units': spaces.Box(
-                low=0, high=255,
-                shape=(self.grid_height, self.grid_width, 3),
-                dtype=np.float32
-            ),
-            'global_features': spaces.Box(
-                low=0, high=10000,
-                shape=(6,),
-                dtype=np.float32
-            ),
-            'action_mask': spaces.Box(
-                low=0, high=1,
-                shape=(self._get_action_space_size(),),
-                dtype=np.float32
-            )
+            "grid": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
+            "units": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
+            "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(self._get_action_space_size(),), dtype=np.float32),
         }
 
         # Add visibility layer when fog of war is enabled
         if fog_of_war:
-            obs_dict['visibility'] = spaces.Box(
-                low=0, high=2,  # 0=unexplored, 1=shrouded, 2=visible
+            obs_dict["visibility"] = spaces.Box(
+                low=0,
+                high=2,  # 0=unexplored, 1=shrouded, 2=visible
                 shape=(self.grid_height, self.grid_width),
-                dtype=np.uint8
+                dtype=np.uint8,
             )
 
         self.observation_space = spaces.Dict(obs_dict)
@@ -179,50 +167,52 @@ class StrategyGameEnv(gym.Env):
         # Define action space
         if hierarchical:
             # HRL: Manager outputs goals, worker outputs primitive actions
-            self.action_space = spaces.Dict({
-                'goal': spaces.Discrete(goal_space_size),  # Manager action
-                'primitive': spaces.MultiDiscrete([
-                    10,  # action_type (0-9)
-                    8,  # unit_type (for create): W, M, C, A, K, R, S, B
-                    self.grid_width,  # from_x
-                    self.grid_height,  # from_y
-                    self.grid_width,  # to_x
-                    self.grid_height   # to_y
-                ])
-            })
-        elif action_space_type == 'flat_discrete':
+            self.action_space = spaces.Dict(
+                {
+                    "goal": spaces.Discrete(goal_space_size),  # Manager action
+                    "primitive": spaces.MultiDiscrete(
+                        [
+                            10,  # action_type (0-9)
+                            8,  # unit_type (for create): W, M, C, A, K, R, S, B
+                            self.grid_width,  # from_x
+                            self.grid_height,  # from_y
+                            self.grid_width,  # to_x
+                            self.grid_height,  # to_y
+                        ]
+                    ),
+                }
+            )
+        elif action_space_type == "flat_discrete":
             # Flat Discrete: each index maps to a specific legal action.
             # Exact masking eliminates invalid actions entirely.
             self.action_space = spaces.Discrete(max_flat_actions)
         else:
             # MultiDiscrete: per-dimension masks (over-approximation)
-            self.action_space = spaces.MultiDiscrete([
-                10,  # action_type (0-9)
-                8,  # unit_type (for create): W, M, C, A, K, R, S, B
-                self.grid_width,  # from_x
-                self.grid_height,  # from_y
-                self.grid_width,  # to_x
-                self.grid_height   # to_y
-            ])
+            self.action_space = spaces.MultiDiscrete(
+                [
+                    10,  # action_type (0-9)
+                    8,  # unit_type (for create): W, M, C, A, K, R, S, B
+                    self.grid_width,  # from_x
+                    self.grid_height,  # from_y
+                    self.grid_width,  # to_x
+                    self.grid_height,  # to_y
+                ]
+            )
 
         # Rendering
         self.render_mode = render_mode
         self.renderer = None
-        if render_mode == 'human':
+        if render_mode == "human":
             from reinforcetactics.ui.renderer import Renderer
+
             self.renderer = Renderer(self.game_state)
 
         # Episode statistics
-        self.episode_stats = {
-            'reward': 0.0,
-            'length': 0,
-            'winner': None,
-            'invalid_actions': 0
-        }
+        self.episode_stats = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
 
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
-        if self.action_space_type == 'flat_discrete':
+        if self.action_space_type == "flat_discrete":
             return self.max_flat_actions
         return 10 * self.grid_width * self.grid_height
 
@@ -242,36 +232,47 @@ class StrategyGameEnv(gym.Env):
 
         # When FOW is enabled, hide enemy gold
         if self.fog_of_war:
-            global_features = np.array([
-                self.game_state.player_gold[ap],
-                0,  # Hide enemy gold
-                self.game_state.turn_number,
-                len([u for u in self.game_state.units if u.player == ap]),
-                # Count only visible enemy units
-                len([u for u in self.game_state.units
-                     if u.player == opp and self.game_state.is_position_visible(u.x, u.y, ap)]),
-                self.game_state.current_player
-            ], dtype=np.float32)
+            global_features = np.array(
+                [
+                    self.game_state.player_gold[ap],
+                    0,  # Hide enemy gold
+                    self.game_state.turn_number,
+                    len([u for u in self.game_state.units if u.player == ap]),
+                    # Count only visible enemy units
+                    len(
+                        [
+                            u
+                            for u in self.game_state.units
+                            if u.player == opp and self.game_state.is_position_visible(u.x, u.y, ap)
+                        ]
+                    ),
+                    self.game_state.current_player,
+                ],
+                dtype=np.float32,
+            )
         else:
-            global_features = np.array([
-                self.game_state.player_gold[ap],
-                self.game_state.player_gold[opp],
-                self.game_state.turn_number,
-                len([u for u in self.game_state.units if u.player == ap]),
-                len([u for u in self.game_state.units if u.player == opp]),
-                self.game_state.current_player
-            ], dtype=np.float32)
+            global_features = np.array(
+                [
+                    self.game_state.player_gold[ap],
+                    self.game_state.player_gold[opp],
+                    self.game_state.turn_number,
+                    len([u for u in self.game_state.units if u.player == ap]),
+                    len([u for u in self.game_state.units if u.player == opp]),
+                    self.game_state.current_player,
+                ],
+                dtype=np.float32,
+            )
 
         obs = {
-            'grid': state_arrays['grid'].astype(np.float32),
-            'units': state_arrays['units'].astype(np.float32),
-            'global_features': global_features,
-            'action_mask': action_mask
+            "grid": state_arrays["grid"].astype(np.float32),
+            "units": state_arrays["units"].astype(np.float32),
+            "global_features": global_features,
+            "action_mask": action_mask,
         }
 
         # Add visibility layer when FOW is enabled
-        if self.fog_of_war and 'visibility' in state_arrays:
-            obs['visibility'] = state_arrays['visibility']
+        if self.fog_of_war and "visibility" in state_arrays:
+            obs["visibility"] = state_arrays["visibility"]
 
         return obs
 
@@ -279,23 +280,28 @@ class StrategyGameEnv(gym.Env):
     # source_key/target_key name the dict keys or object attrs for from/to positions.
     _ACTION_KEY_MAP = {
         # key            idx  from_fields            to_fields
-        'create_unit':   (0,  None,                  ('x', 'y')),
-        'move':          (1,  ('from_x', 'from_y'),  ('to_x', 'to_y')),
-        'attack':        (2,  'attacker',             'target'),
-        'seize':         (3,  'unit',                 'tile'),
-        'heal':          (4,  'healer',               'target'),
-        'cure':          (4,  'curer',                'target'),
-        'paralyze':      (6,  'paralyzer',            'target'),
-        'haste':         (7,  'sorcerer',             'target'),
-        'defence_buff':  (8,  'sorcerer',             'target'),
-        'attack_buff':   (9,  'sorcerer',             'target'),
+        "create_unit": (0, None, ("x", "y")),
+        "move": (1, ("from_x", "from_y"), ("to_x", "to_y")),
+        "attack": (2, "attacker", "target"),
+        "seize": (3, "unit", "tile"),
+        "heal": (4, "healer", "target"),
+        "cure": (4, "curer", "target"),
+        "paralyze": (6, "paralyzer", "target"),
+        "haste": (7, "sorcerer", "target"),
+        "defence_buff": (8, "sorcerer", "target"),
+        "attack_buff": (9, "sorcerer", "target"),
     }
 
-    def _build_masks(self) -> Tuple[
+    def _build_masks(
+        self,
+    ) -> Tuple[
         np.ndarray,  # flat mask  (10*W*H,)
-        np.ndarray, np.ndarray,  # action_type (10,), unit_type (8,)
-        np.ndarray, np.ndarray,  # from_x (W,), from_y (H,)
-        np.ndarray, np.ndarray,  # to_x (W,), to_y (H,)
+        np.ndarray,
+        np.ndarray,  # action_type (10,), unit_type (8,)
+        np.ndarray,
+        np.ndarray,  # from_x (W,), from_y (H,)
+        np.ndarray,
+        np.ndarray,  # to_x (W,), to_y (H,)
     ]:
         """
         Compute both the flat target-based mask and per-dimension masks from
@@ -305,9 +311,7 @@ class StrategyGameEnv(gym.Env):
             (flat_mask, action_type_mask, unit_type_mask,
              from_x_mask, from_y_mask, to_x_mask, to_y_mask)
         """
-        legal_actions = self.game_state.get_legal_actions(
-            player=self.game_state.current_player
-        )
+        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         width = self.grid_width
         height = self.grid_height
@@ -324,7 +328,7 @@ class StrategyGameEnv(gym.Env):
         tx_mask = np.zeros(width, dtype=bool)
         ty_mask = np.zeros(height, dtype=bool)
 
-        unit_type_to_idx = {'W': 0, 'M': 1, 'C': 2, 'A': 3, 'K': 4, 'R': 5, 'S': 6, 'B': 7}
+        unit_type_to_idx = {"W": 0, "M": 1, "C": 2, "A": 3, "K": 4, "R": 5, "S": 6, "B": 7}
 
         def _pos(obj_or_dict, fields):
             """Extract (x, y) from an object (.x/.y) or a dict (fields tuple)."""
@@ -360,8 +364,8 @@ class StrategyGameEnv(gym.Env):
                     fy_mask[ty] = True
 
                 # unit_type for create_unit
-                if key == 'create_unit':
-                    ut_mask[unit_type_to_idx.get(action['unit_type'], 0)] = True
+                if key == "create_unit":
+                    ut_mask[unit_type_to_idx.get(action["unit_type"], 0)] = True
 
         # 5: End Turn — always valid (single canonical entry at position 0,0)
         at_mask[5] = True
@@ -390,15 +394,19 @@ class StrategyGameEnv(gym.Env):
 
         End turn is always appended as the last action.
         """
-        legal_actions = self.game_state.get_legal_actions(
-            player=self.agent_player
-        )
+        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
 
         actions = []
         seen = set()
         unit_type_to_idx = {
-            'W': 0, 'M': 1, 'C': 2, 'A': 3,
-            'K': 4, 'R': 5, 'S': 6, 'B': 7,
+            "W": 0,
+            "M": 1,
+            "C": 2,
+            "A": 3,
+            "K": 4,
+            "R": 5,
+            "S": 6,
+            "B": 7,
         }
 
         def _pos(obj_or_dict, fields):
@@ -417,8 +425,8 @@ class StrategyGameEnv(gym.Env):
                     fx, fy = tx, ty  # create_unit: from = building position
 
                 ut_idx = 0
-                if key == 'create_unit':
-                    ut_idx = unit_type_to_idx.get(action['unit_type'], 0)
+                if key == "create_unit":
+                    ut_idx = unit_type_to_idx.get(action["unit_type"], 0)
 
                 action_key = (at_idx, ut_idx, fx, fy, tx, ty)
                 if action_key not in seen:
@@ -432,11 +440,11 @@ class StrategyGameEnv(gym.Env):
 
         if len(actions) > self.max_flat_actions:
             logger.warning(
-                "Legal actions (%d) exceed max_flat_actions (%d), truncating. "
-                "Consider increasing max_flat_actions.",
-                len(actions), self.max_flat_actions,
+                "Legal actions (%d) exceed max_flat_actions (%d), truncating. Consider increasing max_flat_actions.",
+                len(actions),
+                self.max_flat_actions,
             )
-            actions = actions[:self.max_flat_actions]
+            actions = actions[: self.max_flat_actions]
 
         self._current_actions = actions
 
@@ -450,10 +458,10 @@ class StrategyGameEnv(gym.Env):
         For multi_discrete mode, returns the flat target-based mask of size
         (10 * W * H,).
         """
-        if self.action_space_type == 'flat_discrete':
+        if self.action_space_type == "flat_discrete":
             self._build_flat_actions()
             mask = np.zeros(self.max_flat_actions, dtype=np.float32)
-            mask[:len(self._current_actions)] = 1.0
+            mask[: len(self._current_actions)] = 1.0
             return mask
         flat_mask, *_ = self._build_masks()
         return flat_mask
@@ -472,10 +480,10 @@ class StrategyGameEnv(gym.Env):
         Returns:
             Tuple of boolean numpy arrays
         """
-        if self.action_space_type == 'flat_discrete':
+        if self.action_space_type == "flat_discrete":
             self._build_flat_actions()
             mask = np.zeros(self.max_flat_actions, dtype=bool)
-            mask[:len(self._current_actions)] = True
+            mask[: len(self._current_actions)] = True
             return (mask,)
         _, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask = self._build_masks()
         return (at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask)
@@ -503,15 +511,10 @@ class StrategyGameEnv(gym.Env):
         from_x, from_y = int(action[2]), int(action[3])
         to_x, to_y = int(action[4]), int(action[5])
 
-        unit_types = ['W', 'M', 'C', 'A', 'K', 'R', 'S', 'B']
+        unit_types = ["W", "M", "C", "A", "K", "R", "S", "B"]
         unit_type = unit_types[unit_type_idx % 8]
 
-        return {
-            'action_type': action_type,
-            'unit_type': unit_type,
-            'from_pos': (from_x, from_y),
-            'to_pos': (to_x, to_y)
-        }
+        return {"action_type": action_type, "unit_type": unit_type, "from_pos": (from_x, from_y), "to_pos": (to_x, to_y)}
 
     def _execute_action(self, action_dict: Dict[str, Any]) -> Tuple[float, bool]:
         """
@@ -520,9 +523,9 @@ class StrategyGameEnv(gym.Env):
         Returns:
             (reward, is_valid)
         """
-        action_type = action_dict['action_type']
-        from_pos = action_dict['from_pos']
-        to_pos = action_dict['to_pos']
+        action_type = action_dict["action_type"]
+        from_pos = action_dict["from_pos"]
+        to_pos = action_dict["to_pos"]
         rc = self.reward_config
         ap = self.agent_player
 
@@ -531,12 +534,10 @@ class StrategyGameEnv(gym.Env):
 
         try:
             if action_type == 0:  # Create unit
-                unit_type = action_dict['unit_type']
-                unit = self.game_state.create_unit(
-                    unit_type, to_pos[0], to_pos[1], player=ap
-                )
+                unit_type = action_dict["unit_type"]
+                unit = self.game_state.create_unit(unit_type, to_pos[0], to_pos[1], player=ap)
                 if unit:
-                    reward += rc.get('create_unit', 2.0)
+                    reward += rc.get("create_unit", 2.0)
                 else:
                     is_valid = False
 
@@ -544,7 +545,7 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 if unit and unit.player == ap and unit.can_move:
                     if self.game_state.move_unit(unit, to_pos[0], to_pos[1]):
-                        reward += rc.get('move', 0.1)
+                        reward += rc.get("move", 0.1)
                     else:
                         is_valid = False
                 else:
@@ -555,9 +556,9 @@ class StrategyGameEnv(gym.Env):
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.player == ap and target.player != ap:
                     result = self.game_state.attack(unit, target)
-                    reward += result['damage'] * rc.get('damage_scale', 0.2)
-                    if not result['target_alive']:
-                        reward += rc.get('kill', 10.0)
+                    reward += result["damage"] * rc.get("damage_scale", 0.2)
+                    if not result["target_alive"]:
+                        reward += rc.get("kill", 10.0)
                 else:
                     is_valid = False
 
@@ -565,10 +566,10 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 if unit and unit.player == ap:
                     result = self.game_state.seize(unit)
-                    if result.get('damage', 0) > 0:
-                        reward += rc.get('seize_progress', 1.0)
-                        if result['captured']:
-                            reward += rc.get('capture', 20.0)
+                    if result.get("damage", 0) > 0:
+                        reward += rc.get("seize_progress", 1.0)
+                        if result["captured"]:
+                            reward += rc.get("capture", 20.0)
                     else:
                         is_valid = False
                 else:
@@ -577,18 +578,18 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 4:  # Heal/Cure (Cleric)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == 'C' and unit.player == ap:
+                if unit and target and unit.type == "C" and unit.player == ap:
                     action_performed = False
                     if target.is_paralyzed():
                         result = self.game_state.cure(unit, target)
                         if result:
-                            reward += rc.get('cure', 5.0)
+                            reward += rc.get("cure", 5.0)
                             action_performed = True
 
                     if not action_performed:
                         heal_amount = self.game_state.heal(unit, target)
                         if heal_amount > 0:
-                            reward += heal_amount * rc.get('heal_scale', 0.5)
+                            reward += heal_amount * rc.get("heal_scale", 0.5)
                             action_performed = True
 
                     if not action_performed:
@@ -598,9 +599,9 @@ class StrategyGameEnv(gym.Env):
 
             elif action_type == 5:  # End turn
                 self.game_state.end_turn()
-                reward += self.reward_config['turn_penalty']
+                reward += self.reward_config["turn_penalty"]
                 # Opponent plays (dispatch on opponent_type, not opponent object)
-                if self.opponent_type and self.opponent_type != 'self':
+                if self.opponent_type and self.opponent_type != "self":
                     if not self.game_state.game_over:
                         self._opponent_turn()
                         if not self.game_state.game_over:
@@ -612,10 +613,10 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 6:  # Paralyze (Mage/Sorcerer)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type in ['M', 'S'] and target.player != ap:
+                if unit and target and unit.type in ["M", "S"] and target.player != ap:
                     result = self.game_state.paralyze(unit, target)
                     if result:
-                        reward += rc.get('paralyze', 8.0)
+                        reward += rc.get("paralyze", 8.0)
                     else:
                         is_valid = False
                 else:
@@ -624,10 +625,10 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 7:  # Haste (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == 'S' and target.player == ap:
+                if unit and target and unit.type == "S" and target.player == ap:
                     result = self.game_state.haste(unit, target)
                     if result:
-                        reward += rc.get('haste', 6.0)
+                        reward += rc.get("haste", 6.0)
                     else:
                         is_valid = False
                 else:
@@ -636,10 +637,10 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 8:  # Defence Buff (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == 'S' and target.player == ap:
+                if unit and target and unit.type == "S" and target.player == ap:
                     result = self.game_state.defence_buff(unit, target)
                     if result:
-                        reward += rc.get('defence_buff', 5.0)
+                        reward += rc.get("defence_buff", 5.0)
                     else:
                         is_valid = False
                 else:
@@ -648,10 +649,10 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 9:  # Attack Buff (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == 'S' and target.player == ap:
+                if unit and target and unit.type == "S" and target.player == ap:
                     result = self.game_state.attack_buff(unit, target)
                     if result:
-                        reward += rc.get('attack_buff', 5.0)
+                        reward += rc.get("attack_buff", 5.0)
                     else:
                         is_valid = False
                 else:
@@ -660,22 +661,21 @@ class StrategyGameEnv(gym.Env):
         except (ValueError, KeyError, IndexError) as e:
             logger.debug("Game action failed (type=%s): %s", action_type, e)
             is_valid = False
-        except (TypeError, AttributeError) as e:
+        except (TypeError, AttributeError):
             # Programming errors should propagate so they are not silently ignored
             raise
         except Exception as e:
-            logger.error("Unexpected error executing action (type=%s): %s\n%s",
-                         action_type, e, traceback.format_exc())
+            logger.error("Unexpected error executing action (type=%s): %s\n%s", action_type, e, traceback.format_exc())
             is_valid = False
 
         return reward, is_valid
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
-        if self.opponent_type == 'bot':
+        if self.opponent_type == "bot":
             if self.opponent:
                 self.opponent.take_turn()
-        elif self.opponent_type == 'random':
+        elif self.opponent_type == "random":
             self._random_opponent_turn()
         # 'self' mode is handled externally by the training script
 
@@ -688,9 +688,18 @@ class StrategyGameEnv(gym.Env):
 
             # Collect all non-end-turn actions
             all_actions = []
-            for action_key in ['create_unit', 'move', 'attack', 'seize',
-                               'paralyze', 'heal', 'cure', 'haste',
-                               'defence_buff', 'attack_buff']:
+            for action_key in [
+                "create_unit",
+                "move",
+                "attack",
+                "seize",
+                "paralyze",
+                "heal",
+                "cure",
+                "haste",
+                "defence_buff",
+                "attack_buff",
+            ]:
                 for action in legal_actions.get(action_key, []):
                     all_actions.append((action_key, action))
 
@@ -700,28 +709,26 @@ class StrategyGameEnv(gym.Env):
             # Pick a random action and execute it
             action_key, action = random.choice(all_actions)
             try:
-                if action_key == 'create_unit':
-                    self.game_state.create_unit(
-                        action['unit_type'], action['x'], action['y'], player=2)
-                elif action_key == 'move':
-                    self.game_state.move_unit(
-                        action['unit'], action['to_x'], action['to_y'])
-                elif action_key == 'attack':
-                    self.game_state.attack(action['attacker'], action['target'])
-                elif action_key == 'seize':
-                    self.game_state.seize(action['unit'])
-                elif action_key == 'paralyze':
-                    self.game_state.paralyze(action['paralyzer'], action['target'])
-                elif action_key == 'heal':
-                    self.game_state.heal(action['healer'], action['target'])
-                elif action_key == 'cure':
-                    self.game_state.cure(action['curer'], action['target'])
-                elif action_key == 'haste':
-                    self.game_state.haste(action['sorcerer'], action['target'])
-                elif action_key == 'defence_buff':
-                    self.game_state.defence_buff(action['sorcerer'], action['target'])
-                elif action_key == 'attack_buff':
-                    self.game_state.attack_buff(action['sorcerer'], action['target'])
+                if action_key == "create_unit":
+                    self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=2)
+                elif action_key == "move":
+                    self.game_state.move_unit(action["unit"], action["to_x"], action["to_y"])
+                elif action_key == "attack":
+                    self.game_state.attack(action["attacker"], action["target"])
+                elif action_key == "seize":
+                    self.game_state.seize(action["unit"])
+                elif action_key == "paralyze":
+                    self.game_state.paralyze(action["paralyzer"], action["target"])
+                elif action_key == "heal":
+                    self.game_state.heal(action["healer"], action["target"])
+                elif action_key == "cure":
+                    self.game_state.cure(action["curer"], action["target"])
+                elif action_key == "haste":
+                    self.game_state.haste(action["sorcerer"], action["target"])
+                elif action_key == "defence_buff":
+                    self.game_state.defence_buff(action["sorcerer"], action["target"])
+                elif action_key == "attack_buff":
+                    self.game_state.attack_buff(action["sorcerer"], action["target"])
             except Exception:
                 continue  # Skip failed actions, try another
 
@@ -737,20 +744,20 @@ class StrategyGameEnv(gym.Env):
         ap = self.agent_player
         opp = 3 - ap
 
-        if self.reward_config.get('income_diff', 0) > 0:
+        if self.reward_config.get("income_diff", 0) > 0:
             income_agent = self.game_state.mechanics.calculate_income(ap, self.game_state.grid)
             income_opp = self.game_state.mechanics.calculate_income(opp, self.game_state.grid)
-            potential += (income_agent['total'] - income_opp['total']) * self.reward_config['income_diff']
+            potential += (income_agent["total"] - income_opp["total"]) * self.reward_config["income_diff"]
 
-        if self.reward_config.get('unit_diff', 0) > 0:
+        if self.reward_config.get("unit_diff", 0) > 0:
             units_agent = sum(1 for u in self.game_state.units if u.player == ap)
             units_opp = sum(1 for u in self.game_state.units if u.player == opp)
-            potential += (units_agent - units_opp) * self.reward_config['unit_diff']
+            potential += (units_agent - units_opp) * self.reward_config["unit_diff"]
 
-        if self.reward_config.get('structure_control', 0) > 0:
+        if self.reward_config.get("structure_control", 0) > 0:
             structures_agent = len(self.game_state.grid.get_capturable_tiles(player=ap))
             structures_opp = len(self.game_state.grid.get_capturable_tiles(player=opp))
-            potential += (structures_agent - structures_opp) * self.reward_config['structure_control']
+            potential += (structures_agent - structures_opp) * self.reward_config["structure_control"]
 
         return potential
 
@@ -759,8 +766,8 @@ class StrategyGameEnv(gym.Env):
         reward = action_reward
 
         if not is_valid:
-            reward += self.reward_config['invalid_action']
-            self.episode_stats['invalid_actions'] += 1
+            reward += self.reward_config["invalid_action"]
+            self.episode_stats["invalid_actions"] += 1
 
         # Potential-based reward shaping: reward += Phi(s') - Phi(s)
         # This only rewards CHANGES in advantage, not maintaining a lead
@@ -778,14 +785,14 @@ class StrategyGameEnv(gym.Env):
             observation, reward, terminated, truncated, info
         """
         self.current_step += 1
-        self.episode_stats['length'] = self.current_step
+        self.episode_stats["length"] = self.current_step
 
         # In hierarchical mode, extract the primitive action from the Dict
         if self.hierarchical and isinstance(action, dict):
-            action = action['primitive']
+            action = action["primitive"]
 
         # For flat_discrete, map the integer index to the actual action array
-        if self.action_space_type == 'flat_discrete':
+        if self.action_space_type == "flat_discrete":
             action_idx = int(action)
             if 0 <= action_idx < len(self._current_actions):
                 action = self._current_actions[action_idx]
@@ -799,7 +806,7 @@ class StrategyGameEnv(gym.Env):
 
         # Calculate total reward
         reward = self._calculate_reward(action_reward, is_valid)
-        self.episode_stats['reward'] += reward
+        self.episode_stats["reward"] += reward
 
         # Check termination
         terminated = self.game_state.game_over
@@ -807,49 +814,42 @@ class StrategyGameEnv(gym.Env):
 
         if terminated:
             if self.game_state.winner == self.agent_player:
-                reward += self.reward_config['win']
-                self.episode_stats['winner'] = self.agent_player
+                reward += self.reward_config["win"]
+                self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)
-                reward += self.reward_config.get('draw', 0.0)
-                self.episode_stats['winner'] = None
+                reward += self.reward_config.get("draw", 0.0)
+                self.episode_stats["winner"] = None
             else:
-                reward += self.reward_config['loss']
-                self.episode_stats['winner'] = self.game_state.winner
+                reward += self.reward_config["loss"]
+                self.episode_stats["winner"] = self.game_state.winner
         elif truncated:
             # Truncation penalty: agent hit step limit without finishing the game.
             # Without this, the agent has no incentive to end games decisively.
-            reward += self.reward_config.get('draw', 0.0)
-            self.episode_stats['winner'] = None
+            reward += self.reward_config.get("draw", 0.0)
+            self.episode_stats["winner"] = None
 
         # Get observation
         obs = self._get_obs()
 
         # Info dict
         info = {
-            'episode_stats': self.episode_stats.copy() if terminated or truncated else {},
-            'game_over': terminated,
-            'winner': self.game_state.winner if terminated else None,
-            'turn': self.game_state.turn_number,
-            'valid_action': is_valid
+            "episode_stats": self.episode_stats.copy() if terminated or truncated else {},
+            "game_over": terminated,
+            "winner": self.game_state.winner if terminated else None,
+            "turn": self.game_state.turn_number,
+            "valid_action": is_valid,
         }
 
         return obs, reward, terminated, truncated, info
 
-    def reset(
-        self,
-        seed: Optional[int] = None,
-        options: Optional[Dict] = None
-    ) -> Tuple[Dict, Dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
         """Reset environment."""
         super().reset(seed=seed)
 
         # Reset game state (preserving enabled_units and fog_of_war configuration)
         self.game_state = GameState(
-            self.initial_map_data,
-            num_players=2,
-            enabled_units=self.enabled_units,
-            fog_of_war=self.fog_of_war
+            self.initial_map_data, num_players=2, enabled_units=self.enabled_units, fog_of_war=self.fog_of_war
         )
         self.current_step = 0
         self._prev_potential = 0.0
@@ -859,21 +859,17 @@ class StrategyGameEnv(gym.Env):
             self.game_state.update_visibility()
 
         # Reset opponent
-        if self.opponent_type == 'bot':
+        if self.opponent_type == "bot":
             self.opponent = SimpleBot(self.game_state, player=2)
 
         # Reset renderer
-        if self.render_mode == 'human' and self.renderer:
+        if self.render_mode == "human" and self.renderer:
             from reinforcetactics.ui.renderer import Renderer
+
             self.renderer = Renderer(self.game_state)
 
         # Reset episode stats
-        self.episode_stats = {
-            'reward': 0.0,
-            'length': 0,
-            'winner': None,
-            'invalid_actions': 0
-        }
+        self.episode_stats = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
 
         obs = self._get_obs()
         info = {}
@@ -882,10 +878,10 @@ class StrategyGameEnv(gym.Env):
 
     def render(self):
         """Render the environment."""
-        if self.render_mode == 'human':
+        if self.render_mode == "human":
             if self.renderer:
                 self.renderer.render()
-        elif self.render_mode == 'rgb_array':
+        elif self.render_mode == "rgb_array":
             if self.renderer:
                 return self.renderer.get_rgb_array()
 

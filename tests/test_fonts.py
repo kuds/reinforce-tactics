@@ -1,7 +1,9 @@
 """Tests for font utility module."""
-import pytest
+
 import pygame
-from reinforcetactics.utils.fonts import get_font, _get_available_fonts, _font_cache
+import pytest
+
+from reinforcetactics.utils.fonts import _font_cache, _get_available_fonts, get_font
 
 
 @pytest.fixture
@@ -97,4 +99,3 @@ def test_get_font_edge_cases(pygame_init):
 
     # Ensure they're different
     assert small_font is not large_font
-

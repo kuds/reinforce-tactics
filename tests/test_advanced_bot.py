@@ -1,16 +1,14 @@
 """Tests for AdvancedBot class."""
-import pytest
-import numpy as np
 
+import numpy as np
+import pytest
+
+from game.bot_factory import create_bot
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import AdvancedBot, MediumBot
-from game.bot_factory import create_bot
 from reinforcetactics.tournament import (
     BotDescriptor,
     BotType,
-    TournamentConfig,
-    TournamentRunner,
-    MapConfig,
     create_bot_instance,
 )
 from reinforcetactics.tournament.bots import discover_builtin_bots
@@ -20,19 +18,19 @@ from reinforcetactics.tournament.bots import discover_builtin_bots
 def simple_game():
     """Create a simple game state for testing."""
     # Create a 10x10 map with basic tiles
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
     # Add HQ for player 1 and 2
-    map_data[0][0] = 'h_1'
-    map_data[9][9] = 'h_2'
+    map_data[0][0] = "h_1"
+    map_data[9][9] = "h_2"
     # Add some buildings
-    map_data[0][1] = 'b_1'
-    map_data[9][8] = 'b_2'
+    map_data[0][1] = "b_1"
+    map_data[9][8] = "b_2"
     # Add some mountains and forests
-    map_data[5][5] = 'm'
-    map_data[4][4] = 'f'
+    map_data[5][5] = "m"
+    map_data[4][4] = "f"
     # Add some towers
-    map_data[3][3] = 't_1'
-    map_data[6][6] = 't_2'
+    map_data[3][3] = "t_1"
+    map_data[6][6] = "t_2"
     return GameState(map_data, num_players=2)
 
 
@@ -113,11 +111,11 @@ class TestAdvancedBotSpecialAbilities:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit('C', 5, 5, 2)
-        simple_game.create_unit('W', 5, 6, 2)
+        simple_game.create_unit("C", 5, 5, 2)
+        simple_game.create_unit("W", 5, 6, 2)
 
-        cleric = [u for u in simple_game.units if u.type == 'C' and u.player == 2][0]
-        warrior = [u for u in simple_game.units if u.type == 'W' and u.player == 2]
+        cleric = [u for u in simple_game.units if u.type == "C" and u.player == 2][0]
+        warrior = [u for u in simple_game.units if u.type == "W" and u.player == 2]
 
         # Only test if warrior was created
         if warrior:
@@ -146,10 +144,10 @@ class TestAdvancedBotRangedCombat:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit('A', 5, 5, 2)
-        simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
+        simple_game.create_unit("A", 5, 5, 2)
+        simple_game.create_unit("W", 5, 3, 1)  # Enemy warrior
 
-        archer = [u for u in simple_game.units if u.type == 'A' and u.player == 2][0]
+        archer = [u for u in simple_game.units if u.type == "A" and u.player == 2][0]
 
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
@@ -165,10 +163,10 @@ class TestAdvancedBotRangedCombat:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit('M', 5, 5, 2)
-        simple_game.create_unit('W', 5, 3, 1)  # Enemy warrior
+        simple_game.create_unit("M", 5, 5, 2)
+        simple_game.create_unit("W", 5, 3, 1)  # Enemy warrior
 
-        mage = [u for u in simple_game.units if u.type == 'M' and u.player == 2][0]
+        mage = [u for u in simple_game.units if u.type == "M" and u.player == 2][0]
 
         bot = AdvancedBot(simple_game, player=2)
         bot.analyze_map()
@@ -207,9 +205,10 @@ class TestBotFactoryAdvancedBot:
     def test_bot_factory_creates_advancedbot(self, simple_game):
         """Test that bot factory can create AdvancedBot."""
         from reinforcetactics.utils.settings import get_settings
+
         settings = get_settings()
 
-        bot = create_bot(simple_game, 2, 'AdvancedBot', settings)
+        bot = create_bot(simple_game, 2, "AdvancedBot", settings)
 
         assert isinstance(bot, AdvancedBot)
         assert bot.bot_player == 2
@@ -224,16 +223,16 @@ class TestTournamentAdvancedBot:
 
         # Should find AdvancedBot
         bot_names = [b.name for b in bots]
-        assert 'AdvancedBot' in bot_names
+        assert "AdvancedBot" in bot_names
 
     def test_bot_descriptor_advanced_bot(self):
         """Test BotDescriptor can create AdvancedBot."""
         from reinforcetactics.utils.file_io import FileIO
 
-        map_data = FileIO.load_map('maps/1v1/beginner.csv')
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game_state = GameState(map_data, num_players=2)
 
-        descriptor = BotDescriptor(name='AdvancedBot', bot_type=BotType.ADVANCED)
+        descriptor = BotDescriptor(name="AdvancedBot", bot_type=BotType.ADVANCED)
         bot = create_bot_instance(descriptor, game_state, player=2)
 
         assert isinstance(bot, AdvancedBot)
@@ -275,4 +274,3 @@ class TestAdvancedBotFullTurn:
 
         # Should have completed turns successfully
         assert bot.map_analyzed is True
-

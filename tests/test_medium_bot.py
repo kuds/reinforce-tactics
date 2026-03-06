@@ -1,29 +1,30 @@
 """Tests for MediumBot class."""
-import pytest
+
 import numpy as np
+import pytest
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import MediumBot, SimpleBot
-from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.tournament import (
     BotDescriptor,
     BotType,
     create_bot_instance,
 )
 from reinforcetactics.tournament.bots import discover_builtin_bots
+from reinforcetactics.utils.file_io import FileIO
 
 
 @pytest.fixture
 def simple_game():
     """Create a simple game state for testing."""
     # Create a 10x10 map with basic tiles
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
     # Add HQ for player 1 and 2
-    map_data[0][0] = 'h_1'
-    map_data[9][9] = 'h_2'
+    map_data[0][0] = "h_1"
+    map_data[9][9] = "h_2"
     # Add some buildings
-    map_data[0][1] = 'b_1'
-    map_data[9][8] = 'b_2'
+    map_data[0][1] = "b_1"
+    map_data[9][8] = "b_2"
     return GameState(map_data, num_players=2)
 
 
@@ -118,17 +119,17 @@ class TestMediumBotCoordinatedAttacks:
     def test_mediumbot_identifies_killable_targets(self):
         """Test that MediumBot can identify enemies that can be killed."""
         # Create a game with specific setup
-        map_data = FileIO.load_map('maps/1v1/beginner.csv')
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game = GameState(map_data, num_players=2)
 
         # Create enemy unit with low health
-        game.create_unit('W', 3, 3, 1)
+        game.create_unit("W", 3, 3, 1)
         enemy = game.units[-1]
         enemy.health = 5  # Low health
 
         # Create bot units nearby
-        game.create_unit('W', 2, 3, 2)
-        game.create_unit('W', 4, 3, 2)
+        game.create_unit("W", 2, 3, 2)
+        game.create_unit("W", 4, 3, 2)
 
         bot = MediumBot(game, player=2)
         bot_units = [u for u in game.units if u.player == 2]
@@ -144,16 +145,13 @@ class TestMediumBotContestedStructures:
 
     def test_finds_contested_structures(self):
         """Test that MediumBot can find structures being captured."""
-        map_data = FileIO.load_map('maps/1v1/beginner.csv')
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game = GameState(map_data, num_players=2)
 
         bot = MediumBot(game, player=2)
 
         # Get a structure owned by player 1
-        p1_structures = [
-            tile for row in game.grid.tiles for tile in row
-            if tile.is_capturable() and tile.player == 1
-        ]
+        p1_structures = [tile for row in game.grid.tiles for tile in row if tile.is_capturable() and tile.player == 1]
 
         if p1_structures:
             structure = p1_structures[0]
@@ -161,7 +159,7 @@ class TestMediumBotContestedStructures:
             structure.health = structure.max_health - 5
 
             # Place enemy unit on structure
-            game.create_unit('W', structure.x, structure.y, 1)
+            game.create_unit("W", structure.x, structure.y, 1)
 
             contested = bot.find_contested_structures()
 
@@ -175,7 +173,7 @@ class TestMediumBotVsSimpleBot:
     def test_mediumbot_vs_simplebot_single_game(self):
         """Test a single game between MediumBot and SimpleBot."""
         # Load a standard map
-        map_data = FileIO.load_map('maps/1v1/beginner.csv')
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game = GameState(map_data, num_players=2)
 
         # Create bots
@@ -203,15 +201,15 @@ class TestMediumBotAttackValue:
 
     def test_calculate_attack_value_kill_bonus(self):
         """Test that killing blows have high value."""
-        map_data = FileIO.load_map('maps/1v1/beginner.csv')
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game = GameState(map_data, num_players=2)
 
         # Create attacker
-        game.create_unit('W', 2, 2, 2)
+        game.create_unit("W", 2, 2, 2)
         attacker = game.units[-1]
 
         # Create weak target
-        game.create_unit('W', 3, 2, 1)
+        game.create_unit("W", 3, 2, 1)
         target = game.units[-1]
         target.health = 5  # Low health
 
@@ -234,7 +232,7 @@ class TestBotFactoryMediumBot:
         game_state = GameState(map_data, num_players=2)
         settings = get_settings()
 
-        bot = create_bot(game_state, 2, 'MediumBot', settings)
+        bot = create_bot(game_state, 2, "MediumBot", settings)
 
         assert isinstance(bot, MediumBot)
         assert bot.bot_player == 2
@@ -249,13 +247,13 @@ class TestTournamentMediumBot:
 
         # Should find both SimpleBot and MediumBot
         bot_names = [bot.name for bot in bots]
-        assert 'SimpleBot' in bot_names
-        assert 'MediumBot' in bot_names
+        assert "SimpleBot" in bot_names
+        assert "MediumBot" in bot_names
 
     def test_bot_descriptor_medium_bot(self):
         """Test BotDescriptor for MediumBot."""
-        desc = BotDescriptor(name='TestMediumBot', bot_type=BotType.MEDIUM)
-        assert desc.name == 'TestMediumBot'
+        desc = BotDescriptor(name="TestMediumBot", bot_type=BotType.MEDIUM)
+        assert desc.name == "TestMediumBot"
         assert desc.bot_type == BotType.MEDIUM
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)

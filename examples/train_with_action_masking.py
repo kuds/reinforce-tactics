@@ -18,8 +18,8 @@ Usage:
     python examples/train_with_action_masking.py --timesteps 500000 --difficulty medium
 """
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 # Check for required packages
@@ -31,9 +31,9 @@ except ImportError:
     sys.exit(1)
 
 from reinforcetactics.rl import (
+    make_curriculum_env,
     make_maskable_env,
     make_maskable_vec_env,
-    make_curriculum_env,
     validate_action_mask,
 )
 
@@ -54,11 +54,11 @@ def train_basic(timesteps: int = 100000, save_path: str = "models/maskable_ppo_b
     # Validate that action masks are working correctly
     print("\nValidating action masks...")
     validation = validate_action_mask(env.env)
-    if validation['valid']:
+    if validation["valid"]:
         print("Action masks are valid!")
     else:
         print("Warning: Action mask validation found issues:")
-        for error in validation['errors']:
+        for error in validation["errors"]:
             print(f"  - {error}")
 
     # Create MaskablePPO model
@@ -83,11 +83,7 @@ def train_basic(timesteps: int = 100000, save_path: str = "models/maskable_ppo_b
     return model
 
 
-def train_parallel(
-    timesteps: int = 500000,
-    n_envs: int = 4,
-    save_path: str = "models/maskable_ppo_parallel.zip"
-):
+def train_parallel(timesteps: int = 500000, n_envs: int = 4, save_path: str = "models/maskable_ppo_parallel.zip"):
     """
     Parallel training with multiple environments.
 
@@ -102,7 +98,7 @@ def train_parallel(
     vec_env = make_maskable_vec_env(
         n_envs=n_envs,
         opponent="bot",
-        use_subprocess=True  # Use separate processes for true parallelism
+        use_subprocess=True,  # Use separate processes for true parallelism
     )
 
     # Create MaskablePPO model
@@ -127,10 +123,7 @@ def train_parallel(
     return model
 
 
-def train_with_curriculum(
-    timesteps_per_stage: int = 100000,
-    save_path: str = "models/maskable_ppo_curriculum.zip"
-):
+def train_with_curriculum(timesteps_per_stage: int = 100000, save_path: str = "models/maskable_ppo_curriculum.zip"):
     """
     Curriculum learning: progressively increase difficulty.
 
@@ -141,11 +134,11 @@ def train_with_curriculum(
     print("Curriculum Learning: Easy -> Medium -> Hard")
     print("=" * 60)
 
-    difficulties = ['easy', 'medium', 'hard']
+    difficulties = ["easy", "medium", "hard"]
     model = None
 
     for i, difficulty in enumerate(difficulties):
-        print(f"\n--- Stage {i+1}/3: {difficulty.upper()} ---")
+        print(f"\n--- Stage {i + 1}/3: {difficulty.upper()} ---")
 
         # Create environment for this difficulty level
         env = make_curriculum_env(difficulty=difficulty)
@@ -166,12 +159,10 @@ def train_with_curriculum(
 
         # Train at this difficulty
         print(f"Training for {timesteps_per_stage:,} timesteps at {difficulty} difficulty...")
-        model.learn(
-            total_timesteps=timesteps_per_stage, progress_bar=True, reset_num_timesteps=False
-        )
+        model.learn(total_timesteps=timesteps_per_stage, progress_bar=True, reset_num_timesteps=False)
 
         # Save checkpoint
-        checkpoint_path = f"models/curriculum_stage_{i+1}_{difficulty}.zip"
+        checkpoint_path = f"models/curriculum_stage_{i + 1}_{difficulty}.zip"
         Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
         model.save(checkpoint_path)
         print(f"Checkpoint saved: {checkpoint_path}")
@@ -220,7 +211,7 @@ def evaluate_agent(model_path: str, num_episodes: int = 10):
             episode_reward += reward
 
         total_rewards.append(episode_reward)
-        if info.get('winner') == 1:
+        if info.get("winner") == 1:
             wins += 1
             result = "WIN"
         else:
@@ -229,8 +220,8 @@ def evaluate_agent(model_path: str, num_episodes: int = 10):
         print(f"Episode {episode + 1}: {result} (reward: {episode_reward:.1f})")
 
     print("\n--- Results ---")
-    print(f"Win rate: {wins}/{num_episodes} ({100*wins/num_episodes:.1f}%)")
-    print(f"Average reward: {sum(total_rewards)/len(total_rewards):.1f}")
+    print(f"Win rate: {wins}/{num_episodes} ({100 * wins / num_episodes:.1f}%)")
+    print(f"Average reward: {sum(total_rewards) / len(total_rewards):.1f}")
 
     return wins / num_episodes
 
@@ -265,73 +256,44 @@ def watch_agent(model_path: str):
 
         env.render()
 
-    winner = info.get('winner', 'Unknown')
+    winner = info.get("winner", "Unknown")
     print(f"\nGame Over! Winner: Player {winner}")
 
     env.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train RL agents with action masking for Reinforce Tactics"
-    )
+    parser = argparse.ArgumentParser(description="Train RL agents with action masking for Reinforce Tactics")
 
     parser.add_argument(
-        '--mode',
+        "--mode",
         type=str,
-        default='basic',
-        choices=['basic', 'parallel', 'curriculum', 'evaluate', 'watch'],
-        help='Training mode'
+        default="basic",
+        choices=["basic", "parallel", "curriculum", "evaluate", "watch"],
+        help="Training mode",
     )
-    parser.add_argument(
-        '--timesteps',
-        type=int,
-        default=100000,
-        help='Total training timesteps'
-    )
-    parser.add_argument(
-        '--n-envs',
-        type=int,
-        default=4,
-        help='Number of parallel environments (for parallel mode)'
-    )
-    parser.add_argument(
-        '--model-path',
-        type=str,
-        default='models/maskable_ppo_basic.zip',
-        help='Path to save/load model'
-    )
-    parser.add_argument(
-        '--episodes',
-        type=int,
-        default=10,
-        help='Number of evaluation episodes'
-    )
+    parser.add_argument("--timesteps", type=int, default=100000, help="Total training timesteps")
+    parser.add_argument("--n-envs", type=int, default=4, help="Number of parallel environments (for parallel mode)")
+    parser.add_argument("--model-path", type=str, default="models/maskable_ppo_basic.zip", help="Path to save/load model")
+    parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes")
 
     args = parser.parse_args()
 
-    if args.mode == 'basic':
+    if args.mode == "basic":
         train_basic(timesteps=args.timesteps, save_path=args.model_path)
 
-    elif args.mode == 'parallel':
-        train_parallel(
-            timesteps=args.timesteps,
-            n_envs=args.n_envs,
-            save_path=args.model_path
-        )
+    elif args.mode == "parallel":
+        train_parallel(timesteps=args.timesteps, n_envs=args.n_envs, save_path=args.model_path)
 
-    elif args.mode == 'curriculum':
-        train_with_curriculum(
-            timesteps_per_stage=args.timesteps // 3,
-            save_path=args.model_path
-        )
+    elif args.mode == "curriculum":
+        train_with_curriculum(timesteps_per_stage=args.timesteps // 3, save_path=args.model_path)
 
-    elif args.mode == 'evaluate':
+    elif args.mode == "evaluate":
         evaluate_agent(model_path=args.model_path, num_episodes=args.episodes)
 
-    elif args.mode == 'watch':
+    elif args.mode == "watch":
         watch_agent(model_path=args.model_path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

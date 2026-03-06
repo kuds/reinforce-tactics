@@ -1,10 +1,12 @@
 """
 Experiment tracking with Weights & Biases and TensorBoard
 """
+
+import json
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
-import json
+from typing import Any, Dict, Optional
+
 import numpy as np
 
 
@@ -21,7 +23,7 @@ class ExperimentTracker:
         config: Optional[Dict] = None,
         log_dir: str = "./logs",
         use_wandb: bool = True,
-        use_tensorboard: bool = True
+        use_tensorboard: bool = True,
     ):
         """
         Initialize experiment tracker.
@@ -45,12 +47,9 @@ class ExperimentTracker:
         if use_wandb:
             try:
                 import wandb
+
                 self.wandb = wandb
-                wandb.init(
-                    project=project_name,
-                    name=experiment_name,
-                    config=config
-                )
+                wandb.init(project=project_name, name=experiment_name, config=config)
                 print("✅ Weights & Biases initialized")
             except ImportError:
                 print("⚠️  wandb not installed, skipping")
@@ -60,6 +59,7 @@ class ExperimentTracker:
         if use_tensorboard:
             try:
                 from torch.utils.tensorboard import SummaryWriter
+
                 self.writer = SummaryWriter(str(self.log_dir / "tensorboard"))
                 print("✅ TensorBoard initialized")
             except ImportError:
@@ -67,7 +67,7 @@ class ExperimentTracker:
 
         # Save config
         config_path = self.log_dir / "config.json"
-        with open(config_path, 'w', encoding='utf-8') as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2)
 
     def log_metrics(self, metrics: Dict[str, float], step: int):
@@ -123,6 +123,7 @@ class ExperimentTracker:
         # W&B
         if self.wandb:
             import pandas as pd
+
             df = pd.DataFrame(data)
             self.wandb.log({name: self.wandb.Table(dataframe=df)})
 
@@ -132,6 +133,7 @@ class ExperimentTracker:
 
         # Save locally
         import torch
+
         torch.save(model.state_dict(), model_path)
 
         # Upload to W&B
@@ -150,14 +152,6 @@ class ExperimentTracker:
 
 
 # Convenience function
-def create_tracker(
-    experiment_name: str,
-    config: Dict[str, Any],
-    **kwargs
-) -> ExperimentTracker:
+def create_tracker(experiment_name: str, config: Dict[str, Any], **kwargs) -> ExperimentTracker:
     """Create experiment tracker with defaults."""
-    return ExperimentTracker(
-        experiment_name=experiment_name,
-        config=config,
-        **kwargs
-    )
+    return ExperimentTracker(experiment_name=experiment_name, config=config, **kwargs)

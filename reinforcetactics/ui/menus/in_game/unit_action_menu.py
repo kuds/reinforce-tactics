@@ -1,5 +1,6 @@
 """In-game overlay menu for unit actions during gameplay."""
-from typing import Optional, Dict, Any, List, Tuple
+
+from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
@@ -63,119 +64,59 @@ class UnitActionMenu:
         actions = []
 
         # Check for attackable enemies (using range-aware method)
-        attackable_enemies = GameMechanics.get_attackable_enemies(
-            self.unit, self.game_state.units, self.game_state.grid
-        )
+        attackable_enemies = GameMechanics.get_attackable_enemies(self.unit, self.game_state.units, self.game_state.grid)
 
         # Attack - available if attackable enemies exist
         if attackable_enemies:
-            actions.append({
-                'name': 'Attack (A)',
-                'key': 'a',
-                'type': 'attack',
-                'targets': attackable_enemies
-            })
+            actions.append({"name": "Attack (A)", "key": "a", "type": "attack", "targets": attackable_enemies})
 
         # Paralyze - only for Mages with adjacent enemies
-        if self.unit.type == 'M':
+        if self.unit.type == "M":
             adjacent_enemies = GameMechanics.get_adjacent_enemies(self.unit, self.game_state.units)
             if adjacent_enemies:
-                actions.append({
-                    'name': 'Paralyze (P)',
-                    'key': 'p',
-                    'type': 'paralyze',
-                    'targets': adjacent_enemies
-                })
+                actions.append({"name": "Paralyze (P)", "key": "p", "type": "paralyze", "targets": adjacent_enemies})
 
         # Heal and Cure - only for Clerics
-        if self.unit.type == 'C':
+        if self.unit.type == "C":
             # Heal - damaged allies within range 1-2
             healable_allies = GameMechanics.get_healable_allies(self.unit, self.game_state.units)
             if healable_allies:
-                actions.append({
-                    'name': 'Heal (H)',
-                    'key': 'h',
-                    'type': 'heal',
-                    'targets': healable_allies
-                })
+                actions.append({"name": "Heal (H)", "key": "h", "type": "heal", "targets": healable_allies})
 
             # Cure - paralyzed allies within range 1-2
-            curable_allies = GameMechanics.get_curable_allies(
-                self.unit, self.game_state.units
-            )
+            curable_allies = GameMechanics.get_curable_allies(self.unit, self.game_state.units)
             if curable_allies:
-                actions.append({
-                    'name': 'Cure (C)',
-                    'key': 'c',
-                    'type': 'cure',
-                    'targets': curable_allies
-                })
+                actions.append({"name": "Cure (C)", "key": "c", "type": "cure", "targets": curable_allies})
 
         # Haste - only for Sorcerers with ability off cooldown
-        if self.unit.type == 'S' and self.unit.can_use_haste():
-            hasteable_allies = GameMechanics.get_hasteable_allies(
-                self.unit, self.game_state.units
-            )
+        if self.unit.type == "S" and self.unit.can_use_haste():
+            hasteable_allies = GameMechanics.get_hasteable_allies(self.unit, self.game_state.units)
             if hasteable_allies:
-                actions.append({
-                    'name': 'Haste (T)',
-                    'key': 't',
-                    'type': 'haste',
-                    'targets': hasteable_allies
-                })
+                actions.append({"name": "Haste (T)", "key": "t", "type": "haste", "targets": hasteable_allies})
 
         # Defence Buff - only for Sorcerers with ability off cooldown
-        if self.unit.type == 'S' and self.unit.can_use_defence_buff():
-            buffable_allies = GameMechanics.get_defence_buffable_allies(
-                self.unit, self.game_state.units
-            )
+        if self.unit.type == "S" and self.unit.can_use_defence_buff():
+            buffable_allies = GameMechanics.get_defence_buffable_allies(self.unit, self.game_state.units)
             if buffable_allies:
-                actions.append({
-                    'name': 'Defence Buff (D)',
-                    'key': 'd',
-                    'type': 'defence_buff',
-                    'targets': buffable_allies
-                })
+                actions.append({"name": "Defence Buff (D)", "key": "d", "type": "defence_buff", "targets": buffable_allies})
 
         # Attack Buff - only for Sorcerers with ability off cooldown
-        if self.unit.type == 'S' and self.unit.can_use_attack_buff():
-            buffable_allies = GameMechanics.get_attack_buffable_allies(
-                self.unit, self.game_state.units
-            )
+        if self.unit.type == "S" and self.unit.can_use_attack_buff():
+            buffable_allies = GameMechanics.get_attack_buffable_allies(self.unit, self.game_state.units)
             if buffable_allies:
-                actions.append({
-                    'name': 'Attack Buff (B)',
-                    'key': 'b',
-                    'type': 'attack_buff',
-                    'targets': buffable_allies
-                })
+                actions.append({"name": "Attack Buff (B)", "key": "b", "type": "attack_buff", "targets": buffable_allies})
 
         # Capture - only if on a capturable structure
         tile = self.game_state.grid.get_tile(self.unit.x, self.unit.y)
         if tile.is_capturable() and tile.player != self.unit.player:
-            actions.append({
-                'name': 'Capture (S)',
-                'key': 's',
-                'type': 'capture',
-                'targets': None
-            })
+            actions.append({"name": "Capture (S)", "key": "s", "type": "capture", "targets": None})
 
         # Cancel Move - only if unit has moved this turn
         if self.unit.has_moved:
-            actions.append({
-                'name': 'Cancel Move (M)',
-                'key': 'm',
-                'type': 'cancel_move',
-                'targets': None
-            })
+            actions.append({"name": "Cancel Move (M)", "key": "m", "type": "cancel_move", "targets": None})
 
         # Wait/End Turn - always available
-        actions.append({
-            'name': 'Wait/End Turn (W)',
-            'key': 'w',
-            'type': 'wait',
-            'targets': None
-        })
+        actions.append({"name": "Wait/End Turn (W)", "key": "w", "type": "wait", "targets": None})
 
         return actions
 
@@ -225,16 +166,16 @@ class UnitActionMenu:
         """
         # Check if click is outside menu (close menu and cancel)
         if not self.menu_rect.collidepoint(mouse_pos):
-            return {'type': 'cancel'}
+            return {"type": "cancel"}
 
         # Check interactive elements
         for element in self.interactive_elements:
-            if element['rect'].collidepoint(mouse_pos):
-                if element['type'] == 'close_button':
-                    return {'type': 'cancel'}
-                if element['type'] == 'action_button':
-                    action = element['action']
-                    return {'type': 'action_selected', 'action': action}
+            if element["rect"].collidepoint(mouse_pos):
+                if element["type"] == "close_button":
+                    return {"type": "cancel"}
+                if element["type"] == "action_button":
+                    action = element["action"]
+                    return {"type": "action_selected", "action": action}
 
         return None
 
@@ -249,13 +190,13 @@ class UnitActionMenu:
             Dict with action result, or None
         """
         if event.key == pygame.K_ESCAPE:
-            return {'type': 'cancel'}
+            return {"type": "cancel"}
 
         # Check keyboard shortcuts
         key_char = pygame.key.name(event.key).lower()
         for action in self.actions:
-            if action['key'] == key_char:
-                return {'type': 'action_selected', 'action': action}
+            if action["key"] == key_char:
+                return {"type": "action_selected", "action": action}
 
         return None
 
@@ -268,7 +209,7 @@ class UnitActionMenu:
         """
         self.hover_element = None
         for element in self.interactive_elements:
-            if element['rect'].collidepoint(mouse_pos):
+            if element["rect"].collidepoint(mouse_pos):
                 self.hover_element = element
                 break
 
@@ -291,26 +232,17 @@ class UnitActionMenu:
         # Draw title
         title = "Unit Actions"
         title_surface = self.title_font.render(title, True, self.text_color)
-        title_rect = title_surface.get_rect(
-            centerx=self.menu_rect.centerx,
-            y=self.menu_rect.y + 10
-        )
+        title_rect = title_surface.get_rect(centerx=self.menu_rect.centerx, y=self.menu_rect.y + 10)
         screen.blit(title_surface, title_rect)
 
         # Draw close button (X) in upper right
         close_button_size = 20
         close_button_x = self.menu_rect.right - close_button_size - 10
         close_button_y = self.menu_rect.y + 10
-        close_button_rect = pygame.Rect(
-            close_button_x,
-            close_button_y,
-            close_button_size,
-            close_button_size
-        )
+        close_button_rect = pygame.Rect(close_button_x, close_button_y, close_button_size, close_button_size)
 
         # Check if hovering over close button
-        is_close_hover = (self.hover_element and
-                         self.hover_element.get('type') == 'close_button')
+        is_close_hover = self.hover_element and self.hover_element.get("type") == "close_button"
         close_color = self.close_button_hover_color if is_close_hover else self.close_button_color
 
         pygame.draw.rect(screen, close_color, close_button_rect, border_radius=3)
@@ -322,20 +254,17 @@ class UnitActionMenu:
             (255, 255, 255),
             (close_button_rect.left + x_margin, close_button_rect.top + x_margin),
             (close_button_rect.right - x_margin, close_button_rect.bottom - x_margin),
-            2
+            2,
         )
         pygame.draw.line(
             screen,
             (255, 255, 255),
             (close_button_rect.right - x_margin, close_button_rect.top + x_margin),
             (close_button_rect.left + x_margin, close_button_rect.bottom - x_margin),
-            2
+            2,
         )
 
-        self.interactive_elements.append({
-            'type': 'close_button',
-            'rect': close_button_rect
-        })
+        self.interactive_elements.append({"type": "close_button", "rect": close_button_rect})
 
         # Draw action options
         start_y = self.menu_rect.y + 50
@@ -351,8 +280,7 @@ class UnitActionMenu:
             button_rect = pygame.Rect(button_x, y_pos, button_width, button_height)
 
             # Check if hovering
-            is_hovered = (self.hover_element and
-                         self.hover_element.get('rect') == button_rect)
+            is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect
 
             # Choose colors
             if is_hovered:
@@ -369,17 +297,10 @@ class UnitActionMenu:
                 pygame.draw.rect(screen, self.hover_color, button_rect, width=2, border_radius=5)
 
             # Draw text
-            text = action['name']
+            text = action["name"]
             text_surface = self.option_font.render(text, True, text_color)
-            text_rect = text_surface.get_rect(
-                left=button_rect.left + 10,
-                centery=button_rect.centery
-            )
+            text_rect = text_surface.get_rect(left=button_rect.left + 10, centery=button_rect.centery)
             screen.blit(text_surface, text_rect)
 
             # Register as interactive element
-            self.interactive_elements.append({
-                'type': 'action_button',
-                'rect': button_rect,
-                'action': action
-            })
+            self.interactive_elements.append({"type": "action_button", "rect": button_rect, "action": action})

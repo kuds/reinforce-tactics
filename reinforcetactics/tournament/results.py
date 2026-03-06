@@ -160,15 +160,11 @@ class TournamentResults:
         """
         self.elo_system = elo_system or EloRatingSystem()
         self.game_results: List[GameResult] = []
-        self.bot_stats: Dict[str, Dict[str, int]] = defaultdict(
-            lambda: {"wins": 0, "losses": 0, "draws": 0}
-        )
+        self.bot_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
         self.per_map_stats: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
             lambda: defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
         )
-        self.matchup_stats: Dict[str, Dict[str, int]] = defaultdict(
-            lambda: {"bot1_wins": 0, "bot2_wins": 0, "draws": 0}
-        )
+        self.matchup_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"bot1_wins": 0, "bot2_wins": 0, "draws": 0})
         self.maps_used: List[str] = []
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
@@ -254,10 +250,7 @@ class TournamentResults:
                 draws=stats["draws"],
                 elo=self.elo_system.get_rating(bot_name),
                 elo_change=self.elo_system.get_rating_change(bot_name),
-                per_map_stats={
-                    map_name: dict(map_stats)
-                    for map_name, map_stats in self.per_map_stats[bot_name].items()
-                },
+                per_map_stats={map_name: dict(map_stats) for map_name, map_stats in self.per_map_stats[bot_name].items()},
             )
             standings.append(standing)
 
@@ -307,8 +300,7 @@ class TournamentResults:
             "standings": [s.to_dict() for s in standings],
             "matchups": [m.to_dict() for m in matchups],
             "elo_history": {
-                bot_name: [round(r, 0) for r in history]
-                for bot_name, history in self.elo_system.rating_history.items()
+                bot_name: [round(r, 0) for r in history] for bot_name, history in self.elo_system.rating_history.items()
             },
             "games": [g.to_dict() for g in self.game_results],
         }
@@ -394,9 +386,7 @@ class ResultsExporter:
         logger.info(f"Results saved to: {filepath}")
         return str(filepath)
 
-    def export_standings_csv(
-        self, results: TournamentResults, timestamp: Optional[str] = None
-    ) -> str:
+    def export_standings_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
         """Export standings to CSV."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -416,9 +406,7 @@ class ResultsExporter:
         logger.info(f"Standings saved to: {filepath}")
         return str(filepath)
 
-    def export_matchups_csv(
-        self, results: TournamentResults, timestamp: Optional[str] = None
-    ) -> str:
+    def export_matchups_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
         """Export matchups to CSV."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -429,16 +417,12 @@ class ResultsExporter:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("Bot 1,Bot 2,Bot 1 Wins,Bot 2 Wins,Draws\n")
             for m in matchups:
-                f.write(
-                    f"{m.bot1},{m.bot2},{m.bot1_wins},{m.bot2_wins},{m.draws}\n"
-                )
+                f.write(f"{m.bot1},{m.bot2},{m.bot1_wins},{m.bot2_wins},{m.draws}\n")
 
         logger.info(f"Matchups saved to: {filepath}")
         return str(filepath)
 
-    def export_matrix_csv(
-        self, results: TournamentResults, timestamp: Optional[str] = None
-    ) -> str:
+    def export_matrix_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
         """Export results as a matrix table."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -480,10 +464,7 @@ class ResultsExporter:
         logger.info("=" * 84)
         logger.info("TOURNAMENT RESULTS")
         logger.info("=" * 84)
-        logger.info(
-            f"{'Rank':<6}{'Bot':<25}{'Wins':<8}{'Losses':<8}{'Draws':<8}"
-            f"{'Win Rate':<10}{'Elo':<8}{'Change':<8}"
-        )
+        logger.info(f"{'Rank':<6}{'Bot':<25}{'Wins':<8}{'Losses':<8}{'Draws':<8}{'Win Rate':<10}{'Elo':<8}{'Change':<8}")
         logger.info("-" * 84)
 
         for rank, s in enumerate(standings, 1):
@@ -525,9 +506,7 @@ def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     def sanitize(value: Any) -> Any:
         if isinstance(value, dict):
-            return {
-                k: sanitize(v) for k, v in value.items() if not is_sensitive(k)
-            }
+            return {k: sanitize(v) for k, v in value.items() if not is_sensitive(k)}
         if isinstance(value, list):
             return [sanitize(item) for item in value]
         return value

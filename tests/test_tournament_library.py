@@ -9,19 +9,16 @@ Tests cover:
 - TournamentResults tracking
 """
 
-import json
-import os
-import tempfile
 import pytest
 
 from reinforcetactics.tournament import (
-    EloRatingSystem,
     BotDescriptor,
     BotType,
-    MapConfig,
-    TournamentConfig,
-    ScheduledGame,
+    EloRatingSystem,
     GameResult,
+    MapConfig,
+    ScheduledGame,
+    TournamentConfig,
     TournamentResults,
     generate_round_robin_schedule,
 )
@@ -394,7 +391,7 @@ class TestTournamentConfigLibrary:
             "maps": ["maps/test.csv"],
             "output": {
                 "results_dir": "/output/results",
-            }
+            },
         }
         config = TournamentConfig.from_dict(data)
 
@@ -450,14 +447,16 @@ class TestTournamentResultsLibrary:
         results = TournamentResults()
 
         # Add some results
-        results.add_game_result(GameResult(
-            game_id=1, bot1_name="Bot1", bot2_name="Bot2",
-            winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
-        ))
-        results.add_game_result(GameResult(
-            game_id=2, bot1_name="Bot1", bot2_name="Bot2",
-            winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
-        ))
+        results.add_game_result(
+            GameResult(
+                game_id=1, bot1_name="Bot1", bot2_name="Bot2", winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
+            )
+        )
+        results.add_game_result(
+            GameResult(
+                game_id=2, bot1_name="Bot1", bot2_name="Bot2", winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
+            )
+        )
 
         standings = results.get_standings()
 
@@ -471,14 +470,16 @@ class TestTournamentResultsLibrary:
         """Test getting matchup results."""
         results = TournamentResults()
 
-        results.add_game_result(GameResult(
-            game_id=1, bot1_name="Bot1", bot2_name="Bot2",
-            winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
-        ))
-        results.add_game_result(GameResult(
-            game_id=2, bot1_name="Bot2", bot2_name="Bot1",
-            winner=2, winner_name="Bot1", turns=50, map_name="test.csv"
-        ))
+        results.add_game_result(
+            GameResult(
+                game_id=1, bot1_name="Bot1", bot2_name="Bot2", winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
+            )
+        )
+        results.add_game_result(
+            GameResult(
+                game_id=2, bot1_name="Bot2", bot2_name="Bot1", winner=2, winner_name="Bot1", turns=50, map_name="test.csv"
+            )
+        )
 
         matchups = results.get_matchups()
 
@@ -493,10 +494,11 @@ class TestTournamentResultsLibrary:
         """Test handling of draws."""
         results = TournamentResults()
 
-        results.add_game_result(GameResult(
-            game_id=1, bot1_name="Bot1", bot2_name="Bot2",
-            winner=0, winner_name="Draw", turns=100, map_name="test.csv"
-        ))
+        results.add_game_result(
+            GameResult(
+                game_id=1, bot1_name="Bot1", bot2_name="Bot2", winner=0, winner_name="Draw", turns=100, map_name="test.csv"
+            )
+        )
 
         assert results.bot_stats["Bot1"]["draws"] == 1
         assert results.bot_stats["Bot2"]["draws"] == 1
@@ -509,10 +511,11 @@ class TestTournamentResultsLibrary:
         results = TournamentResults()
         results.start()
 
-        results.add_game_result(GameResult(
-            game_id=1, bot1_name="Bot1", bot2_name="Bot2",
-            winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
-        ))
+        results.add_game_result(
+            GameResult(
+                game_id=1, bot1_name="Bot1", bot2_name="Bot2", winner=1, winner_name="Bot1", turns=50, map_name="test.csv"
+            )
+        )
 
         results.finish()
         data = results.to_dict()
@@ -527,14 +530,16 @@ class TestTournamentResultsLibrary:
         """Test per-map statistics tracking."""
         results = TournamentResults()
 
-        results.add_game_result(GameResult(
-            game_id=1, bot1_name="Bot1", bot2_name="Bot2",
-            winner=1, winner_name="Bot1", turns=50, map_name="map1.csv"
-        ))
-        results.add_game_result(GameResult(
-            game_id=2, bot1_name="Bot1", bot2_name="Bot2",
-            winner=2, winner_name="Bot2", turns=50, map_name="map2.csv"
-        ))
+        results.add_game_result(
+            GameResult(
+                game_id=1, bot1_name="Bot1", bot2_name="Bot2", winner=1, winner_name="Bot1", turns=50, map_name="map1.csv"
+            )
+        )
+        results.add_game_result(
+            GameResult(
+                game_id=2, bot1_name="Bot1", bot2_name="Bot2", winner=2, winner_name="Bot2", turns=50, map_name="map2.csv"
+            )
+        )
 
         standings = results.get_standings()
 

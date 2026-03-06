@@ -2,21 +2,20 @@
 Tests for AlphaZero components: neural network, MCTS, trainer, and bot.
 """
 
-import copy
 import numpy as np
 import pytest
 import torch
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet, ResidualBlock
-from reinforcetactics.rl.mcts import MCTS, MCTSNode, _obs_from_game_state
 from reinforcetactics.rl.alphazero_trainer import ReplayBuffer, self_play_game
+from reinforcetactics.rl.mcts import MCTS, MCTSNode, _obs_from_game_state
 from reinforcetactics.utils.file_io import FileIO
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def small_map_data():
@@ -45,8 +44,8 @@ def small_network(game_state):
 # AlphaZeroNet tests
 # ---------------------------------------------------------------------------
 
-class TestAlphaZeroNet:
 
+class TestAlphaZeroNet:
     def test_residual_block_shape(self):
         """Residual block preserves spatial dimensions."""
         block = ResidualBlock(channels=32)
@@ -146,8 +145,8 @@ class TestAlphaZeroNet:
 # MCTS tests
 # ---------------------------------------------------------------------------
 
-class TestMCTS:
 
+class TestMCTS:
     def test_obs_from_game_state(self, game_state):
         """Observation extraction produces correct shapes."""
         w = game_state.grid.width
@@ -185,7 +184,7 @@ class TestMCTS:
         # End turn should be present
         end_turn_idx = 5 * w * h
         assert end_turn_idx in legal_flat
-        assert legal_flat[end_turn_idx]['key'] == 'end_turn'
+        assert legal_flat[end_turn_idx]["key"] == "end_turn"
 
     def test_mcts_search_returns_valid_distribution(self, small_network, game_state):
         """MCTS search returns a valid probability distribution."""
@@ -197,7 +196,7 @@ class TestMCTS:
             grid_width=w,
             grid_height=h,
             num_simulations=5,  # Few simulations for speed
-            device='cpu',
+            device="cpu",
         )
 
         action_probs, value = mcts.search(game_state, add_noise=False)
@@ -220,7 +219,7 @@ class TestMCTS:
             grid_width=w,
             grid_height=h,
             num_simulations=5,
-            device='cpu',
+            device="cpu",
         )
 
         action, probs = mcts.select_action(game_state, temperature=0, add_noise=False)
@@ -239,7 +238,7 @@ class TestMCTS:
             grid_width=w,
             grid_height=h,
             num_simulations=10,
-            device='cpu',
+            device="cpu",
         )
 
         action, probs = mcts.select_action(game_state, temperature=0, add_noise=False)
@@ -255,28 +254,27 @@ class TestMCTS:
             grid_width=w,
             grid_height=h,
             num_simulations=5,
-            device='cpu',
+            device="cpu",
         )
 
         # End turn should always resolve
         end_turn_idx = 5 * w * h
         info = mcts.get_action_info(game_state, end_turn_idx)
         assert info is not None
-        assert info['key'] == 'end_turn'
+        assert info["key"] == "end_turn"
 
 
 # ---------------------------------------------------------------------------
 # ReplayBuffer tests
 # ---------------------------------------------------------------------------
 
-class TestReplayBuffer:
 
+class TestReplayBuffer:
     def test_push_and_len(self):
         buf = ReplayBuffer(capacity=100)
         assert len(buf) == 0
 
-        examples = [(np.zeros(3), np.zeros(3), np.zeros(6),
-                      np.zeros(10), np.zeros(10), 1.0)]
+        examples = [(np.zeros(3), np.zeros(3), np.zeros(6), np.zeros(10), np.zeros(10), 1.0)]
         buf.push(examples)
         assert len(buf) == 1
 
@@ -288,8 +286,7 @@ class TestReplayBuffer:
 
     def test_sample(self):
         buf = ReplayBuffer(capacity=100)
-        examples = [(np.zeros(3), np.zeros(3), np.zeros(6),
-                      np.zeros(10), np.zeros(10), float(i)) for i in range(20)]
+        examples = [(np.zeros(3), np.zeros(3), np.zeros(6), np.zeros(10), np.zeros(10), float(i)) for i in range(20)]
         buf.push(examples)
 
         batch = buf.sample(5)
@@ -315,8 +312,8 @@ class TestReplayBuffer:
 # Self-play game test
 # ---------------------------------------------------------------------------
 
-class TestSelfPlay:
 
+class TestSelfPlay:
     def test_self_play_game_completes(self, small_map_data):
         """A self-play game runs to completion and produces examples."""
         gs = GameState(small_map_data, num_players=2)
@@ -333,7 +330,7 @@ class TestSelfPlay:
             grid_width=gs.grid.width,
             grid_height=gs.grid.height,
             num_simulations=3,  # Minimal for speed
-            device='cpu',
+            device="cpu",
         )
 
         examples, winner = self_play_game(
@@ -372,7 +369,7 @@ class TestSelfPlay:
             grid_width=gs.grid.width,
             grid_height=gs.grid.height,
             num_simulations=3,
-            device='cpu',
+            device="cpu",
         )
 
         examples, winner = self_play_game(
@@ -394,16 +391,18 @@ class TestSelfPlay:
 # Integration test
 # ---------------------------------------------------------------------------
 
-class TestAlphaZeroIntegration:
 
+class TestAlphaZeroIntegration:
     def test_network_on_real_game_state(self, game_state):
         """Network can process a real game state observation."""
         w = game_state.grid.width
         h = game_state.grid.height
 
         network = AlphaZeroNet(
-            grid_height=h, grid_width=w,
-            num_res_blocks=2, channels=32,
+            grid_height=h,
+            grid_width=w,
+            num_res_blocks=2,
+            channels=32,
         )
 
         grid, units, gf, mask = _obs_from_game_state(game_state, w, h)
@@ -425,8 +424,10 @@ class TestAlphaZeroIntegration:
         h = game_state.grid.height
 
         network = AlphaZeroNet(
-            grid_height=h, grid_width=w,
-            num_res_blocks=2, channels=32,
+            grid_height=h,
+            grid_width=w,
+            num_res_blocks=2,
+            channels=32,
         )
         network.eval()
 
@@ -435,14 +436,23 @@ class TestAlphaZeroIntegration:
             grid_width=w,
             grid_height=h,
             num_simulations=5,
-            device='cpu',
+            device="cpu",
         )
 
         action, probs = mcts.select_action(game_state, temperature=0, add_noise=False)
         info = mcts.get_action_info(game_state, action)
 
         assert info is not None
-        assert info['key'] in (
-            'create_unit', 'move', 'attack', 'seize', 'heal', 'cure',
-            'end_turn', 'paralyze', 'haste', 'defence_buff', 'attack_buff',
+        assert info["key"] in (
+            "create_unit",
+            "move",
+            "attack",
+            "seize",
+            "heal",
+            "cure",
+            "end_turn",
+            "paralyze",
+            "haste",
+            "defence_buff",
+            "attack_buff",
         )

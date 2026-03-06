@@ -14,6 +14,7 @@ Example:
 Sprite sheet format (6 columns x 5 rows of 64x64 frames, centre-cropped to 32x32):
     Idle frames are the first 4 cells: [0,0] [0,1] [0,2] [0,3]
 """
+
 import argparse
 import os
 import sys
@@ -26,8 +27,14 @@ except ImportError:
 
 # Unit names matching the animation_path values in constants.py
 UNIT_NAMES = [
-    'warrior', 'mage', 'cleric', 'archer',
-    'knight', 'rogue', 'sorcerer', 'barbarian',
+    "warrior",
+    "mage",
+    "cleric",
+    "archer",
+    "knight",
+    "rogue",
+    "sorcerer",
+    "barbarian",
 ]
 
 # Idle frame coordinates (row, col) from ANIMATION_CONFIG
@@ -67,7 +74,7 @@ def extract_idle_frames(sheet_path, scale=1):
     Returns:
         List of PIL Image frames
     """
-    sheet = Image.open(sheet_path).convert('RGBA')
+    sheet = Image.open(sheet_path).convert("RGBA")
     frames = []
 
     for row, col in IDLE_FRAMES:
@@ -114,7 +121,7 @@ def create_gif(frames, output_path, frame_duration_ms=200):
     for frame in frames:
         # Create a palette-based image with transparency
         # Use a magenta background as the transparent colour
-        bg = Image.new('RGBA', frame.size, (0, 0, 0, 0))
+        bg = Image.new("RGBA", frame.size, (0, 0, 0, 0))
         bg.paste(frame, (0, 0), frame)
 
         # Convert to palette mode, preserving transparency
@@ -135,27 +142,30 @@ def create_gif(frames, output_path, frame_duration_ms=200):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Generate animated GIF idle sprites from unit sprite sheets.'
+    parser = argparse.ArgumentParser(description="Generate animated GIF idle sprites from unit sprite sheets.")
+    parser.add_argument(
+        "sprites_dir",
+        help="Directory containing unit sprite sheet PNG files",
     )
     parser.add_argument(
-        'sprites_dir',
-        help='Directory containing unit sprite sheet PNG files',
+        "--output",
+        "-o",
+        default="docs-site/static/img/units",
+        help="Output directory for generated GIFs (default: docs-site/static/img/units)",
     )
     parser.add_argument(
-        '--output', '-o',
-        default='docs-site/static/img/units',
-        help='Output directory for generated GIFs (default: docs-site/static/img/units)',
+        "--scale",
+        "-s",
+        type=int,
+        default=3,
+        help="Scale factor for output GIFs (default: 3, producing 96x96 GIFs)",
     )
     parser.add_argument(
-        '--scale', '-s',
-        type=int, default=3,
-        help='Scale factor for output GIFs (default: 3, producing 96x96 GIFs)',
-    )
-    parser.add_argument(
-        '--duration', '-d',
-        type=int, default=200,
-        help='Frame duration in milliseconds (default: 200)',
+        "--duration",
+        "-d",
+        type=int,
+        default=200,
+        help="Frame duration in milliseconds (default: 200)",
     )
     args = parser.parse_args()
 
@@ -194,5 +204,5 @@ def main():
     print(f"\nDone: {generated} GIFs generated, {skipped} skipped")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

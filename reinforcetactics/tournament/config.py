@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .schedule import MapConfig
 from .bots import BotDescriptor, BotType
+from .schedule import MapConfig
 
 
 @dataclass
@@ -85,9 +85,7 @@ class TournamentConfig:
             self.replay_dir = str(Path(self.output_dir) / "replays")
 
         if self.log_conversations and self.conversation_log_dir is None:
-            self.conversation_log_dir = str(
-                Path(self.output_dir) / "llm_conversations"
-            )
+            self.conversation_log_dir = str(Path(self.output_dir) / "llm_conversations")
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TournamentConfig":
@@ -110,10 +108,7 @@ class TournamentConfig:
 
             return cls(
                 name=tournament_data.get("name", "Tournament"),
-                maps=[
-                    MapConfig.from_config(m, tournament_data.get("max_turns", 500))
-                    for m in maps_data
-                ],
+                maps=[MapConfig.from_config(m, tournament_data.get("max_turns", 500)) for m in maps_data],
                 map_pool_mode=tournament_data.get("map_pool_mode", "all"),
                 games_per_side=tournament_data.get("games_per_matchup", 2),
                 max_turns=tournament_data.get("max_turns", 500),
@@ -218,7 +213,7 @@ class TournamentConfig:
             errors.append("concurrent_games must be at least 1")
 
         if self.enabled_units is not None:
-            valid_units = {'W', 'M', 'C', 'A', 'K', 'R', 'S', 'B'}
+            valid_units = {"W", "M", "C", "A", "K", "R", "S", "B"}
             invalid = [u for u in self.enabled_units if u not in valid_units]
             if invalid:
                 errors.append(f"Invalid unit types in enabled_units: {invalid}")
@@ -227,9 +222,7 @@ class TournamentConfig:
 
         return errors
 
-    def add_map(
-        self, path: str, max_turns: Optional[int] = None
-    ) -> "TournamentConfig":
+    def add_map(self, path: str, max_turns: Optional[int] = None) -> "TournamentConfig":
         """
         Add a map to the configuration.
 
@@ -240,14 +233,10 @@ class TournamentConfig:
         Returns:
             self for chaining
         """
-        self.maps.append(
-            MapConfig(path=path, max_turns=max_turns or self.max_turns)
-        )
+        self.maps.append(MapConfig(path=path, max_turns=max_turns or self.max_turns))
         return self
 
-    def add_maps_from_directory(
-        self, directory: str, max_turns: Optional[int] = None
-    ) -> "TournamentConfig":
+    def add_maps_from_directory(self, directory: str, max_turns: Optional[int] = None) -> "TournamentConfig":
         """
         Add all CSV maps from a directory.
 

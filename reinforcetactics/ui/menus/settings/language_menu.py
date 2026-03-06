@@ -1,4 +1,5 @@
 """Language selection menu."""
+
 from typing import Optional
 
 import pygame
@@ -10,13 +11,7 @@ from reinforcetactics.utils.language import get_language, reset_language
 class LanguageMenu(Menu):
     """Language selection menu."""
 
-    LANGUAGES = {
-        'en': 'English',
-        'fr': 'Français',
-        'ko': '한국어',
-        'es': 'Español',
-        'zh': '中文'
-    }
+    LANGUAGES = {"en": "English", "fr": "Français", "ko": "한국어", "es": "Español", "zh": "中文"}
 
     def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
         """
@@ -25,14 +20,14 @@ class LanguageMenu(Menu):
         Args:
             screen: Optional pygame surface. If None, creates its own.
         """
-        super().__init__(screen, get_language().get('language.title', 'Select Language'))
+        super().__init__(screen, get_language().get("language.title", "Select Language"))
         self._setup_options()
 
     def _setup_options(self) -> None:
         for code, name in self.LANGUAGES.items():
             self.add_option(name, lambda c=code: self._set_language(c))
 
-        self.add_option(get_language().get('common.back', 'Back'), lambda: None)
+        self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
     def _set_language(self, lang_code: str) -> str:
         """Set the game language."""
@@ -43,7 +38,7 @@ class LanguageMenu(Menu):
         self.options.clear()
 
         # Update menu title to use the new language
-        self.title = self.lang.get('language.title', 'Select Language')
+        self.title = self.lang.get("language.title", "Select Language")
 
         # Rebuild menu options with new language
         self._setup_options()

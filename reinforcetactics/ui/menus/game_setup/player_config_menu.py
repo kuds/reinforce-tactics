@@ -1,16 +1,18 @@
 """Menu for configuring players."""
+
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import pygame
 
-from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 # Import tkinter optionally for file dialog
 try:
     import tkinter as tk
     from tkinter import filedialog
+
     TKINTER_AVAILABLE = True
 except ImportError:
     TKINTER_AVAILABLE = False
@@ -70,11 +72,9 @@ class PlayerConfigMenu:
         # Default: Player 1 is Human, others are Computer (SimpleBot)
         self.player_configs = []
         for i in range(self.num_players):
-            self.player_configs.append({
-                'type': 'human' if i == 0 else 'computer',
-                'bot_type': None if i == 0 else 'SimpleBot',
-                'model_path': None
-            })
+            self.player_configs.append(
+                {"type": "human" if i == 0 else "computer", "bot_type": None if i == 0 else "SimpleBot", "model_path": None}
+            )
 
         # Game options
         self.fog_of_war = False  # Fog of war toggle
@@ -92,11 +92,12 @@ class PlayerConfigMenu:
 
         # Check which LLM providers have API keys configured
         from reinforcetactics.utils.settings import get_settings
+
         settings = get_settings()
         self.available_llm_bots = {
-            'OpenAIBot': bool(settings.get_api_key('openai')),
-            'ClaudeBot': bool(settings.get_api_key('anthropic')),
-            'GeminiBot': bool(settings.get_api_key('google'))
+            "OpenAIBot": bool(settings.get_api_key("openai")),
+            "ClaudeBot": bool(settings.get_api_key("anthropic")),
+            "GeminiBot": bool(settings.get_api_key("google")),
         }
 
         # Check if stable-baselines3 is available for ModelBot
@@ -107,6 +108,7 @@ class PlayerConfigMenu:
         try:
             # pylint: disable=unused-import,import-outside-toplevel
             import stable_baselines3  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -124,20 +126,20 @@ class PlayerConfigMenu:
         try:
             model_file = Path(model_path)
             if not model_file.exists():
-                return {'valid': False, 'error': 'File not found'}
+                return {"valid": False, "error": "File not found"}
 
-            if not model_file.suffix == '.zip':
-                return {'valid': False, 'error': 'Must be a .zip file'}
+            if not model_file.suffix == ".zip":
+                return {"valid": False, "error": "Must be a .zip file"}
 
             # Try to load the model with ModelBot
-            from reinforcetactics.game.model_bot import ModelBot
             from reinforcetactics.core.game_state import GameState
+            from reinforcetactics.game.model_bot import ModelBot
 
             # Create a dummy game state for testing
             # Use a simple 6x6 map for validation
-            dummy_map = [['p' for _ in range(6)] for _ in range(6)]
-            dummy_map[0][0] = 'h_1'  # HQ for player 1
-            dummy_map[5][5] = 'h_2'  # HQ for player 2
+            dummy_map = [["p" for _ in range(6)] for _ in range(6)]
+            dummy_map[0][0] = "h_1"  # HQ for player 1
+            dummy_map[5][5] = "h_2"  # HQ for player 2
 
             dummy_state = GameState(dummy_map, num_players=2)
 
@@ -145,14 +147,14 @@ class PlayerConfigMenu:
             bot = ModelBot(dummy_state, player=2, model_path=str(model_path))
 
             if bot.model is None:
-                return {'valid': False, 'error': 'Failed to load model'}
+                return {"valid": False, "error": "Failed to load model"}
 
-            return {'valid': True, 'error': None}
+            return {"valid": True, "error": None}
 
         except ImportError as e:
-            return {'valid': False, 'error': f'Missing dependency: {e}'}
+            return {"valid": False, "error": f"Missing dependency: {e}"}
         except Exception as e:
-            return {'valid': False, 'error': f'Load error: {str(e)[:50]}'}
+            return {"valid": False, "error": f"Load error: {str(e)[:50]}"}
 
     def _open_file_dialog(self) -> Optional[str]:
         """
@@ -172,9 +174,7 @@ class PlayerConfigMenu:
 
             # Open file dialog
             file_path = filedialog.askopenfilename(
-                title="Select Model File",
-                filetypes=[("Model files", "*.zip"), ("All files", "*.*")],
-                initialdir="."
+                title="Select Model File", filetypes=[("Model files", "*.zip"), ("All files", "*.*")], initialdir="."
             )
 
             # Clean up
@@ -209,72 +209,72 @@ class PlayerConfigMenu:
             if event.button == 1:  # Left mouse button
                 mouse_pos = event.pos
                 for element in self.interactive_elements:
-                    if element['rect'].collidepoint(mouse_pos):
-                        if element['type'] == 'type_toggle':
+                    if element["rect"].collidepoint(mouse_pos):
+                        if element["type"] == "type_toggle":
                             # Toggle between human and computer
-                            player_idx = element['player_idx']
+                            player_idx = element["player_idx"]
                             config = self.player_configs[player_idx]
-                            if config['type'] == 'human':
-                                config['type'] = 'computer'
-                                config['bot_type'] = 'SimpleBot'
-                                config['model_path'] = None
+                            if config["type"] == "human":
+                                config["type"] = "computer"
+                                config["bot_type"] = "SimpleBot"
+                                config["model_path"] = None
                             else:
-                                config['type'] = 'human'
-                                config['bot_type'] = None
-                                config['model_path'] = None
+                                config["type"] = "human"
+                                config["bot_type"] = None
+                                config["model_path"] = None
                                 # Clear validation
                                 if player_idx in self.model_validation:
                                     del self.model_validation[player_idx]
 
-                        elif element['type'] == 'difficulty_select':
+                        elif element["type"] == "difficulty_select":
                             # Cycle through available bot types (only those with API keys)
-                            player_idx = element['player_idx']
+                            player_idx = element["player_idx"]
                             config = self.player_configs[player_idx]
-                            if config['type'] == 'computer':
+                            if config["type"] == "computer":
                                 # Build list of available bot types
                                 # All built-in bots are always available
-                                bot_types = ['SimpleBot', 'MediumBot', 'AdvancedBot']
+                                bot_types = ["SimpleBot", "MediumBot", "AdvancedBot"]
                                 for bot_name, is_available in self.available_llm_bots.items():
                                     if is_available:
                                         bot_types.append(bot_name)
                                 # Add ModelBot if dependencies are available
                                 if self.modelbot_available:
-                                    bot_types.append('ModelBot')
+                                    bot_types.append("ModelBot")
 
-                                current_bot = config['bot_type']
+                                current_bot = config["bot_type"]
                                 try:
                                     current_idx = bot_types.index(current_bot)
                                     next_idx = (current_idx + 1) % len(bot_types)
-                                    config['bot_type'] = bot_types[next_idx]
+                                    config["bot_type"] = bot_types[next_idx]
                                     # Clear model path if switching away from ModelBot
-                                    if bot_types[next_idx] != 'ModelBot':
-                                        config['model_path'] = None
+                                    if bot_types[next_idx] != "ModelBot":
+                                        config["model_path"] = None
                                         if player_idx in self.model_validation:
                                             del self.model_validation[player_idx]
                                 except ValueError:
                                     # If current bot type is not in list, default to SimpleBot
-                                    config['bot_type'] = 'SimpleBot'
+                                    config["bot_type"] = "SimpleBot"
 
-                        elif element['type'] == 'browse_model':
+                        elif element["type"] == "browse_model":
                             # Open file dialog to select model
-                            player_idx = element['player_idx']
+                            player_idx = element["player_idx"]
                             config = self.player_configs[player_idx]
 
                             file_path = self._open_file_dialog()
                             if file_path:
-                                config['model_path'] = file_path
+                                config["model_path"] = file_path
                                 # Validate the model
                                 validation = self._validate_model(file_path)
                                 self.model_validation[player_idx] = validation
 
-                        elif element['type'] == 'fog_of_war_toggle':
+                        elif element["type"] == "fog_of_war_toggle":
                             # Toggle fog of war
                             self.fog_of_war = not self.fog_of_war
 
-                        elif element['type'] == 'start_button':
+                        elif element["type"] == "start_button":
                             return self._get_result()
 
-                        elif element['type'] == 'back_button':
+                        elif element["type"] == "back_button":
                             self.running = False
                             return None
 
@@ -283,7 +283,7 @@ class PlayerConfigMenu:
             mouse_pos = event.pos
             self.hover_element = None
             for element in self.interactive_elements:
-                if element['rect'].collidepoint(mouse_pos):
+                if element["rect"].collidepoint(mouse_pos):
                     self.hover_element = element
                     break
 
@@ -298,23 +298,20 @@ class PlayerConfigMenu:
         """
         # Check if any ModelBot has invalid or missing model
         for i, config in enumerate(self.player_configs):
-            if config['type'] == 'computer' and config['bot_type'] == 'ModelBot':
-                if not config.get('model_path'):
+            if config["type"] == "computer" and config["bot_type"] == "ModelBot":
+                if not config.get("model_path"):
                     # Show error message
-                    print(f"⚠️  Player {i+1}: ModelBot requires a model file")
+                    print(f"⚠️  Player {i + 1}: ModelBot requires a model file")
                     return None
 
                 # Check validation status
                 validation = self.model_validation.get(i, {})
-                if not validation.get('valid', False):
-                    error = validation.get('error', 'Unknown error')
-                    print(f"⚠️  Player {i+1}: Model validation failed - {error}")
+                if not validation.get("valid", False):
+                    error = validation.get("error", "Unknown error")
+                    print(f"⚠️  Player {i + 1}: Model validation failed - {error}")
                     return None
 
-        return {
-            'players': self.player_configs,
-            'fog_of_war': self.fog_of_war
-        }
+        return {"players": self.player_configs, "fog_of_war": self.fog_of_war}
 
     def draw(self) -> None:
         """Draw the player configuration menu."""
@@ -324,7 +321,7 @@ class PlayerConfigMenu:
         screen_width = self.screen.get_width()
 
         # Draw title
-        title = self.lang.get('player_config.title', 'Configure Players')
+        title = self.lang.get("player_config.title", "Configure Players")
         title_surface = self.title_font.render(title, True, self.title_color)
         title_rect = title_surface.get_rect(centerx=screen_width // 2, y=30)
         self.screen.blit(title_surface, title_rect)
@@ -340,72 +337,63 @@ class PlayerConfigMenu:
             y_pos = start_y + i * spacing_y
 
             # Player label
-            player_label = self.lang.get(
-                'player_config.player',
-                'Player {number}'
-            ).format(number=i + 1)
+            player_label = self.lang.get("player_config.player", "Player {number}").format(number=i + 1)
             label_surface = self.label_font.render(player_label, True, self.text_color)
             label_rect = label_surface.get_rect(x=50, y=y_pos)
             self.screen.blit(label_surface, label_rect)
 
             # Type toggle button (Human/Computer)
             type_x = 200
-            if config['type'] == 'human':
-                type_text = self.lang.get('player_config.type_human', 'Human')
+            if config["type"] == "human":
+                type_text = self.lang.get("player_config.type_human", "Human")
             else:
-                type_text = self.lang.get('player_config.type_computer', 'Computer')
-            self._draw_button(type_x, y_pos, type_text, 'type_toggle', i)
+                type_text = self.lang.get("player_config.type_computer", "Computer")
+            self._draw_button(type_x, y_pos, type_text, "type_toggle", i)
 
             # Difficulty selection (only shown if computer)
-            if config['type'] == 'computer':
+            if config["type"] == "computer":
                 diff_x = 400
-                bot_type = config.get('bot_type', 'SimpleBot')
+                bot_type = config.get("bot_type", "SimpleBot")
                 # Get display text for bot type
                 bot_display_names = {
-                    'SimpleBot': 'Simple Bot',
-                    'MediumBot': 'Medium Bot',
-                    'AdvancedBot': 'Advanced Bot',
-                    'OpenAIBot': 'OpenAI (GPT)',
-                    'ClaudeBot': 'Claude',
-                    'GeminiBot': 'Gemini',
-                    'ModelBot': 'Custom Model'
+                    "SimpleBot": "Simple Bot",
+                    "MediumBot": "Medium Bot",
+                    "AdvancedBot": "Advanced Bot",
+                    "OpenAIBot": "OpenAI (GPT)",
+                    "ClaudeBot": "Claude",
+                    "GeminiBot": "Gemini",
+                    "ModelBot": "Custom Model",
                 }
                 diff_text = bot_display_names.get(bot_type, bot_type)
 
                 # Add indicator if bot is unavailable (no API key)
                 if bot_type in self.available_llm_bots and not self.available_llm_bots[bot_type]:
-                    diff_text += ' (No API Key)'
+                    diff_text += " (No API Key)"
 
-                self._draw_button(
-                    diff_x, y_pos, diff_text,
-                    'difficulty_select', i, disabled=False
-                )
+                self._draw_button(diff_x, y_pos, diff_text, "difficulty_select", i, disabled=False)
 
                 # If ModelBot is selected, show browse button and model status
-                if bot_type == 'ModelBot':
+                if bot_type == "ModelBot":
                     # Browse button
                     browse_x = 590
-                    self._draw_button(
-                        browse_x, y_pos, 'Browse...',
-                        'browse_model', i, disabled=False
-                    )
+                    self._draw_button(browse_x, y_pos, "Browse...", "browse_model", i, disabled=False)
 
                     # Show model status below
-                    model_path = config.get('model_path')
+                    model_path = config.get("model_path")
                     if model_path:
                         # Show filename
                         filename = Path(model_path).name
                         # Truncate if too long
                         if len(filename) > 30:
-                            filename = filename[:27] + '...'
+                            filename = filename[:27] + "..."
 
                         # Check validation status
                         validation = self.model_validation.get(i, {})
-                        if validation.get('valid'):
+                        if validation.get("valid"):
                             status_text = f"✓ {filename}"
                             status_color = (100, 255, 100)  # Green
                         else:
-                            error = validation.get('error', 'Invalid')
+                            error = validation.get("error", "Invalid")
                             status_text = f"✗ {error}"
                             status_color = (255, 100, 100)  # Red
                     else:
@@ -422,68 +410,64 @@ class PlayerConfigMenu:
 
         # Draw divider line
         divider_y = options_y
-        pygame.draw.line(
-            self.screen,
-            (60, 60, 80),
-            (50, divider_y),
-            (screen_width - 50, divider_y),
-            2
-        )
+        pygame.draw.line(self.screen, (60, 60, 80), (50, divider_y), (screen_width - 50, divider_y), 2)
 
         # Game Options label
-        options_label = self.lang.get('player_config.game_options', 'Game Options')
+        options_label = self.lang.get("player_config.game_options", "Game Options")
         options_surface = self.label_font.render(options_label, True, self.title_color)
         options_rect = options_surface.get_rect(x=50, y=divider_y + 10)
         self.screen.blit(options_surface, options_rect)
 
         # Fog of War toggle
         fow_y = divider_y + 50
-        fow_label = self.lang.get('player_config.fog_of_war', 'Fog of War')
+        fow_label = self.lang.get("player_config.fog_of_war", "Fog of War")
         fow_label_surface = self.option_font.render(fow_label, True, self.text_color)
         self.screen.blit(fow_label_surface, (50, fow_y))
 
-        fow_status = self.lang.get('common.enabled', 'Enabled') if self.fog_of_war else self.lang.get('common.disabled', 'Disabled')
+        fow_status = (
+            self.lang.get("common.enabled", "Enabled") if self.fog_of_war else self.lang.get("common.disabled", "Disabled")
+        )
         fow_color = (100, 255, 100) if self.fog_of_war else (150, 150, 150)
-        self._draw_toggle_button(200, fow_y - 5, fow_status, 'fog_of_war_toggle', fow_color)
+        self._draw_toggle_button(200, fow_y - 5, fow_status, "fog_of_war_toggle", fow_color)
 
         # Draw Start Game button
         # Add extra spacing if any player uses ModelBot (for status text)
-        extra_spacing = 30 if any(
-            c['bot_type'] == 'ModelBot' for c in self.player_configs
-        ) else 0
+        extra_spacing = 30 if any(c["bot_type"] == "ModelBot" for c in self.player_configs) else 0
         start_y_pos = fow_y + 50 + extra_spacing
-        start_text = self.lang.get('player_config.start_game', 'Start Game')
+        start_text = self.lang.get("player_config.start_game", "Start Game")
 
         # Disable start button if any ModelBot has invalid/missing model
         start_disabled = False
         for i, config in enumerate(self.player_configs):
-            if config['type'] == 'computer' and config['bot_type'] == 'ModelBot':
-                if not config.get('model_path'):
+            if config["type"] == "computer" and config["bot_type"] == "ModelBot":
+                if not config.get("model_path"):
                     start_disabled = True
                     break
                 validation = self.model_validation.get(i, {})
-                if not validation.get('valid', False):
+                if not validation.get("valid", False):
                     start_disabled = True
                     break
 
         self._draw_button(
-            screen_width // 2 - 100, start_y_pos, start_text,
-            'start_button', centered=True, disabled=start_disabled
+            screen_width // 2 - 100, start_y_pos, start_text, "start_button", centered=True, disabled=start_disabled
         )
 
         # Draw Back button
-        back_text = self.lang.get('common.back', 'Back')
-        self._draw_button(
-            screen_width // 2 - 100, start_y_pos + 60,
-            back_text, 'back_button', centered=True
-        )
+        back_text = self.lang.get("common.back", "Back")
+        self._draw_button(screen_width // 2 - 100, start_y_pos + 60, back_text, "back_button", centered=True)
 
         pygame.display.flip()
 
     def _draw_button(
-            self, x: int, y: int, text: str, element_type: str,
-            player_idx: int = -1, centered: bool = False,
-            disabled: bool = False) -> pygame.Rect:
+        self,
+        x: int,
+        y: int,
+        text: str,
+        element_type: str,
+        player_idx: int = -1,
+        centered: bool = False,
+        disabled: bool = False,
+    ) -> pygame.Rect:
         """
         Draw a button and register it as an interactive element.
 
@@ -523,11 +507,7 @@ class PlayerConfigMenu:
         button_rect = pygame.Rect(button_x, y, button_width, button_height)
 
         # Determine styling
-        is_hovered = (
-            self.hover_element
-            and self.hover_element.get('rect') == button_rect
-            and not disabled
-        )
+        is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect and not disabled
 
         if is_hovered:
             bg_color = self.option_bg_hover_color
@@ -549,17 +529,13 @@ class PlayerConfigMenu:
 
         # Register as interactive element if not disabled
         if not disabled:
-            self.interactive_elements.append({
-                'type': element_type,
-                'rect': button_rect,
-                'player_idx': player_idx
-            })
+            self.interactive_elements.append({"type": element_type, "rect": button_rect, "player_idx": player_idx})
 
         return button_rect
 
     def _draw_toggle_button(
-            self, x: int, y: int, text: str, element_type: str,
-            text_color: tuple = (255, 255, 255)) -> pygame.Rect:
+        self, x: int, y: int, text: str, element_type: str, text_color: tuple = (255, 255, 255)
+    ) -> pygame.Rect:
         """
         Draw a toggle button for game options.
 
@@ -587,10 +563,7 @@ class PlayerConfigMenu:
         button_rect = pygame.Rect(x, y, button_width, button_height)
 
         # Determine styling
-        is_hovered = (
-            self.hover_element
-            and self.hover_element.get('rect') == button_rect
-        )
+        is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect
 
         if is_hovered:
             bg_color = self.option_bg_hover_color
@@ -608,11 +581,7 @@ class PlayerConfigMenu:
         self.screen.blit(text_surface, text_rect)
 
         # Register as interactive element
-        self.interactive_elements.append({
-            'type': element_type,
-            'rect': button_rect,
-            'player_idx': -1
-        })
+        self.interactive_elements.append({"type": element_type, "rect": button_rect, "player_idx": -1})
 
         return button_rect
 

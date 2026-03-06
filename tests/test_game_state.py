@@ -1,26 +1,27 @@
 """Tests for GameState class, specifically win conditions."""
-import pytest
+
 import numpy as np
+import pytest
+
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.core.unit import Unit
 
 
 @pytest.fixture
 def simple_game():
     """Create a simple game state for testing."""
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
-    map_data[0][0] = 'h_1'  # HQ for player 1
-    map_data[9][9] = 'h_2'  # HQ for player 2
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data[0][0] = "h_1"  # HQ for player 1
+    map_data[9][9] = "h_2"  # HQ for player 2
     return GameState(map_data, num_players=2)
 
 
 @pytest.fixture
 def game_with_building():
     """Create a game state with a building for unit creation tests."""
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
-    map_data[0][0] = 'h_1'  # HQ for player 1
-    map_data[1][1] = 'b_1'  # Building for player 1
-    map_data[9][9] = 'h_2'  # HQ for player 2
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data[0][0] = "h_1"  # HQ for player 1
+    map_data[1][1] = "b_1"  # Building for player 1
+    map_data[9][9] = "h_2"  # HQ for player 2
     return GameState(map_data, num_players=2)
 
 
@@ -36,7 +37,7 @@ class TestUnitCreationRestrictions:
         legal_actions = simple_game.get_legal_actions(player=1)
 
         # No create_unit actions should be available (no Buildings, only HQ)
-        assert len(legal_actions['create_unit']) == 0
+        assert len(legal_actions["create_unit"]) == 0
 
     def test_building_can_create_units(self, game_with_building):
         """Test that Buildings can create units."""
@@ -47,12 +48,11 @@ class TestUnitCreationRestrictions:
         legal_actions = game_with_building.get_legal_actions(player=1)
 
         # Create unit actions should be available at the Building
-        assert len(legal_actions['create_unit']) > 0
+        assert len(legal_actions["create_unit"]) > 0
 
         # All create_unit actions should be at the Building location (1, 1), not HQ (0, 0)
-        for action in legal_actions['create_unit']:
-            assert action['x'] == 1 and action['y'] == 1, \
-                "Unit creation should only be at Building (1,1), not HQ (0,0)"
+        for action in legal_actions["create_unit"]:
+            assert action["x"] == 1 and action["y"] == 1, "Unit creation should only be at Building (1,1), not HQ (0,0)"
 
     def test_hq_not_in_legal_create_actions(self, game_with_building):
         """Test that HQ location is never in create_unit legal actions."""
@@ -63,10 +63,7 @@ class TestUnitCreationRestrictions:
         legal_actions = game_with_building.get_legal_actions(player=1)
 
         # Check that no action has HQ coordinates
-        hq_actions = [
-            action for action in legal_actions['create_unit']
-            if action['x'] == 0 and action['y'] == 0
-        ]
+        hq_actions = [action for action in legal_actions["create_unit"] if action["x"] == 0 and action["y"] == 0]
         assert len(hq_actions) == 0, "HQ should not allow unit creation"
 
 
@@ -76,8 +73,8 @@ class TestUnitEliminationWinCondition:
     def test_game_ends_when_target_player_loses_last_unit(self, simple_game):
         """Test game ends when target is killed and they have no remaining units."""
         # Create attacker for player 1 and a single target for player 2
-        attacker = simple_game.create_unit('W', 5, 5, player=1)
-        target = simple_game.create_unit('C', 6, 5, player=2)  # Cleric has 8 HP
+        attacker = simple_game.create_unit("W", 5, 5, player=1)
+        target = simple_game.create_unit("C", 6, 5, player=2)  # Cleric has 8 HP
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -88,7 +85,7 @@ class TestUnitEliminationWinCondition:
         result = simple_game.attack(attacker, target)
 
         # Verify target is killed
-        assert result['target_alive'] is False
+        assert result["target_alive"] is False
         assert target not in simple_game.units
 
         # Verify game is over and player 1 won
@@ -98,8 +95,8 @@ class TestUnitEliminationWinCondition:
     def test_game_ends_when_attacker_player_loses_last_unit(self, simple_game):
         """Test game ends when attacker dies via counter-attack and they have no remaining units."""
         # Create a weak attacker for player 1 and a strong defender for player 2
-        attacker = simple_game.create_unit('C', 5, 5, player=1)  # Cleric has 8 HP, 2 attack
-        defender = simple_game.create_unit('W', 6, 5, player=2)  # Warrior has 15 HP, 10 attack
+        attacker = simple_game.create_unit("C", 5, 5, player=1)  # Cleric has 8 HP, 2 attack
+        defender = simple_game.create_unit("W", 6, 5, player=2)  # Warrior has 15 HP, 10 attack
 
         # Pre-damage the Cleric so it will die from counter-attack
         # Warrior counter does 6 damage (10 * 0.8 counter * 0.8 defense reduction)
@@ -115,7 +112,7 @@ class TestUnitEliminationWinCondition:
         result = simple_game.attack(attacker, defender)
 
         # Verify attacker is killed by counter
-        assert result['attacker_alive'] is False
+        assert result["attacker_alive"] is False
         assert attacker not in simple_game.units
 
         # Verify game is over and player 2 won
@@ -128,9 +125,9 @@ class TestUnitEliminationWinCondition:
         simple_game.player_gold[2] = 500
 
         # Create attacker for player 1 and two units for player 2
-        attacker = simple_game.create_unit('W', 5, 5, player=1)
-        target = simple_game.create_unit('C', 6, 5, player=2)  # Will be killed
-        survivor = simple_game.create_unit('W', 7, 7, player=2)  # Will survive
+        attacker = simple_game.create_unit("W", 5, 5, player=1)
+        target = simple_game.create_unit("C", 6, 5, player=2)  # Will be killed
+        _survivor = simple_game.create_unit("W", 7, 7, player=2)  # Will survive
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -140,7 +137,7 @@ class TestUnitEliminationWinCondition:
         result = simple_game.attack(attacker, target)
 
         # Verify target is killed
-        assert result['target_alive'] is False
+        assert result["target_alive"] is False
         assert target not in simple_game.units
 
         # Verify game is NOT over because player 2 still has a unit
@@ -154,8 +151,8 @@ class TestUnitEliminationWinCondition:
         simple_game.player_gold[1] = 300
 
         # Create two units - a weak attacker and strong defender to ensure counter-kill
-        attacker = simple_game.create_unit('C', 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
-        defender = simple_game.create_unit('W', 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
+        attacker = simple_game.create_unit("C", 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
+        defender = simple_game.create_unit("W", 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
 
         # Damage attacker so counter-attack will kill it
         # Warrior counter: 10 attack - 3 defense = 7 damage * 0.9 = 6.3 -> 6 damage
@@ -173,8 +170,8 @@ class TestUnitEliminationWinCondition:
         result = simple_game.attack(attacker, defender)
 
         # Attacker should die from counter, but defender survives with 1 HP
-        assert result['target_alive'] is True  # Defender survives with 1 HP
-        assert result['attacker_alive'] is False  # Attacker dies from counter
+        assert result["target_alive"] is True  # Defender survives with 1 HP
+        assert result["attacker_alive"] is False  # Attacker dies from counter
 
         # Only one player has no units (player 1)
         assert simple_game.game_over is True
@@ -183,18 +180,18 @@ class TestUnitEliminationWinCondition:
     def test_unit_elimination_with_hq_still_owned(self, simple_game):
         """Test that losing all units ends the game even if player owns HQ."""
         # Player 2 owns HQ at (9,9) but will lose their only unit
-        attacker = simple_game.create_unit('W', 5, 5, player=1)
-        target = simple_game.create_unit('C', 6, 5, player=2)
+        attacker = simple_game.create_unit("W", 5, 5, player=1)
+        target = simple_game.create_unit("C", 6, 5, player=2)
 
         # Verify player 2 owns HQ
         hq_tile = simple_game.grid.get_tile(9, 9)
-        assert hq_tile.type == 'h'
+        assert hq_tile.type == "h"
         assert hq_tile.player == 2
 
         # Kill player 2's only unit
         result = simple_game.attack(attacker, target)
 
         # Game should end even though player 2 still owns their HQ
-        assert result['target_alive'] is False
+        assert result["target_alive"] is False
         assert simple_game.game_over is True
         assert simple_game.winner == 1

@@ -4,9 +4,10 @@ Cross-platform UI icons module.
 Generates simple geometric icons programmatically using pygame drawing,
 ensuring consistent appearance across Windows, macOS, and Linux.
 """
-from typing import Tuple, Dict
-import pygame
 
+from typing import Dict, Tuple
+
+import pygame
 
 # Icon cache to avoid regenerating icons
 _icon_cache: Dict[str, pygame.Surface] = {}
@@ -19,9 +20,7 @@ def _ensure_pygame_init() -> None:
 
 
 def get_arrow_up_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (200, 180, 100),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (200, 180, 100), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate an upward-pointing arrow icon.
@@ -58,9 +57,7 @@ def get_arrow_up_icon(
 
 
 def get_arrow_down_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (200, 180, 100),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (200, 180, 100), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a downward-pointing arrow icon.
@@ -100,7 +97,7 @@ def get_checkmark_icon(
     size: int = 16,
     color: Tuple[int, int, int] = (50, 200, 50),
     bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
-    thickness: int = 0
+    thickness: int = 0,
 ) -> pygame.Surface:
     """
     Generate a checkmark icon.
@@ -148,7 +145,7 @@ def get_x_icon(
     size: int = 16,
     color: Tuple[int, int, int] = (200, 50, 50),
     bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
-    thickness: int = 0
+    thickness: int = 0,
 ) -> pygame.Surface:
     """
     Generate an X (cross) icon.
@@ -191,9 +188,7 @@ def get_x_icon(
 
 
 def get_play_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a play icon (right-pointing triangle).
@@ -228,9 +223,7 @@ def get_play_icon(
 
 
 def get_pause_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a pause icon (two vertical bars).
@@ -273,9 +266,7 @@ def get_pause_icon(
 
 
 def get_arrow_left_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a left-pointing arrow icon.
@@ -310,9 +301,7 @@ def get_arrow_left_icon(
 
 
 def get_arrow_right_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a right-pointing arrow icon.
@@ -333,7 +322,7 @@ def get_restart_icon(
     size: int = 16,
     color: Tuple[int, int, int] = (255, 255, 255),
     bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
-    thickness: int = 0
+    thickness: int = 0,
 ) -> pygame.Surface:
     """
     Generate a restart/refresh icon (circular arrow).
@@ -397,11 +386,7 @@ def get_restart_icon(
     wing2_y = base_center_y + arrow_width * 0.5 * math.sin(perp_rad)
 
     # Draw the arrowhead triangle
-    arrow_points = [
-        (arrow_tip_x, arrow_tip_y),
-        (wing1_x, wing1_y),
-        (wing2_x, wing2_y)
-    ]
+    arrow_points = [(arrow_tip_x, arrow_tip_y), (wing1_x, wing1_y), (wing2_x, wing2_y)]
     pygame.draw.polygon(surface, color, arrow_points)
 
     # Step 2: Draw the circular arc connecting into the arrowhead
@@ -438,9 +423,7 @@ def get_restart_icon(
 
 
 def get_skip_back_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a skip back icon (vertical bar + two left triangles).
@@ -473,21 +456,13 @@ def get_skip_back_icon(
     # First triangle (left)
     t1_left = padding + bar_width + 2
     t1_right = t1_left + triangle_width
-    triangle1 = [
-        (t1_right, padding),
-        (t1_right, size - padding),
-        (t1_left, size // 2)
-    ]
+    triangle1 = [(t1_right, padding), (t1_right, size - padding), (t1_left, size // 2)]
     pygame.draw.polygon(surface, color, triangle1)
 
     # Second triangle (right)
     t2_left = t1_right
     t2_right = t2_left + triangle_width
-    triangle2 = [
-        (t2_right, padding),
-        (t2_right, size - padding),
-        (t2_left, size // 2)
-    ]
+    triangle2 = [(t2_right, padding), (t2_right, size - padding), (t2_left, size // 2)]
     pygame.draw.polygon(surface, color, triangle2)
 
     _icon_cache[cache_key] = surface
@@ -495,9 +470,7 @@ def get_skip_back_icon(
 
 
 def get_skip_forward_icon(
-    size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a skip forward icon (two right triangles + vertical bar).
@@ -526,21 +499,13 @@ def get_skip_forward_icon(
     # First triangle (left)
     t1_left = padding
     t1_right = t1_left + triangle_width
-    triangle1 = [
-        (t1_left, padding),
-        (t1_left, size - padding),
-        (t1_right, size // 2)
-    ]
+    triangle1 = [(t1_left, padding), (t1_left, size - padding), (t1_right, size // 2)]
     pygame.draw.polygon(surface, color, triangle1)
 
     # Second triangle (right)
     t2_left = t1_right
     t2_right = t2_left + triangle_width
-    triangle2 = [
-        (t2_left, padding),
-        (t2_left, size - padding),
-        (t2_right, size // 2)
-    ]
+    triangle2 = [(t2_left, padding), (t2_left, size - padding), (t2_right, size // 2)]
     pygame.draw.polygon(surface, color, triangle2)
 
     # Vertical bar on the right

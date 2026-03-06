@@ -1,13 +1,16 @@
 """
 Tests for save/load and replay functionality.
 """
+
 import json
+import os
 import tempfile
 from pathlib import Path
-import os
+
 import numpy as np
-import pytest
 import pygame
+import pytest
+
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
 
@@ -15,13 +18,16 @@ from reinforcetactics.utils.file_io import FileIO
 @pytest.fixture
 def simple_map():
     """Create a simple test map."""
-    map_data = np.array([
-        ['o', 'o', 'o', 'o', 'o'],
-        ['o', 'h_1', 'b_1', 'o', 'o'],
-        ['o', 'o', 'o', 'o', 'o'],
-        ['o', 'o', 'b_2', 'h_2', 'o'],
-        ['o', 'o', 'o', 'o', 'o']
-    ], dtype=object)
+    map_data = np.array(
+        [
+            ["o", "o", "o", "o", "o"],
+            ["o", "h_1", "b_1", "o", "o"],
+            ["o", "o", "o", "o", "o"],
+            ["o", "o", "b_2", "h_2", "o"],
+            ["o", "o", "o", "o", "o"],
+        ],
+        dtype=object,
+    )
     return map_data
 
 
@@ -29,14 +35,11 @@ def simple_map():
 def game_with_actions(simple_map):
     """Create a game with some actions."""
     game = GameState(simple_map, num_players=2)
-    game.player_configs = [
-        {'type': 'human', 'bot_type': None},
-        {'type': 'computer', 'bot_type': 'SimpleBot'}
-    ]
+    game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
 
     # Create some units and perform actions
-    unit1 = game.create_unit('W', 1, 1, player=1)
-    _ = game.create_unit('W', 3, 3, player=2)  # Create unit but not used in test
+    unit1 = game.create_unit("W", 1, 1, player=1)
+    _ = game.create_unit("W", 3, 3, player=2)  # Create unit but not used in test
 
     if unit1:
         game.move_unit(unit1, 2, 1)
@@ -79,7 +82,7 @@ class TestInitialMapStorage:
         game = GameState(simple_map, num_players=2)
 
         # Check that initial_map_data attribute exists and is a list
-        assert hasattr(game, 'initial_map_data')
+        assert hasattr(game, "initial_map_data")
         assert isinstance(game.initial_map_data, list)
         assert len(game.initial_map_data) == 5  # 5 rows
         assert len(game.initial_map_data[0]) == 5  # 5 columns
@@ -87,19 +90,17 @@ class TestInitialMapStorage:
     def test_initial_map_in_replay_info(self, game_with_actions):
         """Test that initial map is included in replay game_info."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             # Load and check replay data
             replay_data = FileIO.load_replay(replay_path)
 
-            assert 'game_info' in replay_data
-            assert 'initial_map' in replay_data['game_info']
-            assert isinstance(replay_data['game_info']['initial_map'], list)
+            assert "game_info" in replay_data
+            assert "initial_map" in replay_data["game_info"]
+            assert isinstance(replay_data["game_info"]["initial_map"], list)
 
             # Verify map structure
-            initial_map = replay_data['game_info']['initial_map']
+            initial_map = replay_data["game_info"]["initial_map"]
             assert len(initial_map) == 5
             assert len(initial_map[0]) == 5
 
@@ -110,32 +111,26 @@ class TestPlayerConfigs:
     def test_player_configs_saved(self, simple_map):
         """Test that player_configs are saved in game state."""
         game = GameState(simple_map, num_players=2)
-        game.player_configs = [
-            {'type': 'human', 'bot_type': None},
-            {'type': 'computer', 'bot_type': 'SimpleBot'}
-        ]
+        game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
 
         save_data = game.to_dict()
 
-        assert 'player_configs' in save_data
-        assert len(save_data['player_configs']) == 2
-        assert save_data['player_configs'][0]['type'] == 'human'
-        assert save_data['player_configs'][1]['type'] == 'computer'
+        assert "player_configs" in save_data
+        assert len(save_data["player_configs"]) == 2
+        assert save_data["player_configs"][0]["type"] == "human"
+        assert save_data["player_configs"][1]["type"] == "computer"
 
     def test_player_configs_restored(self, simple_map):
         """Test that player_configs are restored from saved data."""
         game = GameState(simple_map, num_players=2)
-        game.player_configs = [
-            {'type': 'human', 'bot_type': None},
-            {'type': 'computer', 'bot_type': 'SimpleBot'}
-        ]
+        game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
 
         save_data = game.to_dict()
         restored_game = GameState.from_dict(save_data, simple_map)
 
         assert len(restored_game.player_configs) == 2
-        assert restored_game.player_configs[0]['type'] == 'human'
-        assert restored_game.player_configs[1]['type'] == 'computer'
+        assert restored_game.player_configs[0]["type"] == "human"
+        assert restored_game.player_configs[1]["type"] == "computer"
 
     def test_backward_compatibility_no_player_configs(self, simple_map):
         """Test that old saves without player_configs still load."""
@@ -143,7 +138,7 @@ class TestPlayerConfigs:
         save_data = game.to_dict()
 
         # Remove player_configs to simulate old save
-        del save_data['player_configs']
+        del save_data["player_configs"]
 
         restored_game = GameState.from_dict(save_data, simple_map)
 
@@ -153,167 +148,150 @@ class TestPlayerConfigs:
     def test_player_configs_in_replay(self, game_with_actions):
         """Test that player_configs are included in replay."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            assert 'game_info' in replay_data
-            assert 'player_configs' in replay_data['game_info']
-            assert len(replay_data['game_info']['player_configs']) == 2
+            assert "game_info" in replay_data
+            assert "player_configs" in replay_data["game_info"]
+            assert len(replay_data["game_info"]["player_configs"]) == 2
 
     def test_max_turns_in_replay(self, simple_map):
         """Test that max_turns is included in replay."""
         game = GameState(simple_map, num_players=2)
         game.max_turns = 100
         game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
-            {'type': 'computer', 'bot_type': 'SimpleBot', 'player_name': 'SimpleBot'}
+            {"type": "human", "bot_type": None, "player_name": "Human"},
+            {"type": "computer", "bot_type": "SimpleBot", "player_name": "SimpleBot"},
         ]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            assert 'game_info' in replay_data
-            assert 'max_turns' in replay_data['game_info']
-            assert replay_data['game_info']['max_turns'] == 100
+            assert "game_info" in replay_data
+            assert "max_turns" in replay_data["game_info"]
+            assert replay_data["game_info"]["max_turns"] == 100
 
     def test_max_turns_defaults_to_null(self, simple_map):
         """Test that max_turns defaults to null when not set."""
         game = GameState(simple_map, num_players=2)
         game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
-            {'type': 'computer', 'bot_type': 'SimpleBot', 'player_name': 'SimpleBot'}
+            {"type": "human", "bot_type": None, "player_name": "Human"},
+            {"type": "computer", "bot_type": "SimpleBot", "player_name": "SimpleBot"},
         ]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            assert 'game_info' in replay_data
-            assert 'max_turns' in replay_data['game_info']
-            assert replay_data['game_info']['max_turns'] is None
+            assert "game_info" in replay_data
+            assert "max_turns" in replay_data["game_info"]
+            assert replay_data["game_info"]["max_turns"] is None
 
     def test_enhanced_player_configs_structure(self, simple_map):
         """Test that player_configs has enhanced structure in replay."""
         game = GameState(simple_map, num_players=2)
         game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
-            {'type': 'computer', 'bot_type': 'SimpleBot', 'player_name': 'SimpleBot'}
+            {"type": "human", "bot_type": None, "player_name": "Human"},
+            {"type": "computer", "bot_type": "SimpleBot", "player_name": "SimpleBot"},
         ]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            assert 'game_info' in replay_data
-            player_configs = replay_data['game_info']['player_configs']
+            assert "game_info" in replay_data
+            player_configs = replay_data["game_info"]["player_configs"]
             assert len(player_configs) == 2
 
             # Check player 1 (human)
-            assert player_configs[0]['player_no'] == 1
-            assert player_configs[0]['type'] == 'human'
-            assert player_configs[0]['name'] == 'Human'
+            assert player_configs[0]["player_no"] == 1
+            assert player_configs[0]["type"] == "human"
+            assert player_configs[0]["name"] == "Human"
 
             # Check player 2 (bot)
-            assert player_configs[1]['player_no'] == 2
-            assert player_configs[1]['type'] == 'bot'
-            assert player_configs[1]['name'] == 'SimpleBot'
+            assert player_configs[1]["player_no"] == 2
+            assert player_configs[1]["type"] == "bot"
+            assert player_configs[1]["name"] == "SimpleBot"
 
     def test_player_name_fallback_to_unknown(self, simple_map):
         """Test that player name falls back to 'Unknown' when not set."""
         game = GameState(simple_map, num_players=2)
         # player_configs without player_name set
-        game.player_configs = [
-            {'type': 'human', 'bot_type': None},
-            {'type': 'computer', 'bot_type': 'SimpleBot'}
-        ]
+        game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            player_configs = replay_data['game_info']['player_configs']
-            assert player_configs[0]['name'] == 'Unknown'
-            assert player_configs[1]['name'] == 'Unknown'
+            player_configs = replay_data["game_info"]["player_configs"]
+            assert player_configs[0]["name"] == "Unknown"
+            assert player_configs[1]["name"] == "Unknown"
 
     def test_llm_player_config_includes_llm_fields(self, simple_map):
         """Test that LLM player configs include temperature and max_tokens."""
         game = GameState(simple_map, num_players=2)
         game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
+            {"type": "human", "bot_type": None, "player_name": "Human"},
             {
-                'type': 'computer',
-                'bot_type': 'ClaudeBot',
-                'player_name': 'claude-3-5-sonnet',
-                'temperature': 0.5,
-                'max_tokens': 8000
-            }
+                "type": "computer",
+                "bot_type": "ClaudeBot",
+                "player_name": "claude-3-5-sonnet",
+                "temperature": 0.5,
+                "max_tokens": 8000,
+            },
         ]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            player_configs = replay_data['game_info']['player_configs']
+            player_configs = replay_data["game_info"]["player_configs"]
 
             # Check player 2 (LLM bot)
-            assert player_configs[1]['player_no'] == 2
-            assert player_configs[1]['type'] == 'llm'
-            assert player_configs[1]['name'] == 'claude-3-5-sonnet'
-            assert player_configs[1]['temperature'] == 0.5
-            assert player_configs[1]['max_tokens'] == 8000
+            assert player_configs[1]["player_no"] == 2
+            assert player_configs[1]["type"] == "llm"
+            assert player_configs[1]["name"] == "claude-3-5-sonnet"
+            assert player_configs[1]["temperature"] == 0.5
+            assert player_configs[1]["max_tokens"] == 8000
 
     def test_llm_player_config_null_temperature(self, simple_map):
         """Test that LLM player configs include null temperature when not set."""
         game = GameState(simple_map, num_players=2)
         game.player_configs = [
-            {'type': 'human', 'bot_type': None, 'player_name': 'Human'},
+            {"type": "human", "bot_type": None, "player_name": "Human"},
             {
-                'type': 'computer',
-                'bot_type': 'OpenAIBot',
-                'player_name': 'gpt-4o',
-                'max_tokens': 4000
+                "type": "computer",
+                "bot_type": "OpenAIBot",
+                "player_name": "gpt-4o",
+                "max_tokens": 4000,
                 # temperature not set
-            }
+            },
         ]
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
 
-            player_configs = replay_data['game_info']['player_configs']
+            player_configs = replay_data["game_info"]["player_configs"]
 
             # Check player 2 (LLM bot)
-            assert player_configs[1]['type'] == 'llm'
-            assert player_configs[1]['temperature'] is None
-            assert player_configs[1]['max_tokens'] == 4000
+            assert player_configs[1]["type"] == "llm"
+            assert player_configs[1]["temperature"] is None
+            assert player_configs[1]["max_tokens"] == 4000
 
 
 class TestReplayActionHandlers:
@@ -325,26 +303,26 @@ class TestReplayActionHandlers:
         game = GameState(simple_map, num_players=2)
         # Give player 1 enough gold to afford a Mage (costs 300, starting gold is 250)
         game.player_gold[1] = 500
-        mage = game.create_unit('M', 1, 1, player=1)
-        enemy = game.create_unit('W', 2, 1, player=2)
+        mage = game.create_unit("M", 1, 1, player=1)
+        enemy = game.create_unit("W", 2, 1, player=2)
 
         if mage and enemy:
             game.paralyze(mage, enemy)
 
         # Check that action was recorded
-        paralyze_actions = [a for a in game.action_history if a['type'] == 'paralyze']
+        paralyze_actions = [a for a in game.action_history if a["type"] == "paralyze"]
         assert len(paralyze_actions) > 0
 
         # Verify action structure
         action = paralyze_actions[0]
-        assert 'paralyzer_pos' in action
-        assert 'target_pos' in action
+        assert "paralyzer_pos" in action
+        assert "target_pos" in action
 
     def test_heal_action_handler(self, simple_map):
         """Test that heal actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit('C', 1, 1, player=1)
-        ally = game.create_unit('W', 2, 1, player=1)
+        cleric = game.create_unit("C", 1, 1, player=1)
+        ally = game.create_unit("W", 2, 1, player=1)
 
         if cleric and ally:
             # Damage the ally first
@@ -354,25 +332,25 @@ class TestReplayActionHandlers:
             # Only check if heal was successful
             if heal_amount > 0:
                 # Check that action was recorded
-                heal_actions = [a for a in game.action_history if a['type'] == 'heal']
+                heal_actions = [a for a in game.action_history if a["type"] == "heal"]
                 assert len(heal_actions) > 0
 
                 # Verify action structure
                 action = heal_actions[0]
-                assert 'healer_pos' in action
-                assert 'target_pos' in action
+                assert "healer_pos" in action
+                assert "target_pos" in action
             else:
                 # If heal didn't work, at least verify the structure would be correct
                 # by recording action manually
-                game.record_action('heal', healer_pos=(1, 1), target_pos=(2, 1), amount=0)
-                heal_actions = [a for a in game.action_history if a['type'] == 'heal']
+                game.record_action("heal", healer_pos=(1, 1), target_pos=(2, 1), amount=0)
+                heal_actions = [a for a in game.action_history if a["type"] == "heal"]
                 assert len(heal_actions) > 0
 
     def test_cure_action_handler(self, simple_map):
         """Test that cure actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit('C', 1, 1, player=1)
-        ally = game.create_unit('W', 2, 1, player=1)
+        cleric = game.create_unit("C", 1, 1, player=1)
+        ally = game.create_unit("W", 2, 1, player=1)
 
         if cleric and ally:
             # Paralyze the ally first
@@ -382,18 +360,18 @@ class TestReplayActionHandlers:
             # Only check if cure was successful
             if cure_result:
                 # Check that action was recorded
-                cure_actions = [a for a in game.action_history if a['type'] == 'cure']
+                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
                 assert len(cure_actions) > 0
 
                 # Verify action structure
                 action = cure_actions[0]
-                assert 'curer_pos' in action
-                assert 'target_pos' in action
+                assert "curer_pos" in action
+                assert "target_pos" in action
             else:
                 # If cure didn't work, at least verify the structure would be correct
                 # by recording action manually
-                game.record_action('cure', curer_pos=(1, 1), target_pos=(2, 1))
-                cure_actions = [a for a in game.action_history if a['type'] == 'cure']
+                game.record_action("cure", curer_pos=(1, 1), target_pos=(2, 1))
+                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
                 assert len(cure_actions) > 0
 
     def test_resign_action_handler(self, simple_map):
@@ -402,12 +380,12 @@ class TestReplayActionHandlers:
         game.resign(player=1)
 
         # Check that action was recorded
-        resign_actions = [a for a in game.action_history if a['type'] == 'resign']
+        resign_actions = [a for a in game.action_history if a["type"] == "resign"]
         assert len(resign_actions) > 0
 
         # Verify action structure
         action = resign_actions[0]
-        assert action['player'] == 1
+        assert action["player"] == 1
         assert game.game_over
         assert game.winner == 2
 
@@ -419,9 +397,7 @@ class TestFullSaveLoadCycle:
         """Test that game can be saved and loaded correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Save the game
-            save_path = game_with_actions.save_to_file(
-                filepath=str(Path(tmpdir) / "test_save.json")
-            )
+            save_path = game_with_actions.save_to_file(filepath=str(Path(tmpdir) / "test_save.json"))
 
             # Load the save data
             save_data = FileIO.load_game(save_path)
@@ -443,28 +419,27 @@ class TestReplayPadding:
     @pytest.fixture(autouse=True)
     def setup_pygame(self):
         """Setup pygame for tests."""
-        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
         pygame.init()
         yield
         pygame.quit()
 
     def test_replay_player_pads_small_map(self, simple_map):
         """Test that ReplayPlayer adds padding to small maps."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer, REPLAY_BORDER_SIZE
-        from reinforcetactics.constants import MIN_MAP_SIZE
         import pandas as pd
 
+        from reinforcetactics.constants import MIN_MAP_SIZE
+        from reinforcetactics.utils.replay_player import REPLAY_BORDER_SIZE, ReplayPlayer
+
         game = GameState(simple_map, num_players=2)
-        game.create_unit('W', 1, 1, player=1)
+        game.create_unit("W", 1, 1, player=1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
@@ -483,28 +458,27 @@ class TestReplayPadding:
 
     def test_replay_player_translates_coordinates(self, simple_map):
         """Test that ReplayPlayer translates coordinates correctly."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
+
+        from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
         # Create unit at position (1, 1) in original coordinates
-        game.create_unit('W', 1, 1, player=1)
+        game.create_unit("W", 1, 1, player=1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
             # Execute the create_unit action (it's in original coordinates)
             # The ReplayPlayer should translate to padded coordinates
             for action in player.actions:
-                if action['type'] == 'create_unit':
+                if action["type"] == "create_unit":
                     player.execute_action(action)
                     break
 
@@ -513,33 +487,32 @@ class TestReplayPadding:
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
-            assert unit.type == 'W'
+            assert unit.type == "W"
             assert unit.player == 1
 
     def test_replay_player_move_action_translates(self, simple_map):
         """Test that move actions translate coordinates."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         game = GameState(simple_map, num_players=2)
-        unit = game.create_unit('W', 1, 1, player=1)
+        unit = game.create_unit("W", 1, 1, player=1)
         if unit:
             game.move_unit(unit, 2, 1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
             # Execute actions
             for action in player.actions:
-                if action['type'] in ['create_unit', 'move']:
+                if action["type"] in ["create_unit", "move"]:
                     player.execute_action(action)
 
             # The unit should be at translated destination position
@@ -547,24 +520,23 @@ class TestReplayPadding:
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
-            assert unit.type == 'W'
+            assert unit.type == "W"
 
     def test_replay_player_restart_preserves_padding(self, simple_map):
         """Test that restart maintains padding offsets."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         game = GameState(simple_map, num_players=2)
-        game.create_unit('W', 1, 1, player=1)
+        game.create_unit("W", 1, 1, player=1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
             original_offset_x = player.padding_offset_x
@@ -588,45 +560,43 @@ class TestReplayVideoExport:
     @pytest.fixture(autouse=True)
     def setup_pygame(self):
         """Setup pygame for tests."""
-        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
         pygame.init()
         yield
         pygame.quit()
 
     def test_replay_player_initialization(self, game_with_actions):
         """Test that ReplayPlayer initializes correctly."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
             assert player.recording is False
             assert len(player.recorded_frames) == 0
-            assert hasattr(player, 'save_video_button')
+            assert hasattr(player, "save_video_button")
             # Check padding is applied
-            assert hasattr(player, 'padding_offset_x')
-            assert hasattr(player, 'padding_offset_y')
+            assert hasattr(player, "padding_offset_x")
+            assert hasattr(player, "padding_offset_y")
 
     def test_start_stop_recording(self, game_with_actions):
         """Test starting and stopping video recording."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
@@ -641,16 +611,15 @@ class TestReplayVideoExport:
 
     def test_frame_capture(self, game_with_actions):
         """Test that frames are captured during recording."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
             player.start_recording()
@@ -671,22 +640,22 @@ class TestReplayVideoExport:
 
     def test_save_video(self, game_with_actions):
         """Test saving recorded frames to video file."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
+
+        from reinforcetactics.utils.replay_player import ReplayPlayer
 
         try:
             import cv2  # pylint: disable=import-outside-toplevel
+
             _ = cv2  # Mark as used
         except ImportError:
             pytest.skip("opencv-python not installed")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
             player.start_recording()
@@ -704,7 +673,7 @@ class TestReplayVideoExport:
 
             assert video_path is not None
             assert os.path.exists(video_path)
-            assert video_path.endswith('.mp4')
+            assert video_path.endswith(".mp4")
 
             # Cleanup
             if os.path.exists(video_path):
@@ -712,16 +681,15 @@ class TestReplayVideoExport:
 
     def test_save_video_without_frames(self, game_with_actions):
         """Test that saving video without frames returns None."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
@@ -732,21 +700,20 @@ class TestReplayVideoExport:
 
     def test_video_button_layout(self, game_with_actions):
         """Test that video button is properly positioned."""
-        from reinforcetactics.utils.replay_player import ReplayPlayer
         import pandas as pd
 
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(
-                filepath=str(Path(tmpdir) / "test_replay.json")
-            )
+            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
 
             replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data['game_info']['initial_map'])
+            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
 
             player = ReplayPlayer(replay_data, map_df)
 
             # Check button exists and has reasonable dimensions
-            assert hasattr(player, 'save_video_button')
+            assert hasattr(player, "save_video_button")
             assert player.save_video_button.width == 80
             assert player.save_video_button.height == 40
 

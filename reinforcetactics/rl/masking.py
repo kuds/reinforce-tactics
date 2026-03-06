@@ -20,10 +20,10 @@ Usage:
     model.learn(total_timesteps=100000)
 """
 
-from typing import Callable, Optional, List, Any, Dict
-import numpy as np
+from typing import Any, Callable, Dict, List, Optional
+
 import gymnasium as gym
-from gymnasium import spaces
+import numpy as np
 
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
@@ -52,9 +52,9 @@ class ActionMaskedEnv(gym.Wrapper):
 
         if track_stats:
             self.stats = {
-                'total_actions': 0,
-                'masked_actions_attempted': 0,
-                'action_type_distribution': np.zeros(10),
+                "total_actions": 0,
+                "masked_actions_attempted": 0,
+                "action_type_distribution": np.zeros(10),
             }
 
     def __getattr__(self, name):
@@ -86,11 +86,11 @@ class ActionMaskedEnv(gym.Wrapper):
     def step(self, action):
         """Execute action and optionally track statistics."""
         if self.track_stats:
-            self.stats['total_actions'] += 1
+            self.stats["total_actions"] += 1
             # For MultiDiscrete, action is an array; for flat Discrete, it's an int
             if isinstance(action, np.ndarray) and action.ndim > 0:
                 action_type = int(action[0])
-                self.stats['action_type_distribution'][action_type] += 1
+                self.stats["action_type_distribution"][action_type] += 1
 
         return super().step(action)
 
@@ -105,24 +105,22 @@ class ActionMaskedEnv(gym.Wrapper):
 
         stats = self.stats.copy()
         # Compute action type percentages
-        total = stats['action_type_distribution'].sum()
+        total = stats["action_type_distribution"].sum()
         if total > 0:
-            stats['action_type_percentages'] = (
-                stats['action_type_distribution'] / total * 100
-            ).tolist()
+            stats["action_type_percentages"] = (stats["action_type_distribution"] / total * 100).tolist()
         return stats
 
 
 def make_maskable_env(
     map_file: Optional[str] = None,
-    opponent: str = 'bot',
+    opponent: str = "bot",
     render_mode: Optional[str] = None,
     max_steps: int = 200,
     reward_config: Optional[Dict[str, float]] = None,
     track_stats: bool = False,
     enabled_units: Optional[List[str]] = None,
-    action_space_type: str = 'multi_discrete',
-    max_flat_actions: int = 512
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -169,14 +167,15 @@ def _make_env_fn(
     max_steps: int,
     reward_config: Optional[Dict[str, float]],
     enabled_units: Optional[List[str]] = None,
-    action_space_type: str = 'multi_discrete',
-    max_flat_actions: int = 512
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
 
     Used for vectorized environment creation.
     """
+
     def _init() -> ActionMaskedEnv:
         env = StrategyGameEnv(
             map_file=map_file,
@@ -191,20 +190,21 @@ def _make_env_fn(
         env.reset(seed=seed + rank)
         wrapped = ActionMaskedEnv(env)
         return wrapped
+
     return _init
 
 
 def make_maskable_vec_env(
     n_envs: int = 4,
     map_file: Optional[str] = None,
-    opponent: str = 'bot',
+    opponent: str = "bot",
     max_steps: int = 200,
     reward_config: Optional[Dict[str, float]] = None,
     seed: int = 0,
     use_subprocess: bool = True,
     enabled_units: Optional[List[str]] = None,
-    action_space_type: str = 'multi_discrete',
-    max_flat_actions: int = 512
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -234,20 +234,24 @@ def make_maskable_vec_env(
         model.learn(total_timesteps=1000000)
     """
     try:
-        from sb3_contrib.common.wrappers import ActionMasker
-        from sb3_contrib.common.maskable.utils import get_action_masks
+        from sb3_contrib.common.maskable.utils import get_action_masks  # noqa: F401
+        from sb3_contrib.common.wrappers import ActionMasker  # noqa: F401
     except ImportError:
-        raise ImportError(
-            "sb3-contrib is required for action masking. "
-            "Install it with: pip install sb3-contrib"
-        )
+        raise ImportError("sb3-contrib is required for action masking. Install it with: pip install sb3-contrib")
 
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     env_fns = [
         _make_env_fn(
-            i, seed, map_file, opponent, max_steps, reward_config,
-            enabled_units, action_space_type, max_flat_actions,
+            i,
+            seed,
+            map_file,
+            opponent,
+            max_steps,
+            reward_config,
+            enabled_units,
+            action_space_type,
+            max_flat_actions,
         )
         for i in range(n_envs)
     ]
@@ -275,55 +279,55 @@ def validate_action_mask(env: StrategyGameEnv) -> Dict[str, Any]:
     masks = env.action_masks()
     legal_actions = env.game_state.get_legal_actions(player=env.game_state.current_player)
 
-    results = {
-        'valid': True,
-        'errors': [],
-        'warnings': [],
-        'mask_summary': {}
-    }
+    results = {"valid": True, "errors": [], "warnings": [], "mask_summary": {}}
 
     # Check each mask dimension
-    action_type_names = ['create', 'move', 'attack', 'seize', 'heal', 'end_turn', 'paralyze', 'haste', 'defence_buff', 'attack_buff']
+    action_type_names = [
+        "create",
+        "move",
+        "attack",
+        "seize",
+        "heal",
+        "end_turn",
+        "paralyze",
+        "haste",
+        "defence_buff",
+        "attack_buff",
+    ]
 
     for i, name in enumerate(action_type_names):
         mask_enabled = masks[0][i]
         has_actions = bool(legal_actions.get(name, []))
 
         # Special case: end_turn is always valid
-        if name == 'end_turn':
+        if name == "end_turn":
             has_actions = True
 
         # Special case: heal and cure share action type 4
-        if name == 'heal':
-            has_actions = bool(legal_actions.get('heal', [])) or bool(legal_actions.get('cure', []))
+        if name == "heal":
+            has_actions = bool(legal_actions.get("heal", [])) or bool(legal_actions.get("cure", []))
 
-        results['mask_summary'][name] = {
-            'mask_enabled': mask_enabled,
-            'has_legal_actions': has_actions
-        }
+        results["mask_summary"][name] = {"mask_enabled": mask_enabled, "has_legal_actions": has_actions}
 
         if has_actions and not mask_enabled:
-            results['valid'] = False
-            results['errors'].append(f"Action type '{name}' has legal actions but mask is False")
+            results["valid"] = False
+            results["errors"].append(f"Action type '{name}' has legal actions but mask is False")
 
     # Check that at least one action is always available (end_turn should always work)
     if not masks[0].any():
-        results['valid'] = False
-        results['errors'].append("No action types are masked as valid")
+        results["valid"] = False
+        results["errors"].append("No action types are masked as valid")
 
     # Check position masks have at least one valid option
-    for i, dim_name in enumerate(['action_type', 'unit_type', 'from_x', 'from_y', 'to_x', 'to_y']):
+    for i, dim_name in enumerate(["action_type", "unit_type", "from_x", "from_y", "to_x", "to_y"]):
         if not masks[i].any():
-            results['warnings'].append(f"Dimension '{dim_name}' has no valid values in mask")
+            results["warnings"].append(f"Dimension '{dim_name}' has no valid values in mask")
 
     return results
 
 
 # Convenience function for curriculum learning
-def make_curriculum_env(
-    difficulty: str = 'easy',
-    **kwargs
-) -> ActionMaskedEnv:
+def make_curriculum_env(difficulty: str = "easy", **kwargs) -> ActionMaskedEnv:
     """
     Create environment with preset difficulty configurations.
 
@@ -340,48 +344,48 @@ def make_curriculum_env(
         Configured ActionMaskedEnv
     """
     difficulty_configs = {
-        'easy': {
-            'opponent': 'random',  # Start with random for easier wins
-            'max_steps': 200,
-            'reward_config': {
-                'win': 1000.0,
-                'loss': -1000.0,
-                'draw': -100.0,  # Lighter truncation penalty
-                'income_diff': 0.1,
-                'unit_diff': 0.5,
-                'structure_control': 2.0,
-                'invalid_action': -5.0,
-                'turn_penalty': -0.5
-            }
+        "easy": {
+            "opponent": "random",  # Start with random for easier wins
+            "max_steps": 200,
+            "reward_config": {
+                "win": 1000.0,
+                "loss": -1000.0,
+                "draw": -100.0,  # Lighter truncation penalty
+                "income_diff": 0.1,
+                "unit_diff": 0.5,
+                "structure_control": 2.0,
+                "invalid_action": -5.0,
+                "turn_penalty": -0.5,
+            },
         },
-        'medium': {
-            'opponent': 'bot',
-            'max_steps': 200,
-            'reward_config': {
-                'win': 1000.0,
-                'loss': -1000.0,
-                'draw': -200.0,
-                'income_diff': 0.05,
-                'unit_diff': 0.3,
-                'structure_control': 1.0,
-                'invalid_action': -10.0,
-                'turn_penalty': -1.0
-            }
+        "medium": {
+            "opponent": "bot",
+            "max_steps": 200,
+            "reward_config": {
+                "win": 1000.0,
+                "loss": -1000.0,
+                "draw": -200.0,
+                "income_diff": 0.05,
+                "unit_diff": 0.3,
+                "structure_control": 1.0,
+                "invalid_action": -10.0,
+                "turn_penalty": -1.0,
+            },
         },
-        'hard': {
-            'opponent': 'bot',
-            'max_steps': 300,
-            'reward_config': {
-                'win': 1000.0,
-                'loss': -1000.0,
-                'draw': -300.0,  # Harsher truncation penalty
-                'income_diff': 0.02,
-                'unit_diff': 0.1,
-                'structure_control': 0.5,
-                'invalid_action': -15.0,
-                'turn_penalty': -2.0
-            }
-        }
+        "hard": {
+            "opponent": "bot",
+            "max_steps": 300,
+            "reward_config": {
+                "win": 1000.0,
+                "loss": -1000.0,
+                "draw": -300.0,  # Harsher truncation penalty
+                "income_diff": 0.02,
+                "unit_diff": 0.1,
+                "structure_control": 0.5,
+                "invalid_action": -15.0,
+                "turn_penalty": -2.0,
+            },
+        },
     }
 
     if difficulty not in difficulty_configs:

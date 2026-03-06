@@ -1,11 +1,12 @@
 """Tests for LLM bot module."""
+
 import json
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import pytest
 import numpy as np
+import pytest
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.llm_bot import LLMBot
@@ -15,13 +16,13 @@ from reinforcetactics.game.llm_bot import LLMBot
 def simple_game():
     """Create a simple game state for testing."""
     # Create a 10x10 map with basic tiles
-    map_data = np.array([['p' for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
     # Add HQ for player 1 and 2
-    map_data[0][0] = 'h_1'
-    map_data[9][9] = 'h_2'
+    map_data[0][0] = "h_1"
+    map_data[9][9] = "h_2"
     # Add some buildings
-    map_data[0][1] = 'b_1'
-    map_data[9][8] = 'b_2'
+    map_data[0][1] = "b_1"
+    map_data[9][8] = "b_2"
     return GameState(map_data, num_players=2)
 
 
@@ -37,138 +38,142 @@ class TestLLMBotBase:
                     return None
 
                 def _get_env_var_name(self):
-                    return 'TEST_API_KEY'
+                    return "TEST_API_KEY"
 
                 def _get_default_model(self):
-                    return 'test-model'
+                    return "test-model"
 
                 def _get_supported_models(self):
-                    return ['test-model']
+                    return ["test-model"]
 
                 def _call_llm(self, messages):
                     return '{"reasoning": "test", "actions": []}'
 
                 def _get_llm_sdk_version(self):
-                    return 'test-sdk-1.0.0'
+                    return "test-sdk-1.0.0"
 
             TestBot(simple_game, player=2)
 
     def test_game_state_serialization(self, simple_game):
         """Test that game state can be serialized."""
+
         # Create a mock bot with API key
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         bot = TestBot(simple_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
 
         # Check that serialization includes expected keys
-        assert 'turn_number' in game_state_json
-        assert 'player_gold' in game_state_json
-        assert 'opponent_gold' in game_state_json
-        assert 'player_units' in game_state_json
-        assert 'enemy_units' in game_state_json
-        assert 'player_buildings' in game_state_json
-        assert 'enemy_buildings' in game_state_json
-        assert 'legal_actions' in game_state_json
+        assert "turn_number" in game_state_json
+        assert "player_gold" in game_state_json
+        assert "opponent_gold" in game_state_json
+        assert "player_units" in game_state_json
+        assert "enemy_units" in game_state_json
+        assert "player_buildings" in game_state_json
+        assert "enemy_buildings" in game_state_json
+        assert "legal_actions" in game_state_json
 
     def test_json_extraction_plain(self, simple_game):
         """Test JSON extraction from plain JSON response."""
+
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         bot = TestBot(simple_game, player=2, api_key="test-key")
         json_text = '{"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}'
         extracted = bot._extract_json(json_text)
 
         assert extracted is not None
-        assert extracted['reasoning'] == "test strategy"
-        assert len(extracted['actions']) == 1
+        assert extracted["reasoning"] == "test strategy"
+        assert len(extracted["actions"]) == 1
 
     def test_json_extraction_markdown(self, simple_game):
         """Test JSON extraction from markdown code blocks."""
+
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": []}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         bot = TestBot(simple_game, player=2, api_key="test-key")
-        json_text = '''Here is the response:
+        json_text = """Here is the response:
 ```json
 {"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}
 ```
-'''
+"""
         extracted = bot._extract_json(json_text)
 
         assert extracted is not None
-        assert extracted['reasoning'] == "test strategy"
+        assert extracted["reasoning"] == "test strategy"
 
     def test_take_turn_ends_turn(self, simple_game):
         """Test that take_turn() properly ends the turn and advances game state."""
+
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         # Game starts at player 1's turn
         assert simple_game.current_player == 1
@@ -198,13 +203,13 @@ class TestLLMBotBase:
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 nonlocal call_count
@@ -212,7 +217,7 @@ class TestLLMBotBase:
                 raise Exception("API Error")
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         # End player 1's turn
         simple_game.end_turn()
@@ -235,25 +240,29 @@ class TestOpenAIBot:
 
     def test_env_var_name(self):
         """Test that correct environment variable name is returned."""
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_env_var_name(Mock()) == 'OPENAI_API_KEY'  # pylint: disable=protected-access
+
+            assert TestBot._get_env_var_name(Mock()) == "OPENAI_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'gpt-5-mini-2025-08-07'  # pylint: disable=protected-access
+
+            assert TestBot._get_default_model(Mock()) == "gpt-5-mini-2025-08-07"  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
-        with patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'}):
-            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot, OPENAI_MODELS  # pylint: disable=import-outside-toplevel
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            from reinforcetactics.game.llm_bot import OPENAI_MODELS
+            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
+
             assert TestBot._get_supported_models(Mock()) == OPENAI_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
-            assert 'gpt-5.2' in OPENAI_MODELS
-            assert 'gpt-5-mini-2025-08-07' in OPENAI_MODELS
-            assert 'gpt-5-nano-2025-08-07' in OPENAI_MODELS
+            assert "gpt-5.2" in OPENAI_MODELS
+            assert "gpt-5-mini-2025-08-07" in OPENAI_MODELS
+            assert "gpt-5-nano-2025-08-07" in OPENAI_MODELS
 
 
 class TestClaudeBot:
@@ -261,26 +270,30 @@ class TestClaudeBot:
 
     def test_env_var_name(self):
         """Test that correct environment variable name is returned."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_env_var_name(Mock()) == 'ANTHROPIC_API_KEY'  # pylint: disable=protected-access
+
+            assert TestBot._get_env_var_name(Mock()) == "ANTHROPIC_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'claude-haiku-4-5-20251001'  # pylint: disable=protected-access
+
+            assert TestBot._get_default_model(Mock()) == "claude-haiku-4-5-20251001"  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
-        with patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test-key'}):
-            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot, ANTHROPIC_MODELS  # pylint: disable=import-outside-toplevel
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            from reinforcetactics.game.llm_bot import ANTHROPIC_MODELS
+            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
+
             assert TestBot._get_supported_models(Mock()) == ANTHROPIC_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
-            assert 'claude-opus-4-6' in ANTHROPIC_MODELS
-            assert 'claude-sonnet-4-5-20250929' in ANTHROPIC_MODELS
-            assert 'claude-haiku-4-5-20251001' in ANTHROPIC_MODELS
-            assert 'claude-sonnet-4-20250514' in ANTHROPIC_MODELS
+            assert "claude-opus-4-6" in ANTHROPIC_MODELS
+            assert "claude-sonnet-4-5-20250929" in ANTHROPIC_MODELS
+            assert "claude-haiku-4-5-20251001" in ANTHROPIC_MODELS
+            assert "claude-sonnet-4-20250514" in ANTHROPIC_MODELS
 
 
 class TestGeminiBot:
@@ -288,26 +301,30 @@ class TestGeminiBot:
 
     def test_env_var_name(self):
         """Test that correct environment variable name is returned."""
-        with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_env_var_name(Mock()) == 'GOOGLE_API_KEY'  # pylint: disable=protected-access
+
+            assert TestBot._get_env_var_name(Mock()) == "GOOGLE_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
             from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
-            assert TestBot._get_default_model(Mock()) == 'gemini-2.5-flash'  # pylint: disable=protected-access
+
+            assert TestBot._get_default_model(Mock()) == "gemini-2.5-flash"  # pylint: disable=protected-access
 
     def test_supported_models(self):
         """Test that supported models list is returned."""
-        with patch.dict('os.environ', {'GOOGLE_API_KEY': 'test-key'}):
-            from reinforcetactics.game.llm_bot import GeminiBot as TestBot, GEMINI_MODELS  # pylint: disable=import-outside-toplevel
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
+            from reinforcetactics.game.llm_bot import GEMINI_MODELS
+            from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
+
             assert TestBot._get_supported_models(Mock()) == GEMINI_MODELS  # pylint: disable=protected-access
             # Verify some expected models are present
-            assert 'gemini-2.5-flash' in GEMINI_MODELS
-            assert 'gemini-2.5-pro' in GEMINI_MODELS
-            assert 'gemini-3-pro-preview' in GEMINI_MODELS
-            assert 'gemini-2.5-flash-lite' in GEMINI_MODELS
+            assert "gemini-2.5-flash" in GEMINI_MODELS
+            assert "gemini-2.5-pro" in GEMINI_MODELS
+            assert "gemini-3-pro-preview" in GEMINI_MODELS
+            assert "gemini-2.5-flash-lite" in GEMINI_MODELS
 
 
 class TestConversationLogging:
@@ -316,24 +333,25 @@ class TestConversationLogging:
     @pytest.fixture
     def test_bot_class(self):
         """Create a test bot class for testing."""
+
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         return TestBot
 
@@ -351,23 +369,22 @@ class TestConversationLogging:
     def test_conversation_log_dir_parameter(self, simple_game, test_bot_class):
         """Test that conversation_log_dir parameter is properly set."""
         custom_dir = "/tmp/custom_logs/"
-        bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                            conversation_log_dir=custom_dir)
+        bot = test_bot_class(simple_game, player=2, api_key="test-key", conversation_log_dir=custom_dir)
         assert bot.conversation_log_dir == custom_dir
 
         bot2 = test_bot_class(simple_game, player=2, api_key="test-key")
-        assert bot2.conversation_log_dir == 'logs/llm_conversations/'  # Default
+        assert bot2.conversation_log_dir == "logs/llm_conversations/"  # Default
 
     def test_no_logging_when_disabled(self, simple_game, test_bot_class):
         """Test that no logging occurs when log_conversations is False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=False,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=False, conversation_log_dir=tmpdir
+            )
 
             # Mock _call_llm to avoid actual API calls
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # No files should be created
@@ -377,13 +394,13 @@ class TestConversationLogging:
     def test_logging_when_enabled(self, simple_game, test_bot_class):
         """Test that logging occurs when log_conversations is True."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             # Mock _call_llm to avoid actual API calls
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # One file should be created
@@ -393,60 +410,60 @@ class TestConversationLogging:
     def test_json_file_structure(self, simple_game, test_bot_class):
         """Test that JSON log file has correct structure."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             response = '{"reasoning": "test strategy", "actions": [{"type": "END_TURN"}]}'
             # Mock _call_llm to avoid actual API calls
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Read the log file
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 log_data = json.load(f)
 
             # Verify structure
-            assert 'game_session_id' in log_data
-            assert 'model' in log_data
-            assert log_data['model'] == 'test-model'
-            assert 'temperature' in log_data
-            assert log_data['temperature'] is None
-            assert 'provider' in log_data
-            assert log_data['provider'] == 'Test'
-            assert 'player' in log_data
-            assert log_data['player'] == 2
-            assert 'start_time' in log_data
-            assert 'system_prompt' in log_data
-            assert 'turns' in log_data
+            assert "game_session_id" in log_data
+            assert "model" in log_data
+            assert log_data["model"] == "test-model"
+            assert "temperature" in log_data
+            assert log_data["temperature"] is None
+            assert "provider" in log_data
+            assert log_data["provider"] == "Test"
+            assert "player" in log_data
+            assert log_data["player"] == 2
+            assert "start_time" in log_data
+            assert "system_prompt" in log_data
+            assert "turns" in log_data
 
             # Verify system prompt contains game rules
-            assert 'Reinforce Tactics' in log_data['system_prompt']
-            assert 'GAME OBJECTIVE' in log_data['system_prompt']
+            assert "Reinforce Tactics" in log_data["system_prompt"]
+            assert "GAME OBJECTIVE" in log_data["system_prompt"]
 
             # Verify turns structure
-            assert len(log_data['turns']) == 1
-            turn = log_data['turns'][0]
-            assert 'turn_number' in turn
-            assert 'timestamp' in turn
-            assert 'user_prompt' in turn
-            assert 'assistant_response' in turn
-            assert turn['assistant_response'] == response
+            assert len(log_data["turns"]) == 1
+            turn = log_data["turns"][0]
+            assert "turn_number" in turn
+            assert "timestamp" in turn
+            assert "user_prompt" in turn
+            assert "assistant_response" in turn
+            assert turn["assistant_response"] == response
 
     def test_custom_log_directory(self, simple_game, test_bot_class):
         """Test that custom log directory is used."""
         with tempfile.TemporaryDirectory() as tmpdir:
             custom_dir = Path(tmpdir) / "my_custom_logs"
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=str(custom_dir))
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=str(custom_dir)
+            )
 
             # Mock _call_llm to avoid actual API calls
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Verify directory was created
@@ -460,13 +477,13 @@ class TestConversationLogging:
     def test_filename_format(self, simple_game, test_bot_class):
         """Test that log filename has correct format."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             # Mock _call_llm to avoid actual API calls
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Verify filename format
@@ -484,15 +501,19 @@ class TestConversationLogging:
         """Test that custom game_session_id is used when provided."""
         with tempfile.TemporaryDirectory() as tmpdir:
             custom_session_id = "test_session_12345"
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir,
-                                game_session_id=custom_session_id)
+            bot = test_bot_class(
+                simple_game,
+                player=2,
+                api_key="test-key",
+                log_conversations=True,
+                conversation_log_dir=tmpdir,
+                game_session_id=custom_session_id,
+            )
 
             assert bot.game_session_id == custom_session_id
 
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Verify filename includes custom session ID
@@ -501,9 +522,9 @@ class TestConversationLogging:
             assert custom_session_id in log_files[0].name
 
             # Verify session ID is in the log data
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 log_data = json.load(f)
-            assert log_data['game_session_id'] == custom_session_id
+            assert log_data["game_session_id"] == custom_session_id
 
     def test_auto_generated_session_id(self, simple_game, test_bot_class):
         """Test that session ID is auto-generated if not provided."""
@@ -514,7 +535,7 @@ class TestConversationLogging:
         assert len(bot.game_session_id) > 0
 
         # Should have format: YYYYMMDD_HHMMSS_{random}
-        parts = bot.game_session_id.split('_')
+        parts = bot.game_session_id.split("_")
         assert len(parts) == 3
         assert len(parts[0]) == 8  # YYYYMMDD
         assert len(parts[1]) == 6  # HHMMSS
@@ -524,18 +545,26 @@ class TestConversationLogging:
         """Test that multiple games create separate log files."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create two bots with different session IDs (simulating different games)
-            bot1 = test_bot_class(simple_game, player=2, api_key="test-key",
-                                 log_conversations=True,
-                                 conversation_log_dir=tmpdir,
-                                 game_session_id="game1")
-            bot2 = test_bot_class(simple_game, player=2, api_key="test-key",
-                                 log_conversations=True,
-                                 conversation_log_dir=tmpdir,
-                                 game_session_id="game2")
+            bot1 = test_bot_class(
+                simple_game,
+                player=2,
+                api_key="test-key",
+                log_conversations=True,
+                conversation_log_dir=tmpdir,
+                game_session_id="game1",
+            )
+            bot2 = test_bot_class(
+                simple_game,
+                player=2,
+                api_key="test-key",
+                log_conversations=True,
+                conversation_log_dir=tmpdir,
+                game_session_id="game2",
+            )
 
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot1, '_call_llm', return_value=response):
-                with patch.object(bot2, '_call_llm', return_value=response):
+            with patch.object(bot1, "_call_llm", return_value=response):
+                with patch.object(bot2, "_call_llm", return_value=response):
                     bot1.take_turn()
                     bot2.take_turn()
 
@@ -546,9 +575,9 @@ class TestConversationLogging:
             # Verify they have different session IDs
             session_ids = set()
             for log_file in log_files:
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(log_file, "r", encoding="utf-8") as f:
                     log_data = json.load(f)
-                    session_ids.add(log_data['game_session_id'])
+                    session_ids.add(log_data["game_session_id"])
 
             assert len(session_ids) == 2
             assert "game1" in session_ids
@@ -557,76 +586,84 @@ class TestConversationLogging:
     def test_pretty_print_logs_enabled(self, simple_game, test_bot_class):
         """Test that pretty_print_logs=True creates indented JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir,
-                                pretty_print_logs=True)
+            bot = test_bot_class(
+                simple_game,
+                player=2,
+                api_key="test-key",
+                log_conversations=True,
+                conversation_log_dir=tmpdir,
+                pretty_print_logs=True,
+            )
 
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Read the file as text
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Pretty-printed JSON should have newlines and indentation
-            assert '\n' in content
-            assert '  ' in content  # Indentation
+            assert "\n" in content
+            assert "  " in content  # Indentation
 
     def test_pretty_print_logs_disabled(self, simple_game, test_bot_class):
         """Test that pretty_print_logs=False creates compact JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir,
-                                pretty_print_logs=False)
+            bot = test_bot_class(
+                simple_game,
+                player=2,
+                api_key="test-key",
+                log_conversations=True,
+                conversation_log_dir=tmpdir,
+                pretty_print_logs=False,
+            )
 
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Read the file as text
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Compact JSON should be mostly on one line (no indentation)
             # It may have some newlines but shouldn't have the 2-space indentation pattern
-            lines = content.split('\n')
+            lines = content.split("\n")
             # For compact JSON, most content is on fewer lines
             assert len(lines) < 10  # Pretty version would have many more lines
 
     def test_logging_error_handling(self, simple_game, test_bot_class):
         """Test that logging errors don't break the bot."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             # Mock Path.mkdir to raise an exception
-            with patch('reinforcetactics.game.llm_bot.Path.mkdir', side_effect=OSError("Permission denied")):
+            with patch("reinforcetactics.game.llm_bot.Path.mkdir", side_effect=OSError("Permission denied")):
                 # Mock _call_llm to avoid actual API calls
                 # This should not raise an exception even if logging fails
                 response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-                with patch.object(bot, '_call_llm', return_value=response):
+                with patch.object(bot, "_call_llm", return_value=response):
                     bot.take_turn()  # Should complete without exception
 
     def test_multiple_turns_create_single_file(self, simple_game, test_bot_class):
         """Test that multiple turns create a single log file with all turns."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(simple_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                simple_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             # Mock _call_llm to avoid actual API calls
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
                 # Advance turn
                 bot.game_state.turn_number += 1
@@ -637,14 +674,14 @@ class TestConversationLogging:
             assert len(log_files) == 1
 
             # Verify it contains two turns
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 log_data = json.load(f)
 
-            assert 'turns' in log_data
-            assert len(log_data['turns']) == 2
+            assert "turns" in log_data
+            assert len(log_data["turns"]) == 2
 
             # Verify they have different turn numbers
-            turn_numbers = [turn['turn_number'] for turn in log_data['turns']]
+            turn_numbers = [turn["turn_number"] for turn in log_data["turns"]]
             assert len(set(turn_numbers)) == 2  # Should be different
             assert turn_numbers[0] < turn_numbers[1]  # Should be in order
 
@@ -655,6 +692,7 @@ class TestStatefulConversation:
     @pytest.fixture
     def test_bot_class(self):
         """Create a test bot class for testing."""
+
         class TestBot(LLMBot):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
@@ -665,13 +703,13 @@ class TestStatefulConversation:
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 self.call_count += 1
@@ -679,7 +717,7 @@ class TestStatefulConversation:
                 return f'{{"reasoning": "Turn {self.call_count}", "actions": [{{"type": "END_TURN"}}]}}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         return TestBot
 
@@ -711,8 +749,8 @@ class TestStatefulConversation:
         assert bot.call_count == 3
         for messages in bot.messages_received:
             assert len(messages) == 2  # system + user only
-            assert messages[0]['role'] == 'system'
-            assert messages[1]['role'] == 'user'
+            assert messages[0]["role"] == "system"
+            assert messages[1]["role"] == "user"
 
     def test_stateful_mode_accumulates_history(self, simple_game, test_bot_class):
         """Test that stateful mode accumulates conversation history."""
@@ -728,8 +766,8 @@ class TestStatefulConversation:
 
         # Verify the pattern: user, assistant, user, assistant, ...
         for i in range(0, 6, 2):
-            assert bot.conversation_history[i]['role'] == 'user'
-            assert bot.conversation_history[i + 1]['role'] == 'assistant'
+            assert bot.conversation_history[i]["role"] == "user"
+            assert bot.conversation_history[i + 1]["role"] == "assistant"
 
     def test_stateful_mode_sends_history_to_llm(self, simple_game, test_bot_class):
         """Test that stateful mode sends conversation history to LLM."""
@@ -743,10 +781,10 @@ class TestStatefulConversation:
         simple_game.turn_number += 1
         bot.take_turn()
         assert len(bot.messages_received[1]) == 4  # system + prev_user + prev_assistant + current_user
-        assert bot.messages_received[1][0]['role'] == 'system'
-        assert bot.messages_received[1][1]['role'] == 'user'  # previous turn
-        assert bot.messages_received[1][2]['role'] == 'assistant'  # previous response
-        assert bot.messages_received[1][3]['role'] == 'user'  # current turn
+        assert bot.messages_received[1][0]["role"] == "system"
+        assert bot.messages_received[1][1]["role"] == "user"  # previous turn
+        assert bot.messages_received[1][2]["role"] == "assistant"  # previous response
+        assert bot.messages_received[1][3]["role"] == "user"  # current turn
 
         # Third turn should include even more history
         simple_game.turn_number += 1
@@ -766,16 +804,16 @@ class TestStatefulConversation:
         assert len(bot.conversation_history) == 4
 
         # First user message should have game state
-        assert 'Current Game State' in bot.conversation_history[0]['content']
+        assert "Current Game State" in bot.conversation_history[0]["content"]
 
         # First assistant message should have reasoning
-        assert 'Turn 1' in bot.conversation_history[1]['content']
+        assert "Turn 1" in bot.conversation_history[1]["content"]
 
         # Second user message should have game state
-        assert 'Current Game State' in bot.conversation_history[2]['content']
+        assert "Current Game State" in bot.conversation_history[2]["content"]
 
         # Second assistant message should have reasoning
-        assert 'Turn 2' in bot.conversation_history[3]['content']
+        assert "Turn 2" in bot.conversation_history[3]["content"]
 
 
 class TestMapCoordinateConversion:
@@ -785,17 +823,17 @@ class TestMapCoordinateConversion:
     def padded_game(self):
         """Create a game state with a small map that will be padded."""
         # Create a 6x6 map (smaller than MIN_MAP_SIZE of 20)
-        small_map = np.array([['p' for _ in range(6)] for _ in range(6)], dtype=object)
+        small_map = np.array([["p" for _ in range(6)] for _ in range(6)], dtype=object)
         # Add HQ for player 1 and 2 at opposite corners
-        small_map[0][0] = 'h_1'
-        small_map[5][5] = 'h_2'
+        small_map[0][0] = "h_1"
+        small_map[5][5] = "h_2"
         # Add some buildings
-        small_map[0][1] = 'b_1'
-        small_map[5][4] = 'b_2'
+        small_map[0][1] = "b_1"
+        small_map[5][4] = "b_2"
 
         # Manually pad the map to 20x20 to simulate what load_map does
         # For a 6x6 map padded to 20x20, padding is 7 on each side
-        padded_map = np.full((20, 20), 'o', dtype=object)
+        padded_map = np.full((20, 20), "o", dtype=object)
         padded_map[7:13, 7:13] = small_map
 
         game = GameState(padded_map, num_players=2)
@@ -807,7 +845,7 @@ class TestMapCoordinateConversion:
             padding_offset_x=7,
             padding_offset_y=7,
             map_file="maps/1v1/beginner.csv",
-            original_map_data=small_map.tolist()
+            original_map_data=small_map.tolist(),
         )
 
         return game
@@ -815,24 +853,25 @@ class TestMapCoordinateConversion:
     @pytest.fixture
     def test_bot_class(self):
         """Create a test bot class for testing."""
+
         class TestBot(LLMBot):
             def _get_api_key_from_env(self):
                 return "test-key"
 
             def _get_env_var_name(self):
-                return 'TEST_API_KEY'
+                return "TEST_API_KEY"
 
             def _get_default_model(self):
-                return 'test-model'
+                return "test-model"
 
             def _get_supported_models(self):
-                return ['test-model']
+                return ["test-model"]
 
             def _call_llm(self, messages):
                 return '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
 
             def _get_llm_sdk_version(self):
-                return 'test-sdk-1.0.0'
+                return "test-sdk-1.0.0"
 
         return TestBot
 
@@ -863,29 +902,29 @@ class TestMapCoordinateConversion:
         game_state_json = bot._serialize_game_state()
 
         # Check map metadata fields
-        assert 'map_name' in game_state_json
-        assert game_state_json['map_name'] == 'beginner'
+        assert "map_name" in game_state_json
+        assert game_state_json["map_name"] == "beginner"
 
-        assert 'map_width' in game_state_json
-        assert game_state_json['map_width'] == 6
+        assert "map_width" in game_state_json
+        assert game_state_json["map_width"] == 6
 
-        assert 'map_height' in game_state_json
-        assert game_state_json['map_height'] == 6
+        assert "map_height" in game_state_json
+        assert game_state_json["map_height"] == 6
 
         # map_padding_applied field has been removed from serialization
 
     def test_serialized_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that serialized coordinates are in original map system."""
         # Add a unit at padded position [7, 7] (which is original [0, 0])
-        padded_game.create_unit('W', 7, 7, player=2)
+        padded_game.create_unit("W", 7, 7, player=2)
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
 
         # Check that unit position is in original coordinates
-        assert len(game_state_json['player_units']) == 1
-        unit = game_state_json['player_units'][0]
-        assert unit['position'] == [0, 0]  # Original coordinates, not [7, 7]
+        assert len(game_state_json["player_units"]) == 1
+        unit = game_state_json["player_units"][0]
+        assert unit["position"] == [0, 0]  # Original coordinates, not [7, 7]
 
     def test_serialized_building_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that building coordinates are in original map system."""
@@ -894,38 +933,38 @@ class TestMapCoordinateConversion:
 
         # The HQ at padded [7, 7] should be at original [0, 0]
         # But it belongs to player 1, so check enemy_buildings
-        assert len(game_state_json['enemy_buildings']) >= 1
+        assert len(game_state_json["enemy_buildings"]) >= 1
 
         # Find the HQ
         enemy_hq = None
-        for building in game_state_json['enemy_buildings']:
-            if building['type'] == 'h':
+        for building in game_state_json["enemy_buildings"]:
+            if building["type"] == "h":
                 enemy_hq = building
                 break
 
         assert enemy_hq is not None
         # The padded position would be [7, 7], original should be [0, 0]
-        assert enemy_hq['position'] == [0, 0]
+        assert enemy_hq["position"] == [0, 0]
 
     def test_legal_actions_use_original_coordinates(self, padded_game, test_bot_class):
         """Test that legal actions use original coordinates."""
         # Add a unit at padded [7, 8]
-        padded_game.create_unit('W', 7, 8, player=2)
+        padded_game.create_unit("W", 7, 8, player=2)
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
 
         # Check move actions - they should use original coordinates
-        legal_moves = game_state_json['legal_actions']['move']
+        legal_moves = game_state_json["legal_actions"]["move"]
 
         if len(legal_moves) > 0:
             # At least one move should exist
             # Positions should be in original coordinate system (0-5, not 7-12)
             for move in legal_moves:
-                assert 0 <= move['from'][0] < 6
-                assert 0 <= move['from'][1] < 6
-                assert 0 <= move['to'][0] < 6
-                assert 0 <= move['to'][1] < 6
+                assert 0 <= move["from"][0] < 6
+                assert 0 <= move["from"][1] < 6
+                assert 0 <= move["to"][0] < 6
+                assert 0 <= move["to"][1] < 6
 
     def test_create_unit_action_converts_coordinates(self, padded_game, test_bot_class):
         """Test that CREATE_UNIT action converts from original to padded coordinates."""
@@ -933,19 +972,24 @@ class TestMapCoordinateConversion:
 
         # Action in original coordinates [4, 5] (building at padded [11, 12])
         action = {
-            'type': 'CREATE_UNIT',
-            'unit_type': 'W',
-            'position': [4, 5]  # Original coordinates
+            "type": "CREATE_UNIT",
+            "unit_type": "W",
+            "position": [4, 5],  # Original coordinates
         }
 
         initial_unit_count = len(padded_game.units)
 
         # Mock the legal actions check
-        with patch.object(padded_game, 'get_legal_actions') as mock_legal:
+        with patch.object(padded_game, "get_legal_actions") as mock_legal:
             mock_legal.return_value = {
-                'create_unit': [{'unit_type': 'W', 'x': 11, 'y': 12}],
-                'move': [], 'attack': [], 'paralyze': [],
-                'heal': [], 'cure': [], 'seize': [], 'end_turn': True
+                "create_unit": [{"unit_type": "W", "x": 11, "y": 12}],
+                "move": [],
+                "attack": [],
+                "paralyze": [],
+                "heal": [],
+                "cure": [],
+                "seize": [],
+                "end_turn": True,
             }
 
             bot._execute_create_unit(action)
@@ -959,7 +1003,7 @@ class TestMapCoordinateConversion:
     def test_move_action_converts_coordinates(self, padded_game, test_bot_class):
         """Test that MOVE action converts from original to padded coordinates."""
         # Create a unit at padded [7, 7]
-        unit = padded_game.create_unit('W', 7, 7, player=2)
+        unit = padded_game.create_unit("W", 7, 7, player=2)
         unit.can_move = True  # Enable movement for this test
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
@@ -970,9 +1014,9 @@ class TestMapCoordinateConversion:
         # Action in original coordinates: move from [0, 0] to [0, 1]
         # This corresponds to padded [7, 7] to [7, 8]
         action = {
-            'type': 'MOVE',
-            'unit_id': 0,
-            'to': [0, 1]  # Original coordinates
+            "type": "MOVE",
+            "unit_id": 0,
+            "to": [0, 1],  # Original coordinates
         }
 
         bot._execute_move(action, unit_map)
@@ -984,28 +1028,28 @@ class TestMapCoordinateConversion:
     def test_conversation_log_includes_map_metadata(self, padded_game, test_bot_class):
         """Test that conversation logs include map metadata."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            bot = test_bot_class(padded_game, player=2, api_key="test-key",
-                                log_conversations=True,
-                                conversation_log_dir=tmpdir)
+            bot = test_bot_class(
+                padded_game, player=2, api_key="test-key", log_conversations=True, conversation_log_dir=tmpdir
+            )
 
             response = '{"reasoning": "test", "actions": [{"type": "END_TURN"}]}'
-            with patch.object(bot, '_call_llm', return_value=response):
+            with patch.object(bot, "_call_llm", return_value=response):
                 bot.take_turn()
 
             # Read the log file
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], 'r', encoding='utf-8') as f:
+            with open(log_files[0], "r", encoding="utf-8") as f:
                 log_data = json.load(f)
 
             # Verify map metadata is present
-            assert 'map_file' in log_data
-            assert log_data['map_file'] == "maps/1v1/beginner.csv"
+            assert "map_file" in log_data
+            assert log_data["map_file"] == "maps/1v1/beginner.csv"
 
-            assert 'map_dimensions' in log_data
-            assert log_data['map_dimensions']['width'] == 6
-            assert log_data['map_dimensions']['height'] == 6
+            assert "map_dimensions" in log_data
+            assert log_data["map_dimensions"]["width"] == 6
+            assert log_data["map_dimensions"]["height"] == 6
 
     def test_non_padded_map_works_correctly(self, simple_game, test_bot_class):
         """Test that non-padded maps (20x20+) work correctly without coordinate conversion."""
@@ -1018,31 +1062,31 @@ class TestMapCoordinateConversion:
         bot = test_bot_class(simple_game, player=2, api_key="test-key")
 
         # Create a unit at position [5, 5]
-        simple_game.create_unit('W', 5, 5, player=2)
+        simple_game.create_unit("W", 5, 5, player=2)
 
         game_state_json = bot._serialize_game_state()
 
         # With no padding, coordinates should be identical
-        assert len(game_state_json['player_units']) == 1
-        unit = game_state_json['player_units'][0]
-        assert unit['position'] == [5, 5]  # Same as padded position
+        assert len(game_state_json["player_units"]) == 1
+        unit = game_state_json["player_units"][0]
+        assert unit["position"] == [5, 5]  # Same as padded position
 
         # Map dimensions should match grid dimensions
-        assert game_state_json['map_width'] == 10
-        assert game_state_json['map_height'] == 10
+        assert game_state_json["map_width"] == 10
+        assert game_state_json["map_height"] == 10
         # map_padding_applied field has been removed from serialization
 
     def test_action_history_uses_original_coordinates(self, padded_game):
         """Test that action history records use original/unpadded coordinates."""
         # Create a unit at padded position [7, 7] (original [0, 0])
-        unit = padded_game.create_unit('W', 7, 7, player=1)
+        unit = padded_game.create_unit("W", 7, 7, player=1)
 
         # Check the create_unit action was recorded with original coordinates
         assert len(padded_game.action_history) >= 1
         create_action = padded_game.action_history[-1]
-        assert create_action['type'] == 'create_unit'
-        assert create_action['x'] == 0  # Original coordinate, not 7
-        assert create_action['y'] == 0  # Original coordinate, not 7
+        assert create_action["type"] == "create_unit"
+        assert create_action["x"] == 0  # Original coordinate, not 7
+        assert create_action["y"] == 0  # Original coordinate, not 7
 
         # Move the unit from padded [7, 7] to [7, 8] (original [0, 0] to [0, 1])
         unit.can_move = True
@@ -1050,14 +1094,14 @@ class TestMapCoordinateConversion:
 
         # Check the move action was recorded with original coordinates
         move_action = padded_game.action_history[-1]
-        assert move_action['type'] == 'move'
-        assert move_action['from_x'] == 0  # Original coordinate, not 7
-        assert move_action['from_y'] == 0  # Original coordinate, not 7
-        assert move_action['to_x'] == 0    # Original coordinate, not 7
-        assert move_action['to_y'] == 1    # Original coordinate, not 8
+        assert move_action["type"] == "move"
+        assert move_action["from_x"] == 0  # Original coordinate, not 7
+        assert move_action["from_y"] == 0  # Original coordinate, not 7
+        assert move_action["to_x"] == 0  # Original coordinate, not 7
+        assert move_action["to_y"] == 1  # Original coordinate, not 8
 
         # Create an enemy unit at padded [7, 9] (original [0, 2])
-        enemy = padded_game.create_unit('W', 7, 9, player=2)
+        enemy = padded_game.create_unit("W", 7, 9, player=2)
 
         # Attack the enemy
         unit.can_attack = True
@@ -1065,17 +1109,17 @@ class TestMapCoordinateConversion:
 
         # Check the attack action was recorded with original coordinates
         attack_action = padded_game.action_history[-1]
-        assert attack_action['type'] == 'attack'
-        assert attack_action['attacker_pos'] == (0, 1)  # Original coords
-        assert attack_action['target_pos'] == (0, 2)    # Original coords
+        assert attack_action["type"] == "attack"
+        assert attack_action["attacker_pos"] == (0, 1)  # Original coords
+        assert attack_action["target_pos"] == (0, 2)  # Original coords
 
     def test_action_history_no_padding(self, simple_game):
         """Test that action history works correctly when there's no padding."""
         # Create a unit at position [5, 5] (no padding, so original = padded)
-        simple_game.create_unit('W', 5, 5, player=1)
+        simple_game.create_unit("W", 5, 5, player=1)
 
         # Check the create_unit action
         create_action = simple_game.action_history[-1]
-        assert create_action['type'] == 'create_unit'
-        assert create_action['x'] == 5  # Same as input since no padding
-        assert create_action['y'] == 5
+        assert create_action["type"] == "create_unit"
+        assert create_action["x"] == 5  # Same as input since no padding
+        assert create_action["y"] == 5

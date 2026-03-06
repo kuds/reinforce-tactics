@@ -1,23 +1,25 @@
 """
 Game constants for the 2D Strategy Game.
 """
+
 from enum import Enum
 
 
 class TileType(Enum):
     """Enumeration of tile types in the game."""
-    GRASS = 'p'
-    WATER = 'w'
-    MOUNTAIN = 'm'
-    FOREST = 'f'
-    ROAD = 'r'
-    BUILDING = 'b'
-    HEADQUARTERS = 'h'
-    TOWER = 't'
-    OCEAN = 'o'
+
+    GRASS = "p"
+    WATER = "w"
+    MOUNTAIN = "m"
+    FOREST = "f"
+    ROAD = "r"
+    BUILDING = "b"
+    HEADQUARTERS = "h"
+    TOWER = "t"
+    OCEAN = "o"
 
     @classmethod
-    def from_code(cls, code: str) -> 'TileType':
+    def from_code(cls, code: str) -> "TileType":
         """Get TileType from single-letter code."""
         for tile_type in cls:
             if tile_type.value == code:
@@ -42,48 +44,48 @@ MIN_STRIP_SIZE = 6  # Minimum size to preserve when stripping water borders
 # Tile type colors (fallback when images aren't available)
 # Made more distinct and vibrant
 TILE_COLORS = {
-    TileType.GRASS.value: (100, 200, 100),      # Grass - Bright green
-    TileType.WATER.value: (50, 120, 200),       # Water - Blue
-    TileType.MOUNTAIN.value: (150, 150, 150),   # Mountain - Light gray
-    TileType.FOREST.value: (34, 139, 34),       # Forest - Forest green
-    TileType.ROAD.value: (160, 130, 80),        # Road - Brown/tan
-    TileType.BUILDING.value: (180, 180, 180),   # Building - Light gray (player-colored)
+    TileType.GRASS.value: (100, 200, 100),  # Grass - Bright green
+    TileType.WATER.value: (50, 120, 200),  # Water - Blue
+    TileType.MOUNTAIN.value: (150, 150, 150),  # Mountain - Light gray
+    TileType.FOREST.value: (34, 139, 34),  # Forest - Forest green
+    TileType.ROAD.value: (160, 130, 80),  # Road - Brown/tan
+    TileType.BUILDING.value: (180, 180, 180),  # Building - Light gray (player-colored)
     TileType.HEADQUARTERS.value: (200, 200, 50),  # Headquarters - Yellow (player-colored)
-    TileType.TOWER.value: (220, 220, 220),      # Tower - Light gray
-    TileType.OCEAN.value: (0, 39, 232),         # Ocean - Dark Blue
+    TileType.TOWER.value: (220, 220, 220),  # Tower - Light gray
+    TileType.OCEAN.value: (0, 39, 232),  # Ocean - Dark Blue
     # Keep string keys for backwards compatibility
-    'p': (100, 200, 100),
-    'w': (50, 120, 200),
-    'm': (150, 150, 150),
-    'f': (34, 139, 34),
-    'r': (160, 130, 80),
-    'b': (180, 180, 180),
-    'h': (200, 200, 50),
-    't': (220, 220, 220),
-    'o': (0, 39, 232),
+    "p": (100, 200, 100),
+    "w": (50, 120, 200),
+    "m": (150, 150, 150),
+    "f": (34, 139, 34),
+    "r": (160, 130, 80),
+    "b": (180, 180, 180),
+    "h": (200, 200, 50),
+    "t": (220, 220, 220),
+    "o": (0, 39, 232),
 }
 
 # Player colors - Made more vibrant
 PLAYER_COLORS = {
-    1: (255, 50, 50),     # Red - Brighter
-    2: (77, 121, 255),    # Blue - Brighter
-    3: (50, 255, 50),     # Green - Brighter
-    4: (255, 255, 50)     # Yellow - Brighter
+    1: (255, 50, 50),  # Red - Brighter
+    2: (77, 121, 255),  # Blue - Brighter
+    3: (50, 255, 50),  # Green - Brighter
+    4: (255, 255, 50),  # Yellow - Brighter
 }
 
 # Base sprite sheet palette (blue tones) to be replaced per team.
 # These are the exact RGB values in the sprite sheet PNGs that represent
 # the unit's "team colour" regions, from darkest to lightest.
 BASE_SPRITE_COLORS = [
-    (30, 87, 156),    # #1e579c - darkest
-    (60, 94, 139),    # #3c5e8b
-    (47, 114, 144),   # #2f7290
-    (40, 134, 176),   # #2886b0
-    (61, 165, 211),   # #3da5d3 - lightest
+    (30, 87, 156),  # #1e579c - darkest
+    (60, 94, 139),  # #3c5e8b
+    (47, 114, 144),  # #2f7290
+    (40, 134, 176),  # #2886b0
+    (61, 165, 211),  # #3da5d3 - lightest
     # Additional blue tones for units and bases
-    (7, 109, 191),    # #076dbf
-    (0, 152, 219),    # #0098db
-    (79, 143, 186),   # #4f8fba
+    (7, 109, 191),  # #076dbf
+    (0, 152, 219),  # #0098db
+    (79, 143, 186),  # #4f8fba
     (115, 190, 211),  # #73bed3
 ]
 
@@ -132,11 +134,11 @@ TEAM_PALETTES = {
 # Neutral (unowned) structure palette – white/gray tones used when a
 # capturable structure has no owning player (tile.player is None).
 NEUTRAL_STRUCTURE_PALETTE = [
-    (100, 100, 112),   # dark gray
-    (120, 120, 130),   # medium-dark gray
-    (142, 142, 152),   # medium gray
-    (172, 172, 182),   # medium-light gray
-    (204, 204, 214),   # light gray
+    (100, 100, 112),  # dark gray
+    (120, 120, 130),  # medium-dark gray
+    (142, 142, 152),  # medium gray
+    (172, 172, 182),  # medium-light gray
+    (204, 204, 214),  # light gray
     # Neutrals for additional blue tones
     (174, 174, 185),
     (200, 200, 212),
@@ -146,110 +148,110 @@ NEUTRAL_STRUCTURE_PALETTE = [
 
 # Tile type names (from TILE_TYPES values) that should receive team
 # colour recoloring when rendered as sprites.
-STRUCTURE_TILE_TYPES = {'TOWER', 'BUILDING', 'HEADQUARTERS'}
+STRUCTURE_TILE_TYPES = {"TOWER", "BUILDING", "HEADQUARTERS"}
 
 # Unit colors
 UNIT_COLORS = {
-    'W': (139, 69, 19),      # Brown (Warrior)
-    'M': (138, 43, 226),     # Purple (Mage)
-    'C': (255, 215, 0),      # Gold (Cleric)
-    'B': (0, 215, 0),        # Barbarian (Green)
-    'A': (34, 139, 34),      # Archer (Forest Green)
-    'K': (192, 192, 192),    # Knight (Silver)
-    'R': (64, 64, 64),       # Rogue (Dark Gray)
-    'S': (0, 191, 255)       # Sorcerer (Deep Sky Blue)
+    "W": (139, 69, 19),  # Brown (Warrior)
+    "M": (138, 43, 226),  # Purple (Mage)
+    "C": (255, 215, 0),  # Gold (Cleric)
+    "B": (0, 215, 0),  # Barbarian (Green)
+    "A": (34, 139, 34),  # Archer (Forest Green)
+    "K": (192, 192, 192),  # Knight (Silver)
+    "R": (64, 64, 64),  # Rogue (Dark Gray)
+    "S": (0, 191, 255),  # Sorcerer (Deep Sky Blue)
 }
 
 # Unit costs and properties
 UNIT_DATA = {
-    'W': {
-        'static_path': 'warrior.png',
-        'animation_path': 'warrior',
-        'name': 'Warrior',
-        'cost': 200,
-        'color': (139, 69, 19),
-        'movement': 3,
-        'health': 15,
-        'attack': 10,
-        'defence': 6
+    "W": {
+        "static_path": "warrior.png",
+        "animation_path": "warrior",
+        "name": "Warrior",
+        "cost": 200,
+        "color": (139, 69, 19),
+        "movement": 3,
+        "health": 15,
+        "attack": 10,
+        "defence": 6,
     },
-    'M': {
-        'static_path': 'mage.png',
-        'animation_path': 'mage',
-        'name': 'Mage',
-        'cost': 300,
-        'color': (138, 43, 226),
-        'movement': 2,
-        'health': 10,
-        'attack': {'adjacent': 8, 'range': 12},
-        'defence': 4
+    "M": {
+        "static_path": "mage.png",
+        "animation_path": "mage",
+        "name": "Mage",
+        "cost": 300,
+        "color": (138, 43, 226),
+        "movement": 2,
+        "health": 10,
+        "attack": {"adjacent": 8, "range": 12},
+        "defence": 4,
     },
-    'C': {
-        'static_path': 'cleric.png',
-        'animation_path': 'cleric',
-        'name': 'Cleric',
-        'cost': 200,
-        'color': (255, 215, 0),
-        'movement': 2,
-        'health': 8,
-        'attack': 2,
-        'defence': 4
+    "C": {
+        "static_path": "cleric.png",
+        "animation_path": "cleric",
+        "name": "Cleric",
+        "cost": 200,
+        "color": (255, 215, 0),
+        "movement": 2,
+        "health": 8,
+        "attack": 2,
+        "defence": 4,
     },
-    'B': {
-        'static_path': 'barbarian.png',
-        'animation_path': 'barbarian',
-        'name': 'Barbarian',
-        'cost': 400,
-        'color': (0, 215, 0),
-        'movement': 5,
-        'health': 20,
-        'attack': 10,
-        'defence': 2
+    "B": {
+        "static_path": "barbarian.png",
+        "animation_path": "barbarian",
+        "name": "Barbarian",
+        "cost": 400,
+        "color": (0, 215, 0),
+        "movement": 5,
+        "health": 20,
+        "attack": 10,
+        "defence": 2,
     },
-    'A': {
-        'static_path': 'archer.png',
-        'animation_path': 'archer',
-        'name': 'Archer',
-        'cost': 250,
-        'color': (34, 139, 34),
-        'movement': 3,
-        'health': 15,
-        'attack': 5,
-        'defence': 1
+    "A": {
+        "static_path": "archer.png",
+        "animation_path": "archer",
+        "name": "Archer",
+        "cost": 250,
+        "color": (34, 139, 34),
+        "movement": 3,
+        "health": 15,
+        "attack": 5,
+        "defence": 1,
     },
-    'K': {
-        'static_path': 'knight.png',
-        'animation_path': 'knight',
-        'name': 'Knight',
-        'cost': 350,
-        'color': (192, 192, 192),
-        'movement': 4,
-        'health': 18,
-        'attack': 8,
-        'defence': 5
+    "K": {
+        "static_path": "knight.png",
+        "animation_path": "knight",
+        "name": "Knight",
+        "cost": 350,
+        "color": (192, 192, 192),
+        "movement": 4,
+        "health": 18,
+        "attack": 8,
+        "defence": 5,
     },
-    'R': {
-        'static_path': 'rogue.png',
-        'animation_path': 'rogue',
-        'name': 'Rogue',
-        'cost': 350,
-        'color': (64, 64, 64),
-        'movement': 4,
-        'health': 12,
-        'attack': 9,
-        'defence': 3
+    "R": {
+        "static_path": "rogue.png",
+        "animation_path": "rogue",
+        "name": "Rogue",
+        "cost": 350,
+        "color": (64, 64, 64),
+        "movement": 4,
+        "health": 12,
+        "attack": 9,
+        "defence": 3,
     },
-    'S': {
-        'static_path': 'sorcerer.png',
-        'animation_path': 'sorcerer',
-        'name': 'Sorcerer',
-        'cost': 400,
-        'color': (0, 191, 255),
-        'movement': 2,
-        'health': 10,
-        'attack': {'adjacent': 6, 'range': 8},
-        'defence': 3
-    }
+    "S": {
+        "static_path": "sorcerer.png",
+        "animation_path": "sorcerer",
+        "name": "Sorcerer",
+        "cost": 400,
+        "color": (0, 191, 255),
+        "movement": 2,
+        "health": 10,
+        "attack": {"adjacent": 6, "range": 8},
+        "defence": 3,
+    },
 }
 
 # Starting gold for each player
@@ -296,38 +298,38 @@ SORCERER_ATTACK_BUFF_AMOUNT = 0.35  # 35% damage increase
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility
 TILE_TYPES = {
-    TileType.GRASS.value: 'GRASS',
-    TileType.WATER.value: 'WATER',
-    TileType.MOUNTAIN.value: 'MOUNTAIN',
-    TileType.FOREST.value: 'FOREST',
-    TileType.ROAD.value: 'ROAD',
-    TileType.BUILDING.value: 'BUILDING',
-    TileType.HEADQUARTERS.value: 'HEADQUARTERS',
-    TileType.TOWER.value: 'TOWER',
-    TileType.OCEAN.value: 'OCEAN',
+    TileType.GRASS.value: "GRASS",
+    TileType.WATER.value: "WATER",
+    TileType.MOUNTAIN.value: "MOUNTAIN",
+    TileType.FOREST.value: "FOREST",
+    TileType.ROAD.value: "ROAD",
+    TileType.BUILDING.value: "BUILDING",
+    TileType.HEADQUARTERS.value: "HEADQUARTERS",
+    TileType.TOWER.value: "TOWER",
+    TileType.OCEAN.value: "OCEAN",
     # Also keep simple string keys for backwards compatibility
-    'p': 'GRASS',
-    'w': 'WATER',
-    'm': 'MOUNTAIN',
-    'f': 'FOREST',
-    'r': 'ROAD',
-    'b': 'BUILDING',
-    'h': 'HEADQUARTERS',
-    't': 'TOWER',
-    'o': 'OCEAN'
+    "p": "GRASS",
+    "w": "WATER",
+    "m": "MOUNTAIN",
+    "f": "FOREST",
+    "r": "ROAD",
+    "b": "BUILDING",
+    "h": "HEADQUARTERS",
+    "t": "TOWER",
+    "o": "OCEAN",
 }
 
 # Tile images
 TILE_IMAGES = {
-    'GRASS': 'grass.png',
-    'WATER': 'water.png',
-    'OCEAN': 'ocean.png',
-    'MOUNTAIN': 'mountain.png',
-    'FOREST': 'forest.png',
-    'ROAD': 'road.png',
-    'TOWER': 'city.png',
-    'BUILDING': 'building.png',
-    'HEADQUARTERS': 'headquarters.png'
+    "GRASS": "grass.png",
+    "WATER": "water.png",
+    "OCEAN": "ocean.png",
+    "MOUNTAIN": "mountain.png",
+    "FOREST": "forest.png",
+    "ROAD": "road.png",
+    "TOWER": "city.png",
+    "BUILDING": "building.png",
+    "HEADQUARTERS": "headquarters.png",
 }
 
 # Animation configuration for sprite sheets
@@ -343,46 +345,59 @@ TILE_IMAGES = {
 #
 ANIMATION_CONFIG = {
     # Source frame size on the sprite sheet
-    'frame_width': 64,
-    'frame_height': 64,
-
+    "frame_width": 64,
+    "frame_height": 64,
     # Centre-crop each frame to this size before scaling to display
-    'crop_width': 32,
-    'crop_height': 32,
-
+    "crop_width": 32,
+    "crop_height": 32,
     # Frame map: animation state -> list of (row, col) coordinates
     # This replaces the old row-based state_rows mapping.
-    'frame_map': {
-        'idle': [(0, 0), (0, 1), (0, 2), (0, 3)],
-        'move_left': [
-            (0, 4), (0, 5),
-            (1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5),
+    "frame_map": {
+        "idle": [(0, 0), (0, 1), (0, 2), (0, 3)],
+        "move_left": [
+            (0, 4),
+            (0, 5),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
         ],
-        'move_down': [
-            (2, 0), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5),
-            (3, 0), (3, 1),
+        "move_down": [
+            (2, 0),
+            (2, 1),
+            (2, 2),
+            (2, 3),
+            (2, 4),
+            (2, 5),
+            (3, 0),
+            (3, 1),
         ],
-        'move_up': [
-            (3, 2), (3, 3), (3, 4), (3, 5),
-            (4, 0), (4, 1), (4, 2), (4, 3),
+        "move_up": [
+            (3, 2),
+            (3, 3),
+            (3, 4),
+            (3, 5),
+            (4, 0),
+            (4, 1),
+            (4, 2),
+            (4, 3),
         ],
     },
-
     # States that are generated by horizontally flipping another state
-    'mirror_states': {
-        'move_right': 'move_left',
+    "mirror_states": {
+        "move_right": "move_left",
     },
-
     # Animation state speed (seconds per frame)
-    'states': {
-        'idle': {'speed': 0.2},
-        'move_down': {'speed': 0.1},
-        'move_up': {'speed': 0.1},
-        'move_left': {'speed': 0.1},
-        'move_right': {'speed': 0.1},
+    "states": {
+        "idle": {"speed": 0.2},
+        "move_down": {"speed": 0.1},
+        "move_up": {"speed": 0.1},
+        "move_left": {"speed": 0.1},
+        "move_right": {"speed": 0.1},
     },
-
     # Per-unit type overrides (optional)
     # Example: 'units': {'W': {'frame_width': 48, 'frame_height': 48}}
-    'units': {}
+    "units": {},
 }

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
@@ -97,9 +97,7 @@ class TournamentRunner:
         if self.config.log_conversations and self.config.conversation_log_dir:
             os.makedirs(self.config.conversation_log_dir, exist_ok=True)
 
-    def set_progress_callback(
-        self, callback: Callable[[int, int, GameResult], None]
-    ) -> None:
+    def set_progress_callback(self, callback: Callable[[int, int, GameResult], None]) -> None:
         """
         Set a callback for progress updates.
 
@@ -108,9 +106,7 @@ class TournamentRunner:
         """
         self._progress_callback = callback
 
-    def set_completed_matches(
-        self, completed: Dict[str, List[CompletedMatchInfo]]
-    ) -> None:
+    def set_completed_matches(self, completed: Dict[str, List[CompletedMatchInfo]]) -> None:
         """
         Set completed matches for resume support.
 
@@ -175,13 +171,9 @@ class TournamentRunner:
             logger.info(f"Games in round: {len(round_games)}")
 
             if self.config.concurrent_games > 1:
-                completed_count = self._run_round_concurrent(
-                    round_games, completed_count, total_games
-                )
+                completed_count = self._run_round_concurrent(round_games, completed_count, total_games)
             else:
-                completed_count = self._run_round_sequential(
-                    round_games, completed_count, total_games
-                )
+                completed_count = self._run_round_sequential(round_games, completed_count, total_games)
 
         # Mark end time
         self.results.finish()
@@ -199,10 +191,7 @@ class TournamentRunner:
     ) -> int:
         """Run games sequentially."""
         for game in games:
-            logger.info(
-                f"  Game {completed_count + 1}/{total_games}: "
-                f"{game.bot1.name} vs {game.bot2.name}"
-            )
+            logger.info(f"  Game {completed_count + 1}/{total_games}: {game.bot1.name} vs {game.bot2.name}")
 
             result = self._execute_game(game)
             self.results.add_game_result(result)
@@ -226,9 +215,7 @@ class TournamentRunner:
         logger.info(f"  Running with {concurrency} concurrent workers")
 
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            future_to_game = {
-                executor.submit(self._execute_game, game): game for game in games
-            }
+            future_to_game = {executor.submit(self._execute_game, game): game for game in games}
 
             for future in as_completed(future_to_game):
                 game = future_to_game[future]
@@ -243,9 +230,7 @@ class TournamentRunner:
                             f"{result.winner_name} ({result.turns} turns)"
                         )
                         if self._progress_callback:
-                            self._progress_callback(
-                                completed_count, total_games, result
-                            )
+                            self._progress_callback(completed_count, total_games, result)
                 except Exception as e:
                     logger.error(f"  Error in game {game.game_id}: {e}")
                     completed_count += 1
@@ -276,22 +261,18 @@ class TournamentRunner:
 
         if self.config.log_conversations and self.config.conversation_log_dir:
             matchup_log_dir = str(
-                Path(self.config.conversation_log_dir)
-                / map_config.stem
-                / f"{bot1_desc.name}_vs_{bot2_desc.name}"
+                Path(self.config.conversation_log_dir) / map_config.stem / f"{bot1_desc.name}_vs_{bot2_desc.name}"
             )
             os.makedirs(matchup_log_dir, exist_ok=True)
 
         # Create session ID for logging
-        session_id = (
-            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
-            f"{bot1_desc.name}_vs_{bot2_desc.name}"
-        )
+        session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{bot1_desc.name}_vs_{bot2_desc.name}"
 
         # Load map and create game state
         map_data = FileIO.load_map(map_config.path)
         game_state = GameState(
-            map_data, num_players=2,
+            map_data,
+            num_players=2,
             enabled_units=self.config.enabled_units,
         )
         max_turns = map_config.max_turns or self.config.max_turns
@@ -392,12 +373,10 @@ class TournamentRunner:
     ) -> str:
         """Save game replay and return path."""
         replay_filename = (
-            f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
-            f"{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
+            f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
         )
-        replay_path = str(
-            Path(self.config.replay_dir) / map_config.stem / replay_filename
-        )
+        assert self.config.replay_dir is not None
+        replay_path = str(Path(self.config.replay_dir) / map_config.stem / replay_filename)
 
         # Map bot_type to player_type
         type_mapping = {
@@ -471,9 +450,7 @@ class TournamentRunner:
 
         logger.info("=" * 70)
 
-    def export_results(
-        self, timestamp: Optional[str] = None
-    ) -> Dict[str, str]:
+    def export_results(self, timestamp: Optional[str] = None) -> Dict[str, str]:
         """
         Export results to all formats.
 

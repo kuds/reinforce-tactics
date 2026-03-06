@@ -113,10 +113,16 @@ def self_play_game(
         )
 
         # Store training example (value target will be filled in after game ends)
-        examples.append((
-            grid, units, global_features, action_mask,
-            action_probs, game_state.current_player,
-        ))
+        examples.append(
+            (
+                grid,
+                units,
+                global_features,
+                action_mask,
+                action_probs,
+                game_state.current_player,
+            )
+        )
 
         # Execute the selected action
         action_info = mcts.get_action_info(game_state, flat_action)
@@ -125,7 +131,7 @@ def self_play_game(
             game_state.end_turn()
         else:
             try:
-                _execute_action_on_state(game_state, action_info['key'], action_info['action'])
+                _execute_action_on_state(game_state, action_info["key"], action_info["action"])
             except Exception:
                 logger.debug("Self-play action failed, ending turn")
                 game_state.end_turn()
@@ -180,8 +186,8 @@ class AlphaZeroTrainer:
         temperature_threshold: int = 30,
         eval_games: int = 20,
         eval_win_threshold: float = 0.55,
-        checkpoint_dir: str = 'checkpoints/alphazero',
-        device: str = 'cpu',
+        checkpoint_dir: str = "checkpoints/alphazero",
+        device: str = "cpu",
         enabled_units: Optional[list] = None,
     ):
         self.map_file = map_file
@@ -230,7 +236,10 @@ class AlphaZeroTrainer:
 
         # LR scheduler: reduce on plateau
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5,
+            self.optimizer,
+            mode="min",
+            factor=0.5,
+            patience=5,
         )
 
         # Replay buffer
@@ -249,13 +258,13 @@ class AlphaZeroTrainer:
 
         # Training history
         self.history = {
-            'iteration': [],
-            'policy_loss': [],
-            'value_loss': [],
-            'total_loss': [],
-            'self_play_wins_p1': [],
-            'self_play_wins_p2': [],
-            'self_play_draws': [],
+            "iteration": [],
+            "policy_loss": [],
+            "value_loss": [],
+            "total_loss": [],
+            "self_play_wins_p1": [],
+            "self_play_wins_p2": [],
+            "self_play_draws": [],
         }
 
         # Create checkpoint directory
@@ -269,10 +278,12 @@ class AlphaZeroTrainer:
             Training history dict.
         """
         logger.info(
-            "Starting AlphaZero training: %d iterations, %d games/iter, "
-            "%d simulations/move, grid=%dx%d",
-            self.num_iterations, self.games_per_iteration,
-            self.num_simulations, self.grid_width, self.grid_height,
+            "Starting AlphaZero training: %d iterations, %d games/iter, %d simulations/move, grid=%dx%d",
+            self.num_iterations,
+            self.games_per_iteration,
+            self.num_simulations,
+            self.grid_width,
+            self.grid_height,
         )
 
         best_network_state = copy.deepcopy(self.network.state_dict())
@@ -287,11 +298,13 @@ class AlphaZeroTrainer:
             self.replay_buffer.push(examples)
 
             logger.info(
-                "Self-play: %d games, P1 wins=%d, P2 wins=%d, draws=%d, "
-                "%d examples (buffer=%d)",
+                "Self-play: %d games, P1 wins=%d, P2 wins=%d, draws=%d, %d examples (buffer=%d)",
                 self.games_per_iteration,
-                stats['p1_wins'], stats['p2_wins'], stats['draws'],
-                len(examples), len(self.replay_buffer),
+                stats["p1_wins"],
+                stats["p2_wins"],
+                stats["draws"],
+                len(examples),
+                len(self.replay_buffer),
             )
 
             # Phase 2: Training
@@ -300,8 +313,9 @@ class AlphaZeroTrainer:
 
             logger.info(
                 "Training: policy_loss=%.4f, value_loss=%.4f, total=%.4f",
-                train_stats['policy_loss'], train_stats['value_loss'],
-                train_stats['total_loss'],
+                train_stats["policy_loss"],
+                train_stats["value_loss"],
+                train_stats["total_loss"],
             )
 
             # Phase 3: Evaluation (optional)
@@ -309,22 +323,20 @@ class AlphaZeroTrainer:
                 win_rate = self._evaluation_phase(best_network_state)
                 logger.info("Evaluation: new network win rate = %.2f", win_rate)
                 if win_rate >= self.eval_win_threshold:
-                    logger.info("Accepting new network (%.2f >= %.2f)",
-                                win_rate, self.eval_win_threshold)
+                    logger.info("Accepting new network (%.2f >= %.2f)", win_rate, self.eval_win_threshold)
                     best_network_state = copy.deepcopy(self.network.state_dict())
                 else:
-                    logger.info("Rejecting new network (%.2f < %.2f), reverting",
-                                win_rate, self.eval_win_threshold)
+                    logger.info("Rejecting new network (%.2f < %.2f), reverting", win_rate, self.eval_win_threshold)
                     self.network.load_state_dict(best_network_state)
 
             # Record history
-            self.history['iteration'].append(iteration)
-            self.history['policy_loss'].append(train_stats['policy_loss'])
-            self.history['value_loss'].append(train_stats['value_loss'])
-            self.history['total_loss'].append(train_stats['total_loss'])
-            self.history['self_play_wins_p1'].append(stats['p1_wins'])
-            self.history['self_play_wins_p2'].append(stats['p2_wins'])
-            self.history['self_play_draws'].append(stats['draws'])
+            self.history["iteration"].append(iteration)
+            self.history["policy_loss"].append(train_stats["policy_loss"])
+            self.history["value_loss"].append(train_stats["value_loss"])
+            self.history["total_loss"].append(train_stats["total_loss"])
+            self.history["self_play_wins_p1"].append(stats["p1_wins"])
+            self.history["self_play_wins_p2"].append(stats["p2_wins"])
+            self.history["self_play_draws"].append(stats["draws"])
 
             # Checkpoint
             if iteration % 10 == 0 or iteration == self.num_iterations:
@@ -343,13 +355,15 @@ class AlphaZeroTrainer:
         """Generate self-play training data."""
         mcts = MCTS(network=self.network, **self.mcts_kwargs)
         all_examples = []
-        stats = {'p1_wins': 0, 'p2_wins': 0, 'draws': 0}
+        stats = {"p1_wins": 0, "p2_wins": 0, "draws": 0}
 
         for game_idx in range(self.games_per_iteration):
             # Optionally randomize map for diversity
             if self.map_file is None:
                 map_data = FileIO.generate_random_map(
-                    self.grid_width, self.grid_height, num_players=2,
+                    self.grid_width,
+                    self.grid_height,
+                    num_players=2,
                 )
             else:
                 map_data = self.map_data
@@ -365,24 +379,22 @@ class AlphaZeroTrainer:
             all_examples.extend(examples)
 
             if winner == 1:
-                stats['p1_wins'] += 1
+                stats["p1_wins"] += 1
             elif winner == 2:
-                stats['p2_wins'] += 1
+                stats["p2_wins"] += 1
             else:
-                stats['draws'] += 1
+                stats["draws"] += 1
 
             if (game_idx + 1) % 5 == 0:
-                logger.debug("Self-play game %d/%d complete",
-                             game_idx + 1, self.games_per_iteration)
+                logger.debug("Self-play game %d/%d complete", game_idx + 1, self.games_per_iteration)
 
         return all_examples, stats
 
     def _training_phase(self) -> Dict[str, float]:
         """Train the network on replay buffer data."""
         if len(self.replay_buffer) < self.batch_size:
-            logger.info("Buffer too small (%d < %d), skipping training",
-                        len(self.replay_buffer), self.batch_size)
-            return {'policy_loss': 0.0, 'value_loss': 0.0, 'total_loss': 0.0}
+            logger.info("Buffer too small (%d < %d), skipping training", len(self.replay_buffer), self.batch_size)
+            return {"policy_loss": 0.0, "value_loss": 0.0, "total_loss": 0.0}
 
         total_policy_loss = 0.0
         total_value_loss = 0.0
@@ -393,22 +405,34 @@ class AlphaZeroTrainer:
 
             # Unpack batch
             grids = torch.tensor(
-                np.array([ex[0] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[0] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             )
             units_batch = torch.tensor(
-                np.array([ex[1] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[1] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             )
             global_features = torch.tensor(
-                np.array([ex[2] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[2] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             )
             masks = torch.tensor(
-                np.array([ex[3] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[3] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             )
             target_policies = torch.tensor(
-                np.array([ex[4] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[4] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             )
             target_values = torch.tensor(
-                np.array([ex[5] for ex in batch]), dtype=torch.float32, device=self.device,
+                np.array([ex[5] for ex in batch]),
+                dtype=torch.float32,
+                device=self.device,
             ).unsqueeze(1)
 
             # Forward pass
@@ -445,9 +469,9 @@ class AlphaZeroTrainer:
         self.scheduler.step(avg_policy + avg_value)
 
         return {
-            'policy_loss': avg_policy,
-            'value_loss': avg_value,
-            'total_loss': avg_policy + avg_value,
+            "policy_loss": avg_policy,
+            "value_loss": avg_value,
+            "total_loss": avg_policy + avg_value,
         }
 
     def _evaluation_phase(self, best_state_dict: dict) -> float:
@@ -476,7 +500,7 @@ class AlphaZeroTrainer:
 
         for game_idx in range(self.eval_games):
             # Alternate who plays as player 1
-            current_is_p1 = (game_idx % 2 == 0)
+            current_is_p1 = game_idx % 2 == 0
             p1_mcts = current_mcts if current_is_p1 else opponent_mcts
             p2_mcts = opponent_mcts if current_is_p1 else current_mcts
 
@@ -497,7 +521,9 @@ class AlphaZeroTrainer:
     def _play_eval_game(self, p1_mcts: MCTS, p2_mcts: MCTS) -> Optional[int]:
         """Play a single evaluation game. Returns winner (1, 2, or None)."""
         game_state = GameState(
-            self.map_data, num_players=2, enabled_units=self.enabled_units,
+            self.map_data,
+            num_players=2,
+            enabled_units=self.enabled_units,
         )
 
         for _ in range(self.max_game_steps):
@@ -507,7 +533,9 @@ class AlphaZeroTrainer:
             mcts = p1_mcts if game_state.current_player == 1 else p2_mcts
 
             flat_action, _ = mcts.select_action(
-                game_state, temperature=0, add_noise=False,
+                game_state,
+                temperature=0,
+                add_noise=False,
             )
 
             action_info = mcts.get_action_info(game_state, flat_action)
@@ -516,7 +544,9 @@ class AlphaZeroTrainer:
             else:
                 try:
                     _execute_action_on_state(
-                        game_state, action_info['key'], action_info['action'],
+                        game_state,
+                        action_info["key"],
+                        action_info["action"],
                     )
                 except Exception:
                     game_state.end_turn()
@@ -525,33 +555,36 @@ class AlphaZeroTrainer:
 
     def _save_checkpoint(self, iteration: int, is_final: bool = False) -> None:
         """Save a training checkpoint."""
-        suffix = 'final' if is_final else f'iter_{iteration:04d}'
-        path = self.checkpoint_dir / f'alphazero_{suffix}.pt'
+        suffix = "final" if is_final else f"iter_{iteration:04d}"
+        path = self.checkpoint_dir / f"alphazero_{suffix}.pt"
 
-        torch.save({
-            'iteration': iteration,
-            'model_state_dict': self.network.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'history': self.history,
-            'config': {
-                'grid_height': self.grid_height,
-                'grid_width': self.grid_width,
-                'num_simulations': self.num_simulations,
+        torch.save(
+            {
+                "iteration": iteration,
+                "model_state_dict": self.network.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": self.scheduler.state_dict(),
+                "history": self.history,
+                "config": {
+                    "grid_height": self.grid_height,
+                    "grid_width": self.grid_width,
+                    "num_simulations": self.num_simulations,
+                },
             },
-        }, path)
+            path,
+        )
 
         logger.info("Saved checkpoint: %s", path)
 
     def _save_history(self) -> None:
         """Save training history to JSON."""
-        path = self.checkpoint_dir / 'training_history.json'
-        with open(path, 'w') as f:
+        path = self.checkpoint_dir / "training_history.json"
+        with open(path, "w") as f:
             json.dump(self.history, f, indent=2)
         logger.info("Saved training history: %s", path)
 
     @classmethod
-    def load_checkpoint(cls, path: str, device: str = 'cpu', **kwargs) -> 'AlphaZeroTrainer':
+    def load_checkpoint(cls, path: str, device: str = "cpu", **kwargs) -> "AlphaZeroTrainer":
         """
         Load a trainer from a checkpoint.
 
@@ -564,19 +597,18 @@ class AlphaZeroTrainer:
             AlphaZeroTrainer instance with loaded weights.
         """
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        config = checkpoint.get('config', {})
+        config = checkpoint.get("config", {})
         config.update(kwargs)
-        config['device'] = device
+        config["device"] = device
 
         trainer = cls(**config)
-        trainer.network.load_state_dict(checkpoint['model_state_dict'])
-        trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        trainer.network.load_state_dict(checkpoint["model_state_dict"])
+        trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        if 'scheduler_state_dict' in checkpoint:
-            trainer.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        if 'history' in checkpoint:
-            trainer.history = checkpoint['history']
+        if "scheduler_state_dict" in checkpoint:
+            trainer.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if "history" in checkpoint:
+            trainer.history = checkpoint["history"]
 
-        logger.info("Loaded checkpoint from iteration %d: %s",
-                     checkpoint.get('iteration', 0), path)
+        logger.info("Loaded checkpoint from iteration %d: %s", checkpoint.get("iteration", 0), path)
         return trainer

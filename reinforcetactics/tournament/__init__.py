@@ -33,20 +33,20 @@ Example usage:
     results = runner.run(bots)
 """
 
-from .elo import EloRatingSystem
 from .bots import BotDescriptor, BotType, create_bot_instance
-from .schedule import (
-    ScheduledGame,
-    MapConfig,
-    generate_round_robin_schedule,
-)
+from .config import TournamentConfig
+from .elo import EloRatingSystem
 from .results import (
     GameResult,
-    TournamentResults,
     ResultsExporter,
+    TournamentResults,
 )
-from .config import TournamentConfig
 from .runner import TournamentRunner
+from .schedule import (
+    MapConfig,
+    ScheduledGame,
+    generate_round_robin_schedule,
+)
 
 __all__ = [
     # Elo

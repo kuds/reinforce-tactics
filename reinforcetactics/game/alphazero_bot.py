@@ -32,7 +32,7 @@ class AlphaZeroBot:
         num_simulations: int = 100,
         c_puct: float = 1.5,
         temperature: float = 0.0,
-        device: str = 'cpu',
+        device: str = "cpu",
     ):
         """
         Args:
@@ -56,7 +56,12 @@ class AlphaZeroBot:
         # Load or create network
         if model_path:
             self.network, self.mcts = self._load_model(
-                model_path, grid_width, grid_height, num_simulations, c_puct, device,
+                model_path,
+                grid_width,
+                grid_height,
+                num_simulations,
+                c_puct,
+                device,
             )
         else:
             self.network = AlphaZeroNet(
@@ -73,8 +78,9 @@ class AlphaZeroBot:
                 device=device,
             )
 
-    def _load_model(self, model_path: str, grid_width: int, grid_height: int,
-                    num_simulations: int, c_puct: float, device: str):
+    def _load_model(
+        self, model_path: str, grid_width: int, grid_height: int, num_simulations: int, c_puct: float, device: str
+    ):
         """Load a trained AlphaZero model from checkpoint."""
         path = Path(model_path)
         if not path.exists():
@@ -83,15 +89,15 @@ class AlphaZeroBot:
         checkpoint = torch.load(str(path), map_location=device, weights_only=False)
 
         # Get config from checkpoint or use defaults
-        config = checkpoint.get('config', {})
-        net_height = config.get('grid_height', grid_height)
-        net_width = config.get('grid_width', grid_width)
+        config = checkpoint.get("config", {})
+        net_height = config.get("grid_height", grid_height)
+        net_width = config.get("grid_width", grid_width)
 
         network = AlphaZeroNet(
             grid_height=net_height,
             grid_width=net_width,
         ).to(device)
-        network.load_state_dict(checkpoint['model_state_dict'])
+        network.load_state_dict(checkpoint["model_state_dict"])
         network.eval()
 
         mcts = MCTS(
@@ -103,8 +109,7 @@ class AlphaZeroBot:
             device=device,
         )
 
-        logger.info("Loaded AlphaZero model from %s (iteration %d)",
-                     path, checkpoint.get('iteration', 0))
+        logger.info("Loaded AlphaZero model from %s (iteration %d)", path, checkpoint.get("iteration", 0))
         return network, mcts
 
     def take_turn(self) -> None:
@@ -134,15 +139,15 @@ class AlphaZeroBot:
                 self.game_state.end_turn()
                 break
 
-            if action_info['key'] == 'end_turn':
+            if action_info["key"] == "end_turn":
                 self.game_state.end_turn()
                 break
 
             try:
                 _execute_action_on_state(
                     self.game_state,
-                    action_info['key'],
-                    action_info['action'],
+                    action_info["key"],
+                    action_info["action"],
                 )
             except Exception as e:
                 logger.debug("AlphaZero action failed: %s, ending turn", e)

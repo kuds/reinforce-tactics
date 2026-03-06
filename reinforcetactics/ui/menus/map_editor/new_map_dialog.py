@@ -1,10 +1,13 @@
 """Dialog for creating a new map with custom dimensions."""
-from typing import Optional, Dict, Any
+
+from typing import Any, Dict, Optional
+
 import pygame
-from reinforcetactics.ui.menus.base import Menu
-from reinforcetactics.utils.language import get_language
-from reinforcetactics.utils.fonts import get_font
+
 from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.language import get_language
 
 
 class NewMapDialog(Menu):
@@ -18,13 +21,13 @@ class NewMapDialog(Menu):
             screen: Optional pygame surface. If None, creates its own.
         """
         lang = get_language()
-        super().__init__(screen, lang.get('map_editor.new_map_dialog.title', 'Create New Map'))
+        super().__init__(screen, lang.get("map_editor.new_map_dialog.title", "Create New Map"))
 
         # Input fields
         self.width_value = MIN_MAP_SIZE
         self.height_value = MIN_MAP_SIZE
         self.num_players = 2
-        self.active_field = 'width'  # 'width', 'height', or 'players'
+        self.active_field = "width"  # 'width', 'height', or 'players'
 
         # Fonts
         self.label_font = get_font(32)
@@ -41,15 +44,15 @@ class NewMapDialog(Menu):
     def _setup_options(self) -> None:
         """Setup menu options."""
         lang = get_language()
-        self.add_option(lang.get('map_editor.new_map_dialog.create', 'Create'), self._create)
-        self.add_option(lang.get('common.cancel', 'Cancel'), lambda: None)
+        self.add_option(lang.get("map_editor.new_map_dialog.create", "Create"), self._create)
+        self.add_option(lang.get("common.cancel", "Cancel"), lambda: None)
 
     def _create(self) -> Dict[str, Any]:
         """Create a new map with specified dimensions."""
         return {
-            'width': max(self.width_value, MIN_MAP_SIZE),
-            'height': max(self.height_value, MIN_MAP_SIZE),
-            'num_players': self.num_players
+            "width": max(self.width_value, MIN_MAP_SIZE),
+            "height": max(self.height_value, MIN_MAP_SIZE),
+            "num_players": self.num_players,
         }
 
     def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
@@ -65,34 +68,34 @@ class NewMapDialog(Menu):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_TAB:
                 # Cycle through fields
-                if self.active_field == 'width':
-                    self.active_field = 'height'
-                elif self.active_field == 'height':
-                    self.active_field = 'players'
+                if self.active_field == "width":
+                    self.active_field = "height"
+                elif self.active_field == "height":
+                    self.active_field = "players"
                 else:
-                    self.active_field = 'width'
+                    self.active_field = "width"
                 return None
             elif event.key == pygame.K_UP:
                 # Increase value
-                if self.active_field == 'width':
+                if self.active_field == "width":
                     self.width_value = min(100, self.width_value + 1)
-                elif self.active_field == 'height':
+                elif self.active_field == "height":
                     self.height_value = min(100, self.height_value + 1)
-                elif self.active_field == 'players':
+                elif self.active_field == "players":
                     self.num_players = min(4, self.num_players + 1)
                 return None
             elif event.key == pygame.K_DOWN:
                 # Decrease value
-                if self.active_field == 'width':
+                if self.active_field == "width":
                     self.width_value = max(MIN_MAP_SIZE, self.width_value - 1)
-                elif self.active_field == 'height':
+                elif self.active_field == "height":
                     self.height_value = max(MIN_MAP_SIZE, self.height_value - 1)
-                elif self.active_field == 'players':
+                elif self.active_field == "players":
                     self.num_players = max(2, self.num_players - 1)
                 return None
             elif event.key == pygame.K_RETURN:
                 # Only create if we're not on a button
-                if self.active_field in ('width', 'height', 'players'):
+                if self.active_field in ("width", "height", "players"):
                     return self._create()
 
         # Handle menu navigation for buttons
@@ -112,10 +115,7 @@ class NewMapDialog(Menu):
         self.screen.blit(title_surface, title_rect)
 
         # Draw info text
-        info_text = lang.get(
-            'map_editor.new_map_dialog.min_size',
-            'Minimum size: {size}x{size}'
-        ).format(size=MIN_MAP_SIZE)
+        info_text = lang.get("map_editor.new_map_dialog.min_size", "Minimum size: {size}x{size}").format(size=MIN_MAP_SIZE)
         info_surface = self.info_font.render(info_text, True, self.text_color)
         info_rect = info_surface.get_rect(centerx=screen_width // 2, y=120)
         self.screen.blit(info_surface, info_rect)
@@ -126,29 +126,29 @@ class NewMapDialog(Menu):
 
         # Width field
         self._draw_field(
-            lang.get('map_editor.new_map_dialog.width', 'Width:'),
+            lang.get("map_editor.new_map_dialog.width", "Width:"),
             str(self.width_value),
             screen_width // 2,
             start_y,
-            self.active_field == 'width'
+            self.active_field == "width",
         )
 
         # Height field
         self._draw_field(
-            lang.get('map_editor.new_map_dialog.height', 'Height:'),
+            lang.get("map_editor.new_map_dialog.height", "Height:"),
             str(self.height_value),
             screen_width // 2,
             start_y + spacing,
-            self.active_field == 'height'
+            self.active_field == "height",
         )
 
         # Players field
         self._draw_field(
-            lang.get('map_editor.new_map_dialog.players', 'Players:'),
+            lang.get("map_editor.new_map_dialog.players", "Players:"),
             str(self.num_players),
             screen_width // 2,
             start_y + spacing * 2,
-            self.active_field == 'players'
+            self.active_field == "players",
         )
 
         # Draw controls hint
@@ -185,12 +185,7 @@ class NewMapDialog(Menu):
         value_rect = value_surface.get_rect(left=center_x + 20, centery=y)
 
         # Draw background rectangle
-        bg_rect = pygame.Rect(
-            value_rect.x - 10,
-            value_rect.y - 5,
-            value_rect.width + 20,
-            value_rect.height + 10
-        )
+        bg_rect = pygame.Rect(value_rect.x - 10, value_rect.y - 5, value_rect.width + 20, value_rect.height + 10)
         bg_color = self.option_bg_selected_color if is_active else self.option_bg_color
         pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=5)
 
@@ -242,10 +237,7 @@ class NewMapDialog(Menu):
 
             # Create background rectangle
             bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2,
-                text_rect.y - padding_y,
-                uniform_width,
-                text_rect.height + 2 * padding_y
+                (screen_width - uniform_width) // 2, text_rect.y - padding_y, uniform_width, text_rect.height + 2 * padding_y
             )
 
             # Draw background
