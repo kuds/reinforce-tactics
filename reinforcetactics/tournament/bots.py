@@ -23,6 +23,7 @@ class BotType(Enum):
     SIMPLE = "simple"
     MEDIUM = "medium"
     ADVANCED = "advanced"
+    STRATEGY_SWITCHING = "strategy_switching"
     LLM = "llm"
     MODEL = "model"
 
@@ -79,6 +80,11 @@ class BotDescriptor:
     def advanced_bot(cls, name: str = "AdvancedBot") -> "BotDescriptor":
         """Create an AdvancedBot descriptor."""
         return cls(name=name, bot_type=BotType.ADVANCED)
+
+    @classmethod
+    def strategy_switching_bot(cls, name: str = "StrategySwitchingBot") -> "BotDescriptor":
+        """Create a StrategySwitchingBot descriptor."""
+        return cls(name=name, bot_type=BotType.STRATEGY_SWITCHING)
 
     @classmethod
     def llm_bot(
@@ -229,6 +235,11 @@ def create_bot_instance(
 
         return AdvancedBot(game_state, player)
 
+    elif bot_type == BotType.STRATEGY_SWITCHING:
+        from reinforcetactics.game.bot import StrategySwitchingBot
+
+        return StrategySwitchingBot(game_state, player)
+
     elif bot_type == BotType.LLM:
         return _create_llm_bot(
             descriptor,
@@ -317,6 +328,7 @@ def discover_builtin_bots() -> List[BotDescriptor]:
         BotDescriptor.simple_bot("SimpleBot"),
         BotDescriptor.medium_bot("MediumBot"),
         BotDescriptor.advanced_bot("AdvancedBot"),
+        BotDescriptor.strategy_switching_bot("StrategySwitchingBot"),
     ]
 
 

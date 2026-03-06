@@ -1550,3 +1550,249 @@ class AdvancedBot(MediumBot):
         target = min(attackable, key=lambda e: e.health)
         self.game_state.attack(unit, target)
         return True
+
+
+class StrategySwitchingBot(BotUnitMixin):
+    """A bot that switches between strategies during the game.
+
+    Evaluates game state each turn and delegates to the most appropriate
+    strategy (SimpleBot, MediumBot, or AdvancedBot logic). Supports both
+    turn-based phase transitions and dynamic condition-based switching.
+
+    Strategy phases:
+    - EXPAND: Early game - prioritize capturing structures with cheap units.
+              Uses SimpleBot's fast purchasing with expansion-focused targeting.
+    - BUILDUP: Mid game - build a balanced army and establish map control.
+               Uses AdvancedBot's composition-based purchasing and positioning.
+    - ATTACK: Late game or when strong enough - aggressive push to win.
+              Uses MediumBot's coordinated multi-unit attacks with aggressive
+              target prioritization.
+    """
+
+    # Strategy phase constants
+    EXPAND = "expand"
+    BUILDUP = "buildup"
+    ATTACK = "attack"
+
+    # Default phase transition turn thresholds
+    DEFAULT_EXPAND_UNTIL = 3
+    DEFAULT_BUILDUP_UNTIL = 7
+
+    # Expansion-focused purchase priorities (cheap capturers first)
+    EXPAND_PRIORITIES = {
+        "W": 1,  # Warrior - cheapest, good for capturing
+        "B": 2,  # Barbarian - fast, covers ground
+        "A": 5,  # Archer - defer ranged
+        "K": 6,  # Knight - too expensive early
+        "R": 4,  # Rogue - decent mobility
+        "M": 7,  # Mage - defer support
+        "C": 8,  # Cleric - no need early
+        "S": 9,  # Sorcerer - no need early
+    }
+
+    # Attack-focused purchase priorities (damage dealers first)
+    ATTACK_PRIORITIES = {
+        "K": 1,  # Knight - heavy charge damage
+        "B": 2,  # Barbarian - fast aggression
+        "A": 3,  # Archer - ranged pressure
+        "M": 4,  # Mage - paralyze key targets
+        "W": 5,  # Warrior - expendable frontline
+        "R": 6,  # Rogue - flank assassinations
+        "S": 7,  # Sorcerer - buff attackers
+        "C": 8,  # Cleric - keep attackers alive
+    }
+
+    def __init__(self, game_state, player=2, expand_until=None, buildup_until=None):
+        """Initialize the StrategySwitchingBot.
+
+        Args:
+            game_state: GameState instance
+            player: Player number for this bot
+            expand_until: Turn number to switch from EXPAND to BUILDUP (default 3)
+            buildup_until: Turn number to switch from BUILDUP to ATTACK (default 7)
+        """
+        self.game_state = game_state
+        self.bot_player = player
+        self.expand_until = expand_until or self.DEFAULT_EXPAND_UNTIL
+        self.buildup_until = buildup_until or self.DEFAULT_BUILDUP_UNTIL
+
+        # Create delegate bot instances that share the same game state
+        self._simple = SimpleBot(game_state, player)
+        self._medium = MediumBot(game_state, player)
+        self._advanced = AdvancedBot(game_state, player)
+
+        self._current_phase = self.EXPAND
+        self._turn_count = 0
+
+    @property
+    def current_phase(self):
+        """Return the current strategy phase."""
+        return self._current_phase
+
+    def _evaluate_phase(self):
+        """Determine the best strategy phase based on game state.
+
+        Uses turn number as the primary signal, with dynamic overrides
+        based on game conditions (e.g., switch to ATTACK early if we
+        have a significant army advantage).
+        """
+        turn = self.game_state.turn_number
+
+        # Count our units and enemy units
+        my_units = [u for u in self.game_state.units if u.player == self.bot_player]
+        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+
+        # Count structures
+        my_structures = 0
+        enemy_structures = 0
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if tile.is_capturable():
+                    if tile.player == self.bot_player:
+                        my_structures += 1
+                    elif tile.player and tile.player != self.bot_player:
+                        enemy_structures += 1
+
+        # Dynamic override: switch to ATTACK if we have a big army advantage
+        if len(my_units) >= 4 and len(my_units) >= len(enemy_units) * 2:
+            self._current_phase = self.ATTACK
+            return
+
+        # Dynamic override: stay in EXPAND if we have fewer structures
+        if turn <= self.buildup_until and my_structures < enemy_structures:
+            self._current_phase = self.EXPAND
+            return
+
+        # Turn-based phase transitions
+        if turn <= self.expand_until:
+            self._current_phase = self.EXPAND
+        elif turn <= self.buildup_until:
+            self._current_phase = self.BUILDUP
+        else:
+            self._current_phase = self.ATTACK
+
+    def take_turn(self):
+        """Execute the bot's turn using the current strategy phase."""
+        self._turn_count += 1
+        self._evaluate_phase()
+
+        if self._current_phase == self.EXPAND:
+            self._take_expand_turn()
+        elif self._current_phase == self.BUILDUP:
+            self._take_buildup_turn()
+        else:
+            self._take_attack_turn()
+
+    def _take_expand_turn(self):
+        """Expansion phase: buy cheap units, prioritize capturing structures."""
+        # Purchase cheap capturing units
+        self._purchase_with_priorities(self.EXPAND_PRIORITIES)
+
+        # Move units toward uncaptured structures
+        self._move_units_for_expansion()
+
+        self.game_state.end_turn()
+
+    def _take_buildup_turn(self):
+        """Buildup phase: delegate to AdvancedBot for balanced composition."""
+        # Ensure AdvancedBot has analyzed the map
+        if not self._advanced.map_analyzed:
+            self._advanced.analyze_map()
+            self._advanced.map_analyzed = True
+        self._advanced.turn_count = self._turn_count
+
+        # Use AdvancedBot's composition-aware purchasing
+        self._advanced.purchase_units_enhanced()
+
+        # Use AdvancedBot's enhanced unit movement
+        self._advanced.move_and_act_units_enhanced()
+
+        self.game_state.end_turn()
+
+    def _take_attack_turn(self):
+        """Attack phase: aggressive purchasing and coordinated attacks."""
+        # Purchase damage-focused units
+        self._purchase_with_priorities(self.ATTACK_PRIORITIES)
+
+        # Use MediumBot's coordinated attack logic
+        self._medium.move_and_act_units()
+
+        self.game_state.end_turn()
+
+    def _purchase_with_priorities(self, priorities):
+        """Purchase units using the given priority ordering."""
+        while True:
+            legal_actions = self.game_state.get_legal_actions(self.bot_player)
+            create_actions = legal_actions["create_unit"]
+
+            if not create_actions:
+                break
+
+            available_gold = self.game_state.player_gold[self.bot_player]
+            affordable = [a for a in create_actions if UNIT_DATA[a["unit_type"]]["cost"] <= available_gold]
+            if not affordable:
+                break
+
+            affordable.sort(
+                key=lambda a: (priorities.get(a["unit_type"], 99), UNIT_DATA[a["unit_type"]]["cost"])
+            )
+            action = affordable[0]
+            self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+
+    def _move_units_for_expansion(self):
+        """Move units toward uncaptured or enemy structures for expansion."""
+        bot_units = [
+            u
+            for u in self.game_state.units
+            if u.player == self.bot_player and (u.can_move or u.can_attack) and not u.is_paralyzed()
+        ]
+
+        # Find capturable structures not owned by us
+        target_structures = []
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if tile.is_capturable() and tile.player != self.bot_player:
+                    target_structures.append(tile)
+
+        for unit in bot_units:
+            # If on a capturable structure, seize it
+            tile = self.game_state.grid.get_tile(unit.x, unit.y)
+            if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+                self.game_state.seize(unit)
+                continue
+
+            # Try to attack nearby enemies (use SimpleBot logic)
+            enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+            attackable = self.game_state.mechanics.get_attackable_enemies(unit, enemies, self.game_state.grid)
+            if attackable and unit.can_attack:
+                target = min(attackable, key=lambda e: e.health)
+                self.game_state.attack(unit, target)
+                continue
+
+            # Move toward nearest uncaptured structure
+            if target_structures and unit.can_move:
+                nearest = min(
+                    target_structures,
+                    key=lambda t: self.manhattan_distance(unit.x, unit.y, t.x, t.y),
+                )
+                best_pos = self.find_best_move_position(unit, nearest.x, nearest.y)
+                if best_pos and (best_pos[0] != unit.x or best_pos[1] != unit.y):
+                    self.game_state.move_unit(unit, best_pos[0], best_pos[1])
+
+                    # Try to seize after moving
+                    new_tile = self.game_state.grid.get_tile(unit.x, unit.y)
+                    if new_tile.is_capturable() and new_tile.player != self.bot_player:
+                        self.game_state.seize(unit)
+                        continue
+
+                    # Try to attack after moving
+                    if unit.can_attack:
+                        attackable = self.game_state.mechanics.get_attackable_enemies(
+                            unit, enemies, self.game_state.grid
+                        )
+                        if attackable:
+                            target = min(attackable, key=lambda e: e.health)
+                            self.game_state.attack(unit, target)
+            else:
+                # Nothing to do - use SimpleBot fallback
+                self._simple.act_with_unit(unit)
