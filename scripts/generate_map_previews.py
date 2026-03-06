@@ -117,7 +117,7 @@ def extract_metadata(map_path: str) -> dict:
 
     map_height, map_width = map_data.shape
 
-    terrain_counts = {}
+    terrain_counts: dict[str, int] = {}
     player_count = 0
 
     for y in range(map_height):

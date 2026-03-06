@@ -70,12 +70,12 @@ class APIKeysMenu:
 
         # Input tracking
         self.active_input = None
-        self.input_rects = {}
-        self.button_rects = {}
+        self.input_rects: dict[str, pygame.Rect] = {}
+        self.button_rects: dict[str, pygame.Rect] = {}
         self.hover_element = None
 
         # Test connection status
-        self.test_status = {
+        self.test_status: dict[str, Optional[str]] = {
             "openai": None,  # None, 'testing', 'success', 'failed'
             "anthropic": None,
             "google": None,

@@ -75,6 +75,7 @@ class MainMenu(Menu):
 
             elif step == 3:
                 # Configure players
+                assert selected_mode is not None
                 player_config_menu = PlayerConfigMenu(self.screen, game_mode=selected_mode)
                 player_config_result = player_config_menu.run()
                 pygame.event.clear()

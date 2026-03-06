@@ -40,7 +40,10 @@ class UnitsMenu(Menu):
 
             # Create option text with unit info
             option_text = f"{unit_name} ({unit_type}) - {unit_cost}g: [{status}]"
-            self.add_option(option_text, lambda ut=unit_type: self._toggle_unit(ut))
+            def make_callback(ut: str = unit_type) -> str:
+                return self._toggle_unit(ut)
+
+            self.add_option(option_text, make_callback)
 
         # Add separator-like options
         self.add_option("---", lambda: "separator")

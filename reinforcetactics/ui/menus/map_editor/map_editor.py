@@ -286,6 +286,9 @@ class MapEditor:
         lang = get_language()
         errors = []
 
+        if self.map_data is None:
+            return ["No map data loaded"]
+
         # Check minimum size
         height, width = self.map_data.shape
         if width < MIN_MAP_SIZE or height < MIN_MAP_SIZE:
@@ -296,7 +299,7 @@ class MapEditor:
         # Check headquarters for each player
         for player_num in range(1, self.num_players + 1):
             hq_code = f"h_{player_num}"
-            hq_count = (self.map_data == hq_code).sum().sum()
+            hq_count = int((self.map_data == hq_code).values.sum())
 
             if hq_count != 1:
                 errors.append(

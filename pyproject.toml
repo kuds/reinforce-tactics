@@ -97,13 +97,20 @@ check_untyped_defs = false
 ignore_missing_imports = true
 
 # Gradually enable stricter checking per-module as types are improved
+# Reduced from 25 files → 9 files (67 remaining errors).
+# TODO: Fix remaining type errors and remove this override entirely.
+# Remaining issues: dict[str, object] unpacking, Optional narrowing,
+# and pandas DataFrame typing in these modules.
 [[tool.mypy.overrides]]
 module = [
     "reinforcetactics.core.game_state",
-    "reinforcetactics.rl.*",
-    "reinforcetactics.tournament.bots",
-    "reinforcetactics.game.llm_bot",
     "reinforcetactics.game.bot",
-    "reinforcetactics.ui.menus.*",
+    "reinforcetactics.rl.alphazero_trainer",
+    "reinforcetactics.rl.feudal_rl",
+    "reinforcetactics.rl.masking",
+    "reinforcetactics.rl.mcts",
+    "reinforcetactics.tournament.bots",
+    "reinforcetactics.ui.menus.game_setup.player_config_menu",
+    "reinforcetactics.ui.menus.settings.api_keys_menu",
 ]
 ignore_errors = true

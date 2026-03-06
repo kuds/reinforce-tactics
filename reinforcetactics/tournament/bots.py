@@ -151,7 +151,7 @@ class BotDescriptor:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        result = {
+        result: Dict[str, Any] = {
             "name": self.name,
             "type": self.bot_type.value,
         }
@@ -397,7 +397,7 @@ def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDe
     Returns:
         List of BotDescriptors for valid model bots
     """
-    bots = []
+    bots: List[BotDescriptor] = []
     models_path = Path(models_dir)
 
     if not models_path.exists():

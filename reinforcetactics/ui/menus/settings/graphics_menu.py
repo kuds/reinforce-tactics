@@ -22,7 +22,7 @@ class GraphicsMenu(Menu):
         """
         super().__init__(screen, get_language().get("graphics.title", "Graphics Settings"))
         self.settings = get_settings()
-        self.editing_path = None  # Which path is being edited ('unit', 'tile', or 'animation')
+        self.editing_path: Optional[str] = None  # Which path is being edited ('unit', 'tile', or 'animation')
         self.input_text = ""
         self.cursor_visible = True
         self.cursor_timer = 0

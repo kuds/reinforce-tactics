@@ -55,8 +55,8 @@ class TilePalette:
         self.section_spacing = 12
 
         # Clickable rectangles
-        self.tile_rects = {}  # tile_code -> rect
-        self.player_rects = {}  # player_num -> rect
+        self.tile_rects: dict[str, pygame.Rect] = {}  # tile_code -> rect
+        self.player_rects: dict[int, pygame.Rect] = {}  # player_num -> rect
 
     def handle_click(self, mouse_pos: Tuple[int, int]) -> bool:
         """

@@ -208,7 +208,10 @@ class ReplaySelectionMenu(Menu):
         else:
             for replay_file in self.replay_files:
                 display_name = self._get_display_name(replay_file)
-                self.add_option(display_name, lambda p=replay_file: p)
+                def make_callback(p: str = replay_file) -> str:
+                    return p
+
+                self.add_option(display_name, make_callback)
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 

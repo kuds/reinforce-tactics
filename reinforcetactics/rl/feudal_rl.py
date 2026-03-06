@@ -452,7 +452,7 @@ class FeudalRLAgent:
         ).to(device)
 
         # Current goal (maintained across steps)
-        self.current_goal = None
+        self.current_goal: Optional[torch.Tensor] = None
         self.goal_step_counter = 0
         self.manager_horizon = 10  # Update goal every N steps
 
@@ -492,6 +492,7 @@ class FeudalRLAgent:
                 self.goal_step_counter = 0
 
             # Worker selects action conditioned on goal
+            assert self.current_goal is not None
             if deterministic:
                 action_logits, _ = self.worker(features, self.current_goal)
                 action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
@@ -523,7 +524,7 @@ class FeudalRLAgent:
         self.feature_extractor.train()
         self.manager.train()
         self.worker.train()
-        self._last_obs = None
+        self._last_obs: Optional[Dict[str, np.ndarray]] = None
 
     def _obs_to_tensor(self, obs: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
         """Convert a single observation dict to batched tensor dict on device."""
@@ -599,6 +600,7 @@ class FeudalRLAgent:
             done = terminated or truncated
 
             # Compute intrinsic reward
+            assert self.current_goal is not None
             goal_np = self.current_goal.cpu().numpy()[0]
             int_reward = compute_intrinsic_reward(obs, goal_np, next_obs)
 

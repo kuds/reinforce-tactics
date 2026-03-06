@@ -2,7 +2,7 @@
 AI bots for computer opponents with support for all unit types.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from reinforcetactics.constants import (
     CHARGE_BONUS,
@@ -20,6 +20,8 @@ MAX_RECURSION_DEPTH = 10
 
 class BotUnitMixin:
     """Shared methods for handling enabled/disabled units across all bots."""
+
+    game_state: Any  # Provided by concrete bot classes
 
     # Unit categories for strategic decisions
     MELEE_UNITS = ["W", "K", "R", "B"]
@@ -784,8 +786,8 @@ class MediumBot(BotUnitMixin):
 
         # Value = damage dealt - damage received
         # Also consider unit costs
-        attacker_cost = UNIT_DATA[attacker.type]["cost"]
-        target_cost = UNIT_DATA[target.type]["cost"]
+        attacker_cost = int(UNIT_DATA[attacker.type]["cost"])
+        target_cost = int(UNIT_DATA[target.type]["cost"])
 
         # Prefer favorable trades
         value = damage_dealt - counter_damage

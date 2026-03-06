@@ -60,8 +60,8 @@ class GCSUploader:
         self.bucket_name = bucket_name
         self.prefix = prefix.rstrip("/") + "/" if prefix else ""
         self.credentials_file = credentials_file
-        self._client = None
-        self._bucket = None
+        self._client: Any = None
+        self._bucket: Any = None
 
     def _get_client(self):
         """Lazily initialize GCS client."""
@@ -138,7 +138,7 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
     Returns:
         Dictionary mapping matchup keys to list of completed matches
     """
-    completed = defaultdict(list)
+    completed: Dict[str, List[CompletedMatchInfo]] = defaultdict(list)
     resume_path = Path(resume_folder)
 
     if not resume_path.exists():
@@ -152,7 +152,7 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
         resume_path / "output" / "replays",
     ]
 
-    replay_files = []
+    replay_files: List[Path] = []
     for search_path in search_paths:
         if search_path.exists():
             replay_files.extend(search_path.rglob("game_*.json"))

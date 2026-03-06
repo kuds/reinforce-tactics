@@ -71,7 +71,10 @@ class MapSelectionMenu(Menu):
                 _, metadata = self.preview_generator.generate_preview(map_file, 50, 50)
                 display_name = metadata.get("name", os.path.basename(map_file))
 
-            self.add_option(display_name, lambda m=map_file: m)
+            def make_callback(m: str = map_file) -> str:
+                return m
+
+            self.add_option(display_name, make_callback)
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 

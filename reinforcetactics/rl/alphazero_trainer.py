@@ -20,7 +20,7 @@ import random
 import time
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -49,7 +49,7 @@ class ReplayBuffer:
     """
 
     def __init__(self, capacity: int = 100_000):
-        self.buffer = deque(maxlen=capacity)
+        self.buffer: deque[tuple] = deque(maxlen=capacity)
 
     def push(self, examples: List[tuple]) -> None:
         """Add a list of training examples from a single game."""
@@ -257,7 +257,7 @@ class AlphaZeroTrainer:
         )
 
         # Training history
-        self.history = {
+        self.history: Dict[str, List[Any]] = {
             "iteration": [],
             "policy_loss": [],
             "value_loss": [],

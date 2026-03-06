@@ -25,7 +25,11 @@ class LanguageMenu(Menu):
 
     def _setup_options(self) -> None:
         for code, name in self.LANGUAGES.items():
-            self.add_option(name, lambda c=code: self._set_language(c))
+
+            def make_callback(c: str = code) -> str:
+                return self._set_language(c)
+
+            self.add_option(name, make_callback)
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
