@@ -298,7 +298,7 @@ class FileIO:
         height = max(height, MIN_MAP_SIZE)
 
         # Create base map with grass
-        map_data = np.full((height, width), "o", dtype=object)
+        map_data = np.full((height, width), "p", dtype=object)
 
         # Add some variety - forests, mountains, water
         num_tiles = width * height

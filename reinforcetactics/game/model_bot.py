@@ -159,86 +159,90 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         return obs
 
     def _compute_action_mask(self) -> np.ndarray:
-        """Compute action mask from legal actions instead of returning all-ones."""
+        """Compute action mask from legal actions.
+
+        The mask uses the same flat layout as gym_env: action_type * W * H + y * W + x.
+        Each action type maps to a target position on the grid.
+        """
         w = self.game_state.grid.width
         h = self.game_state.grid.height
-        mask_size = self.NUM_ACTION_TYPES * w * h
+        area = w * h
+        mask_size = self.NUM_ACTION_TYPES * area
         mask = np.zeros(mask_size, dtype=np.float32)
 
         try:
             legal_actions = self.game_state.get_legal_actions(self.bot_player)
 
-            # Mark end_turn as always valid (action_type=5)
-            for x in range(w):
-                for y in range(h):
-                    mask[5 * w * h + y * w + x] = 1.0
+            # End turn always valid at canonical position (0,0)
+            mask[5 * area] = 1.0
 
-            # Create unit actions (action_type=0)
+            # Create unit actions (action_type=0): target is building position
             for action in legal_actions.get("create_unit", []):
-                idx = 0 * w * h + action["y"] * w + action["x"]
+                idx = 0 * area + action["y"] * w + action["x"]
                 if 0 <= idx < mask_size:
                     mask[idx] = 1.0
 
-            # Move actions (action_type=1)
+            # Move actions (action_type=1): target is destination
             for action in legal_actions.get("move", []):
-                for tx, ty in action.get("positions", []):
-                    idx = 1 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
-
-            # Attack actions (action_type=2)
-            for action in legal_actions.get("attack", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 2 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
-
-            # Seize actions (action_type=3)
-            for action in legal_actions.get("seize", []):
-                idx = 3 * w * h + action["y"] * w + action["x"]
+                idx = 1 * area + action["to_y"] * w + action["to_x"]
                 if 0 <= idx < mask_size:
                     mask[idx] = 1.0
 
-            # Heal/cure actions (action_type=4)
+            # Attack actions (action_type=2): target is enemy unit position
+            for action in legal_actions.get("attack", []):
+                target = action["target"]
+                idx = 2 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
+
+            # Seize actions (action_type=3): target is tile position
+            for action in legal_actions.get("seize", []):
+                tile = action["tile"]
+                idx = 3 * area + tile.y * w + tile.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
+
+            # Heal actions (action_type=4): target is ally position
             for action in legal_actions.get("heal", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 4 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
+                target = action["target"]
+                idx = 4 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
 
-            # Paralyze (action_type=6)
+            # Cure actions (action_type=4): same slot as heal
+            for action in legal_actions.get("cure", []):
+                target = action["target"]
+                idx = 4 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
+
+            # Paralyze (action_type=6): target is enemy position
             for action in legal_actions.get("paralyze", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 6 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
+                target = action["target"]
+                idx = 6 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
 
-            # Haste (action_type=7)
+            # Haste (action_type=7): target is ally position
             for action in legal_actions.get("haste", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 7 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
+                target = action["target"]
+                idx = 7 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
 
-            # Defence buff (action_type=8)
+            # Defence buff (action_type=8): target is ally position
             for action in legal_actions.get("defence_buff", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 8 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
+                target = action["target"]
+                idx = 8 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
 
-            # Attack buff (action_type=9)
+            # Attack buff (action_type=9): target is ally position
             for action in legal_actions.get("attack_buff", []):
-                for target in action.get("targets", []):
-                    tx, ty = target["x"], target["y"]
-                    idx = 9 * w * h + ty * w + tx
-                    if 0 <= idx < mask_size:
-                        mask[idx] = 1.0
+                target = action["target"]
+                idx = 9 * area + target.y * w + target.x
+                if 0 <= idx < mask_size:
+                    mask[idx] = 1.0
 
         except Exception as e:
             logger.warning("Failed to compute action mask, using all-ones: %s", e)
@@ -246,9 +250,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
 
         # Ensure at least end_turn is valid
         if mask.sum() == 0:
-            for x in range(w):
-                for y in range(h):
-                    mask[5 * w * h + y * w + x] = 1.0
+            mask[5 * area] = 1.0
 
         return mask
 

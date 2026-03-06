@@ -604,7 +604,7 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 6:  # Paralyze (Mage/Sorcerer)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type in ["M", "S"] and target.player != ap:
+                if unit and target and unit.type == "M" and target.player != ap:
                     paralyze_ok = self.game_state.paralyze(unit, target)
                     if paralyze_ok:
                         reward += rc.get("paralyze", 8.0)
@@ -671,11 +671,12 @@ class StrategyGameEnv(gym.Env):
         # 'self' mode is handled externally by the training script
 
     def _random_opponent_turn(self, max_actions: int = 20):
-        """Execute random valid actions for opponent player 2."""
+        """Execute random valid actions for the opponent player."""
+        opponent_player = 3 - self.agent_player
         for _ in range(max_actions):
             if self.game_state.game_over:
                 break
-            legal_actions = self.game_state.get_legal_actions(player=2)
+            legal_actions = self.game_state.get_legal_actions(player=opponent_player)
 
             # Collect all non-end-turn actions
             all_actions = []
@@ -701,7 +702,7 @@ class StrategyGameEnv(gym.Env):
             action_key, action = random.choice(all_actions)
             try:
                 if action_key == "create_unit":
-                    self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=2)
+                    self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=opponent_player)
                 elif action_key == "move":
                     self.game_state.move_unit(action["unit"], action["to_x"], action["to_y"])
                 elif action_key == "attack":
