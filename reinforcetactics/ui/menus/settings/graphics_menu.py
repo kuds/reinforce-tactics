@@ -170,7 +170,11 @@ class GraphicsMenu(Menu):
                         raw_clipboard = pygame.scrap.get(pygame.SCRAP_TEXT)
                         if raw_clipboard:
                             # Decode and clean the clipboard text
-                            clipboard_str = raw_clipboard.decode("utf-8", errors="ignore") if isinstance(raw_clipboard, bytes) else str(raw_clipboard)
+                            clipboard_str = (
+                                raw_clipboard.decode("utf-8", errors="ignore")
+                                if isinstance(raw_clipboard, bytes)
+                                else str(raw_clipboard)
+                            )
                             clipboard_str = clipboard_str.rstrip("\x00").strip()
                             self.input_text += clipboard_str
                 except Exception:

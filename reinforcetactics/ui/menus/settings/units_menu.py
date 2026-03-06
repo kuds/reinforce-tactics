@@ -39,6 +39,7 @@ class UnitsMenu(Menu):
 
             # Create option text with unit info
             option_text = f"{unit_name} ({unit_type}) - {unit_cost}g: [{status}]"
+
             def make_callback(ut: str = unit_type) -> str:
                 return self._toggle_unit(ut)
 

@@ -236,6 +236,7 @@ class LoadGameMenu(Menu):
         else:
             for save_file in self.save_files:
                 display_name = self._get_display_name(save_file)
+
                 def make_callback(p: str = save_file) -> str:
                     return p
 

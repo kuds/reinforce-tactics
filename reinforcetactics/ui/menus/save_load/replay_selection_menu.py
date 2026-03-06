@@ -208,6 +208,7 @@ class ReplaySelectionMenu(Menu):
         else:
             for replay_file in self.replay_files:
                 display_name = self._get_display_name(replay_file)
+
                 def make_callback(p: str = replay_file) -> str:
                     return p
 
