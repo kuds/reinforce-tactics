@@ -168,6 +168,7 @@ def train_with_curriculum(timesteps_per_stage: int = 100000, save_path: str = "m
         print(f"Checkpoint saved: {checkpoint_path}")
 
     # Save final model
+    assert model is not None, "Model was not created during training"
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     model.save(save_path)
     print(f"\nFinal model saved to: {save_path}")

@@ -47,7 +47,7 @@ class UnitPurchaseMenu:
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []
-        self.hover_element = None
+        self.hover_element: Optional[Dict[str, Any]] = None
         self.selected_index = 0  # Keyboard navigation index
 
         # Cached overlay surface to avoid per-frame allocation

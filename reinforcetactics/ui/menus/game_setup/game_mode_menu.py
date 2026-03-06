@@ -44,7 +44,11 @@ class GameModeMenu(Menu):
     def _setup_options(self) -> None:
         """Setup menu options for available game modes."""
         for mode in self.available_modes:
-            self.add_option(mode, lambda m=mode: m)
+
+            def make_callback(m: str = mode) -> str:
+                return m
+
+            self.add_option(mode, make_callback)
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
     def run(self) -> Optional[str]:

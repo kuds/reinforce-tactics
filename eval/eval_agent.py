@@ -52,7 +52,7 @@ def evaluate_agent(
     for _ in tqdm(range(n_episodes)):
         obs, info = env.reset()
         done = False
-        episode_reward = 0
+        episode_reward: float = 0.0
         episode_length = 0
         episode_invalid = 0
 
@@ -79,12 +79,6 @@ def evaluate_agent(
             wins += 1
         else:
             losses += 1
-
-        # Save replay if requested
-        if save_replays:
-            replay_dir = Path("replays") / Path(model_path).stem
-            replay_dir.mkdir(parents=True, exist_ok=True)
-            # TODO: Implement replay saving
 
     env.close()
 

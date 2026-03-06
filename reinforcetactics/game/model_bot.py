@@ -55,7 +55,7 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             from reinforcetactics.rl.gym_env import StrategyGameEnv
 
             # Also try MaskablePPO from sb3-contrib
-            algorithm_classes = [PPO, A2C, DQN]
+            algorithm_classes: list[Any] = [PPO, A2C, DQN]
             try:
                 from sb3_contrib import MaskablePPO
 

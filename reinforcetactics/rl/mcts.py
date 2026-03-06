@@ -63,7 +63,7 @@ class MCTSNode:
         self.game_state = game_state
         self.player: int = game_state.current_player if game_state else 0
         self.is_terminal: bool = game_state.game_over if game_state else False
-        self._legal_actions_cache = None
+        self._legal_actions_cache: Optional[Dict[int, dict]] = None
 
     @property
     def q_value(self) -> float:

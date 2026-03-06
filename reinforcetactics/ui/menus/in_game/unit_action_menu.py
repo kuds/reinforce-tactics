@@ -42,7 +42,7 @@ class UnitActionMenu:
 
         # Interactive elements
         self.interactive_elements: List[Dict[str, Any]] = []
-        self.hover_element = None
+        self.hover_element: Optional[Dict[str, Any]] = None
 
         # Cached overlay surface to avoid per-frame allocation
         self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)

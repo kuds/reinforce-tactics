@@ -1,6 +1,6 @@
 """Map editing canvas component."""
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import pandas as pd
 import pygame
@@ -36,7 +36,7 @@ class EditorCanvas:
         self.offset_y = 0
 
         # Mouse state
-        self.hover_tile = None  # (x, y) of hovered tile
+        self.hover_tile: Optional[Tuple[int, int]] = None  # (x, y) of hovered tile
         self.is_painting = False
 
         # Colors
@@ -218,7 +218,10 @@ class EditorCanvas:
                         player_num = int(parts[1])
                         player_color = PLAYER_COLORS.get(player_num, (255, 255, 255))
                         # Blend colors
-                        tile_color = tuple((tile_color[i] + player_color[i]) // 2 for i in range(3))
+                        r = (tile_color[0] + player_color[0]) // 2
+                        g = (tile_color[1] + player_color[1]) // 2
+                        b = (tile_color[2] + player_color[2]) // 2
+                        tile_color = (r, g, b)
 
                 # Draw tile
                 tile_rect = pygame.Rect(screen_x, screen_y, self.tile_size, self.tile_size)

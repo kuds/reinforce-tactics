@@ -80,7 +80,7 @@ class PlayerConfigMenu:
         self.fog_of_war = False  # Fog of war toggle
 
         # Model validation state: {player_idx: {'valid': bool, 'error': str}}
-        self.model_validation = {}
+        self.model_validation: Dict[int, Dict[str, Any]] = {}
 
         # UI interaction tracking
         self.hover_element = None
@@ -353,7 +353,7 @@ class PlayerConfigMenu:
             # Difficulty selection (only shown if computer)
             if config["type"] == "computer":
                 diff_x = 400
-                bot_type = config.get("bot_type", "SimpleBot")
+                bot_type = config.get("bot_type") or "SimpleBot"
                 # Get display text for bot type
                 bot_display_names = {
                     "SimpleBot": "Simple Bot",

@@ -159,7 +159,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             self.system_prompt = system_prompt
 
         # Initialize conversation history for stateful mode
-        self.conversation_history = []
+        self.conversation_history: list[dict[str, str]] = []
 
         # Initialize token usage tracking
         self.total_input_tokens = 0
@@ -264,7 +264,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             return self.system_prompt
 
         # Get unit names for disabled units
-        disabled_names = [UNIT_DATA[u]["name"] for u in disabled_units]
+        disabled_names: list[str] = [str(UNIT_DATA[u]["name"]) for u in disabled_units]
 
         # Append disabled units note to the system prompt
         disabled_note = (
@@ -272,7 +272,7 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
             f"The following unit types are DISABLED for this game and cannot be created: "
             f"{', '.join(disabled_names)} ({', '.join(disabled_units)}).\n"
             f"Do NOT attempt to create these units. Only the following units are available: "
-            f"{', '.join([UNIT_DATA[u]['name'] for u in enabled_units])} ({', '.join(enabled_units)})."
+            f"{', '.join([str(UNIT_DATA[u]['name']) for u in enabled_units])} ({', '.join(enabled_units)})."
         )
 
         return self.system_prompt + disabled_note
@@ -690,7 +690,7 @@ Respond with your strategic plan in JSON format."""
         Returns:
             Dict with move_then_attack, move_then_seize, etc. combinations
         """
-        result = {
+        result: dict[str, list[dict[str, Any]]] = {
             "move_then_attack": [],
             "move_then_seize": [],
             "move_then_heal": [],
@@ -769,7 +769,7 @@ Respond with your strategic plan in JSON format."""
 
     def _format_legal_actions(self, legal_actions: Dict[str, List[Any]], unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
         """Format legal actions for LLM consumption with original map coordinates."""
-        formatted = {
+        formatted: dict[str, list[dict[str, Any]]] = {
             "create_unit": [],
             "move": [],
             "attack": [],
@@ -1250,7 +1250,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         client = openai.OpenAI(api_key=self.api_key)
 
         # Build request kwargs, conditionally including max_completion_tokens and temperature
-        request_kwargs = {
+        request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "response_format": {"type": "json_object"},
@@ -1445,7 +1445,7 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
                 contents.append(types.Content(role="model", parts=[types.Part.from_text(text=msg["content"])]))
 
         # Build generation config, conditionally including max_output_tokens and temperature
-        config_kwargs = {
+        config_kwargs: dict[str, Any] = {
             "system_instruction": system_instruction,
             "response_mime_type": "application/json",
         }

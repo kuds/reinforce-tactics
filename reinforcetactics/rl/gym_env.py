@@ -49,7 +49,7 @@ class StrategyGameEnv(gym.Env):
     def __init__(
         self,
         map_file: Optional[str] = None,
-        opponent: str = "bot",  # 'bot', 'random', 'self', or None
+        opponent: Optional[str] = "bot",  # 'bot', 'random', 'self', or None
         render_mode: Optional[str] = None,
         max_steps: int = 200,
         reward_config: Optional[Dict[str, float]] = None,
@@ -96,7 +96,7 @@ class StrategyGameEnv(gym.Env):
         if fog_of_war:
             self.game_state.update_visibility()
         self.opponent_type = opponent
-        self.opponent = None
+        self.opponent: Optional[SimpleBot] = None
         self.max_steps = max_steps
         self.current_step = 0
         self.hierarchical = hierarchical
@@ -139,7 +139,7 @@ class StrategyGameEnv(gym.Env):
         # Action space configuration
         self.action_space_type = action_space_type
         self.max_flat_actions = max_flat_actions
-        self._current_actions = []  # Legal action list for flat_discrete mode
+        self._current_actions: list[dict[str, Any]] = []  # Legal action list for flat_discrete mode
 
         # Grid dimensions
         self.grid_height = self.game_state.grid.height
@@ -208,7 +208,7 @@ class StrategyGameEnv(gym.Env):
             self.renderer = Renderer(self.game_state)
 
         # Episode statistics
-        self.episode_stats = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
+        self.episode_stats: dict[str, Any] = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
 
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
@@ -581,8 +581,8 @@ class StrategyGameEnv(gym.Env):
                 if unit and target and unit.type == "C" and unit.player == ap:
                     action_performed = False
                     if target.is_paralyzed():
-                        result = self.game_state.cure(unit, target)
-                        if result:
+                        cure_ok = self.game_state.cure(unit, target)
+                        if cure_ok:
                             reward += rc.get("cure", 5.0)
                             action_performed = True
 
@@ -614,8 +614,8 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type in ["M", "S"] and target.player != ap:
-                    result = self.game_state.paralyze(unit, target)
-                    if result:
+                    paralyze_ok = self.game_state.paralyze(unit, target)
+                    if paralyze_ok:
                         reward += rc.get("paralyze", 8.0)
                     else:
                         is_valid = False
@@ -626,8 +626,8 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == "S" and target.player == ap:
-                    result = self.game_state.haste(unit, target)
-                    if result:
+                    haste_ok = self.game_state.haste(unit, target)
+                    if haste_ok:
                         reward += rc.get("haste", 6.0)
                     else:
                         is_valid = False
@@ -638,8 +638,8 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == "S" and target.player == ap:
-                    result = self.game_state.defence_buff(unit, target)
-                    if result:
+                    def_ok = self.game_state.defence_buff(unit, target)
+                    if def_ok:
                         reward += rc.get("defence_buff", 5.0)
                     else:
                         is_valid = False
@@ -650,8 +650,8 @@ class StrategyGameEnv(gym.Env):
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == "S" and target.player == ap:
-                    result = self.game_state.attack_buff(unit, target)
-                    if result:
+                    atk_ok = self.game_state.attack_buff(unit, target)
+                    if atk_ok:
                         reward += rc.get("attack_buff", 5.0)
                     else:
                         is_valid = False
@@ -872,7 +872,7 @@ class StrategyGameEnv(gym.Env):
         self.episode_stats = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
 
         obs = self._get_obs()
-        info = {}
+        info: dict[str, Any] = {}
 
         return obs, info
 

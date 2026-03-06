@@ -87,7 +87,7 @@ class LoadGameMenu(Menu):
 
             # Count units per player
             units = data.get("units", [])
-            unit_counts = {}
+            unit_counts: Dict[int, int] = {}
             unit_types_per_player: Dict[int, Dict[str, int]] = {}
             total_health_per_player: Dict[int, int] = {}
 
@@ -236,7 +236,10 @@ class LoadGameMenu(Menu):
         else:
             for save_file in self.save_files:
                 display_name = self._get_display_name(save_file)
-                self.add_option(display_name, lambda p=save_file: p)
+                def make_callback(p: str = save_file) -> str:
+                    return p
+
+                self.add_option(display_name, make_callback)
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
