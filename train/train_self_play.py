@@ -142,7 +142,7 @@ class SelfPlayTrainingCallback(BaseCallback):
         win_rates = []
         for env in self.envs:
             win_rates.append(env.get_win_rate())
-        return np.mean(win_rates) if win_rates else 0.5
+        return float(np.mean(win_rates)) if win_rates else 0.5
 
     def _log_stats(self) -> None:
         """Log training statistics."""
@@ -319,7 +319,7 @@ def train_self_play(args) -> Path:
     eval_env.update_opponent_from_current()
 
     # Create callbacks
-    callbacks = []
+    callbacks: list[BaseCallback] = []
 
     # Self-play callback
     self_play_callback = SelfPlayTrainingCallback(
@@ -474,7 +474,7 @@ def train_mixed(args) -> Path:
     eval_env.set_opponent_model(model)
 
     # Create callbacks
-    callbacks = []
+    callbacks: list[BaseCallback] = []
 
     # Self-play callback
     self_play_callback = SelfPlayTrainingCallback(
