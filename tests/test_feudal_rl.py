@@ -1,6 +1,5 @@
 """Tests for Feudal RL components: networks, buffer, GAE, intrinsic reward."""
 
-import gymnasium as gym
 import numpy as np
 import pytest
 import torch
