@@ -12,6 +12,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from reinforcetactics.constants import ALL_UNIT_TYPES
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
@@ -43,8 +44,7 @@ class StrategyGameEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    # All available unit types
-    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+    ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     def __init__(
         self,

@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 class ModelBot:  # pylint: disable=too-few-public-methods
     """Bot that uses a trained Stable-Baselines3 model for decision-making."""
 
-    # Canonical unit type ordering — must match StrategyGameEnv action space indices
-    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+    ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     # Number of action types in the environment (0-9)
     NUM_ACTION_TYPES = 10

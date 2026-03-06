@@ -4,7 +4,7 @@ from typing import Optional
 
 import pygame
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.settings import get_settings
@@ -13,8 +13,7 @@ from reinforcetactics.utils.settings import get_settings
 class UnitsMenu(Menu):
     """Menu for configuring which unit types are available in the game."""
 
-    # All available unit types in order
-    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+    ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
         """

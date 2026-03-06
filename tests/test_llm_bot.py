@@ -3,7 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -239,92 +239,83 @@ class TestOpenAIBot:
     """Test OpenAIBot implementation."""
 
     def test_env_var_name(self):
-        """Test that correct environment variable name is returned."""
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that correct environment variable name is configured."""
+        from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_env_var_name(Mock()) == "OPENAI_API_KEY"  # pylint: disable=protected-access
+        assert TestBot._env_var_name == "OPENAI_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
+        from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_default_model(Mock()) == "gpt-5-mini-2025-08-07"  # pylint: disable=protected-access
+        assert TestBot._default_model_name == "gpt-5-mini-2025-08-07"  # pylint: disable=protected-access
 
     def test_supported_models(self):
-        """Test that supported models list is returned."""
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import OPENAI_MODELS
-            from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that supported models list is configured."""
+        from reinforcetactics.game.llm_bot import OPENAI_MODELS
+        from reinforcetactics.game.llm_bot import OpenAIBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_supported_models(Mock()) == OPENAI_MODELS  # pylint: disable=protected-access
-            # Verify some expected models are present
-            assert "gpt-5.2" in OPENAI_MODELS
-            assert "gpt-5-mini-2025-08-07" in OPENAI_MODELS
-            assert "gpt-5-nano-2025-08-07" in OPENAI_MODELS
+        assert TestBot._supported_model_list is OPENAI_MODELS  # pylint: disable=protected-access
+        # Verify some expected models are present
+        assert "gpt-5.2" in OPENAI_MODELS
+        assert "gpt-5-mini-2025-08-07" in OPENAI_MODELS
+        assert "gpt-5-nano-2025-08-07" in OPENAI_MODELS
 
 
 class TestClaudeBot:
     """Test ClaudeBot implementation."""
 
     def test_env_var_name(self):
-        """Test that correct environment variable name is returned."""
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that correct environment variable name is configured."""
+        from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_env_var_name(Mock()) == "ANTHROPIC_API_KEY"  # pylint: disable=protected-access
+        assert TestBot._env_var_name == "ANTHROPIC_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
+        from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_default_model(Mock()) == "claude-haiku-4-5-20251001"  # pylint: disable=protected-access
+        assert TestBot._default_model_name == "claude-haiku-4-5-20251001"  # pylint: disable=protected-access
 
     def test_supported_models(self):
-        """Test that supported models list is returned."""
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import ANTHROPIC_MODELS
-            from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that supported models list is configured."""
+        from reinforcetactics.game.llm_bot import ANTHROPIC_MODELS
+        from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_supported_models(Mock()) == ANTHROPIC_MODELS  # pylint: disable=protected-access
-            # Verify some expected models are present
-            assert "claude-opus-4-6" in ANTHROPIC_MODELS
-            assert "claude-sonnet-4-5-20250929" in ANTHROPIC_MODELS
-            assert "claude-haiku-4-5-20251001" in ANTHROPIC_MODELS
-            assert "claude-sonnet-4-20250514" in ANTHROPIC_MODELS
+        assert TestBot._supported_model_list is ANTHROPIC_MODELS  # pylint: disable=protected-access
+        # Verify some expected models are present
+        assert "claude-opus-4-6" in ANTHROPIC_MODELS
+        assert "claude-sonnet-4-5-20250929" in ANTHROPIC_MODELS
+        assert "claude-haiku-4-5-20251001" in ANTHROPIC_MODELS
+        assert "claude-sonnet-4-20250514" in ANTHROPIC_MODELS
 
 
 class TestGeminiBot:
     """Test GeminiBot implementation."""
 
     def test_env_var_name(self):
-        """Test that correct environment variable name is returned."""
-        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that correct environment variable name is configured."""
+        from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_env_var_name(Mock()) == "GOOGLE_API_KEY"  # pylint: disable=protected-access
+        assert TestBot._env_var_name == "GOOGLE_API_KEY"  # pylint: disable=protected-access
 
     def test_default_model(self):
         """Test default model selection."""
-        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
+        from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_default_model(Mock()) == "gemini-2.5-flash"  # pylint: disable=protected-access
+        assert TestBot._default_model_name == "gemini-2.5-flash"  # pylint: disable=protected-access
 
     def test_supported_models(self):
-        """Test that supported models list is returned."""
-        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}):
-            from reinforcetactics.game.llm_bot import GEMINI_MODELS
-            from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
+        """Test that supported models list is configured."""
+        from reinforcetactics.game.llm_bot import GEMINI_MODELS
+        from reinforcetactics.game.llm_bot import GeminiBot as TestBot  # pylint: disable=import-outside-toplevel
 
-            assert TestBot._get_supported_models(Mock()) == GEMINI_MODELS  # pylint: disable=protected-access
-            # Verify some expected models are present
-            assert "gemini-2.5-flash" in GEMINI_MODELS
-            assert "gemini-2.5-pro" in GEMINI_MODELS
-            assert "gemini-3-pro-preview" in GEMINI_MODELS
-            assert "gemini-2.5-flash-lite" in GEMINI_MODELS
+        assert TestBot._supported_model_list is GEMINI_MODELS  # pylint: disable=protected-access
+        # Verify some expected models are present
+        assert "gemini-2.5-flash" in GEMINI_MODELS
+        assert "gemini-2.5-pro" in GEMINI_MODELS
+        assert "gemini-3-pro-preview" in GEMINI_MODELS
+        assert "gemini-2.5-flash-lite" in GEMINI_MODELS
 
 
 class TestConversationLogging:
