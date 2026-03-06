@@ -11,6 +11,7 @@ This module provides:
 
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet
 from reinforcetactics.rl.alphazero_trainer import AlphaZeroTrainer, ReplayBuffer
+from reinforcetactics.rl.evaluation import evaluate_model
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.rl.masking import (
     ActionMaskedEnv,
@@ -37,6 +38,8 @@ __all__ = [
     "make_maskable_vec_env",
     "make_curriculum_env",
     "validate_action_mask",
+    # Evaluation
+    "evaluate_model",
     # Self-play
     "SelfPlayEnv",
     "OpponentPool",
