@@ -112,5 +112,6 @@ module = [
     "reinforcetactics.tournament.bots",
     "reinforcetactics.ui.menus.game_setup.player_config_menu",
     "reinforcetactics.ui.menus.settings.api_keys_menu",
+    "reinforcetactics.rl.self_play",
 ]
 ignore_errors = true

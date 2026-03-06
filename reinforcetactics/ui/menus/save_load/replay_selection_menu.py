@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
-from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
-from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
+from reinforcetactics.constants import PLAYER_COLORS
+from reinforcetactics.ui.components.map_preview import MapPreviewGenerator, get_tile_color
 from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font
@@ -208,6 +208,7 @@ class ReplaySelectionMenu(Menu):
         else:
             for replay_file in self.replay_files:
                 display_name = self._get_display_name(replay_file)
+
                 def make_callback(p: str = replay_file) -> str:
                     return p
 
@@ -289,15 +290,7 @@ class ReplaySelectionMenu(Menu):
 
     def _get_tile_color(self, tile: str) -> Tuple[int, int, int]:
         """Get the color for a tile type."""
-        if "_" in tile:
-            parts = tile.split("_")
-            base_type = parts[0]
-
-            if len(parts) > 1 and parts[1].isdigit():
-                player_num = int(parts[1])
-                return PLAYER_COLORS.get(player_num, TILE_COLORS.get(base_type, (128, 128, 128)))
-
-        return TILE_COLORS.get(tile, (128, 128, 128))
+        return get_tile_color(tile)
 
     def draw(self) -> None:
         """Draw the replay selection menu with split-panel layout."""

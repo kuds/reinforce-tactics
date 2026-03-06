@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.constants import STARTING_GOLD, UNIT_DATA, TileType
+from reinforcetactics.constants import ALL_UNIT_TYPES, STARTING_GOLD, UNIT_DATA, TileType
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 class GameState:
     """Manages the core game state without rendering."""
 
-    # All available unit types
-    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+    ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     def __init__(
         self,

@@ -53,7 +53,7 @@ def train_basic(timesteps: int = 100000, save_path: str = "models/maskable_ppo_b
 
     # Validate that action masks are working correctly
     print("\nValidating action masks...")
-    validation = validate_action_mask(env.env)
+    validation = validate_action_mask(env.env)  # type: ignore[arg-type]
     if validation["valid"]:
         print("Action masks are valid!")
     else:

@@ -12,6 +12,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from reinforcetactics.constants import ALL_UNIT_TYPES
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
@@ -43,8 +44,7 @@ class StrategyGameEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    # All available unit types
-    ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+    ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     def __init__(
         self,
@@ -146,7 +146,7 @@ class StrategyGameEnv(gym.Env):
         self.grid_width = self.game_state.grid.width
 
         # Define observation space
-        obs_dict = {
+        obs_dict: dict[str, spaces.Space] = {
             "grid": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
             "units": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
             "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),

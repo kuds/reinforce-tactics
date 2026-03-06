@@ -25,6 +25,29 @@ TERRAIN_DISPLAY_NAMES = {
 }
 
 
+def get_tile_color(tile: str) -> Tuple[int, int, int]:
+    """
+    Get the display color for a tile type code.
+
+    Handles plain tiles (e.g., "p") and player-owned structures (e.g., "h_1", "b_2").
+
+    Args:
+        tile: Tile code (e.g., "p", "h_1", "b_2")
+
+    Returns:
+        RGB color tuple
+    """
+    if "_" in tile:
+        parts = tile.split("_")
+        base_type = parts[0]
+
+        if len(parts) > 1 and parts[1].isdigit():
+            player_num = int(parts[1])
+            return PLAYER_COLORS.get(player_num, TILE_COLORS.get(base_type, (128, 128, 128)))
+
+    return TILE_COLORS.get(tile, (128, 128, 128))
+
+
 class MapPreviewGenerator:
     """Generates visual previews and metadata for map files."""
 
@@ -245,27 +268,8 @@ class MapPreviewGenerator:
         return preview
 
     def _get_tile_color(self, tile: str) -> Tuple[int, int, int]:
-        """
-        Get the color for a tile type.
-
-        Args:
-            tile: Tile code (e.g., "p", "h_1", "b_2")
-
-        Returns:
-            RGB color tuple
-        """
-        # Handle player structures (e.g., "h_1", "b_2")
-        if "_" in tile:
-            parts = tile.split("_")
-            base_type = parts[0]
-
-            if len(parts) > 1 and parts[1].isdigit():
-                player_num = int(parts[1])
-                # Use player color for player structures
-                return PLAYER_COLORS.get(player_num, TILE_COLORS.get(base_type, (128, 128, 128)))
-
-        # Return color from TILE_COLORS
-        return TILE_COLORS.get(tile, (128, 128, 128))
+        """Get the color for a tile type."""
+        return get_tile_color(tile)
 
     def clear_cache(self):
         """Clear the preview cache."""

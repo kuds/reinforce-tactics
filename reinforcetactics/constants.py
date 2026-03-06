@@ -150,6 +150,10 @@ NEUTRAL_STRUCTURE_PALETTE = [
 # colour recoloring when rendered as sprites.
 STRUCTURE_TILE_TYPES = {"TOWER", "BUILDING", "HEADQUARTERS"}
 
+# All available unit types — canonical ordering used by RL environments and bots.
+# Must match the action space indices in StrategyGameEnv.
+ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
+
 # Unit colors
 UNIT_COLORS = {
     "W": (139, 69, 19),  # Brown (Warrior)

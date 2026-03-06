@@ -187,25 +187,31 @@ class LLMBot(ABC):  # pylint: disable=too-few-public-methods
         # Validate model (warning only, to support newly released models)
         self._validate_model()
 
-    @abstractmethod
+    # --- Provider configuration (set by subclasses) ---
+    # Subclasses must define these class attributes:
+    _env_var_name: str = ""  # e.g., "OPENAI_API_KEY"
+    _default_model_name: str = ""  # e.g., "gpt-5-mini-2025-08-07"
+    _supported_model_list: List[str] = []  # e.g., OPENAI_MODELS
+
     def _get_api_key_from_env(self) -> Optional[str]:
         """Get API key from environment variable."""
+        return os.getenv(self._env_var_name)
 
-    @abstractmethod
     def _get_env_var_name(self) -> str:
         """Get the name of the environment variable for the API key."""
+        return self._env_var_name
 
-    @abstractmethod
     def _get_default_model(self) -> str:
         """Get the default model name."""
+        return self._default_model_name
+
+    def _get_supported_models(self) -> List[str]:
+        """Get the list of supported models for this provider."""
+        return self._supported_model_list
 
     @abstractmethod
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         """Call the LLM API and return the response text."""
-
-    @abstractmethod
-    def _get_supported_models(self) -> List[str]:
-        """Get the list of supported models for this provider."""
 
     @abstractmethod
     def _get_llm_sdk_version(self) -> str:
@@ -1219,17 +1225,9 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     - Premium: gpt-5.2 (~$10-15/1M input tokens)
     """
 
-    def _get_api_key_from_env(self) -> Optional[str]:
-        return os.getenv("OPENAI_API_KEY")
-
-    def _get_env_var_name(self) -> str:
-        return "OPENAI_API_KEY"
-
-    def _get_default_model(self) -> str:
-        return "gpt-5-mini-2025-08-07"
-
-    def _get_supported_models(self) -> List[str]:
-        return OPENAI_MODELS
+    _env_var_name = "OPENAI_API_KEY"
+    _default_model_name = "gpt-5-mini-2025-08-07"
+    _supported_model_list = OPENAI_MODELS
 
     def _get_llm_sdk_version(self) -> str:
         """Get the OpenAI SDK version."""
@@ -1296,17 +1294,9 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
     - Claude Haiku 4.5: 200K context, 64K max output
     """
 
-    def _get_api_key_from_env(self) -> Optional[str]:
-        return os.getenv("ANTHROPIC_API_KEY")
-
-    def _get_env_var_name(self) -> str:
-        return "ANTHROPIC_API_KEY"
-
-    def _get_default_model(self) -> str:
-        return "claude-haiku-4-5-20251001"
-
-    def _get_supported_models(self) -> List[str]:
-        return ANTHROPIC_MODELS
+    _env_var_name = "ANTHROPIC_API_KEY"
+    _default_model_name = "claude-haiku-4-5-20251001"
+    _supported_model_list = ANTHROPIC_MODELS
 
     def _get_llm_sdk_version(self) -> str:
         """Get the Anthropic SDK version."""
@@ -1386,23 +1376,15 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
     - gemini-2.5-pro: Complex reasoning tasks
     """
 
+    _env_var_name = "GOOGLE_API_KEY"
+    _default_model_name = "gemini-2.5-flash"
+    _supported_model_list = GEMINI_MODELS
+
     def __init__(self, *args, **kwargs):
         """Initialize GeminiBot with optional chat session for stateful mode."""
         super().__init__(*args, **kwargs)
         self._chat_session = None
         self._client = None
-
-    def _get_api_key_from_env(self) -> Optional[str]:
-        return os.getenv("GOOGLE_API_KEY")
-
-    def _get_env_var_name(self) -> str:
-        return "GOOGLE_API_KEY"
-
-    def _get_default_model(self) -> str:
-        return "gemini-2.5-flash"
-
-    def _get_supported_models(self) -> List[str]:
-        return GEMINI_MODELS
 
     def _get_llm_sdk_version(self) -> str:
         """Get the Google GenAI SDK version."""
