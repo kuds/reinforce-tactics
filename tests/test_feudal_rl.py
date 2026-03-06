@@ -315,9 +315,7 @@ class TestFeudalRolloutBuffer:
         buf = FeudalRolloutBuffer()
         buf.add_manager_step(self._make_obs(), goal=np.array([1.0, 2.0, 0.0]), log_prob=-0.5, value=1.0)
         # Need at least one worker step for finalize to work
-        buf.add_worker_step(
-            self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5
-        )
+        buf.add_worker_step(self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5)
         buf.end_manager_segment(cumulative_reward=10.0, done=False, segment_length=5)
         assert buf.has_manager_data
         buf.finalize()
@@ -327,9 +325,7 @@ class TestFeudalRolloutBuffer:
 
     def test_no_manager_data(self):
         buf = FeudalRolloutBuffer()
-        buf.add_worker_step(
-            self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5
-        )
+        buf.add_worker_step(self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5)
         assert not buf.has_manager_data
         buf.finalize()
         assert len(buf.m_rewards) == 0
@@ -338,9 +334,7 @@ class TestFeudalRolloutBuffer:
     def test_compute_advantages(self):
         buf = FeudalRolloutBuffer()
         for _ in range(4):
-            buf.add_worker_step(
-                self._make_obs(), np.zeros(6), -1.0, 0.5, np.zeros(3), 1.0, 0.5, False, 0.5
-            )
+            buf.add_worker_step(self._make_obs(), np.zeros(6), -1.0, 0.5, np.zeros(3), 1.0, 0.5, False, 0.5)
         buf.add_manager_step(self._make_obs(), np.zeros(3), -0.5, 1.0)
         buf.end_manager_segment(4.0, False, 4)
         buf.finalize()
@@ -352,9 +346,7 @@ class TestFeudalRolloutBuffer:
 
     def test_reset(self):
         buf = FeudalRolloutBuffer()
-        buf.add_worker_step(
-            self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5
-        )
+        buf.add_worker_step(self._make_obs(), np.zeros(6), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5)
         buf.reset()
         assert len(buf.w_obs_grid) == 0
         assert len(buf.m_obs_grid) == 0
