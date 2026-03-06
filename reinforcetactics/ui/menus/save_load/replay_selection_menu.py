@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,6 +11,7 @@ from reinforcetactics.constants import PLAYER_COLORS
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator, get_tile_color
 from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
@@ -143,46 +143,11 @@ class ReplaySelectionMenu(Menu):
 
     def _extract_date_from_filename(self, filename: str) -> str:
         """Extract date from replay filename."""
-        # Handle formats like "game_20251228_053412_..." or "replay_20251228_053412"
-        match = re.search(r"(\d{8})_(\d{6})", filename)
-        if match:
-            date_part = match.group(1)
-            time_part = match.group(2)
-            try:
-                dt = datetime.strptime(f"{date_part}_{time_part}", "%Y%m%d_%H%M%S")
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                pass
-        return "Unknown Date"
+        return extract_date_from_filename(filename)
 
     def _get_player_display_name(self, player_configs: List[Dict], player_idx: int) -> str:
         """Get a display name for a player from config."""
-        if player_idx >= len(player_configs):
-            return f"Player {player_idx + 1}"
-
-        config = player_configs[player_idx]
-        player_type = config.get("type", "human")
-        bot_type = config.get("bot_type", "")
-
-        if player_type == "human":
-            return "Human"
-        elif player_type == "llm":
-            # LLM players have a nice name field with model name
-            name = config.get("name", "")
-            if name:
-                return name
-            # Fallback to model if name not available
-            model = config.get("model", "")
-            if model:
-                return model
-            return "LLM"
-        elif player_type == "computer" or bot_type:
-            # Bot players - use bot_type directly (AdvancedBot or SimpleBot)
-            if bot_type:
-                return bot_type
-            return "Bot"
-        else:
-            return player_type.title()
+        return get_player_display_name(player_configs, player_idx)
 
     def _get_display_name(self, filepath: str) -> str:
         """Get user-friendly display name for a replay."""

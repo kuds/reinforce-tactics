@@ -221,7 +221,10 @@ class Menu:
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
 
             bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2, text_rect.y - padding_y, uniform_width, text_rect.height + 2 * padding_y
+                (screen_width - uniform_width) // 2,
+                text_rect.y - padding_y,
+                uniform_width,
+                text_rect.height + 2 * padding_y,
             )
 
             self.option_rects.append(bg_rect)

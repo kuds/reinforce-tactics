@@ -72,15 +72,19 @@ class BotUnitMixin:
         """Calculate Manhattan distance between two points."""
         return abs(x1 - x2) + abs(y1 - y2)
 
-    def find_best_move_position(self, unit, target_x, target_y):
-        """Find the best position to move towards a target."""
-        reachable = unit.get_reachable_positions(
+    def get_reachable(self, unit):
+        """Get all reachable positions for a unit on the current grid."""
+        return unit.get_reachable_positions(
             self.game_state.grid.width,
             self.game_state.grid.height,
             lambda x, y: self.game_state.mechanics.can_move_to_position(
                 x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
             ),
         )
+
+    def find_best_move_position(self, unit, target_x, target_y):
+        """Find the best position to move towards a target."""
+        reachable = self.get_reachable(unit)
 
         if not reachable:
             return None
@@ -386,13 +390,7 @@ class SimpleBot(BotUnitMixin):
 
     def _find_ranged_attack_position(self, unit, enemy, min_range: int, max_range: int) -> Optional[Tuple[int, int]]:
         """Find a position from which unit can attack enemy at valid range."""
-        reachable = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        reachable = self.get_reachable(unit)
 
         if not reachable:
             return None
@@ -596,13 +594,7 @@ class MediumBot(BotUnitMixin):
                     potential_attackers.append(unit)
                 else:
                     # Check if can move and attack
-                    reachable = unit.get_reachable_positions(
-                        self.game_state.grid.width,
-                        self.game_state.grid.height,
-                        lambda x, y: self.game_state.mechanics.can_move_to_position(
-                            x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-                        ),
-                    )
+                    reachable = self.get_reachable(unit)
 
                     for pos in reachable:
                         # Temporarily check if attacking from this position is possible
@@ -1272,13 +1264,7 @@ class AdvancedBot(MediumBot):
             return False
 
         # Get all reachable positions
-        reachable = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        reachable = self.get_reachable(unit)
 
         best_charge = None
         best_value = -float("inf")
@@ -1327,13 +1313,7 @@ class AdvancedBot(MediumBot):
             return True
 
         # Try to move to flank position
-        reachable = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        reachable = self.get_reachable(unit)
 
         best_flank_pos = None
         best_target = None
@@ -1381,13 +1361,7 @@ class AdvancedBot(MediumBot):
             return False
 
         # Find reachable forest positions
-        reachable = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        reachable = self.get_reachable(unit)
 
         # Find best forest position (closest to enemies)
         best_forest = None

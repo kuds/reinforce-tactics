@@ -154,6 +154,10 @@ STRUCTURE_TILE_TYPES = {"TOWER", "BUILDING", "HEADQUARTERS"}
 # Must match the action space indices in StrategyGameEnv.
 ALL_UNIT_TYPES = ["W", "M", "C", "A", "K", "R", "S", "B"]
 
+# Mapping from unit type code to its index in ALL_UNIT_TYPES.
+# Used by gym_env action masking and model_bot action translation.
+UNIT_TYPE_TO_IDX = {ut: i for i, ut in enumerate(ALL_UNIT_TYPES)}
+
 # Unit colors
 UNIT_COLORS = {
     "W": (139, 69, 19),  # Brown (Warrior)
