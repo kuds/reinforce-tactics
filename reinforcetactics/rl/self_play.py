@@ -344,13 +344,20 @@ class SelfPlayEnv(gym.Wrapper):
 
     def _get_random_valid_action(self) -> np.ndarray:
         """Get a random valid action (fallback)."""
-        # Get action masks as tuple
-        masks = self.action_masks()
+        base_env = self.env.unwrapped
 
-        # Sample valid action for each dimension
+        if base_env.action_space_type == "flat_discrete":
+            # For flat_discrete, sample a random valid index
+            base_env._build_flat_actions()
+            n_actions = len(base_env._current_actions)
+            if n_actions > 0:
+                return np.array(np.random.randint(0, n_actions))
+            return np.array(0)
+
+        # For multi_discrete, sample valid action for each dimension
+        masks = self.action_masks()
         action = []
         for mask in masks:
-            # Ensure mask is at least 1D before calling np.where
             mask = np.atleast_1d(mask)
             valid_indices = np.where(mask)[0]
             if len(valid_indices) > 0:
@@ -405,43 +412,57 @@ class SelfPlayEnv(gym.Wrapper):
 
         return flipped
 
-    def _execute_opponent_turn(self) -> None:
-        """Execute the opponent's turn."""
-        game_state = self.env.game_state
-        opponent_player = 3 - self.agent_player  # 2 if agent is 1, 1 if agent is 2
+    def _resolve_action(self, action) -> np.ndarray:
+        """
+        Resolve any action format to the canonical 6-element array.
 
-        # Safety limit to prevent infinite loops
+        For multi_discrete, action is already a 6-element array.
+        For flat_discrete, action is a scalar index into _current_actions.
+        """
+        base_env = self.env.unwrapped
+
+        if base_env.action_space_type == "flat_discrete":
+            action_idx = int(action)
+            if 0 <= action_idx < len(base_env._current_actions):
+                return base_env._current_actions[action_idx]
+            return np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)
+
+        return np.asarray(action)
+
+    def _execute_opponent_turn(self) -> None:
+        """Execute the opponent's turn using the shared action dispatch."""
+        base_env = self.env.unwrapped
+        game_state = base_env.game_state
+        opponent_player = 3 - self.agent_player
+
         max_actions = 50
         actions_taken = 0
         consecutive_invalid = 0
         max_consecutive_invalid = 5
 
         while game_state.current_player == opponent_player and not game_state.game_over and actions_taken < max_actions:
-            # Get observation from opponent's perspective
             obs = self._get_obs_for_player(opponent_player)
 
-            # Get opponent's action
-            action = self._get_opponent_action(obs)
+            raw_action = self._get_opponent_action(obs)
+            action_arr = self._resolve_action(raw_action)
+            action_type = int(action_arr[0])
 
-            # If action is end_turn, break
-            if action[0] == 5:
+            if action_type == 5:
                 game_state.end_turn()
                 break
 
-            # Execute action
-            action_executed = self._execute_opponent_action(action)
+            action_dict = base_env._encode_action(action_arr)
+            _, is_valid = base_env.execute_game_action(action_dict, opponent_player)
 
-            if action_executed:
+            if is_valid:
                 consecutive_invalid = 0
                 actions_taken += 1
             else:
                 consecutive_invalid += 1
                 if consecutive_invalid >= max_consecutive_invalid:
-                    # Too many invalid actions in a row, end turn
                     game_state.end_turn()
                     break
 
-        # Ensure turn ends if still opponent's turn
         if game_state.current_player == opponent_player and not game_state.game_over:
             game_state.end_turn()
 
@@ -452,102 +473,12 @@ class SelfPlayEnv(gym.Wrapper):
             obs = self._flip_observation(obs)
         return obs
 
-    def _execute_opponent_action(self, action: np.ndarray) -> bool:
-        """
-        Execute opponent's action in the game.
-
-        Returns:
-            True if action was valid, False otherwise
-        """
-        game_state = self.env.game_state
-        opp = 3 - self.agent_player  # opponent player number
-
-        action_type = int(action[0])
-        unit_type_idx = int(action[1])
-        from_x, from_y = int(action[2]), int(action[3])
-        to_x, to_y = int(action[4]), int(action[5])
-
-        unit_types = ["W", "M", "C", "A", "K", "R", "S", "B"]
-        unit_type = unit_types[unit_type_idx % 8]
-
-        try:
-            if action_type == 0:  # Create unit
-                unit = game_state.create_unit(unit_type, to_x, to_y, player=opp)
-                return unit is not None
-
-            elif action_type == 1:  # Move
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == opp and unit.can_move:
-                    return game_state.move_unit(unit, to_x, to_y)
-                return False
-
-            elif action_type == 2:  # Attack
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.player == opp and target.player != opp:
-                    game_state.attack(unit, target)
-                    return True
-                return False
-
-            elif action_type == 3:  # Seize
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == opp:
-                    game_state.seize(unit)
-                    return True
-                return False
-
-            elif action_type == 4:  # Heal/Cure
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == "C" and unit.player == opp:
-                    if target.is_paralyzed():
-                        return game_state.cure(unit, target)
-                    return game_state.heal(unit, target) > 0
-                return False
-
-            elif action_type == 5:  # End turn
-                return True  # Signal to end turn
-
-            elif action_type == 6:  # Paralyze
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == "M" and unit.player == opp:
-                    return game_state.paralyze(unit, target)
-                return False
-
-            elif action_type == 7:  # Haste
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == "S" and unit.player == opp:
-                    return game_state.haste(unit, target)
-                return False
-
-            elif action_type == 8:  # Defence buff
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == "S" and unit.player == opp:
-                    return game_state.defence_buff(unit, target)
-                return False
-
-            elif action_type == 9:  # Attack buff
-                unit = game_state.get_unit_at_position(from_x, from_y)
-                target = game_state.get_unit_at_position(to_x, to_y)
-                if unit and target and unit.type == "S" and unit.player == opp:
-                    return game_state.attack_buff(unit, target)
-                return False
-
-        except Exception as exc:
-            logger.debug("Opponent action failed: %s", exc)
-            return False
-
-        return False
-
-    def step(self, action: np.ndarray) -> Tuple[Dict, float, bool, bool, Dict]:
+    def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
         """
         Execute agent's action and then opponent's turn.
 
         Args:
-            action: Agent's action
+            action: Agent's action (array for multi_discrete, scalar for flat_discrete)
 
         Returns:
             (observation, reward, terminated, truncated, info)
@@ -555,16 +486,18 @@ class SelfPlayEnv(gym.Wrapper):
         # Execute agent's action
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        # If game ended or action was end_turn, let opponent play
-        if not terminated and action[0] == 5:
-            # Agent ended turn, opponent plays
+        # Check if the action was end_turn using info from base env
+        is_end_turn = info.get("action_type") == 5
+
+        # If game not over and action was end_turn, let opponent play
+        if not terminated and is_end_turn:
             self._execute_opponent_turn()
 
             # Get new observation after opponent's turn
             obs = self.env._get_obs()
             terminated = self.env.game_state.game_over
 
-            # Adjust reward for game end
+            # Adjust reward for game end during opponent's turn
             if terminated:
                 winner = self.env.game_state.winner
                 if winner == self.agent_player:
@@ -761,6 +694,8 @@ def make_self_play_env(
     opponent_pool: Optional[OpponentPool] = None,
     swap_players: bool = True,
     enabled_units: Optional[List[str]] = None,
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ) -> SelfPlayEnv:
     """
     Create a single self-play environment.
@@ -772,6 +707,8 @@ def make_self_play_env(
         opponent_pool: Pool of historical opponents
         swap_players: Whether to randomly swap player order
         enabled_units: List of enabled unit types
+        action_space_type: 'multi_discrete' (default) or 'flat_discrete'
+        max_flat_actions: Max actions for flat_discrete mode (default 512)
 
     Returns:
         SelfPlayEnv ready for training
@@ -795,6 +732,8 @@ def make_self_play_env(
         max_steps=max_steps,
         reward_config=reward_config,
         enabled_units=enabled_units,
+        action_space_type=action_space_type,
+        max_flat_actions=max_flat_actions,
     )
 
     # Wrap with action masking first
@@ -815,6 +754,8 @@ def _make_self_play_env_fn(
     opponent_pool: Optional[OpponentPool],
     swap_players: bool,
     enabled_units: Optional[List[str]],
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ) -> Callable[[], SelfPlayEnv]:
     """Create a function that creates a self-play environment."""
     from reinforcetactics.rl.masking import ActionMaskedEnv
@@ -827,6 +768,8 @@ def _make_self_play_env_fn(
             max_steps=max_steps,
             reward_config=reward_config,
             enabled_units=enabled_units,
+            action_space_type=action_space_type,
+            max_flat_actions=max_flat_actions,
         )
         base_env.reset(seed=seed + rank)
 
@@ -847,6 +790,8 @@ def make_self_play_vec_env(
     opponent_pool: Optional[OpponentPool] = None,
     swap_players: bool = True,
     enabled_units: Optional[List[str]] = None,
+    action_space_type: str = "multi_discrete",
+    max_flat_actions: int = 512,
 ):
     """
     Create vectorized self-play environments for parallel training.
@@ -861,6 +806,8 @@ def make_self_play_vec_env(
         opponent_pool: Shared opponent pool
         swap_players: Whether to randomly swap player order
         enabled_units: List of enabled unit types
+        action_space_type: 'multi_discrete' (default) or 'flat_discrete'
+        max_flat_actions: Max actions for flat_discrete mode (default 512)
 
     Returns:
         Vectorized environment ready for MaskablePPO
@@ -879,7 +826,10 @@ def make_self_play_vec_env(
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
     env_fns = [
-        _make_self_play_env_fn(i, seed, map_file, max_steps, reward_config, opponent_pool, swap_players, enabled_units)
+        _make_self_play_env_fn(
+            i, seed, map_file, max_steps, reward_config, opponent_pool,
+            swap_players, enabled_units, action_space_type, max_flat_actions,
+        )
         for i in range(n_envs)
     ]
 

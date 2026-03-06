@@ -507,37 +507,39 @@ class StrategyGameEnv(gym.Env):
 
         return {"action_type": action_type, "unit_type": unit_type, "from_pos": (from_x, from_y), "to_pos": (to_x, to_y)}
 
-    def _execute_action(self, action_dict: Dict[str, Any]) -> Tuple[float, bool]:
+    def execute_game_action(self, action_dict: Dict[str, Any], player: int) -> Tuple[Dict[str, Any], bool]:
         """
-        Execute encoded action in game.
+        Execute an encoded action for the given player.
+
+        This is the single dispatch point for all game actions. Both agent
+        and opponent action execution flow through here.
+
+        Args:
+            action_dict: Encoded action with keys action_type, unit_type,
+                from_pos, to_pos.
+            player: The player number (1 or 2) performing the action.
 
         Returns:
-            (reward, is_valid)
+            (result_info, is_valid) where result_info contains action-specific
+            data (e.g. damage dealt, heal amount).
         """
         action_type = action_dict["action_type"]
         from_pos = action_dict["from_pos"]
         to_pos = action_dict["to_pos"]
-        rc = self.reward_config
-        ap = self.agent_player
-
-        reward = 0.0
+        result_info: Dict[str, Any] = {"action_type": action_type}
         is_valid = True
 
         try:
             if action_type == 0:  # Create unit
                 unit_type = action_dict["unit_type"]
-                unit = self.game_state.create_unit(unit_type, to_pos[0], to_pos[1], player=ap)
-                if unit:
-                    reward += rc.get("create_unit", 2.0)
-                else:
+                unit = self.game_state.create_unit(unit_type, to_pos[0], to_pos[1], player=player)
+                if not unit:
                     is_valid = False
 
             elif action_type == 1:  # Move
                 unit = self.game_state.get_unit_at_position(*from_pos)
-                if unit and unit.player == ap and unit.can_move:
-                    if self.game_state.move_unit(unit, to_pos[0], to_pos[1]):
-                        reward += rc.get("move", 0.1)
-                    else:
+                if unit and unit.player == player and unit.can_move:
+                    if not self.game_state.move_unit(unit, to_pos[0], to_pos[1]):
                         is_valid = False
                 else:
                     is_valid = False
@@ -545,23 +547,20 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 2:  # Attack
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.player == ap and target.player != ap:
+                if unit and target and unit.player == player and target.player != player:
                     result = self.game_state.attack(unit, target)
-                    reward += result["damage"] * rc.get("damage_scale", 0.2)
-                    if not result["target_alive"]:
-                        reward += rc.get("kill", 10.0)
+                    result_info["damage"] = result["damage"]
+                    result_info["target_alive"] = result["target_alive"]
                 else:
                     is_valid = False
 
             elif action_type == 3:  # Seize
                 unit = self.game_state.get_unit_at_position(*from_pos)
-                if unit and unit.player == ap:
+                if unit and unit.player == player:
                     result = self.game_state.seize(unit)
-                    if result.get("damage", 0) > 0:
-                        reward += rc.get("seize_progress", 1.0)
-                        if result["captured"]:
-                            reward += rc.get("capture", 20.0)
-                    else:
+                    result_info["seize_damage"] = result.get("damage", 0)
+                    result_info["captured"] = result.get("captured", False)
+                    if result.get("damage", 0) <= 0:
                         is_valid = False
                 else:
                     is_valid = False
@@ -569,18 +568,18 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 4:  # Heal/Cure (Cleric)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "C" and unit.player == ap:
+                if unit and target and unit.type == "C" and unit.player == player:
                     action_performed = False
                     if target.is_paralyzed():
                         cure_ok = self.game_state.cure(unit, target)
                         if cure_ok:
-                            reward += rc.get("cure", 5.0)
+                            result_info["cured"] = True
                             action_performed = True
 
                     if not action_performed:
                         heal_amount = self.game_state.heal(unit, target)
                         if heal_amount > 0:
-                            reward += heal_amount * rc.get("heal_scale", 0.5)
+                            result_info["heal_amount"] = heal_amount
                             action_performed = True
 
                     if not action_performed:
@@ -590,25 +589,12 @@ class StrategyGameEnv(gym.Env):
 
             elif action_type == 5:  # End turn
                 self.game_state.end_turn()
-                reward += self.reward_config["turn_penalty"]
-                # Opponent plays (dispatch on opponent_type, not opponent object)
-                if self.opponent_type and self.opponent_type != "self":
-                    if not self.game_state.game_over:
-                        self._opponent_turn()
-                        if not self.game_state.game_over:
-                            # Only end turn if opponent didn't already (SimpleBot
-                            # calls end_turn() internally; random opponent does not)
-                            if self.game_state.current_player != self.agent_player:
-                                self.game_state.end_turn()
 
             elif action_type == 6:  # Paralyze (Mage/Sorcerer)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "M" and target.player != ap:
-                    paralyze_ok = self.game_state.paralyze(unit, target)
-                    if paralyze_ok:
-                        reward += rc.get("paralyze", 8.0)
-                    else:
+                if unit and target and unit.type == "M" and target.player != player:
+                    if not self.game_state.paralyze(unit, target):
                         is_valid = False
                 else:
                     is_valid = False
@@ -616,11 +602,8 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 7:  # Haste (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == ap:
-                    haste_ok = self.game_state.haste(unit, target)
-                    if haste_ok:
-                        reward += rc.get("haste", 6.0)
-                    else:
+                if unit and target and unit.type == "S" and target.player == player:
+                    if not self.game_state.haste(unit, target):
                         is_valid = False
                 else:
                     is_valid = False
@@ -628,11 +611,8 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 8:  # Defence Buff (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == ap:
-                    def_ok = self.game_state.defence_buff(unit, target)
-                    if def_ok:
-                        reward += rc.get("defence_buff", 5.0)
-                    else:
+                if unit and target and unit.type == "S" and target.player == player:
+                    if not self.game_state.defence_buff(unit, target):
                         is_valid = False
                 else:
                     is_valid = False
@@ -640,11 +620,8 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 9:  # Attack Buff (Sorcerer only)
                 unit = self.game_state.get_unit_at_position(*from_pos)
                 target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == ap:
-                    atk_ok = self.game_state.attack_buff(unit, target)
-                    if atk_ok:
-                        reward += rc.get("attack_buff", 5.0)
-                    else:
+                if unit and target and unit.type == "S" and target.player == player:
+                    if not self.game_state.attack_buff(unit, target):
                         is_valid = False
                 else:
                     is_valid = False
@@ -658,6 +635,60 @@ class StrategyGameEnv(gym.Env):
         except Exception as e:
             logger.error("Unexpected error executing action (type=%s): %s\n%s", action_type, e, traceback.format_exc())
             is_valid = False
+
+        return result_info, is_valid
+
+    def _execute_action(self, action_dict: Dict[str, Any]) -> Tuple[float, bool]:
+        """
+        Execute encoded action for the agent and compute reward.
+
+        Returns:
+            (reward, is_valid)
+        """
+        rc = self.reward_config
+        ap = self.agent_player
+        action_type = action_dict["action_type"]
+
+        result_info, is_valid = self.execute_game_action(action_dict, ap)
+
+        reward = 0.0
+        if is_valid:
+            if action_type == 0:
+                reward += rc.get("create_unit", 2.0)
+            elif action_type == 1:
+                reward += rc.get("move", 0.1)
+            elif action_type == 2:
+                reward += result_info.get("damage", 0) * rc.get("damage_scale", 0.2)
+                if not result_info.get("target_alive", True):
+                    reward += rc.get("kill", 10.0)
+            elif action_type == 3:
+                reward += rc.get("seize_progress", 1.0)
+                if result_info.get("captured", False):
+                    reward += rc.get("capture", 20.0)
+            elif action_type == 4:
+                if result_info.get("cured"):
+                    reward += rc.get("cure", 5.0)
+                elif result_info.get("heal_amount", 0) > 0:
+                    reward += result_info["heal_amount"] * rc.get("heal_scale", 0.5)
+            elif action_type == 5:
+                reward += self.reward_config["turn_penalty"]
+                # Opponent plays (dispatch on opponent_type, not opponent object)
+                if self.opponent_type and self.opponent_type != "self":
+                    if not self.game_state.game_over:
+                        self._opponent_turn()
+                        if not self.game_state.game_over:
+                            # Only end turn if opponent didn't already (SimpleBot
+                            # calls end_turn() internally; random opponent does not)
+                            if self.game_state.current_player != self.agent_player:
+                                self.game_state.end_turn()
+            elif action_type == 6:
+                reward += rc.get("paralyze", 8.0)
+            elif action_type == 7:
+                reward += rc.get("haste", 6.0)
+            elif action_type == 8:
+                reward += rc.get("defence_buff", 5.0)
+            elif action_type == 9:
+                reward += rc.get("attack_buff", 5.0)
 
         return reward, is_valid
 
@@ -831,6 +862,7 @@ class StrategyGameEnv(gym.Env):
             "winner": self.game_state.winner if terminated else None,
             "turn": self.game_state.turn_number,
             "valid_action": is_valid,
+            "action_type": action_dict["action_type"],
         }
 
         return obs, reward, terminated, truncated, info
