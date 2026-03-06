@@ -139,9 +139,7 @@ class ManagerNetwork(nn.Module):
 
         return goal_x_logits, goal_y_logits, goal_type_logits, value
 
-    def sample_goal(
-        self, features: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample_goal(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Sample a goal from the policy.
 
@@ -260,9 +258,7 @@ class WorkerNetwork(nn.Module):
 
         return action_logits, value
 
-    def sample_action(
-        self, features: torch.Tensor, goal: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample_action(self, features: torch.Tensor, goal: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Sample an action.
 
@@ -580,11 +576,7 @@ class FeudalRLAgent:
         Only includes keys needed by the feature extractor (grid, units,
         global_features), filtering out action_mask, visibility, etc.
         """
-        return {
-            k: torch.as_tensor(v).unsqueeze(0).float().to(self.device)
-            for k, v in obs.items()
-            if k in _OBS_KEYS
-        }
+        return {k: torch.as_tensor(v).unsqueeze(0).float().to(self.device) for k, v in obs.items() if k in _OBS_KEYS}
 
     def _batch_obs_to_tensor(self, grid, units, global_feat):
         """Convert pre-stacked numpy arrays to tensor dict on device."""
@@ -660,8 +652,15 @@ class FeudalRLAgent:
 
             # Store worker transition
             buf.add_worker_step(
-                obs, action_np, w_log_prob.item(), w_value.squeeze(-1).item(), goal_np,
-                ext_reward, int_reward, done, worker_reward_alpha,
+                obs,
+                action_np,
+                w_log_prob.item(),
+                w_value.squeeze(-1).item(),
+                goal_np,
+                ext_reward,
+                int_reward,
+                done,
+                worker_reward_alpha,
             )
 
             manager_reward_accum += ext_reward
