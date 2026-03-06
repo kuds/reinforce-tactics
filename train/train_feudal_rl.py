@@ -193,7 +193,11 @@ def train_feudal_rl(args):
 
     # Create agent
     agent = FeudalRLAgent(
-        observation_space=env.observation_space, grid_width=env.grid_width, grid_height=env.grid_height, device=args.device
+        observation_space=env.observation_space,
+        grid_width=env.grid_width,
+        grid_height=env.grid_height,
+        agent_player=getattr(env, "agent_player", 1),
+        device=args.device,
     )
     agent.manager_horizon = args.manager_horizon
 
