@@ -146,7 +146,7 @@ class StrategyGameEnv(gym.Env):
         self.grid_width = self.game_state.grid.width
 
         # Define observation space
-        obs_dict = {
+        obs_dict: dict[str, spaces.Space] = {
             "grid": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
             "units": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
             "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),

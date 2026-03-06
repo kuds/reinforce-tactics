@@ -23,7 +23,8 @@ class SettingsMenu(Menu):
             screen: Optional pygame surface. If None, creates its own.
         """
         super().__init__(screen, get_language().get("settings.title", "Settings"))
-        self._fullscreen = bool(pygame.display.get_surface() and pygame.display.get_surface().get_flags() & pygame.FULLSCREEN)
+        surface = pygame.display.get_surface()
+        self._fullscreen = bool(surface and surface.get_flags() & pygame.FULLSCREEN)
         self._setup_options()
 
     def _setup_options(self) -> None:

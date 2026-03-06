@@ -43,6 +43,7 @@ class MapEditor:
             self.screen = pygame.display.set_mode((1500, 1000))
             pygame.display.set_caption("Map Editor - Reinforce Tactics")
         else:
+            assert screen is not None
             self.screen = screen
 
         self.map_data = map_data

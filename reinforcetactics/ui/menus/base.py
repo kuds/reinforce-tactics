@@ -63,6 +63,7 @@ class Menu:
                 # Clipboard not available on this platform
                 pass
         else:
+            assert screen is not None
             self.screen = screen
 
         self.title = title

@@ -167,13 +167,12 @@ class GraphicsMenu(Menu):
                 # Paste from clipboard
                 try:
                     if pygame.scrap.get_init():
-                        clipboard_text = pygame.scrap.get(pygame.SCRAP_TEXT)
-                        if clipboard_text:
+                        raw_clipboard = pygame.scrap.get(pygame.SCRAP_TEXT)
+                        if raw_clipboard:
                             # Decode and clean the clipboard text
-                            if isinstance(clipboard_text, bytes):
-                                clipboard_text = clipboard_text.decode("utf-8", errors="ignore")
-                            clipboard_text = clipboard_text.rstrip("\x00").strip()
-                            self.input_text += clipboard_text
+                            clipboard_str = raw_clipboard.decode("utf-8", errors="ignore") if isinstance(raw_clipboard, bytes) else str(raw_clipboard)
+                            clipboard_str = clipboard_str.rstrip("\x00").strip()
+                            self.input_text += clipboard_str
                 except Exception:
                     pass
             else:
