@@ -21,6 +21,11 @@
 /saves
 settings.json
 
+# Test/coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+
 # Build artifacts
 *.egg-info/
 dist/

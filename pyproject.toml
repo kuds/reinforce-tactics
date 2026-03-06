@@ -48,6 +48,7 @@ llm = [
 ]
 dev = [
     "pytest",
+    "pytest-cov",
     "pre-commit",
     "ruff",
     "mypy",
@@ -115,3 +116,13 @@ module = [
     "reinforcetactics.rl.self_play",
 ]
 ignore_errors = true
+
+[tool.pytest.ini_options]
+addopts = "--cov=reinforcetactics --cov-fail-under=50"
+
+[tool.coverage.run]
+source = ["reinforcetactics"]
+omit = ["reinforcetactics/ui/*"]
+
+[tool.coverage.report]
+fail_under = 50

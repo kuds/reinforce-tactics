@@ -22,6 +22,7 @@ from reinforcetactics.constants import (
 )
 from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
 from reinforcetactics.ui.sprite_animator import SpriteAnimator
+from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.settings import get_settings
 
@@ -62,11 +63,7 @@ class Renderer:
 
         # Initialize clipboard support
         if not headless:
-            try:
-                pygame.scrap.init()
-            except pygame.error:
-                # Clipboard not available on this platform
-                pass
+            init_clipboard()
 
         # Load settings
         self.settings = get_settings()

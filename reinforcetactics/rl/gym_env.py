@@ -12,7 +12,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from reinforcetactics.constants import ALL_UNIT_TYPES
+from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 from reinforcetactics.utils.file_io import FileIO
@@ -328,7 +328,7 @@ class StrategyGameEnv(gym.Env):
         tx_mask = np.zeros(width, dtype=bool)
         ty_mask = np.zeros(height, dtype=bool)
 
-        unit_type_to_idx = {"W": 0, "M": 1, "C": 2, "A": 3, "K": 4, "R": 5, "S": 6, "B": 7}
+        unit_type_to_idx = UNIT_TYPE_TO_IDX
 
         def _pos(obj_or_dict, fields):
             """Extract (x, y) from an object (.x/.y) or a dict (fields tuple)."""
@@ -398,16 +398,7 @@ class StrategyGameEnv(gym.Env):
 
         actions = []
         seen = set()
-        unit_type_to_idx = {
-            "W": 0,
-            "M": 1,
-            "C": 2,
-            "A": 3,
-            "K": 4,
-            "R": 5,
-            "S": 6,
-            "B": 7,
-        }
+        unit_type_to_idx = UNIT_TYPE_TO_IDX
 
         def _pos(obj_or_dict, fields):
             if isinstance(fields, str):

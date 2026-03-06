@@ -10,6 +10,7 @@ from typing import Any, Callable, List, Optional, Tuple
 import pygame
 
 from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
+from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import TRANSLATIONS, get_language
 
@@ -56,12 +57,7 @@ class Menu:
         if self.owns_screen:
             self.screen = pygame.display.set_mode((900, 700))
             pygame.display.set_caption("Reinforce Tactics")
-            # Initialize clipboard support when we own the screen
-            try:
-                pygame.scrap.init()
-            except pygame.error:
-                # Clipboard not available on this platform
-                pass
+            init_clipboard()
         else:
             assert screen is not None
             self.screen = screen
@@ -225,7 +221,10 @@ class Menu:
             text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
 
             bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2, text_rect.y - padding_y, uniform_width, text_rect.height + 2 * padding_y
+                (screen_width - uniform_width) // 2,
+                text_rect.y - padding_y,
+                uniform_width,
+                text_rect.height + 2 * padding_y,
             )
 
             self.option_rects.append(bg_rect)
