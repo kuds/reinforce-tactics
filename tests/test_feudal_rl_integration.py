@@ -11,7 +11,6 @@ Covers gaps not addressed by the existing unit-level tests:
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -164,7 +163,6 @@ class TestFeudalRLAgentConstruction:
         assert agent.goal_step_counter == 3
 
         # Next call should trigger a new goal
-        old_counter = agent.goal_step_counter
         agent.select_action(obs)
         assert agent.goal_step_counter == 1  # reset after new goal
 
