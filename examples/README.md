@@ -19,7 +19,7 @@ pip install openai>=1.0.0
 pip install anthropic>=0.18.0
 
 # For Google
-pip install google-generativeai>=0.4.0
+pip install google-genai
 ```
 
 2. Set your API key:
@@ -57,7 +57,7 @@ The script will:
 - Check the variable name matches: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY`
 
 **"Missing dependency"**
-- Install the required package: `pip install openai` (or `anthropic`, `google-generativeai`)
+- Install the required package: `pip install openai` (or `anthropic`, `google-genai`)
 
 **Rate limiting**
 - The bot has built-in retry logic with exponential backoff

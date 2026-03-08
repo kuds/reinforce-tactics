@@ -33,8 +33,11 @@ This command generates static content into the `build` directory and can be serv
 
 The documentation includes:
 - **Getting Started** (`intro.md`): Overview, features, and quick start guide
+- **Game Mechanics** (`game-mechanics.md`): Units, combat system, structures, and terrain
+- **Bot Tournaments** (`tournaments.mdx`): Official tournament results and analysis
+- **Maps** (`maps.mdx`): Available maps with previews and descriptions
+- **Tournament System** (`tournament-system.md`): Technical guide for running tournaments
 - **Implementation Status** (`implementation-status.md`): Current state of features and development roadmap
-- **Tournament System** (`tournament-system.md`): Bot tournament system documentation
 
 ## Deployment
 

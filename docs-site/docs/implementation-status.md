@@ -19,42 +19,48 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 - [x] `reinforcetactics/core/visibility.py` - Fog of war visibility system
 
 ### Game Mechanics
-- [x] `game/mechanics.py` - Combat, healing, structures, income, all special abilities
-- [x] `game/bot.py` - SimpleBot, MediumBot, and AdvancedBot AI for training
-- [x] `game/llm_bot.py` - LLM-powered bots (OpenAI GPT, Claude, Gemini)
-- [x] `game/model_bot.py` - Trained model bot for tournament play
+- [x] `reinforcetactics/game/mechanics.py` - Combat, healing, structures, income, all special abilities
+- [x] `reinforcetactics/game/bot.py` - SimpleBot, MediumBot, and AdvancedBot AI for training
+- [x] `reinforcetactics/game/llm_bot.py` - LLM-powered bots (OpenAI GPT, Claude, Gemini)
+- [x] `reinforcetactics/game/model_bot.py` - Trained model bot for tournament play
+- [x] `reinforcetactics/game/alphazero_bot.py` - AlphaZero bot with MCTS
 
 ### UI Components
-- [x] `ui/renderer.py` - Pygame rendering system with sprite animations
-- [x] `ui/icons.py` - Unit and terrain icons
-- [x] `ui/menus/` - Complete menu system (30 files across 5 subdirectories)
-- [x] `ui/menus/map_editor/` - Full map editor GUI
+- [x] `reinforcetactics/ui/renderer.py` - Pygame rendering system with sprite animations
+- [x] `reinforcetactics/ui/icons.py` - Unit and terrain icons
+- [x] `reinforcetactics/ui/menus/` - Complete menu system (30 files across 5 subdirectories)
+- [x] `reinforcetactics/ui/menus/map_editor/` - Full map editor GUI
 
 ### Reinforcement Learning
-- [x] `rl/gym_env.py` - Full Gymnasium environment wrapper with 10 action types
-- [x] `rl/masking.py` - Action masking for valid moves
-- [x] `rl/self_play.py` - Self-play training with opponent pool
-- [x] `rl/feudal_rl.py` - Hierarchical RL (Manager-Worker) architecture with full training loop
+- [x] `reinforcetactics/rl/gym_env.py` - Full Gymnasium environment wrapper with 10 action types
+- [x] `reinforcetactics/rl/masking.py` - Action masking for valid moves
+- [x] `reinforcetactics/rl/self_play.py` - Self-play training with opponent pool
+- [x] `reinforcetactics/rl/feudal_rl.py` - Hierarchical RL (Manager-Worker) architecture with full training loop
+- [x] `reinforcetactics/rl/alphazero_trainer.py` - AlphaZero training with MCTS
+- [x] `reinforcetactics/rl/alphazero_net.py` - AlphaZero neural network
+- [x] `reinforcetactics/rl/mcts.py` - Monte Carlo Tree Search
+- [x] `reinforcetactics/rl/evaluation.py` - RL evaluation utilities
 
 ### Tournament System
-- [x] `tournament/runner.py` - Tournament execution engine
-- [x] `tournament/elo.py` - ELO rating system
-- [x] `tournament/bots.py` - Bot descriptors and factory
-- [x] `tournament/schedule.py` - Round-robin scheduling with resume support
-- [x] `tournament/results.py` - Results tracking and export
-- [x] `tournament/config.py` - Tournament configuration
+- [x] `reinforcetactics/tournament/runner.py` - Tournament execution engine
+- [x] `reinforcetactics/tournament/elo.py` - ELO rating system
+- [x] `reinforcetactics/tournament/bots.py` - Bot descriptors and factory
+- [x] `reinforcetactics/tournament/schedule.py` - Round-robin scheduling with resume support
+- [x] `reinforcetactics/tournament/results.py` - Results tracking and export
+- [x] `reinforcetactics/tournament/config.py` - Tournament configuration
 
 ### Utilities
-- [x] `utils/file_io.py` - File I/O for maps, saves, replays
-- [x] `utils/settings.py` - Settings management with API keys
-- [x] `utils/language.py` - Multi-language support (English, Korean, Spanish, French, Chinese)
-- [x] `utils/replay_player.py` - Replay playback system with video export
-- [x] `utils/experiment_tracker.py` - RL experiment logging
+- [x] `reinforcetactics/utils/file_io.py` - File I/O for maps, saves, replays
+- [x] `reinforcetactics/utils/settings.py` - Settings management with API keys
+- [x] `reinforcetactics/utils/language.py` - Multi-language support (English, Korean, Spanish, French, Chinese)
+- [x] `reinforcetactics/utils/replay_player.py` - Replay playback system with video export
+- [x] `reinforcetactics/utils/experiment_tracker.py` - RL experiment logging
 
 ### Training & Documentation
 - [x] `main.py` - Complete CLI entry point with train/evaluate/play modes
 - [x] `train/train_self_play.py` - Self-play training with opponent pool
 - [x] `train/train_feudal_rl.py` - Feudal RL training
+- [x] `train/train_alphazero.py` - AlphaZero training
 - [x] `README.md` - Comprehensive documentation
 - [x] `docs-site/` - Docusaurus documentation site deployed at reinforcetactics.com
 - [x] Docker support for containerized deployment
@@ -68,7 +74,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 | **Terrain Types** | 6 (Grass, Water, Ocean, Mountain, Forest, Road) | ✅ Complete |
 | **Structure Types** | 3 (HQ, Building, Tower) | ✅ Complete |
 | **Bot Types** | SimpleBot, MediumBot, AdvancedBot, LLM Bots (3 providers), ModelBot | ✅ Complete |
-| **RL Features** | Gymnasium env, Action masking, Self-play, Feudal HRL | ✅ Complete |
+| **RL Features** | Gymnasium env, Action masking, Self-play, Feudal HRL, AlphaZero with MCTS | ✅ Complete |
 | **Tournament** | Round-robin, ELO ratings, Resume, Multi-map | ✅ Complete |
 | **Fog of War** | Full visibility system with explored/visible states | ✅ Complete |
 | **Map Editor** | GUI-based map creation and editing | ✅ Complete |
@@ -159,7 +165,7 @@ The Gymnasium environment uses a MultiDiscrete action space with 6 dimensions:
 ### Medium Priority
 - Campaign mode with story
 - Online multiplayer
-- More advanced bot strategies (MCTS, minimax)
+- More advanced bot strategies (minimax)
 
 ### Low Priority
 - Additional unit types
