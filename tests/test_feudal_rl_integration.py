@@ -34,13 +34,16 @@ GRID_H, GRID_W = 6, 6
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_obs_space():
-    return spaces.Dict({
-        "grid": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-        "units": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-        "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
-        "action_mask": spaces.Box(low=0, high=1, shape=(60,), dtype=np.float32),
-    })
+    return spaces.Dict(
+        {
+            "grid": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
+            "units": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
+            "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(60,), dtype=np.float32),
+        }
+    )
 
 
 def _make_obs():
@@ -405,12 +408,28 @@ class TestFeudalRolloutBufferEdgeCases:
         """Different alpha values per step produce correct rewards."""
         buf = FeudalRolloutBuffer()
         obs = _make_obs()
-        buf.add_worker_step(obs, np.zeros(6), 0.0, 0.0, np.zeros(3),
-                            extrinsic_reward=10.0, intrinsic_reward=1.0, done=False,
-                            worker_reward_alpha=0.0)
-        buf.add_worker_step(obs, np.zeros(6), 0.0, 0.0, np.zeros(3),
-                            extrinsic_reward=10.0, intrinsic_reward=1.0, done=False,
-                            worker_reward_alpha=1.0)
+        buf.add_worker_step(
+            obs,
+            np.zeros(6),
+            0.0,
+            0.0,
+            np.zeros(3),
+            extrinsic_reward=10.0,
+            intrinsic_reward=1.0,
+            done=False,
+            worker_reward_alpha=0.0,
+        )
+        buf.add_worker_step(
+            obs,
+            np.zeros(6),
+            0.0,
+            0.0,
+            np.zeros(3),
+            extrinsic_reward=10.0,
+            intrinsic_reward=1.0,
+            done=False,
+            worker_reward_alpha=1.0,
+        )
         buf.finalize()
         # alpha=0: 1.0 + 0*10 = 1.0
         np.testing.assert_allclose(buf.w_rewards[0], 1.0, atol=1e-5)
@@ -430,7 +449,9 @@ class TestComputeGAEEdgeCases:
             np.array([], dtype=np.float32),
             np.array([], dtype=np.float32),
             np.array([], dtype=np.float32),
-            0.0, 0.99, 0.95,
+            0.0,
+            0.99,
+            0.95,
         )
         assert len(adv) == 0
         assert len(ret) == 0
@@ -442,10 +463,9 @@ class TestComputeGAEEdgeCases:
         dones = np.array([0.0])
         seg_len = np.array([100])  # gamma^100 ≈ 0.366 for gamma=0.99
 
-        adv, _ = _compute_gae(rewards, values, dones, 5.0, 0.99, 0.95,
-                               segment_lengths=seg_len)
+        adv, _ = _compute_gae(rewards, values, dones, 5.0, 0.99, 0.95, segment_lengths=seg_len)
         # delta = 10 + 0.99^100 * 5 - 1 ≈ 10 + 1.83 - 1 = 10.83
-        expected_delta = 10.0 + (0.99 ** 100) * 5.0 - 1.0
+        expected_delta = 10.0 + (0.99**100) * 5.0 - 1.0
         np.testing.assert_allclose(adv[0], expected_delta, atol=1e-3)
 
     def test_gae_returns_equal_advantages_plus_values(self):
@@ -517,8 +537,9 @@ class TestGradientFlow:
     def test_worker_gradients_flow_through_feature_extractor(self):
         obs_space = _make_obs_space()
         fe = SpatialFeatureExtractor(obs_space, features_dim=64)
-        worker = WorkerNetwork(feature_dim=64, goal_embedding_dim=32,
-                               action_space_dims=[10, 8, GRID_W, GRID_H, GRID_W, GRID_H])
+        worker = WorkerNetwork(
+            feature_dim=64, goal_embedding_dim=32, action_space_dims=[10, 8, GRID_W, GRID_H, GRID_W, GRID_H]
+        )
 
         obs = {
             "grid": torch.rand(2, GRID_H, GRID_W, 3),
