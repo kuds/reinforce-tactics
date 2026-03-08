@@ -25,7 +25,15 @@ Reinforce Tactics is a 2D turn-based strategy game featuring:
 - **AI opponents**: SimpleBot, MediumBot, AdvancedBot, and LLM-powered bots (GPT, Claude, Gemini)
 - **Full Gymnasium integration** for RL training
 - **Headless mode** for fast training without rendering
-- **Multiple training algorithms**: PPO, A2C, DQN via Stable-Baselines3
+- **Multiple training algorithms**: PPO, A2C, DQN via Stable-Baselines3, AlphaZero with MCTS, and Feudal RL
+- **Action masking**: MaskablePPO and legal-action masking across all bot types
+- **Self-play**: Train agents against copies of themselves
+- **Fog of War**: Line-of-sight visibility with terrain bonuses
+- **Map Editor**: In-game editor for creating and modifying maps
+- **Multi-player modes**: 1v1, 1v1v1 (free-for-all), and 2v2 (team) maps
+- **Tournament system**: Round-robin tournaments with ELO ratings and Docker support
+- **Sprite animations**: Per-team palette swapping and movement path transitions
+- **Multi-language**: English, Korean, Spanish, French, Chinese
 - **Docker support** for easy deployment
 
 ## 🤖 Why Reinforce Tactics?

@@ -30,7 +30,7 @@ python3 scripts/tournament.py
 ```
 
 This will:
-- Use the `maps/1v1/6x6_beginner.csv` map
+- Use the `maps/1v1/beginner.csv` map
 - Discover all available bots
 - Run 4 games per matchup (2 per side)
 - Save results to `tournament_results/`
@@ -107,7 +107,7 @@ All three built-in bots are always included. No configuration needed.
 ### LLM Bots
 Automatically included if:
 1. API key is configured in `settings.json`
-2. Required package is installed (`openai`, `anthropic`, or `google-generativeai`)
+2. Required package is installed (`openai`, `anthropic`, or `google-genai`)
 3. API connection test passes
 
 #### Supported Models
@@ -189,7 +189,7 @@ Complete tournament data in JSON format:
 ```json
 {
   "timestamp": "2025-12-10T22:09:52.145889",
-  "map": "maps/1v1/6x6_beginner.csv",
+  "map": "maps/1v1/beginner.csv",
   "games_per_side": 2,
   "rankings": [
     {
@@ -236,7 +236,7 @@ from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
 env = StrategyGameEnv(
-    map_file='maps/1v1/6x6_beginner.csv',
+    map_file='maps/1v1/beginner.csv',
     opponent='bot',
     render_mode=None
 )
@@ -268,7 +268,7 @@ Action format: `[action_type, unit_type, from_x, from_y, to_x, to_y]`
 
 ### LLM bot not discovered
 - Check API key in `settings.json`
-- Install required package: `pip install openai` (or `anthropic`, `google-generativeai`)
+- Install required package: `pip install openai` (or `anthropic`, `google-genai`)
 - Verify API key is valid and has credits
 
 ### Model bot not discovered

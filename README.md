@@ -3,7 +3,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/stargazers)
 [![GitHub License](https://img.shields.io/github/license/kuds/reinforce-tactics)](https://github.com/kuds/reinforce-tactics/blob/main/LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/python-package.yml?label=tests)](https://github.com/kuds/reinforce-tactics/actions/workflows/python-package.yml)
-[![Lint](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/pylint.yml?label=lint)](https://github.com/kuds/reinforce-tactics/actions/workflows/pylint.yml)
+[![Lint](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/lint.yml?label=lint)](https://github.com/kuds/reinforce-tactics/actions/workflows/lint.yml)
 [![Docs](https://img.shields.io/github/actions/workflow/status/kuds/reinforce-tactics/deploy-docusaurus.yml?label=docs)](https://github.com/kuds/reinforce-tactics/actions/workflows/deploy-docusaurus.yml)
 [![Documentation](https://img.shields.io/badge/docs-reinforcetactics.com-blue)](https://reinforcetactics.com)
 
@@ -61,7 +61,7 @@ pip install -e ".[all]"
 | *(base)* | gymnasium, pettingzoo, stable-baselines3, sb3-contrib, numpy, torch, tensorboard, pandas |
 | `[gui]` | pygame-ce, opencv-python, matplotlib, Pillow |
 | `[llm]` | openai, anthropic, google-genai |
-| `[dev]` | pytest, pre-commit, pylint, flake8 |
+| `[dev]` | pytest, pytest-cov, pre-commit, ruff, mypy |
 | `[all]` | All of the above |
 
 </details>
@@ -178,7 +178,7 @@ reinforce-tactics/
 ├── maps/                      # CSV map files (1v1, 1v1v1, 2v2)
 ├── train/                     # Training scripts (self-play, AlphaZero, Feudal RL)
 ├── eval/                      # Evaluation scripts
-├── tests/                     # Test suite (24 files)
+├── tests/                     # Test suite
 ├── examples/                  # Example scripts and demos
 ├── notebooks/                 # Jupyter notebooks (PPO training, tournaments)
 ├── docker/                    # Docker configs for tournaments
@@ -218,7 +218,7 @@ Full documentation available at [reinforcetactics.com](https://reinforcetactics.
 - Tournament results and bot comparisons
 - Map creation guide
 
-Also see: [ROADMAP.md](ROADMAP.md) | [MAP_EDITOR.md](MAP_EDITOR.md)
+Also see: [ROADMAP.md](docs/ROADMAP.md) | [MAP_EDITOR.md](docs/MAP_EDITOR.md)
 
 ## Contributing
 
