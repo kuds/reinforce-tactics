@@ -204,15 +204,11 @@ class GameState:
         if player is not None:
             if player in self.visibility_maps:
                 self.visibility_maps[player].update(self)
-                self.visibility_maps[player].clear_stale_unit_memory(
-                    max_turns=10, current_turn=self.turn_number
-                )
+                self.visibility_maps[player].clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
         else:
             for vis_map in self.visibility_maps.values():
                 vis_map.update(self)
-                vis_map.clear_stale_unit_memory(
-                    max_turns=10, current_turn=self.turn_number
-                )
+                vis_map.clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
 
     def get_visible_units_for_player(self, player: int, include_own: bool = True) -> List[Unit]:
         """
