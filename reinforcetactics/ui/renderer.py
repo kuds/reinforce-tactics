@@ -3,6 +3,7 @@ Pygame rendering for the strategy game.
 """
 
 import os
+import random
 import time
 
 import numpy as np
@@ -348,8 +349,6 @@ class Renderer:
                 pygame.draw.rect(self.screen, lighter, top_rect)
 
             elif tile.type == "f":  # Forest - random dots for texture
-                import random
-
                 random.seed(tile.x * 1000 + tile.y)  # Deterministic randomness
                 for _ in range(3):
                     x = rect.x + random.randint(5, rect.width - 5)
