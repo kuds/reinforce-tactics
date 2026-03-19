@@ -21,4 +21,4 @@ COPY . .
 RUN pip3 install -e .
 
 # Entry point
-CMD ["python3", "train.py"]
+CMD ["python3", "main.py", "--mode", "train"]
