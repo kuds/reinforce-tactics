@@ -8,174 +8,52 @@ import Head from '@docusaurus/Head';
 
 import styles from './index.module.css';
 
-// ===== Unit Data =====
-const units = [
+// ===== Featured Units (trimmed to 4 for landing page) =====
+const featuredUnits = [
   {
     name: 'Warrior',
-    code: 'W',
     role: 'Frontline Fighter',
-    description: 'Stalwart defenders who excel in close combat. High durability makes them perfect for holding the line.',
-    stats: { hp: 15, attack: 10, defense: 6, movement: 3 },
-    cardClass: styles.unitCardWarrior,
-    iconClass: styles.unitIconWarrior,
     gif: '/img/units/warrior_idle.gif',
+    color: '#8b2942',
   },
   {
     name: 'Mage',
-    code: 'M',
     role: 'Arcane Striker',
-    description: 'Masters of mystical arts who can strike from afar and paralyze enemies for 3 turns.',
-    stats: { hp: 10, attack: 12, defense: 4, movement: 2 },
-    cardClass: styles.unitCardMage,
-    iconClass: styles.unitIconMage,
     gif: '/img/units/mage_idle.gif',
-  },
-  {
-    name: 'Cleric',
-    code: 'C',
-    role: 'Support Healer',
-    description: 'Devoted healers who restore allies and cure status effects. Essential for sustained campaigns.',
-    stats: { hp: 8, attack: 2, defense: 4, movement: 2 },
-    cardClass: styles.unitCardCleric,
-    iconClass: styles.unitIconCleric,
-    gif: '/img/units/cleric_idle.gif',
-  },
-  {
-    name: 'Archer',
-    code: 'A',
-    role: 'Ranged Specialist',
-    description: 'Precise marksmen with extended range from high ground. Enemies cannot counter-attack.',
-    stats: { hp: 15, attack: 5, defense: 1, movement: 3 },
-    cardClass: styles.unitCardArcher,
-    iconClass: styles.unitIconArcher,
-    gif: '/img/units/archer_idle.gif',
+    color: '#4a148c',
   },
   {
     name: 'Knight',
-    code: 'K',
     role: 'Heavy Cavalry',
-    description: 'Armored cavalry with devastating charge attacks. Deals +50% damage when moving 3+ tiles before attacking.',
-    stats: { hp: 18, attack: 8, defense: 5, movement: 4 },
-    cardClass: styles.unitCardKnight,
-    iconClass: styles.unitIconKnight,
     gif: '/img/units/knight_idle.gif',
+    color: '#5c5c5c',
+  },
+  {
+    name: 'Archer',
+    role: 'Ranged Specialist',
+    gif: '/img/units/archer_idle.gif',
+    color: '#1e3a5f',
   },
   {
     name: 'Rogue',
-    code: 'R',
     role: 'Stealth Assassin',
-    description: 'Swift assassins who deal +50% flank damage when enemies are adjacent to allies. 15% evade chance (30% in forests).',
-    stats: { hp: 12, attack: 9, defense: 3, movement: 4 },
-    cardClass: styles.unitCardRogue,
-    iconClass: styles.unitIconRogue,
     gif: '/img/units/rogue_idle.gif',
+    color: '#2d2d2d',
   },
   {
-    name: 'Barbarian',
-    code: 'B',
-    role: 'Berserker',
-    description: 'Ferocious warriors with exceptional mobility and endurance. High HP and movement for aggressive tactics.',
-    stats: { hp: 20, attack: 10, defense: 2, movement: 5 },
-    cardClass: styles.unitCardBarbarian,
-    iconClass: styles.unitIconBarbarian,
-    gif: '/img/units/barbarian_idle.gif',
-  },
-  {
-    name: 'Sorcerer',
-    code: 'S',
-    role: 'Battle Mage',
-    description: 'Versatile spellcasters who can grant Haste for extra actions, or buff allies with +35% attack/defense.',
-    stats: { hp: 10, attack: 8, defense: 3, movement: 2 },
-    cardClass: styles.unitCardSorcerer,
-    iconClass: styles.unitIconSorcerer,
-    gif: '/img/units/sorcerer_idle.gif',
+    name: 'Cleric',
+    role: 'Support Healer',
+    gif: '/img/units/cleric_idle.gif',
+    color: '#2d5a3d',
   },
 ];
 
-// ===== Feature Data =====
-const features = [
-  {
-    icon: '🎮',
-    title: 'Turn-Based Tactical Combat',
-    description: 'Strategic grid-based battles with attacks, counter-attacks, paralysis, and healing mechanics inspired by Fire Emblem and Advance Wars.',
-  },
-  {
-    icon: '🤖',
-    title: 'Gymnasium RL Environment',
-    description: 'Full Gymnasium compatibility with multi-discrete action space, configurable reward shaping, and headless mode for high-speed training.',
-  },
-  {
-    icon: '🧠',
-    title: 'LLM Evaluation Framework',
-    description: 'Benchmark GPT-4, Claude, Gemini, and other large language models on strategic reasoning, planning, and multi-step decision making.',
-  },
-  {
-    icon: '🏆',
-    title: 'Tournament System',
-    description: 'Run automated tournaments between AI agents, track ELO ratings, and generate detailed performance analytics and leaderboards.',
-  },
-  {
-    icon: '📊',
-    title: 'Replay & Analysis Tools',
-    description: 'Record battles, export replays to video, and analyze decision patterns. Essential for AI research and model interpretability.',
-  },
-  {
-    icon: '🔧',
-    title: 'Modular Architecture',
-    description: 'Clean, extensible Python codebase for adding new units, mechanics, reward functions, and custom AI agents.',
-  },
-];
-
-// ===== LLM Models Data =====
-const llmModels = [
-  {
-    name: 'OpenAI GPT-5',
-    icon: '🟢',
-    description: 'Evaluate GPT-5 and GPT-5 Mini on complex tactical scenarios requiring multi-step planning.',
-  },
-  {
-    name: 'Anthropic Claude',
-    icon: '🟣',
-    description: 'Benchmark Claude 4.5 Sonnet, Claude 4.5 Opus, and Claude Haiku 4.5 on strategic reasoning tasks.',
-  },
-  {
-    name: 'Google Gemini',
-    icon: '🔵',
-    description: 'Test Gemini Pro and Gemini Ultra on spatial reasoning and resource management.',
-  },
-  {
-    name: 'Custom Models',
-    icon: '⚪',
-    description: 'Integrate any LLM via API or local inference for comparative evaluation.',
-  },
-];
-
-// ===== Documentation Links =====
-const docLinks = [
-  {
-    icon: '📖',
-    title: 'Getting Started',
-    description: 'Installation, setup, and quick start guide',
-    href: '/docs/',
-  },
-  {
-    icon: '⚔️',
-    title: 'Game Mechanics',
-    description: 'Units, combat system, and structures',
-    href: '/docs/game-mechanics',
-  },
-  {
-    icon: '🏆',
-    title: 'Tournament System',
-    description: 'Run AI tournaments and track ELO ratings',
-    href: '/docs/tournament-system',
-  },
-  {
-    icon: '📋',
-    title: 'Implementation Status',
-    description: 'Features and development roadmap',
-    href: '/docs/implementation-status',
-  },
+// ===== Map previews =====
+const mapPreviews = [
+  { src: '/img/maps/crossroads.png', name: 'Crossroads' },
+  { src: '/img/maps/island_fortress.png', name: 'Island Fortress' },
+  { src: '/img/maps/tower_rush.png', name: 'Tower Rush' },
+  { src: '/img/maps/center_mountains.png', name: 'Center Mountains' },
 ];
 
 // ===== SEO Structured Data =====
@@ -196,71 +74,163 @@ const structuredData = {
     name: 'Reinforce Tactics',
     url: 'https://reinforcetactics.com',
   },
-  keywords: 'reinforcement learning, LLM evaluation, AI benchmark, turn-based strategy, tactical AI, GPT-5 evaluation, Claude benchmark, Gemini testing, game AI, Gymnasium environment',
+  keywords: 'reinforcement learning, LLM evaluation, AI benchmark, turn-based strategy, tactical AI, GPT evaluation, Claude benchmark, Gemini testing, game AI, Gymnasium environment',
 };
 
 // ===== Hero Section =====
 function HeroSection(): ReactNode {
   return (
     <header className={styles.heroBanner}>
-      <div className={styles.heroContent}>
-        <span className={styles.heroBadge}>LLM Evaluation + Reinforcement Learning</span>
-        <Heading as="h1" className={styles.heroTitle}>
-          Reinforce<span className={styles.heroTitleAccent}>Tactics</span>
-        </Heading>
-        <p className={styles.heroSubtitle}>
-          The open-source tactical strategy environment for evaluating large language models
-          and training reinforcement learning agents. Benchmark GPT-5, Claude, Gemini, and custom
-          AI on strategic reasoning, multi-step planning, and resource management.
-        </p>
-        <div className={styles.buttons}>
-          <Link
-            className="button button--lg button--tactics-primary"
-            to="/docs/">
-            Get Started
-          </Link>
-          <Link
-            className="button button--lg button--tactics-secondary"
-            to="https://github.com/kuds/reinforce-tactics">
-            View on GitHub
-          </Link>
+      <div className={styles.heroGrid}>
+        <div className={styles.heroText}>
+          <span className={styles.heroBadge}>Open Source</span>
+          <Heading as="h1" className={styles.heroTitle}>
+            Tactical AI<br />
+            <span className={styles.heroTitleAccent}>Benchmark</span>
+          </Heading>
+          <p className={styles.heroSubtitle}>
+            Evaluate LLMs and train RL agents on turn-based tactical combat.
+            Compare models head-to-head in competitive tournaments.
+          </p>
+          <div className={styles.heroButtons}>
+            <Link
+              className={styles.btnPrimary}
+              to="/docs/">
+              Get Started
+            </Link>
+            <Link
+              className={styles.btnSecondary}
+              to="https://github.com/kuds/reinforce-tactics">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </Link>
+          </div>
+        </div>
+        <div className={styles.heroTerminal}>
+          <div className={styles.terminalBar}>
+            <span className={styles.terminalDot} style={{background: '#ff5f56'}} />
+            <span className={styles.terminalDot} style={{background: '#ffbd2e'}} />
+            <span className={styles.terminalDot} style={{background: '#27c93f'}} />
+            <span className={styles.terminalTitle}>terminal</span>
+          </div>
+          <div className={styles.terminalBody}>
+            <code>
+              <span className={styles.terminalPrompt}>$</span>{' '}
+              <span className={styles.terminalCmd}>pip install</span> reinforcetactics
+              {'\n\n'}
+              <span className={styles.terminalPrompt}>$</span>{' '}
+              <span className={styles.terminalCmd}>python</span> -m reinforcetactics tournament \{'\n'}
+              {'  '}--agents gpt-4o claude-sonnet gemini-pro \{'\n'}
+              {'  '}--rounds 50 \{'\n'}
+              {'  '}--map crossroads
+              {'\n\n'}
+              <span className={styles.terminalOutput}>
+                {'Tournament started: 3 agents, 50 rounds\n'}
+                {'Round 50/50 complete\n'}
+                {'─────────────────────────────\n'}
+                {'  #1  claude-sonnet   ELO 1847\n'}
+                {'  #2  gpt-4o          ELO 1723\n'}
+                {'  #3  gemini-pro      ELO 1630\n'}
+              </span>
+            </code>
+          </div>
         </div>
       </div>
     </header>
   );
 }
 
-// ===== LLM Evaluation Section =====
-function LLMSection(): ReactNode {
+// ===== Value Props Section =====
+function ValuePropsSection(): ReactNode {
   return (
-    <section className={styles.llmSection}>
+    <section className={styles.valueProps}>
+      <div className="container">
+        <div className={styles.valueGrid}>
+          <div className={styles.valueCard}>
+            <div className={styles.valueIcon}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <h3>LLM Evaluation</h3>
+            <p>Benchmark GPT, Claude, Gemini, and custom models on strategic reasoning, spatial awareness, and multi-step planning.</p>
+          </div>
+          <div className={styles.valueCard}>
+            <div className={styles.valueIcon}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <h3>RL Training</h3>
+            <p>Full Gymnasium environment with multi-discrete action space, configurable reward shaping, and headless mode for fast training.</p>
+          </div>
+          <div className={styles.valueCard}>
+            <div className={styles.valueIcon}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5C7 4 9 7 12 7s5-3 7.5-3a2.5 2.5 0 0 1 0 5H18"/><path d="M18 15h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M6 15H4.5a2.5 2.5 0 0 1 0-5H6"/><line x1="6" y1="9" x2="6" y2="15"/><line x1="18" y1="9" x2="18" y2="15"/><path d="M6 15a6 6 0 0 0 12 0"/></svg>
+            </div>
+            <h3>Tournaments</h3>
+            <p>Automated round-robin tournaments with ELO ratings, replay recording, and detailed performance analytics.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===== Map Gallery Section =====
+function MapGallerySection(): ReactNode {
+  return (
+    <section className={styles.mapSection}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
-          Evaluate Large Language Models
+          Diverse Tactical Maps
         </Heading>
         <p className={styles.sectionSubtitle}>
-          Reinforce Tactics provides a rigorous benchmark for testing LLM capabilities in
-          strategic reasoning, spatial awareness, and long-horizon planning. Compare models
-          head-to-head in competitive tournaments.
+          14 hand-crafted maps across 1v1, 1v1v1, and 2v2 formats with varied terrain, chokepoints, and strategic objectives.
         </p>
-        <div className={styles.llmGrid}>
-          {llmModels.map((model) => (
-            <div key={model.name} className={styles.llmCard}>
-              <span className={styles.llmIcon}>{model.icon}</span>
-              <h3>{model.name}</h3>
-              <p>{model.description}</p>
+        <div className={styles.mapGrid}>
+          {mapPreviews.map((map) => (
+            <div key={map.name} className={styles.mapCard}>
+              <img src={map.src} alt={map.name} loading="lazy" />
+              <span className={styles.mapLabel}>{map.name}</span>
             </div>
           ))}
         </div>
-        <div className={styles.llmCta}>
-          <p className={styles.llmCtaText}>
-            Run automated tournaments, generate ELO ratings, and analyze decision-making patterns
-            across different model architectures and prompting strategies.
-          </p>
-          <Link
-            className="button button--md button--tactics-primary"
-            to="/docs/tournament-system">
-            Learn About Tournaments
+      </div>
+    </section>
+  );
+}
+
+// ===== Units Strip Section =====
+function UnitsStripSection(): ReactNode {
+  return (
+    <section className={styles.unitsSection}>
+      <div className="container">
+        <Heading as="h2" className={styles.sectionTitle}>
+          8 Unique Unit Types
+        </Heading>
+        <p className={styles.sectionSubtitle}>
+          Each unit has distinct stats, abilities, and roles — creating a rich decision space
+          for AI agents to master.
+        </p>
+        <div className={styles.unitsStrip}>
+          {featuredUnits.map((unit) => (
+            <div key={unit.name} className={styles.unitChip}>
+              <div
+                className={styles.unitChipIcon}
+                style={{ borderColor: unit.color }}
+              >
+                <img
+                  src={unit.gif}
+                  alt={unit.name}
+                  className={styles.unitGif}
+                  loading="lazy"
+                />
+              </div>
+              <span className={styles.unitChipName}>{unit.name}</span>
+              <span className={styles.unitChipRole}>{unit.role}</span>
+            </div>
+          ))}
+        </div>
+        <div className={styles.unitsCta}>
+          <Link to="/docs/game-mechanics" className={styles.linkArrow}>
+            View all units and mechanics &rarr;
           </Link>
         </div>
       </div>
@@ -268,80 +238,40 @@ function LLMSection(): ReactNode {
   );
 }
 
-// ===== Unit Card Component =====
-function UnitCard({ unit }: { unit: typeof units[0] }): ReactNode {
-  const [gifFailed, setGifFailed] = useState(false);
-  const showGif = unit.gif && !gifFailed;
-
+// ===== How It Works Section =====
+function HowItWorksSection(): ReactNode {
   return (
-    <div className={clsx(styles.unitCard, unit.cardClass)}>
-      <div className={styles.unitHeader}>
-        {showGif ? (
-          <div className={clsx(styles.unitIconGif, unit.iconClass)}>
-            <img
-              src={unit.gif}
-              alt={`${unit.name} idle animation`}
-              className={styles.unitGifImage}
-              loading="lazy"
-              onError={() => setGifFailed(true)}
-            />
-          </div>
-        ) : (
-          <div className={clsx(styles.unitIcon, unit.iconClass)}>
-            {unit.code}
-          </div>
-        )}
-        <div className={styles.unitInfo}>
-          <h3>{unit.name}</h3>
-          <p className={styles.unitRole}>{unit.role}</p>
-        </div>
-      </div>
-      <p className={styles.unitDescription}>{unit.description}</p>
-      <div className={styles.unitStats}>
-        <div className={styles.statItem}>
-          <span className={styles.statLabel}>HP</span>
-          <span className={styles.statValue}>{unit.stats.hp}</span>
-        </div>
-        <div className={styles.statItem}>
-          <span className={styles.statLabel}>Attack</span>
-          <span className={styles.statValue}>{unit.stats.attack}</span>
-        </div>
-        <div className={styles.statItem}>
-          <span className={styles.statLabel}>Defense</span>
-          <span className={styles.statValue}>{unit.stats.defense}</span>
-        </div>
-        <div className={styles.statItem}>
-          <span className={styles.statLabel}>Movement</span>
-          <span className={styles.statValue}>{unit.stats.movement}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ===== Units Showcase Section =====
-function UnitsSection(): ReactNode {
-  return (
-    <section className={styles.unitsSection}>
+    <section className={styles.howSection}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
-          Rich Tactical Environment
+          How It Works
         </Heading>
-        <p className={styles.sectionSubtitle}>
-          Eight distinct unit types create a complex decision space that challenges AI agents
-          to reason about positioning, resource allocation, and opponent modeling.
-        </p>
-        <div className={styles.unitsGrid}>
-          {units.map((unit) => (
-            <UnitCard key={unit.name} unit={unit} />
-          ))}
+        <div className={styles.stepsGrid}>
+          <div className={styles.step}>
+            <div className={styles.stepNumber}>1</div>
+            <h3>Install</h3>
+            <p>Install via pip with optional GPU, GUI, and LLM extras. Works on Python 3.10+.</p>
+            <code className={styles.stepCode}>pip install reinforcetactics[llm]</code>
+          </div>
+          <div className={styles.step}>
+            <div className={styles.stepNumber}>2</div>
+            <h3>Configure</h3>
+            <p>Pick your agents — LLM bots, RL models, rule-based bots, or your own custom agent.</p>
+            <code className={styles.stepCode}>--agents gpt-4o claude-sonnet</code>
+          </div>
+          <div className={styles.step}>
+            <div className={styles.stepNumber}>3</div>
+            <h3>Compete</h3>
+            <p>Run tournaments, compare ELO ratings, analyze replays, and iterate on your models.</p>
+            <code className={styles.stepCode}>python -m reinforcetactics tournament</code>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-// ===== Features Section =====
+// ===== Features Grid (compact) =====
 function FeaturesSection(): ReactNode {
   return (
     <section className={styles.featuresSection}>
@@ -349,72 +279,54 @@ function FeaturesSection(): ReactNode {
         <Heading as="h2" className={styles.sectionTitle}>
           Built for AI Research
         </Heading>
-        <p className={styles.sectionSubtitle}>
-          A complete tactical environment designed for reinforcement learning experimentation,
-          LLM benchmarking, and AI development.
-        </p>
         <div className={styles.featuresGrid}>
-          {features.map((feature) => (
-            <div key={feature.title} className={styles.featureCard}>
-              <div className={styles.featureIcon}>{feature.icon}</div>
-              <h3>{feature.title}</h3>
-              <p>{feature.description}</p>
-            </div>
-          ))}
+          <div className={styles.featureItem}>
+            <h4>Gymnasium Compatible</h4>
+            <p>Standard RL interface with observation and action spaces, reward shaping, and episode management.</p>
+          </div>
+          <div className={styles.featureItem}>
+            <h4>Multi-Agent Support</h4>
+            <p>PettingZoo integration for multi-agent RL. Train cooperative and competitive policies.</p>
+          </div>
+          <div className={styles.featureItem}>
+            <h4>Replay & Analysis</h4>
+            <p>Record battles, export to video, and analyze decision patterns for model interpretability.</p>
+          </div>
+          <div className={styles.featureItem}>
+            <h4>Extensible Architecture</h4>
+            <p>Add custom units, maps, reward functions, and AI agents with a clean Python API.</p>
+          </div>
+          <div className={styles.featureItem}>
+            <h4>Multiple AI Backends</h4>
+            <p>OpenAI, Anthropic, and Google Gemini SDKs built-in. Plug in any LLM via API.</p>
+          </div>
+          <div className={styles.featureItem}>
+            <h4>Docker Tournaments</h4>
+            <p>Containerized tournament runner for reproducible benchmarks at scale.</p>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-// ===== Documentation Links Section =====
-function DocsSection(): ReactNode {
-  return (
-    <section className={styles.docsSection}>
-      <div className="container">
-        <Heading as="h2" className={styles.sectionTitle}>
-          Explore the Documentation
-        </Heading>
-        <p className={styles.sectionSubtitle}>
-          Everything you need to start evaluating LLMs and training RL agents.
-        </p>
-        <div className={styles.docsGrid}>
-          {docLinks.map((doc) => (
-            <Link key={doc.title} to={doc.href} className={styles.docLink}>
-              <span className={styles.docLinkIcon}>{doc.icon}</span>
-              <div className={styles.docLinkContent}>
-                <h4>{doc.title}</h4>
-                <p>{doc.description}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ===== Call to Action Section =====
+// ===== CTA Section =====
 function CTASection(): ReactNode {
   return (
     <section className={styles.ctaSection}>
       <div className={styles.ctaContent}>
         <Heading as="h2" className={styles.ctaTitle}>
-          Start Evaluating Your AI Models
+          Ready to benchmark your AI?
         </Heading>
         <p className={styles.ctaText}>
-          Clone the repository, run your first LLM tournament, and discover how different
-          models perform on strategic reasoning tasks. Open source and ready for research.
+          Open source and ready for research. Clone the repo and run your first tournament in minutes.
         </p>
         <div className={styles.ctaButtons}>
-          <Link
-            className="button button--lg button--tactics-primary"
-            to="/docs/">
+          <Link className={styles.btnPrimary} to="/docs/">
             Read the Docs
           </Link>
-          <Link
-            className="button button--lg button--tactics-secondary"
-            to="https://github.com/kuds/reinforce-tactics">
+          <Link className={styles.btnSecondary} to="https://github.com/kuds/reinforce-tactics">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
             Star on GitHub
           </Link>
         </div>
@@ -429,26 +341,25 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="LLM Evaluation & Reinforcement Learning Benchmark"
-      description="Evaluate GPT-4, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research, reinforcement learning, and model benchmarking.">
+      description="Evaluate GPT, Claude, Gemini and other LLMs on strategic reasoning. Open-source turn-based strategy environment for AI research, reinforcement learning, and model benchmarking.">
       <Head>
-        {/* Additional SEO meta tags */}
-        <meta name="keywords" content="LLM evaluation, LLM benchmark, GPT-5 evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning" />
+        <meta name="keywords" content="LLM evaluation, LLM benchmark, GPT evaluation, Claude benchmark, Gemini testing, reinforcement learning, AI benchmark, strategic reasoning, tactical AI, game AI, Gymnasium environment, turn-based strategy, AI research, machine learning" />
         <meta name="author" content="Reinforce Tactics" />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="Reinforce Tactics" />
         <meta name="twitter:card" content="summary_large_image" />
         <link rel="canonical" href="https://reinforcetactics.com" />
-        {/* Structured Data for SEO */}
         <script type="application/ld+json">
           {JSON.stringify(structuredData)}
         </script>
       </Head>
       <HeroSection />
       <main>
-        <LLMSection />
-        <UnitsSection />
+        <ValuePropsSection />
+        <MapGallerySection />
+        <UnitsStripSection />
+        <HowItWorksSection />
         <FeaturesSection />
-        <DocsSection />
         <CTASection />
       </main>
     </Layout>
