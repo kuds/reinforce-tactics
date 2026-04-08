@@ -4,6 +4,7 @@ from typing import Optional
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
@@ -29,17 +30,17 @@ class QuitConfirmDialog:
         self.quit_text = lang.get("quit_confirm.quit", "Quit")
         self.cancel_text = lang.get("quit_confirm.cancel", "Cancel")
 
-        # Colors
-        self.bg_color = (40, 40, 50)
-        self.text_color = (255, 255, 255)
-        self.title_color = (255, 200, 50)
-        self.border_color = (100, 150, 200)
-        self.save_quit_color = (80, 150, 80)
-        self.save_quit_hover_color = (100, 180, 100)
+        # Colors (from shared theme)
+        self.bg_color = theme.PANEL_BG
+        self.text_color = theme.TEXT
+        self.title_color = theme.SELECTED
+        self.border_color = theme.BORDER
+        self.save_quit_color = theme.BTN_CONFIRM
+        self.save_quit_hover_color = theme.BTN_CONFIRM_HOVER
         self.quit_color = (150, 120, 50)
         self.quit_hover_color = (180, 150, 70)
-        self.cancel_color = (150, 80, 80)
-        self.cancel_hover_color = (180, 100, 100)
+        self.cancel_color = theme.BTN_CANCEL
+        self.cancel_hover_color = theme.BTN_CANCEL_HOVER
 
         # Fonts
         self.title_font = get_font(32)
@@ -148,7 +149,7 @@ class QuitConfirmDialog:
 
         # Hint
         hint_font = get_font(18)
-        hint_surface = hint_font.render("S = Save & Quit, Q = Quit, ESC = Cancel", True, (150, 150, 150))
+        hint_surface = hint_font.render("S = Save & Quit, Q = Quit, ESC = Cancel", True, theme.TEXT_MUTED)
         hint_rect = hint_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 100)
         self.screen.blit(hint_surface, hint_rect)
 

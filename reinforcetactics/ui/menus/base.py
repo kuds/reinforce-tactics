@@ -9,6 +9,7 @@ from typing import Any, Callable, List, Optional, Tuple
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_font
@@ -67,15 +68,15 @@ class Menu:
         self.selected_index = 0
         self.options: List[Tuple[str, Callable[[], Any]]] = []
 
-        # Colors
-        self.bg_color = (30, 30, 40)
-        self.text_color = (255, 255, 255)
-        self.selected_color = (255, 200, 50)
-        self.hover_color = (200, 180, 100)
-        self.title_color = (100, 200, 255)
-        self.option_bg_color = (50, 50, 65)
-        self.option_bg_hover_color = (70, 70, 90)
-        self.option_bg_selected_color = (80, 80, 100)
+        # Colors (from shared theme)
+        self.bg_color = theme.BG
+        self.text_color = theme.TEXT
+        self.selected_color = theme.SELECTED
+        self.hover_color = theme.HOVER
+        self.title_color = theme.TITLE
+        self.option_bg_color = theme.OPTION_BG
+        self.option_bg_hover_color = theme.OPTION_BG_HOVER
+        self.option_bg_selected_color = theme.OPTION_BG_SELECTED
 
         # Fonts
         self.title_font = get_font(48)
@@ -89,7 +90,7 @@ class Menu:
         # Scrolling support
         self.scroll_offset = 0
         self.max_visible_options = 8  # Maximum options visible at once
-        self.option_spacing = 60
+        self.option_spacing = theme.MENU_OPTION_SPACING
 
         # Get language instance
         self.lang = get_language()

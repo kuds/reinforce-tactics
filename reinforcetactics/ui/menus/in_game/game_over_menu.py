@@ -5,6 +5,7 @@ from typing import Any, Optional
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
@@ -76,6 +77,6 @@ class GameOverMenu(Menu):
                 if hasattr(lang, "get")
                 else f"Turns: {turn_count}"
             )
-            turn_surface = self.label_font.render(turn_label, True, (180, 180, 190))
+            turn_surface = self.label_font.render(turn_label, True, theme.TEXT_MUTED)
             turn_rect = turn_surface.get_rect(centerx=screen_cx, y=line_y + 12)
             self.screen.blit(turn_surface, turn_rect)
