@@ -71,7 +71,11 @@ class GameOverMenu(Menu):
         # Draw turn count
         turn_count = getattr(self.game_state, "turn", None)
         if turn_count is not None:
-            turn_label = lang.get("game_over.turns", "Turns: {turns}").format(turns=turn_count) if hasattr(lang, 'get') else f"Turns: {turn_count}"
+            turn_label = (
+                lang.get("game_over.turns", "Turns: {turns}").format(turns=turn_count)
+                if hasattr(lang, "get")
+                else f"Turns: {turn_count}"
+            )
             turn_surface = self.label_font.render(turn_label, True, (180, 180, 190))
             turn_rect = turn_surface.get_rect(centerx=screen_cx, y=line_y + 12)
             self.screen.blit(turn_surface, turn_rect)
