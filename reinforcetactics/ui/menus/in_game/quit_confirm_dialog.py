@@ -49,6 +49,10 @@ class QuitConfirmDialog:
         # Button state
         self.hover_button: Optional[str] = None
 
+        # Cached overlay surface to avoid per-frame allocation
+        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+        self._overlay.fill((0, 0, 0, 150))
+
         # Calculate layout
         self._calculate_layout()
 
@@ -125,10 +129,8 @@ class QuitConfirmDialog:
 
     def draw(self) -> None:
         """Draw the quit confirmation dialog."""
-        # Semi-transparent overlay
-        overlay = pygame.Surface((self.screen.get_width(), self.screen.get_height()), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
-        self.screen.blit(overlay, (0, 0))
+        # Draw cached semi-transparent overlay
+        self.screen.blit(self._overlay, (0, 0))
 
         # Dialog background
         pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=12)

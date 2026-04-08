@@ -46,6 +46,10 @@ class ConfirmationDialog:
         self.message_font = get_font(24)
         self.button_font = get_font(28)
 
+        # Cached overlay surface to avoid per-frame allocation
+        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+        self._overlay.fill((0, 0, 0, 150))
+
         # Calculate dialog dimensions
         self._calculate_dialog_rect()
 
@@ -139,10 +143,8 @@ class ConfirmationDialog:
 
     def draw(self) -> None:
         """Draw the confirmation dialog."""
-        # Draw semi-transparent overlay
-        overlay = pygame.Surface((self.screen.get_width(), self.screen.get_height()), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
-        self.screen.blit(overlay, (0, 0))
+        # Draw cached semi-transparent overlay
+        self.screen.blit(self._overlay, (0, 0))
 
         # Draw dialog background
         pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=12)

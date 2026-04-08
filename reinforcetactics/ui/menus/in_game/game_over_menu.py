@@ -4,7 +4,9 @@ from typing import Any, Optional
 
 import pygame
 
+from reinforcetactics.constants import PLAYER_COLORS
 from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
 
@@ -26,6 +28,8 @@ class GameOverMenu(Menu):
 
         self.winner = winner
         self.game_state = game_state
+        self.winner_color = PLAYER_COLORS.get(winner, self.selected_color)
+        self.label_font = get_font(20)
         self._setup_options()
 
     def _setup_options(self) -> None:
@@ -42,11 +46,32 @@ class GameOverMenu(Menu):
     def _draw_content(self) -> None:
         super()._draw_content()
 
-        # Draw winner announcement
+        screen_cx = self.screen.get_width() // 2
+
+        # Draw winner announcement with player color
         lang = get_language()
         winner_template = lang.get("game_over.winner", "Player {player} Wins!")
         winner_text = winner_template.format(player=self.winner)
 
-        winner_surface = self.title_font.render(winner_text, True, self.selected_color)
-        winner_rect = winner_surface.get_rect(centerx=self.screen.get_width() // 2, y=100)
+        winner_surface = self.title_font.render(winner_text, True, self.winner_color)
+        winner_rect = winner_surface.get_rect(centerx=screen_cx, y=100)
         self.screen.blit(winner_surface, winner_rect)
+
+        # Draw decorative underline in player color
+        line_y = winner_rect.bottom + 6
+        line_half = winner_rect.width // 2 + 20
+        pygame.draw.line(
+            self.screen,
+            (*self.winner_color[:3], 120) if len(self.winner_color) > 3 else self.winner_color,
+            (screen_cx - line_half, line_y),
+            (screen_cx + line_half, line_y),
+            2,
+        )
+
+        # Draw turn count
+        turn_count = getattr(self.game_state, "turn", None)
+        if turn_count is not None:
+            turn_label = lang.get("game_over.turns", "Turns: {turns}").format(turns=turn_count) if hasattr(lang, 'get') else f"Turns: {turn_count}"
+            turn_surface = self.label_font.render(turn_label, True, (180, 180, 190))
+            turn_rect = turn_surface.get_rect(centerx=screen_cx, y=line_y + 12)
+            self.screen.blit(turn_surface, turn_rect)
