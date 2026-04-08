@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pygame
 
 from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 
 
@@ -25,15 +26,15 @@ class UnitPurchaseMenu:
         self.building_pos = building_pos
         self.running = True
 
-        # Colors
-        self.bg_color = (40, 40, 50)
-        self.text_color = (255, 255, 255)
-        self.hover_color = (200, 180, 100)
-        self.disabled_color = (100, 100, 120)
+        # Colors (from shared theme)
+        self.bg_color = theme.PANEL_BG
+        self.text_color = theme.TEXT
+        self.hover_color = theme.HOVER
+        self.disabled_color = theme.DISABLED
         self.disabled_bg_color = (60, 60, 70)
-        self.border_color = (100, 150, 200)
-        self.close_button_color = (200, 50, 50)
-        self.close_button_hover_color = (255, 80, 80)
+        self.border_color = theme.BORDER
+        self.close_button_color = theme.BTN_CLOSE
+        self.close_button_hover_color = theme.BTN_CLOSE_HOVER
 
         # Fonts
         self.title_font = get_font(28)

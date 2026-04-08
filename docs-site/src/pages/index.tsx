@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useState, useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -7,6 +7,27 @@ import Heading from '@theme/Heading';
 import Head from '@docusaurus/Head';
 
 import styles from './index.module.css';
+
+// Hook for scroll-based entrance animations
+function useScrollReveal(): React.RefObject<HTMLElement | null> {
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add(styles.visible);
+          observer.unobserve(el);
+        }
+      },
+      { threshold: 0.15 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return ref;
+}
 
 // ===== Featured Units (trimmed to 4 for landing page) =====
 const featuredUnits = [
@@ -142,8 +163,9 @@ function HeroSection(): ReactNode {
 
 // ===== Value Props Section =====
 function ValuePropsSection(): ReactNode {
+  const ref = useScrollReveal();
   return (
-    <section className={styles.valueProps}>
+    <section ref={ref} className={clsx(styles.valueProps, styles.scrollReveal)}>
       <div className="container">
         <div className={styles.valueGrid}>
           <div className={styles.valueCard}>
@@ -175,8 +197,9 @@ function ValuePropsSection(): ReactNode {
 
 // ===== Map Gallery Section =====
 function MapGallerySection(): ReactNode {
+  const ref = useScrollReveal();
   return (
-    <section className={styles.mapSection}>
+    <section ref={ref} className={clsx(styles.mapSection, styles.scrollReveal)}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
           Diverse Tactical Maps
@@ -199,8 +222,9 @@ function MapGallerySection(): ReactNode {
 
 // ===== Units Strip Section =====
 function UnitsStripSection(): ReactNode {
+  const ref = useScrollReveal();
   return (
-    <section className={styles.unitsSection}>
+    <section ref={ref} className={clsx(styles.unitsSection, styles.scrollReveal)}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
           8 Unique Unit Types
@@ -240,8 +264,9 @@ function UnitsStripSection(): ReactNode {
 
 // ===== How It Works Section =====
 function HowItWorksSection(): ReactNode {
+  const ref = useScrollReveal();
   return (
-    <section className={styles.howSection}>
+    <section ref={ref} className={clsx(styles.howSection, styles.scrollReveal)}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
           How It Works
@@ -249,12 +274,14 @@ function HowItWorksSection(): ReactNode {
         <div className={styles.stepsGrid}>
           <div className={styles.step}>
             <div className={styles.stepNumber}>1</div>
+            <span className={styles.stepConnector} />
             <h3>Install</h3>
             <p>Install via pip with optional GPU, GUI, and LLM extras. Works on Python 3.10+.</p>
             <code className={styles.stepCode}>pip install reinforcetactics[llm]</code>
           </div>
           <div className={styles.step}>
             <div className={styles.stepNumber}>2</div>
+            <span className={styles.stepConnector} />
             <h3>Configure</h3>
             <p>Pick your agents — LLM bots, RL models, rule-based bots, or your own custom agent.</p>
             <code className={styles.stepCode}>--agents gpt-4o claude-sonnet</code>
@@ -273,34 +300,53 @@ function HowItWorksSection(): ReactNode {
 
 // ===== Features Grid (compact) =====
 function FeaturesSection(): ReactNode {
+  const ref = useScrollReveal();
   return (
-    <section className={styles.featuresSection}>
+    <section ref={ref} className={clsx(styles.featuresSection, styles.scrollReveal)}>
       <div className="container">
         <Heading as="h2" className={styles.sectionTitle}>
           Built for AI Research
         </Heading>
         <div className={styles.featuresGrid}>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
             <h4>Gymnasium Compatible</h4>
             <p>Standard RL interface with observation and action spaces, reward shaping, and episode management.</p>
           </div>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
             <h4>Multi-Agent Support</h4>
             <p>PettingZoo integration for multi-agent RL. Train cooperative and competitive policies.</p>
           </div>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            </div>
             <h4>Replay & Analysis</h4>
             <p>Record battles, export to video, and analyze decision patterns for model interpretability.</p>
           </div>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
             <h4>Extensible Architecture</h4>
             <p>Add custom units, maps, reward functions, and AI agents with a clean Python API.</p>
           </div>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
             <h4>Multiple AI Backends</h4>
             <p>OpenAI, Anthropic, and Google Gemini SDKs built-in. Plug in any LLM via API.</p>
           </div>
           <div className={styles.featureItem}>
+            <div className={styles.featureIcon}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            </div>
             <h4>Docker Tournaments</h4>
             <p>Containerized tournament runner for reproducible benchmarks at scale.</p>
           </div>

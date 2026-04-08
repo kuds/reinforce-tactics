@@ -4,6 +4,7 @@ from typing import Optional
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 
 
@@ -31,20 +32,24 @@ class ConfirmationDialog:
         self.running = True
         self.result: Optional[bool] = None
 
-        # Colors
-        self.bg_color = (40, 40, 50)
-        self.text_color = (255, 255, 255)
-        self.title_color = (255, 200, 50)
-        self.border_color = (100, 150, 200)
-        self.confirm_color = (80, 150, 80)
-        self.confirm_hover_color = (100, 180, 100)
-        self.cancel_color = (150, 80, 80)
-        self.cancel_hover_color = (180, 100, 100)
+        # Colors (from shared theme)
+        self.bg_color = theme.PANEL_BG
+        self.text_color = theme.TEXT
+        self.title_color = theme.SELECTED
+        self.border_color = theme.BORDER
+        self.confirm_color = theme.BTN_CONFIRM
+        self.confirm_hover_color = theme.BTN_CONFIRM_HOVER
+        self.cancel_color = theme.BTN_CANCEL
+        self.cancel_hover_color = theme.BTN_CANCEL_HOVER
 
         # Fonts
         self.title_font = get_font(32)
         self.message_font = get_font(24)
         self.button_font = get_font(28)
+
+        # Cached overlay surface to avoid per-frame allocation
+        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
+        self._overlay.fill((0, 0, 0, 150))
 
         # Calculate dialog dimensions
         self._calculate_dialog_rect()
@@ -139,10 +144,8 @@ class ConfirmationDialog:
 
     def draw(self) -> None:
         """Draw the confirmation dialog."""
-        # Draw semi-transparent overlay
-        overlay = pygame.Surface((self.screen.get_width(), self.screen.get_height()), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
-        self.screen.blit(overlay, (0, 0))
+        # Draw cached semi-transparent overlay
+        self.screen.blit(self._overlay, (0, 0))
 
         # Draw dialog background
         pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=12)
@@ -160,7 +163,7 @@ class ConfirmationDialog:
 
         # Draw hint
         hint_font = get_font(18)
-        hint_surface = hint_font.render("Press Y to confirm, N or ESC to cancel", True, (150, 150, 150))
+        hint_surface = hint_font.render("Press Y to confirm, N or ESC to cancel", True, theme.TEXT_MUTED)
         hint_rect = hint_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 105)
         self.screen.blit(hint_surface, hint_rect)
 

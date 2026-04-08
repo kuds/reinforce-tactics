@@ -434,6 +434,10 @@
   margin: 0 auto 1rem;
 }
 
+.stepConnector {
+  display: none;
+}
+
 .step h3 {
   font-size: 1.1rem;
   font-weight: 700;
@@ -487,6 +491,24 @@
 
 .featureItem:hover {
   border-color: #c9a227;
+}
+
+.featureIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2e5a8f 100%);
+  color: #c9a227;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.65rem;
+  flex-shrink: 0;
+}
+
+[data-theme='dark'] .featureIcon {
+  background: linear-gradient(135deg, #2a2a4e 0%, #3a3a5e 100%);
+  color: #e3c251;
 }
 
 .featureItem h4 {
@@ -554,6 +576,39 @@
   flex-wrap: wrap;
 }
 
+/* ===== Scroll Reveal Animation ===== */
+.scrollReveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===== Step Connectors (desktop only) ===== */
+@media screen and (min-width: 997px) {
+  .step {
+    position: relative;
+  }
+
+  .stepConnector {
+    display: block;
+    position: absolute;
+    top: 20px;
+    left: calc(50% + 28px);
+    width: calc(100% - 56px);
+    height: 2px;
+    background: linear-gradient(90deg, #c9a227 0%, rgba(201, 162, 39, 0.2) 100%);
+  }
+
+  .step:last-child .stepConnector {
+    display: none;
+  }
+}
+
 /* ===== Responsive ===== */
 @media screen and (max-width: 996px) {
   .heroGrid {
@@ -596,6 +651,23 @@
 
   .sectionTitle {
     font-size: 1.7rem;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .featuresGrid {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .unitsStrip {
+    gap: 1.5rem;
+  }
+
+  .unitChipIcon {
+    width: 64px;
+    height: 64px;
   }
 }
 

@@ -49,6 +49,19 @@
   --docusaurus-highlighted-code-line-bg: rgba(92, 158, 206, 0.2);
 }
 
+/* ===== Smooth Scroll ===== */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ===== Focus Accessibility ===== */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--tactics-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* ===== Tactical Grid Background Pattern ===== */
 .tactical-grid-bg {
   background-image:

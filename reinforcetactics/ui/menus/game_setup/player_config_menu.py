@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
@@ -52,16 +53,16 @@ class PlayerConfigMenu:
         self.num_players = 2 if game_mode == "1v1" else 4
         self.running = True
 
-        # Colors
-        self.bg_color = (30, 30, 40)
-        self.text_color = (255, 255, 255)
-        self.selected_color = (255, 200, 50)
-        self.hover_color = (200, 180, 100)
-        self.title_color = (100, 200, 255)
-        self.option_bg_color = (50, 50, 65)
-        self.option_bg_hover_color = (70, 70, 90)
-        self.option_bg_selected_color = (80, 80, 100)
-        self.disabled_color = (100, 100, 120)
+        # Colors (from shared theme)
+        self.bg_color = theme.BG
+        self.text_color = theme.TEXT
+        self.selected_color = theme.SELECTED
+        self.hover_color = theme.HOVER
+        self.title_color = theme.TITLE
+        self.option_bg_color = theme.OPTION_BG
+        self.option_bg_hover_color = theme.OPTION_BG_HOVER
+        self.option_bg_selected_color = theme.OPTION_BG_SELECTED
+        self.disabled_color = theme.DISABLED
 
         # Fonts
         self.title_font = get_font(48)
