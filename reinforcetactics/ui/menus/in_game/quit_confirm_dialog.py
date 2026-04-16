@@ -37,22 +37,23 @@ class QuitConfirmDialog:
         self.border_color = theme.BORDER
         self.save_quit_color = theme.BTN_CONFIRM
         self.save_quit_hover_color = theme.BTN_CONFIRM_HOVER
-        self.quit_color = (150, 120, 50)
-        self.quit_hover_color = (180, 150, 70)
+        self.quit_color = theme.BTN_QUIT
+        self.quit_hover_color = theme.BTN_QUIT_HOVER
         self.cancel_color = theme.BTN_CANCEL
         self.cancel_hover_color = theme.BTN_CANCEL_HOVER
 
-        # Fonts
-        self.title_font = get_font(32)
-        self.message_font = get_font(24)
-        self.button_font = get_font(24)
+        # Fonts (cached on the instance — never call get_font() in draw())
+        self.title_font = get_font(theme.FONT_SIZE_HEADING)
+        self.message_font = get_font(theme.FONT_SIZE_BODY)
+        self.button_font = get_font(theme.FONT_SIZE_BODY)
+        self.hint_font = get_font(theme.FONT_SIZE_HINT)
 
         # Button state
         self.hover_button: Optional[str] = None
 
         # Cached overlay surface to avoid per-frame allocation
         self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-        self._overlay.fill((0, 0, 0, 150))
+        self._overlay.fill(theme.DIALOG_OVERLAY_COLOR)
 
         # Calculate layout
         self._calculate_layout()
@@ -134,8 +135,14 @@ class QuitConfirmDialog:
         self.screen.blit(self._overlay, (0, 0))
 
         # Dialog background
-        pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=12)
-        pygame.draw.rect(self.screen, self.border_color, self.dialog_rect, width=3, border_radius=12)
+        pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=theme.BORDER_RADIUS_DIALOG)
+        pygame.draw.rect(
+            self.screen,
+            self.border_color,
+            self.dialog_rect,
+            width=theme.BORDER_WIDTH_DIALOG,
+            border_radius=theme.BORDER_RADIUS_DIALOG,
+        )
 
         # Title
         title_surface = self.title_font.render(self.title, True, self.title_color)
@@ -148,18 +155,29 @@ class QuitConfirmDialog:
         self.screen.blit(message_surface, message_rect)
 
         # Hint
-        hint_font = get_font(18)
-        hint_surface = hint_font.render("S = Save & Quit, Q = Quit, ESC = Cancel", True, theme.TEXT_MUTED)
+        hint_surface = self.hint_font.render("S = Save & Quit, Q = Quit, ESC = Cancel", True, theme.TEXT_MUTED)
         hint_rect = hint_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 100)
         self.screen.blit(hint_surface, hint_rect)
 
         # Cancel button
         self._draw_button(
-            self.cancel_rect, self.cancel_text, self.cancel_color, self.cancel_hover_color, "cancel", (255, 150, 150)
+            self.cancel_rect,
+            self.cancel_text,
+            self.cancel_color,
+            self.cancel_hover_color,
+            "cancel",
+            theme.BTN_CANCEL_BORDER_HOVER,
         )
 
         # Quit button
-        self._draw_button(self.quit_rect, self.quit_text, self.quit_color, self.quit_hover_color, "quit", (255, 220, 120))
+        self._draw_button(
+            self.quit_rect,
+            self.quit_text,
+            self.quit_color,
+            self.quit_hover_color,
+            "quit",
+            theme.BTN_QUIT_BORDER_HOVER,
+        )
 
         # Save & Quit button
         self._draw_button(
@@ -168,7 +186,7 @@ class QuitConfirmDialog:
             self.save_quit_color,
             self.save_quit_hover_color,
             "save_quit",
-            (150, 255, 150),
+            theme.BTN_CONFIRM_BORDER_HOVER,
         )
 
     def _draw_button(
@@ -177,11 +195,13 @@ class QuitConfirmDialog:
         """Draw a single button."""
         is_hovered = self.hover_button == button_id
         bg = hover_color if is_hovered else color
-        pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+        pygame.draw.rect(self.screen, bg, rect, border_radius=theme.BORDER_RADIUS)
         if is_hovered:
-            pygame.draw.rect(self.screen, border_highlight, rect, width=2, border_radius=8)
+            pygame.draw.rect(
+                self.screen, border_highlight, rect, width=theme.BORDER_WIDTH_HOVER, border_radius=theme.BORDER_RADIUS
+            )
 
-        text_surface = self.button_font.render(text, True, (255, 255, 255))
+        text_surface = self.button_font.render(text, True, theme.TEXT)
         text_rect = text_surface.get_rect(center=rect.center)
         self.screen.blit(text_surface, text_rect)
 
@@ -206,6 +226,6 @@ class QuitConfirmDialog:
 
             self.draw()
             pygame.display.flip()
-            clock.tick(60)
+            clock.tick(theme.MENU_FRAMERATE)
 
         return self.result if self.result is not None else "cancel"

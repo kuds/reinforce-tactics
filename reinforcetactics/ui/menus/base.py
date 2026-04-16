@@ -67,21 +67,27 @@ class Menu:
         self.running = True
         self.selected_index = 0
         self.options: List[Tuple[str, Callable[[], Any]]] = []
+        # Parallel list: self.option_enabled[i] gates whether options[i] can
+        # receive focus or clicks. Kept separate from `options` to preserve
+        # the public 2-tuple shape subclasses may rely on.
+        self.option_enabled: List[bool] = []
 
         # Colors (from shared theme)
         self.bg_color = theme.BG
         self.text_color = theme.TEXT
+        self.text_disabled_color = theme.TEXT_DISABLED
         self.selected_color = theme.SELECTED
         self.hover_color = theme.HOVER
         self.title_color = theme.TITLE
         self.option_bg_color = theme.OPTION_BG
         self.option_bg_hover_color = theme.OPTION_BG_HOVER
         self.option_bg_selected_color = theme.OPTION_BG_SELECTED
+        self.option_bg_disabled_color = theme.OPTION_BG_DISABLED
 
         # Fonts
-        self.title_font = get_font(48)
-        self.option_font = get_font(36)
-        self.indicator_font = get_font(24)
+        self.title_font = get_font(theme.FONT_SIZE_TITLE)
+        self.option_font = get_font(theme.FONT_SIZE_OPTION)
+        self.indicator_font = get_font(theme.FONT_SIZE_INDICATOR)
 
         # Mouse tracking
         self.hover_index = -1
@@ -95,12 +101,28 @@ class Menu:
         # Get language instance
         self.lang = get_language()
 
-    def add_option(self, text: str, callback: Callable[[], Any]) -> None:
-        """Add a menu option."""
+    def add_option(self, text: str, callback: Callable[[], Any], enabled: bool = True) -> None:
+        """Add a menu option.
+
+        Args:
+            text: Label for the option.
+            callback: Called when the option is selected.
+            enabled: When False, the option is grayed out and cannot be
+                focused or clicked. Useful for unavailable actions without
+                hiding them from the user.
+        """
         # Guard against empty text to prevent pygame "Text has zero width" error
         if not text:
             text = "(Empty)"
         self.options.append((text, callback))
+        self.option_enabled.append(enabled)
+
+    def _is_enabled(self, index: int) -> bool:
+        """Whether the option at ``index`` is enabled. Defaults to True if
+        a subclass appends to ``self.options`` without going through
+        ``add_option`` (keeps backward compatibility with legacy call sites).
+        """
+        return index < len(self.option_enabled) and self.option_enabled[index]
 
     def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
         """
@@ -114,13 +136,13 @@ class Menu:
         """
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_UP:
-                self.selected_index = (self.selected_index - 1) % len(self.options)
+                self._move_selection(-1)
                 self._ensure_selected_visible()
             elif event.key == pygame.K_DOWN:
-                self.selected_index = (self.selected_index + 1) % len(self.options)
+                self._move_selection(1)
                 self._ensure_selected_visible()
             elif event.key == pygame.K_RETURN:
-                if self.options:
+                if self.options and self._is_enabled(self.selected_index):
                     text, callback = self.options[self.selected_index]
                     result = callback()
                     # If callback returns None and it's a Back button, exit the menu
@@ -137,7 +159,7 @@ class Menu:
                     if rect.collidepoint(mouse_pos):
                         # Get the actual option index accounting for scroll
                         actual_index = i + self.scroll_offset
-                        if actual_index < len(self.options):
+                        if actual_index < len(self.options) and self._is_enabled(actual_index):
                             self.selected_index = actual_index
                             text, callback = self.options[actual_index]
                             result = callback()
@@ -161,6 +183,26 @@ class Menu:
 
         return None
 
+    def _move_selection(self, delta: int) -> None:
+        """Advance ``self.selected_index`` by ``delta`` while skipping
+        disabled options. Wraps around. No-op if every option is disabled.
+        """
+        n = len(self.options)
+        if n == 0:
+            return
+        # If every option is disabled, just wrap normally without infinite loop.
+        if not any(self.option_enabled[: len(self.option_enabled)]) and len(self.option_enabled) >= n:
+            self.selected_index = (self.selected_index + delta) % n
+            return
+        step = 1 if delta >= 0 else -1
+        idx = self.selected_index
+        for _ in range(n):
+            idx = (idx + step) % n
+            if self._is_enabled(idx):
+                self.selected_index = idx
+                return
+        # Fallback: leave selection as-is.
+
     def _is_back_option(self, text: str) -> bool:
         """
         Check if an option text represents a Back button.
@@ -181,54 +223,62 @@ class Menu:
         elif self.selected_index >= self.scroll_offset + self.max_visible_options:
             self.scroll_offset = self.selected_index - self.max_visible_options + 1
 
-    def _populate_option_rects(self) -> None:
-        """Populate option_rects for click detection without drawing to screen."""
+    def _layout_visible_options(self) -> List[Tuple[int, str, pygame.Rect]]:
+        """Compute the on-screen layout for the currently visible options.
+
+        Single source of truth for geometry — used by both click-hit testing
+        (``_populate_option_rects``) and drawing (``_draw_content``) so the
+        two cannot drift apart.
+
+        Returns:
+            List of ``(option_index, safe_text, bg_rect)`` for each visible
+            option. ``safe_text`` is the option label guarded against the
+            empty string (pygame raises on zero-width text).
+        """
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
 
         start_y = screen_height // 3
         spacing = self.option_spacing
-        self.option_rects = []
+        padding_x = theme.OPTION_PADDING_X
+        padding_y = theme.OPTION_PADDING_Y
 
-        # Calculate maximum option width for uniform sizing
-        padding_x = 40
-        padding_y = 10
+        def safe(text: str) -> str:
+            return text if text else "(Empty)"
+
+        # Uniform option width: use the widest rendered label (in "> " form
+        # since that's the wider of the two prefixes).
         max_text_width = 0
         for text, _ in self.options:
-            # Guard against empty text to prevent pygame "Text has zero width" error
-            if not text:
-                text = "(Empty)"
-            display_text = f"> {text}"
-            text_surface = self.option_font.render(display_text, True, self.text_color)
-            max_text_width = max(max_text_width, text_surface.get_width())
-
+            surface = self.option_font.render(f"> {safe(text)}", True, self.text_color)
+            max_text_width = max(max_text_width, surface.get_width())
         uniform_width = max_text_width + 2 * padding_x
 
-        # Determine which options to display (with scrolling)
-        total_options = len(self.options)
         start_index = self.scroll_offset
-        end_index = min(total_options, start_index + self.max_visible_options)
+        end_index = min(len(self.options), start_index + self.max_visible_options)
 
-        # Calculate rects for visible options
+        # Approximate row height from a single rendered line so bg_rect y-pos
+        # doesn't depend on which label happens to be tallest.
+        sample = self.option_font.render("Ag", True, self.text_color)
+        row_height = sample.get_height()
+
+        layout: List[Tuple[int, str, pygame.Rect]] = []
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
-            # Guard against empty text
-            if not text:
-                text = "(Empty)"
-            is_selected = option_i == self.selected_index
-            display_text = f"> {text}" if is_selected else f"  {text}"
-
-            text_surface = self.option_font.render(display_text, True, self.text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
-
+            text = safe(text)
+            row_y = start_y + display_i * spacing
             bg_rect = pygame.Rect(
                 (screen_width - uniform_width) // 2,
-                text_rect.y - padding_y,
+                row_y - padding_y,
                 uniform_width,
-                text_rect.height + 2 * padding_y,
+                row_height + 2 * padding_y,
             )
+            layout.append((option_i, text, bg_rect))
+        return layout
 
-            self.option_rects.append(bg_rect)
+    def _populate_option_rects(self) -> None:
+        """Populate option_rects for click detection without drawing to screen."""
+        self.option_rects = [bg_rect for _, _, bg_rect in self._layout_visible_options()]
 
     def _draw_content(self) -> None:
         """Draw the menu content without flipping the display.
@@ -248,43 +298,18 @@ class Menu:
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=50)
             self.screen.blit(title_surface, title_rect)
 
-        # Draw options with scrolling support
-        start_y = screen_height // 3
-        spacing = self.option_spacing
-        self.option_rects = []
+        layout = self._layout_visible_options()
+        self.option_rects = [bg_rect for _, _, bg_rect in layout]
 
-        # Calculate maximum option width for uniform sizing
-        padding_x = 40
-        padding_y = 10
-        max_text_width = 0
-        for text, _ in self.options:
-            # Guard against empty text to prevent pygame "Text has zero width" error
-            if not text:
-                text = "(Empty)"
-            display_text = f"> {text}"  # Use the selected format for consistent width
-            text_surface = self.option_font.render(display_text, True, self.text_color)
-            max_text_width = max(max_text_width, text_surface.get_width())
-
-        uniform_width = max_text_width + 2 * padding_x
-
-        # Determine which options to display (with scrolling)
-        total_options = len(self.options)
-        start_index = self.scroll_offset
-        end_index = min(total_options, start_index + self.max_visible_options)
-
-        # Draw visible options
-        for display_i, option_i in enumerate(range(start_index, end_index)):
-            text, _ = self.options[option_i]
-            # Guard against empty text
-            if not text:
-                text = "(Empty)"
-
-            # Determine styling based on state
+        for option_i, text, bg_rect in layout:
+            is_enabled = self._is_enabled(option_i)
             is_selected = option_i == self.selected_index
             is_hovered = option_i == self.hover_index
 
-            # Choose colors
-            if is_selected:
+            if not is_enabled:
+                text_color = self.text_disabled_color
+                bg_color = self.option_bg_disabled_color
+            elif is_selected:
                 text_color = self.selected_color
                 bg_color = self.option_bg_selected_color
             elif is_hovered:
@@ -294,34 +319,29 @@ class Menu:
                 text_color = self.text_color
                 bg_color = self.option_bg_color
 
-            # Add selection indicator
-            display_text = f"> {text}" if is_selected else f"  {text}"
-
-            # Render text
+            display_text = f"> {text}" if is_selected and is_enabled else f"  {text}"
             text_surface = self.option_font.render(display_text, True, text_color)
-            text_rect = text_surface.get_rect(centerx=screen_width // 2, y=start_y + display_i * spacing)
+            text_rect = text_surface.get_rect(centerx=screen_width // 2, centery=bg_rect.centery)
 
-            # Create background rectangle with uniform width
-            bg_rect = pygame.Rect(
-                (screen_width - uniform_width) // 2,  # Center the uniform-width box
-                text_rect.y - padding_y,
-                uniform_width,
-                text_rect.height + 2 * padding_y,
-            )
+            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=theme.BORDER_RADIUS)
 
-            # Draw rounded background rectangle
-            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
-
-            # Draw border for selected/hovered
-            if is_selected or is_hovered:
+            if is_enabled and (is_selected or is_hovered):
                 border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, bg_rect, width=2, border_radius=8)
+                pygame.draw.rect(
+                    self.screen,
+                    border_color,
+                    bg_rect,
+                    width=theme.BORDER_WIDTH_HOVER,
+                    border_radius=theme.BORDER_RADIUS,
+                )
 
-            # Draw text
             self.screen.blit(text_surface, text_rect)
 
-            # Store rect for click detection
-            self.option_rects.append(bg_rect)
+        # Data needed for the scroll indicator below.
+        start_y = screen_height // 3
+        spacing = self.option_spacing
+        total_options = len(self.options)
+        end_index = min(total_options, self.scroll_offset + self.max_visible_options)
 
         # Draw scroll indicators if needed
         if total_options > self.max_visible_options:
@@ -393,6 +413,6 @@ class Menu:
                     return result
 
             self.draw()
-            clock.tick(30)
+            clock.tick(theme.MENU_FRAMERATE)
 
         return result
