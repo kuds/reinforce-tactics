@@ -1,8 +1,11 @@
 # Reinforce Tactics Documentation Site
 
-This is the documentation website for Reinforce Tactics, built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+This is the **user-facing** documentation website for Reinforce Tactics, built
+using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+It is deployed at [reinforcetactics.com](https://reinforcetactics.com).
 
-The documentation is deployed at [reinforcetactics.com](https://reinforcetactics.com).
+> Contributor-facing notes (roadmap, internal code reviews, dev guides) live in
+> the repo-level [`docs/`](../docs/) directory — see [`docs/README.md`](../docs/README.md).
 
 ## Installation
 

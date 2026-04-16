@@ -15,6 +15,7 @@ from gymnasium import spaces
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
@@ -218,63 +219,12 @@ class StrategyGameEnv(gym.Env):
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
         """Get current observation from the agent's perspective."""
-        ap = self.agent_player
-        opp = 3 - ap
-        # Convert game state to numpy arrays
-        # When fog of war is enabled, filter observation for the agent's player
-        if self.fog_of_war:
-            state_arrays = self.game_state.to_numpy(for_player=ap)
-        else:
-            state_arrays = self.game_state.to_numpy()
-
-        # Get action mask
-        action_mask = self._get_action_mask()
-
-        # When FOW is enabled, hide enemy gold
-        if self.fog_of_war:
-            global_features = np.array(
-                [
-                    self.game_state.player_gold[ap],
-                    0,  # Hide enemy gold
-                    self.game_state.turn_number,
-                    len([u for u in self.game_state.units if u.player == ap]),
-                    # Count only visible enemy units
-                    len(
-                        [
-                            u
-                            for u in self.game_state.units
-                            if u.player == opp and self.game_state.is_position_visible(u.x, u.y, ap)
-                        ]
-                    ),
-                    self.game_state.current_player,
-                ],
-                dtype=np.float32,
-            )
-        else:
-            global_features = np.array(
-                [
-                    self.game_state.player_gold[ap],
-                    self.game_state.player_gold[opp],
-                    self.game_state.turn_number,
-                    len([u for u in self.game_state.units if u.player == ap]),
-                    len([u for u in self.game_state.units if u.player == opp]),
-                    self.game_state.current_player,
-                ],
-                dtype=np.float32,
-            )
-
-        obs = {
-            "grid": state_arrays["grid"].astype(np.float32),
-            "units": state_arrays["units"].astype(np.float32),
-            "global_features": global_features,
-            "action_mask": action_mask,
-        }
-
-        # Add visibility layer when FOW is enabled
-        if self.fog_of_war and "visibility" in state_arrays:
-            obs["visibility"] = state_arrays["visibility"]
-
-        return obs
+        return build_observation(
+            self.game_state,
+            perspective_player=self.agent_player,
+            action_mask=self._get_action_mask(),
+            fog_of_war=self.fog_of_war,
+        )
 
     # Mapping from action key → (action_type_idx, source_key, target_key)
     # source_key/target_key name the dict keys or object attrs for from/to positions.

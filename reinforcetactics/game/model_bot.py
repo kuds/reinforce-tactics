@@ -133,30 +133,22 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         """
         Get observation from current game state in the format expected by the model.
 
+        The observation is built from ``self.bot_player``'s perspective so
+        global_features start with this bot's own gold / unit count, matching
+        the agent-relative contract used by the training environment.
+
         Returns:
             Observation dict compatible with StrategyGameEnv
         """
-        # Convert game state to observation format
-        state_arrays = self.game_state.to_numpy()
+        # Lazy import: reinforcetactics.game is imported before reinforcetactics.rl
+        # during package init, so a top-level import would be circular.
+        from reinforcetactics.rl.observation import build_observation
 
-        obs = {
-            "grid": state_arrays["grid"].astype(np.float32),
-            "units": state_arrays["units"].astype(np.float32),
-            "global_features": np.array(
-                [
-                    self.game_state.player_gold.get(1, 0),
-                    self.game_state.player_gold.get(2, 0),
-                    self.game_state.turn_number,
-                    len([u for u in self.game_state.units if u.player == 1]),
-                    len([u for u in self.game_state.units if u.player == 2]),
-                    self.game_state.current_player,
-                ],
-                dtype=np.float32,
-            ),
-            "action_mask": self._compute_action_mask(),
-        }
-
-        return obs
+        return build_observation(
+            self.game_state,
+            perspective_player=self.bot_player,
+            action_mask=self._compute_action_mask(),
+        )
 
     def _compute_action_mask(self) -> np.ndarray:
         """Compute action mask from legal actions.

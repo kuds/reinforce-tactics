@@ -22,6 +22,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
+from reinforcetactics.rl.observation import build_observation
+
 logger = logging.getLogger(__name__)
 
 
@@ -282,26 +284,15 @@ def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_acti
     """
     Extract observation tensors from a GameState for neural network evaluation.
 
+    The observation is built from the perspective of ``game_state.current_player``
+    so the network sees an agent-relative view (own gold/units first). This
+    matches the value convention in ``_evaluate`` — value is from the current
+    player's perspective.
+
     Returns:
         (grid, units, global_features, action_mask) as numpy arrays.
     """
-    state_arrays = game_state.to_numpy()
-    grid = state_arrays["grid"].astype(np.float32)
-    units = state_arrays["units"].astype(np.float32)
-
-    global_features = np.array(
-        [
-            game_state.player_gold.get(1, 0),
-            game_state.player_gold.get(2, 0),
-            game_state.turn_number,
-            sum(1 for u in game_state.units if u.player == 1),
-            sum(1 for u in game_state.units if u.player == 2),
-            game_state.current_player,
-        ],
-        dtype=np.float32,
-    )
-
-    # Build flat action mask
+    # Build flat action mask (kept local; Phase 2 will consolidate mask logic)
     area = grid_width * grid_height
     mask_size = num_action_types * area
     mask = np.zeros(mask_size, dtype=np.float32)
@@ -336,7 +327,12 @@ def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_acti
     for action in legal_actions.get("attack_buff", []):
         set_mask(9, action["target"].x, action["target"].y)
 
-    return grid, units, global_features, mask
+    obs = build_observation(
+        game_state,
+        perspective_player=game_state.current_player,
+        action_mask=mask,
+    )
+    return obs["grid"], obs["units"], obs["global_features"], obs["action_mask"]
 
 
 class MCTS:
