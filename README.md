@@ -210,15 +210,13 @@ Configure bots, maps, and settings in `docker/tournament/config.json`. See `dock
 
 ## Documentation
 
-Full documentation available at [reinforcetactics.com](https://reinforcetactics.com), including:
+Docs are split by audience:
 
-- Detailed game rules and mechanics
-- RL environment API reference
-- LLM bot configuration and model options
-- Tournament results and bot comparisons
-- Map creation guide
-
-Also see: [ROADMAP.md](docs/ROADMAP.md) | [MAP_EDITOR.md](docs/MAP_EDITOR.md)
+- **Users** — [reinforcetactics.com](https://reinforcetactics.com) (sourced from
+  [`docs-site/`](docs-site/)): game rules, RL environment API, LLM bot
+  configuration, tournament results, map creation guide.
+- **Contributors** — [`docs/`](docs/) (see [`docs/README.md`](docs/README.md) for
+  an index): roadmap, internal code reviews, and developer-facing guides.
 
 ## Contributing
 
