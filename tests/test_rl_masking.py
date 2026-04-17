@@ -91,8 +91,16 @@ class TestValidateActionMask:
         assert "mask_summary" in result
         # All named action types should appear
         expected = {
-            "create", "move", "attack", "seize", "heal", "end_turn",
-            "paralyze", "haste", "defence_buff", "attack_buff",
+            "create",
+            "move",
+            "attack",
+            "seize",
+            "heal",
+            "end_turn",
+            "paralyze",
+            "haste",
+            "defence_buff",
+            "attack_buff",
         }
         assert set(result["mask_summary"].keys()) == expected
         env.close()

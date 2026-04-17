@@ -52,9 +52,9 @@ class _StubModel:
 class TestEvaluateModel:
     def test_counts_wins_losses_draws(self):
         episodes = [
-            [(1.0, True, 1)],          # win
-            [(0.0, True, 2)],          # loss
-            [(0.0, True, None)],       # draw
+            [(1.0, True, 1)],  # win
+            [(0.0, True, 2)],  # loss
+            [(0.0, True, None)],  # draw
             [(0.5, False, None), (0.5, True, 1)],  # win, 2 steps
         ]
         env = _StubEnv(episodes)

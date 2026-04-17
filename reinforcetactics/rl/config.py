@@ -162,9 +162,7 @@ class TrainingConfig:
     def validate(self) -> None:
         """Raise ``ValueError`` if config is internally inconsistent."""
         if self.algorithm not in self.KNOWN_ALGORITHMS:
-            raise ValueError(
-                f"Unknown algorithm '{self.algorithm}'. Must be one of {self.KNOWN_ALGORITHMS}"
-            )
+            raise ValueError(f"Unknown algorithm '{self.algorithm}'. Must be one of {self.KNOWN_ALGORITHMS}")
         if self.total_timesteps <= 0:
             raise ValueError("total_timesteps must be positive")
         if self.env.n_envs <= 0:
@@ -181,13 +179,10 @@ class TrainingConfig:
             raise ValueError("ppo.n_steps must be positive")
         if self.env.action_space_type not in ("multi_discrete", "flat_discrete"):
             raise ValueError(
-                f"env.action_space_type must be 'multi_discrete' or 'flat_discrete', "
-                f"got '{self.env.action_space_type}'"
+                f"env.action_space_type must be 'multi_discrete' or 'flat_discrete', got '{self.env.action_space_type}'"
             )
         if self.self_play.pool_strategy not in ("uniform", "recent", "prioritized"):
-            raise ValueError(
-                "self_play.pool_strategy must be 'uniform', 'recent', or 'prioritized'"
-            )
+            raise ValueError("self_play.pool_strategy must be 'uniform', 'recent', or 'prioritized'")
         if not 0.0 <= self.self_play.min_win_rate_for_pool <= 1.0:
             raise ValueError("self_play.min_win_rate_for_pool must be in [0, 1]")
 
@@ -217,10 +212,7 @@ def _build_section(section_name: str, raw: Any):
     valid_fields = {f.name for f in fields(cls)}
     unknown = set(raw.keys()) - valid_fields
     if unknown:
-        raise ValueError(
-            f"Unknown keys in section '{section_name}': {sorted(unknown)}. "
-            f"Valid keys: {sorted(valid_fields)}"
-        )
+        raise ValueError(f"Unknown keys in section '{section_name}': {sorted(unknown)}. Valid keys: {sorted(valid_fields)}")
     return cls(**{k: v for k, v in raw.items() if k in valid_fields})
 
 
@@ -233,10 +225,7 @@ def config_from_dict(data: Mapping[str, Any]) -> TrainingConfig:
     valid_keys = top_level_scalars | set(_SECTION_TYPES)
     unknown = set(data.keys()) - valid_keys
     if unknown:
-        raise ValueError(
-            f"Unknown top-level keys: {sorted(unknown)}. "
-            f"Valid keys: {sorted(valid_keys)}"
-        )
+        raise ValueError(f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}")
 
     kwargs: Dict[str, Any] = {}
     for key in top_level_scalars:
@@ -257,17 +246,13 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
     if suffix in (".yaml", ".yml"):
         if yaml is None:
             raise ImportError(
-                f"Cannot load '{path}': PyYAML is not installed. "
-                "Install with `pip install PyYAML` or use a .json config."
+                f"Cannot load '{path}': PyYAML is not installed. Install with `pip install PyYAML` or use a .json config."
             )
         data = yaml.safe_load(text) or {}
     elif suffix == ".json":
         data = json.loads(text) if text.strip() else {}
     else:
-        raise ValueError(
-            f"Unsupported config extension '{suffix}' for {path}. "
-            "Use .yaml, .yml, or .json."
-        )
+        raise ValueError(f"Unsupported config extension '{suffix}' for {path}. Use .yaml, .yml, or .json.")
     if not isinstance(data, Mapping):
         raise TypeError(f"Config file {path} must contain a mapping at the top level.")
     return dict(data)
@@ -329,9 +314,7 @@ def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
             raise KeyError(f"Unknown config key segment: '{part}' in '{dotted_key}'")
         target = getattr(target, part)
         if not is_dataclass(target):
-            raise KeyError(
-                f"'{part}' in '{dotted_key}' does not point to a config section"
-            )
+            raise KeyError(f"'{part}' in '{dotted_key}' does not point to a config section")
     leaf = parts[-1]
     if not hasattr(target, leaf):
         raise KeyError(f"Unknown config key: '{dotted_key}'")

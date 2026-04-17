@@ -139,10 +139,12 @@ class TestConfigFromDict:
         assert cfg.total_timesteps == 1000
 
     def test_nested_sections(self):
-        cfg = config_from_dict({
-            "env": {"opponent": "random", "n_envs": 2},
-            "ppo": {"learning_rate": 1e-4, "gamma": 0.95},
-        })
+        cfg = config_from_dict(
+            {
+                "env": {"opponent": "random", "n_envs": 2},
+                "ppo": {"learning_rate": 1e-4, "gamma": 0.95},
+            }
+        )
         assert cfg.env.opponent == "random"
         assert cfg.env.n_envs == 2
         assert cfg.ppo.learning_rate == 1e-4
@@ -177,12 +179,16 @@ class TestConfigFromDict:
 class TestFileLoading:
     def test_load_yaml(self, tmp_path: Path):
         path = tmp_path / "c.yaml"
-        path.write_text(yaml.safe_dump({
-            "algorithm": "feudal",
-            "total_timesteps": 5000,
-            "env": {"opponent": "random", "max_steps": 100},
-            "ppo": {"learning_rate": 1e-5},
-        }))
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "algorithm": "feudal",
+                    "total_timesteps": 5000,
+                    "env": {"opponent": "random", "max_steps": 100},
+                    "ppo": {"learning_rate": 1e-5},
+                }
+            )
+        )
         cfg = load_config(path)
         assert cfg.algorithm == "feudal"
         assert cfg.env.opponent == "random"
