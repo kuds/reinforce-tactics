@@ -42,9 +42,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_ARG_TO_CONFIG_PATH = {
+    "map_file": "env.map_file",
+    "res_blocks": "alphazero.res_blocks",
+    "channels": "alphazero.channels",
+    "num_simulations": "alphazero.num_simulations",
+    "c_puct": "alphazero.c_puct",
+    "dirichlet_alpha": "alphazero.dirichlet_alpha",
+    "iterations": "alphazero.iterations",
+    "games_per_iter": "alphazero.games_per_iter",
+    "epochs_per_iter": "alphazero.epochs_per_iter",
+    "batch_size": "alphazero.batch_size",
+    "buffer_size": "alphazero.buffer_size",
+    "max_game_steps": "alphazero.max_game_steps",
+    "temperature_threshold": "alphazero.temperature_threshold",
+    "eval_games": "alphazero.eval_games",
+    "eval_threshold": "alphazero.eval_threshold",
+    "lr": "alphazero.lr",
+    "weight_decay": "alphazero.weight_decay",
+    "checkpoint_dir": "logging.log_dir",
+}
+
+
 def parse_args():
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
+    pre_args, _ = pre_parser.parse_known_args()
+
     parser = argparse.ArgumentParser(
         description="AlphaZero training for Reinforce Tactics",
+        parents=[pre_parser],
     )
 
     # Map configuration
@@ -188,6 +215,12 @@ def parse_args():
         default=None,
         help="Enabled unit types (e.g., W M A). Default: all units.",
     )
+
+    if pre_args.config:
+        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
+
+        cfg = load_config(pre_args.config)
+        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     return parser.parse_args()
 

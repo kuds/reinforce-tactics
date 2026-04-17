@@ -511,10 +511,50 @@ def train_mixed(args) -> Path:
     return log_dir
 
 
+_ARG_TO_CONFIG_PATH = {
+    "max_steps": "env.max_steps",
+    "n_envs": "env.n_envs",
+    "total_timesteps": "total_timesteps",
+    "seed": "seed",
+    "device": "ppo.device",
+    "learning_rate": "ppo.learning_rate",
+    "n_steps": "ppo.n_steps",
+    "batch_size": "ppo.batch_size",
+    "n_epochs": "ppo.n_epochs",
+    "gamma": "ppo.gamma",
+    "gae_lambda": "ppo.gae_lambda",
+    "clip_range": "ppo.clip_range",
+    "ent_coef": "ppo.ent_coef",
+    "vf_coef": "ppo.vf_coef",
+    "max_grad_norm": "ppo.max_grad_norm",
+    "swap_players": "self_play.swap_players",
+    "opponent_update_freq": "self_play.opponent_update_freq",
+    "use_opponent_pool": "self_play.use_opponent_pool",
+    "pool_size": "self_play.pool_size",
+    "pool_strategy": "self_play.pool_strategy",
+    "add_to_pool_freq": "self_play.add_to_pool_freq",
+    "min_win_rate_for_pool": "self_play.min_win_rate_for_pool",
+    "bot_ratio": "self_play.bot_ratio",
+    "eval_freq": "eval.eval_freq",
+    "n_eval_episodes": "eval.n_eval_episodes",
+    "checkpoint_freq": "eval.checkpoint_freq",
+    "log_dir": "logging.log_dir",
+    "wandb": "logging.wandb",
+    "wandb_project": "logging.wandb_project",
+    "wandb_entity": "logging.wandb_entity",
+}
+
+
 def main():
     """Main entry point."""
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
+    pre_args, _ = pre_parser.parse_known_args()
+
     parser = argparse.ArgumentParser(
-        description="Train RL agents with self-play", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Train RL agents with self-play",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        parents=[pre_parser],
     )
 
     # Training mode
@@ -576,6 +616,12 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Use Weights & Biases logging")
     parser.add_argument("--wandb-project", type=str, default="reinforcetactics-selfplay", help="W&B project name")
     parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
+
+    if pre_args.config:
+        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
+
+        cfg = load_config(pre_args.config)
+        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args()
 

@@ -1,0 +1,17 @@
+# Curriculum preset: easy.
+# Random opponent, lighter truncation penalty, generous shaping.
+algorithm: maskable_ppo
+
+env:
+  opponent: random
+  max_steps: 200
+  action_space_type: multi_discrete
+  reward_config:
+    win: 1000.0
+    loss: -1000.0
+    draw: -100.0
+    income_diff: 0.1
+    unit_diff: 0.5
+    structure_control: 2.0
+    invalid_action: -5.0
+    turn_penalty: -0.5

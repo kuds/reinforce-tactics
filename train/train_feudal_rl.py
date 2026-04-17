@@ -291,9 +291,49 @@ def train_feudal_rl(args):
     return log_dir
 
 
+_ARG_TO_CONFIG_PATH = {
+    "opponent": "env.opponent",
+    "n_envs": "env.n_envs",
+    "total_timesteps": "total_timesteps",
+    "seed": "seed",
+    "device": "ppo.device",
+    "learning_rate": "ppo.learning_rate",
+    "n_steps": "ppo.n_steps",
+    "batch_size": "ppo.batch_size",
+    "n_epochs": "ppo.n_epochs",
+    "gamma": "ppo.gamma",
+    "gae_lambda": "ppo.gae_lambda",
+    "clip_range": "ppo.clip_range",
+    "ent_coef": "ppo.ent_coef",
+    "vf_coef": "ppo.vf_coef",
+    "max_grad_norm": "ppo.max_grad_norm",
+    "use_action_masking": "ppo.use_action_masking",
+    "manager_horizon": "feudal.manager_horizon",
+    "worker_reward_alpha": "feudal.worker_reward_alpha",
+    "manager_lr_scale": "feudal.manager_lr_scale",
+    "worker_lr_scale": "feudal.worker_lr_scale",
+    "eval_freq": "eval.eval_freq",
+    "n_eval_episodes": "eval.n_eval_episodes",
+    "checkpoint_freq": "eval.checkpoint_freq",
+    "log_dir": "logging.log_dir",
+    "wandb": "logging.wandb",
+    "wandb_project": "logging.wandb_project",
+    "wandb_entity": "logging.wandb_entity",
+}
+
+
 def main():
     """Main entry point for training script."""
-    parser = argparse.ArgumentParser(description="Train RL agents for Reinforce Tactics")
+    # Pre-parse --config so YAML values become the parser's defaults; CLI
+    # flags still override because argparse prefers user-supplied values.
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
+    pre_args, _ = pre_parser.parse_known_args()
+
+    parser = argparse.ArgumentParser(
+        description="Train RL agents for Reinforce Tactics",
+        parents=[pre_parser],
+    )
 
     # Training mode
     parser.add_argument(
@@ -351,6 +391,12 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Use Weights & Biases logging")
     parser.add_argument("--wandb-project", type=str, default="reinforcetactics", help="W&B project name")
     parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
+
+    if pre_args.config:
+        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
+
+        cfg = load_config(pre_args.config)
+        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args()
 

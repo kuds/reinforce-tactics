@@ -118,11 +118,11 @@ module = [
 ignore_errors = true
 
 [tool.pytest.ini_options]
-addopts = "--cov=reinforcetactics --cov-fail-under=50"
+addopts = "--cov=reinforcetactics --cov-fail-under=65"
 
 [tool.coverage.run]
 source = ["reinforcetactics"]
 omit = ["reinforcetactics/ui/*"]
 
 [tool.coverage.report]
-fail_under = 50
+fail_under = 65
