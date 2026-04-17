@@ -1,0 +1,43 @@
+# Self-play training with optional opponent pool.
+algorithm: self_play
+total_timesteps: 5000000
+seed: 0
+
+env:
+  max_steps: 200
+  n_envs: 8
+  use_subprocess: true
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  use_action_masking: true
+  device: auto
+
+self_play:
+  swap_players: true
+  opponent_update_freq: 10000
+  use_opponent_pool: true
+  pool_size: 10
+  pool_strategy: uniform
+  add_to_pool_freq: 50000
+  min_win_rate_for_pool: 0.55
+  mixed_training: false
+  bot_ratio: 0.3
+
+eval:
+  eval_freq: 10000
+  n_eval_episodes: 10
+  checkpoint_freq: 50000
+
+logging:
+  log_dir: ./logs
+  tensorboard: true

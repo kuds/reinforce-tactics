@@ -1,0 +1,17 @@
+# Curriculum preset: hard.
+# Scripted bot opponent, longer episodes, harsher penalties.
+algorithm: maskable_ppo
+
+env:
+  opponent: bot
+  max_steps: 300
+  action_space_type: multi_discrete
+  reward_config:
+    win: 1000.0
+    loss: -1000.0
+    draw: -300.0
+    income_diff: 0.02
+    unit_diff: 0.1
+    structure_control: 0.5
+    invalid_action: -15.0
+    turn_penalty: -2.0

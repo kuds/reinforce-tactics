@@ -1,0 +1,28 @@
+# AlphaZero training config.
+algorithm: alphazero
+seed: 0
+
+env:
+  map_file: null
+  max_steps: 400       # Also used as max_game_steps for MCTS self-play
+
+alphazero:
+  res_blocks: 6
+  channels: 128
+  num_simulations: 100
+  c_puct: 1.5
+  dirichlet_alpha: 0.3
+  iterations: 100
+  games_per_iter: 25
+  epochs_per_iter: 10
+  batch_size: 256
+  buffer_size: 100000
+  max_game_steps: 400
+  temperature_threshold: 30
+  eval_games: 20
+  eval_threshold: 0.55
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+logging:
+  log_dir: ./checkpoints/alphazero

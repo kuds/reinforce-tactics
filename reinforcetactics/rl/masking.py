@@ -326,72 +326,46 @@ def validate_action_mask(env: StrategyGameEnv) -> Dict[str, Any]:
     return results
 
 
-# Convenience function for curriculum learning
+# Curriculum presets live in configs/curriculum/*.yaml so reward weights can
+# be tuned without editing source. Built-ins: 'easy', 'medium', 'hard'.
+_CURRICULUM_CONFIG_DIR = "configs/curriculum"
+_CURRICULUM_PRESETS = ("easy", "medium", "hard")
+
+
 def make_curriculum_env(difficulty: str = "easy", **kwargs) -> ActionMaskedEnv:
     """
-    Create environment with preset difficulty configurations.
+    Create environment from a curriculum YAML preset.
 
     Args:
-        difficulty: 'easy', 'medium', or 'hard'
-        **kwargs: Additional arguments passed to make_maskable_env
-
-    Difficulty presets:
-        - easy: SimpleBot opponent, 10x10 maps, high starting gold
-        - medium: MediumBot opponent, 15x15 maps, normal gold
-        - hard: AdvancedBot opponent, 20x20 maps, limited gold
+        difficulty: Preset name. Built-ins: 'easy', 'medium', 'hard'. Any name
+            is accepted if ``configs/curriculum/<difficulty>.yaml`` exists.
+        **kwargs: Overrides forwarded to :func:`make_maskable_env`.
 
     Returns:
-        Configured ActionMaskedEnv
+        Configured :class:`ActionMaskedEnv`.
     """
-    difficulty_configs = {
-        "easy": {
-            "opponent": "random",  # Start with random for easier wins
-            "max_steps": 200,
-            "reward_config": {
-                "win": 1000.0,
-                "loss": -1000.0,
-                "draw": -100.0,  # Lighter truncation penalty
-                "income_diff": 0.1,
-                "unit_diff": 0.5,
-                "structure_control": 2.0,
-                "invalid_action": -5.0,
-                "turn_penalty": -0.5,
-            },
-        },
-        "medium": {
-            "opponent": "bot",
-            "max_steps": 200,
-            "reward_config": {
-                "win": 1000.0,
-                "loss": -1000.0,
-                "draw": -200.0,
-                "income_diff": 0.05,
-                "unit_diff": 0.3,
-                "structure_control": 1.0,
-                "invalid_action": -10.0,
-                "turn_penalty": -1.0,
-            },
-        },
-        "hard": {
-            "opponent": "bot",
-            "max_steps": 300,
-            "reward_config": {
-                "win": 1000.0,
-                "loss": -1000.0,
-                "draw": -300.0,  # Harsher truncation penalty
-                "income_diff": 0.02,
-                "unit_diff": 0.1,
-                "structure_control": 0.5,
-                "invalid_action": -15.0,
-                "turn_penalty": -2.0,
-            },
-        },
+    from pathlib import Path
+
+    from reinforcetactics.rl.config import load_config
+
+    config_path = Path(_CURRICULUM_CONFIG_DIR) / f"{difficulty}.yaml"
+    if not config_path.is_file():
+        raise ValueError(
+            f"Unknown curriculum difficulty: '{difficulty}'. "
+            f"Built-ins: {list(_CURRICULUM_PRESETS)}. "
+            f"Expected file: {config_path}"
+        )
+
+    cfg = load_config(config_path)
+    env_kwargs: Dict[str, Any] = {
+        "opponent": cfg.env.opponent,
+        "max_steps": cfg.env.max_steps,
+        "map_file": cfg.env.map_file,
+        "action_space_type": cfg.env.action_space_type,
+        "max_flat_actions": cfg.env.max_flat_actions,
+        "enabled_units": cfg.env.enabled_units,
+        "reward_config": cfg.env.reward_config,
     }
+    env_kwargs.update(kwargs)
 
-    if difficulty not in difficulty_configs:
-        raise ValueError(f"Unknown difficulty: {difficulty}. Choose from: {list(difficulty_configs.keys())}")
-
-    config = difficulty_configs[difficulty]
-    config.update(kwargs)  # Allow overrides
-
-    return make_maskable_env(**config)
+    return make_maskable_env(**env_kwargs)

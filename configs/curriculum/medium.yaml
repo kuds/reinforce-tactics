@@ -1,0 +1,17 @@
+# Curriculum preset: medium.
+# Scripted bot opponent, standard shaping, moderate penalties.
+algorithm: maskable_ppo
+
+env:
+  opponent: bot
+  max_steps: 200
+  action_space_type: multi_discrete
+  reward_config:
+    win: 1000.0
+    loss: -1000.0
+    draw: -200.0
+    income_diff: 0.05
+    unit_diff: 0.3
+    structure_control: 1.0
+    invalid_action: -10.0
+    turn_penalty: -1.0
