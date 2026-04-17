@@ -10,6 +10,7 @@ tensorboard
 matplotlib
 pandas
 Pillow
+PyYAML
 
 # Optional: LLM bot dependencies
 # Uncomment the ones you need for your LLM provider:
