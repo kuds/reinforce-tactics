@@ -7,6 +7,7 @@ These tests mirror the suite that ships with the upstream
 same surface that competition runners use. They are skipped if the
 ``kaggle-environments`` package is not installed locally.
 """
+
 # pylint: disable=missing-function-docstring,redefined-outer-name
 import json as json_module
 from pathlib import Path
@@ -41,6 +42,7 @@ def _register_env():
 @pytest.fixture
 def make_env():
     """Factory: build an env with mapSeed defaulting to 42 for determinism."""
+
     def _make(configuration=None):
         if configuration is None:
             configuration = {"mapSeed": 42}
@@ -232,6 +234,7 @@ def test_can_evaluate():
 
 def test_invalid_action_dict_loses(make_env):
     """An agent returning an out-of-bounds move should lose immediately."""
+
     def bad_agent(_obs, _config):
         return [{"type": "move", "from_x": -99, "from_y": -99, "to_x": -1, "to_y": -1}]
 
