@@ -318,9 +318,7 @@ class TestFlipObservationFogOfWar:
         from reinforcetactics.rl.masking import ActionMaskedEnv
         from reinforcetactics.rl.self_play import SelfPlayEnv
 
-        base = StrategyGameEnv(
-            map_file=None, opponent=None, render_mode=None, fog_of_war=True
-        )
+        base = StrategyGameEnv(map_file=None, opponent=None, render_mode=None, fog_of_war=True)
         env = SelfPlayEnv(ActionMaskedEnv(base), swap_players=False)
         env.reset()
         yield env
