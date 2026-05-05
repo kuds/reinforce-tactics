@@ -386,7 +386,9 @@ class TestMoveUnitAutoCapturesSnapshot:
         attacker.can_move = True
         attacker.can_attack = True
 
-        target = game_with_fow.create_unit("W", 4, 2, player=2)
+        # Place an enemy at (4, 2) so it lands in the attacker's pre-capture
+        # snapshot; we only care that the snapshot survives the subsequent move.
+        game_with_fow.create_unit("W", 4, 2, player=2)
         game_with_fow.update_visibility(player=1)
 
         # Pre-capture (mimics UI selection)

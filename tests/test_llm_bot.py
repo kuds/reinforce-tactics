@@ -1207,8 +1207,10 @@ class TestLLMBotFogOfWar:
         attacker.can_move = True
         attacker.can_attack = True
 
-        # Enemy within attacker's pre-move vision range (Warrior vision 3)
-        visible_enemy = fow_game.create_unit("W", 5, 3, player=2)
+        # Enemy within attacker's pre-move vision range (Warrior vision 3).
+        # We only need the unit to exist on the board; we look it up by
+        # position in the serialized output below.
+        fow_game.create_unit("W", 5, 3, player=2)
         fow_game.update_visibility(player=1)
         assert fow_game.is_position_visible(5, 3, player=1)
 
@@ -1220,7 +1222,7 @@ class TestLLMBotFogOfWar:
         assert (5, 3) in targets
 
     def test_move_then_actions_unaffected_without_fow(self, simple_game, bot_class):
-        """Without FOW, move_then_attack still includes all reachable enemies."""
+        """Without FOW, the FOW filter must not accidentally drop enemies."""
         attacker = simple_game.create_unit("W", 3, 3, player=1)
         attacker.can_move = True
         attacker.can_attack = True
@@ -1229,10 +1231,7 @@ class TestLLMBotFogOfWar:
         bot = bot_class(simple_game, player=1, api_key="test-key")
         state = bot._serialize_game_state()
 
-        targets = [tuple(c["then_attack"]) for c in state["legal_actions"].get("move_then_attack", [])]
-        # Distance > Warrior movement range, so won't appear; check a closer enemy
+        # Without FOW, the enemy must appear in the serialized state — the new
+        # filter in _compute_move_then_actions only kicks in under FOW.
         assert state["fog_of_war"] is False
-        # Sanity: the exact contents depend on movement; the assertion below
-        # just ensures no FOW filter accidentally drops the target when FOW
-        # is off (target_at_visible_position survives serialization).
         assert any(u["position"] == [target.x, target.y] for u in state["enemy_units"])
