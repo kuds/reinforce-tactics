@@ -302,6 +302,90 @@ class TestSelfPlayEnv:
         assert "self_play_stats" in info
 
 
+class TestFlipObservationFogOfWar:
+    """Verify _flip_observation builds a FOW-correct opponent obs.
+
+    The previous implementation just swapped ownership and gold/unit slots
+    in the agent's obs in-place. Under fog of war, that left the agent's
+    visibility filter in place — so the opponent saw what the agent could
+    see, not its own perspective. The fix rebuilds the obs from scratch
+    via ``build_observation(perspective_player=opponent)``.
+    """
+
+    @pytest.fixture
+    def fow_self_play_env(self):
+        """Self-play env with fog-of-war enabled on the underlying base env."""
+        from reinforcetactics.rl.masking import ActionMaskedEnv
+        from reinforcetactics.rl.self_play import SelfPlayEnv
+
+        base = StrategyGameEnv(
+            map_file=None, opponent=None, render_mode=None, fog_of_war=True
+        )
+        env = SelfPlayEnv(ActionMaskedEnv(base), swap_players=False)
+        env.reset()
+        yield env
+        env.close()
+
+    def test_flipped_obs_uses_opponent_visibility(self, fow_self_play_env):
+        """Visibility layer in the flipped obs must be the opponent's, not the agent's."""
+        base_env = fow_self_play_env.env.unwrapped
+        agent_obs = fow_self_play_env._get_obs_for_player(fow_self_play_env.agent_player)
+        opp_obs = fow_self_play_env._get_obs_for_player(3 - fow_self_play_env.agent_player)
+
+        assert "visibility" in agent_obs
+        assert "visibility" in opp_obs
+
+        # Sanity: each player sees their own HQ neighborhood. With opposite
+        # HQ placements on the random map, the visibility masks should not
+        # be identical — if they were, the opponent would just be seeing
+        # the agent's view (the old buggy behavior).
+        assert not np.array_equal(agent_obs["visibility"], opp_obs["visibility"])
+
+        # Each player's visibility must match what their own VisibilityMap reports.
+        agent_vis = base_env.game_state.visibility_maps[fow_self_play_env.agent_player].to_numpy()
+        opp_vis = base_env.game_state.visibility_maps[3 - fow_self_play_env.agent_player].to_numpy()
+        np.testing.assert_array_equal(agent_obs["visibility"], agent_vis)
+        np.testing.assert_array_equal(opp_obs["visibility"], opp_vis)
+
+    def test_flipped_obs_hides_opponent_gold_under_fow(self, fow_self_play_env):
+        """In the opponent's obs, the agent's gold (now the 'enemy') must be hidden."""
+        base_env = fow_self_play_env.env.unwrapped
+        # Distinct gold values so we can tell them apart.
+        base_env.game_state.player_gold[1] = 123
+        base_env.game_state.player_gold[2] = 456
+
+        opp_obs = fow_self_play_env._get_obs_for_player(3 - fow_self_play_env.agent_player)
+
+        # Opponent (player 2 when agent_player=1) sees its own gold first
+        # and the agent's (enemy) gold hidden as 0 under FOW.
+        # global_features layout: [own_gold, opp_gold, turn, own_units, opp_units, current_player]
+        assert opp_obs["global_features"][0] == 456
+        assert opp_obs["global_features"][1] == 0  # hidden under FOW
+
+    def test_flip_observation_swaps_gold_without_fow(self, self_play_env):
+        """The non-FOW behavior is preserved: the existing swap test still holds."""
+        # This duplicates the existing test_flip_observation but is kept in the
+        # FOW class to make the regression criterion explicit.
+        self_play_env.reset()
+        obs = self_play_env.env._get_obs()
+        flipped = self_play_env._flip_observation(obs)
+        assert flipped["global_features"][0] == obs["global_features"][1]
+        assert flipped["global_features"][1] == obs["global_features"][0]
+        assert flipped["global_features"][3] == obs["global_features"][4]
+        assert flipped["global_features"][4] == obs["global_features"][3]
+
+    def test_flip_observation_obs_argument_is_ignored(self, self_play_env):
+        """``_flip_observation`` rebuilds from scratch and ignores its obs argument."""
+        self_play_env.reset()
+        obs = self_play_env.env._get_obs()
+        # Mangling the obs we pass in must not affect the rebuilt result.
+        garbage = {k: np.zeros_like(v) if isinstance(v, np.ndarray) else v for k, v in obs.items()}
+        flipped_from_real = self_play_env._flip_observation(obs)
+        flipped_from_garbage = self_play_env._flip_observation(garbage)
+        for key in flipped_from_real:
+            np.testing.assert_array_equal(flipped_from_real[key], flipped_from_garbage[key])
+
+
 # ==============================================================================
 # 3. SELF-PLAY ENVIRONMENT CREATION TESTS
 # ==============================================================================
