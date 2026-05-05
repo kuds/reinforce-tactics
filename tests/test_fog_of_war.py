@@ -338,6 +338,110 @@ class TestPreMoveAttackFiltering:
         assert game_without_fow.is_enemy_attackable_by_unit(attacker, target)
 
 
+class TestMoveUnitAutoCapturesSnapshot:
+    """Verify move_unit auto-captures the FOW snapshot for non-UI code paths.
+
+    The UI's input_handler captures at unit-selection time, but RL/LLM/bot
+    code paths drive ``move_unit`` directly. Without auto-capture, the
+    pre-move attack restriction silently fell back to current visibility
+    (defeating the "move to discover, then attack" prevention).
+    """
+
+    def test_move_without_prior_capture_still_blocks_discovered_attack(self, game_with_fow):
+        """RL/LLM path: no manual snapshot, but discovered enemy must not be attackable."""
+        # Warrior vision 3, movement 3. HQ at (0,0) has vision 4.
+        # Attacker at (5,1) -> Chebyshev to (5,5) is 4, outside both attacker
+        # vision and HQ vision, so (5,5) starts hidden.
+        attacker = game_with_fow.create_unit("W", 5, 1, player=1)
+        attacker.can_move = True
+        attacker.can_attack = True
+
+        # Hidden enemy outside attacker's pre-move vision
+        target = game_with_fow.create_unit("W", 5, 5, player=2)
+        game_with_fow.update_visibility(player=1)
+
+        assert not game_with_fow.is_position_visible(5, 5, player=1)
+        # Snapshot has not been captured (mimics RL/LLM/bot flow)
+        assert attacker.visible_enemies_at_action_start is None
+
+        # Move adjacent to target via move_unit; auto-capture fires here.
+        # (5,1) -> (5,4) is Manhattan distance 3, within Warrior movement.
+        assert game_with_fow.move_unit(attacker, 5, 4)
+
+        # After move, target is visible (Chebyshev (5,4)->(5,5) = 1 <= 3)
+        assert game_with_fow.is_position_visible(5, 5, player=1)
+
+        # Snapshot was captured pre-move and does NOT contain the discovered enemy
+        assert attacker.visible_enemies_at_action_start is not None
+        assert (5, 5) not in attacker.visible_enemies_at_action_start
+
+        # Attack against the discovered enemy must be filtered out
+        assert not game_with_fow.is_enemy_attackable_by_unit(attacker, target)
+        legal_actions = game_with_fow.get_legal_actions(player=1)
+        assert target not in [a["target"] for a in legal_actions["attack"]]
+
+    def test_move_preserves_existing_snapshot(self, game_with_fow):
+        """If a snapshot was already captured (UI flow), move_unit must not overwrite it."""
+        attacker = game_with_fow.create_unit("W", 2, 2, player=1)
+        attacker.can_move = True
+        attacker.can_attack = True
+
+        target = game_with_fow.create_unit("W", 4, 2, player=2)
+        game_with_fow.update_visibility(player=1)
+
+        # Pre-capture (mimics UI selection)
+        game_with_fow.capture_visible_enemies_for_unit(attacker)
+        original_snapshot = attacker.visible_enemies_at_action_start
+        assert (4, 2) in original_snapshot
+
+        # Move; auto-capture must not overwrite the existing snapshot
+        assert game_with_fow.move_unit(attacker, 3, 2)
+        assert attacker.visible_enemies_at_action_start is original_snapshot
+
+    def test_move_unit_no_capture_when_fow_disabled(self, game_without_fow):
+        """Without FOW, move_unit must not touch the snapshot field."""
+        attacker = game_without_fow.create_unit("W", 2, 2, player=1)
+        attacker.can_move = True
+        assert attacker.visible_enemies_at_action_start is None
+        game_without_fow.move_unit(attacker, 3, 2)
+        assert attacker.visible_enemies_at_action_start is None
+
+
+class TestEndTurnClearsSnapshot:
+    """end_turn must clear stale snapshots so the unit's next turn starts fresh."""
+
+    def test_end_turn_clears_snapshot_for_new_player_units(self, game_with_fow):
+        """When refreshing units of the new current player, FOW snapshots reset."""
+        unit = game_with_fow.create_unit("W", 2, 2, player=1)
+        game_with_fow.update_visibility(player=1)
+        game_with_fow.capture_visible_enemies_for_unit(unit)
+        assert unit.visible_enemies_at_action_start is not None
+
+        # Player 1 ends turn -> player 2's turn -> player 1's turn again
+        game_with_fow.end_turn()  # now player 2
+        # Player 2 has no units, so end their turn too
+        game_with_fow.end_turn()  # back to player 1
+
+        # Player 1's unit snapshot must have been cleared at refresh time
+        assert unit.visible_enemies_at_action_start is None
+
+    def test_end_turn_does_not_clear_other_players_snapshots(self, game_with_fow):
+        """end_turn only refreshes units belonging to the new current player."""
+        p1_unit = game_with_fow.create_unit("W", 2, 2, player=1)
+        p2_unit = game_with_fow.create_unit("W", 8, 8, player=2)
+
+        game_with_fow.update_visibility()
+        game_with_fow.capture_visible_enemies_for_unit(p1_unit)
+        game_with_fow.capture_visible_enemies_for_unit(p2_unit)
+
+        # End player 1's turn -> current_player becomes 2.
+        # p2_unit gets refreshed (snapshot cleared); p1_unit does not.
+        game_with_fow.end_turn()
+
+        assert p1_unit.visible_enemies_at_action_start is not None
+        assert p2_unit.visible_enemies_at_action_start is None
+
+
 class TestFOWObservation:
     """Test observation generation with fog of war."""
 
