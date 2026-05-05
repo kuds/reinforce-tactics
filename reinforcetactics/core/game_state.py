@@ -468,6 +468,13 @@ class GameState:
             logger.debug(f"Cannot move to ({to_x}, {to_y}): position blocked")
             return False
 
+        # FOW: Snapshot pre-move enemy visibility so the unit cannot attack
+        # enemies it discovers by moving. The UI's input_handler captures this
+        # at unit-selection time; for RL/LLM/bot code paths that drive
+        # move_unit directly, capture lazily here just before the move.
+        if self.fog_of_war and unit.visible_enemies_at_action_start is None:
+            self.capture_visible_enemies_for_unit(unit)
+
         # Execute move
         unit.move_to(to_x, to_y)
         unit.can_move = False  # Consume move action
@@ -849,6 +856,9 @@ class GameState:
                 unit.has_moved = False
                 unit.distance_moved = 0
                 unit.is_hasted = False
+                # FOW: Clear stale snapshot so it gets recaptured before
+                # this unit's next move (see move_unit lazy capture).
+                unit.visible_enemies_at_action_start = None
             unit.selected = False
 
         # Calculate and apply income

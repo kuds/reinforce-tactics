@@ -704,8 +704,14 @@ Respond with your strategic plan in JSON format."""
             "move_then_paralyze": [],
         }
 
-        # Get enemy units for attack calculations
+        # Get enemy units for attack calculations.
+        # Under FOW, only consider enemies currently visible: a move-then-attack
+        # combo against an enemy the bot can't see right now would either be a
+        # FOW info leak (we'd reveal hidden enemy positions) or a "move to
+        # discover, then attack" exploit (forbidden by is_enemy_attackable_by_unit).
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player]
+        if self.game_state.fog_of_war:
+            enemy_units = [u for u in enemy_units if self.game_state.is_position_visible(u.x, u.y, self.bot_player)]
 
         # Get ally units for heal/cure calculations (Cleric only)
         ally_units = [u for u in self.game_state.units if u.player == self.bot_player and u != unit]

@@ -369,48 +369,49 @@ class SelfPlayEnv(gym.Wrapper):
 
     def _flip_observation(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """
-        Flip observation to opponent's perspective.
+        Build an observation from the opponent's perspective.
 
-        For symmetric self-play, the opponent sees the game from their
-        perspective (as player 1).
+        Previously this method swapped ownership channels and gold/unit-count
+        slots in-place on the agent's observation. That produced the right
+        labels under perfect information but was wrong under fog of war:
+        the visibility filter applied by ``GameState.to_numpy(for_player=...)``
+        belonged to the agent, not the opponent, so the "flipped" obs leaked
+        the agent's vision and hid the opponent's own information.
+
+        The fix is to rebuild the observation from scratch via
+        ``build_observation(perspective_player=opponent)``, which applies the
+        opponent's visibility (or none, when FOW is off) and computes the
+        agent-relative global_features for the opponent. The ``obs`` argument
+        is ignored — kept only for API compatibility — because nothing the
+        agent's obs carries is reusable from the opponent's POV.
+
+        Args:
+            obs: Unused. Retained to preserve the existing call signature.
+
+        Returns:
+            Observation dict from the opponent's perspective.
         """
-        flipped = {}
+        del obs  # See docstring; rebuilt from game state instead.
+        return self._build_obs_for_player(3 - self.agent_player)
 
-        # Grid: swap player ownership (channel 1)
-        if "grid" in obs:
-            grid = obs["grid"].copy()
-            # Ownership channel: 1 -> 2, 2 -> 1
-            ownership = grid[:, :, 1]
-            new_ownership = np.where(ownership == 1, 2, np.where(ownership == 2, 1, ownership))
-            grid[:, :, 1] = new_ownership
-            flipped["grid"] = grid
+    def _build_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
+        """Build a fresh observation from ``player``'s perspective.
 
-        # Units: swap ownership (channel 1)
-        if "units" in obs:
-            units = obs["units"].copy()
-            ownership = units[:, :, 1]
-            new_ownership = np.where(ownership == 1, 2, np.where(ownership == 2, 1, ownership))
-            units[:, :, 1] = new_ownership
-            flipped["units"] = units
+        Delegates to the shared ``build_observation`` helper so FOW handling
+        matches gym_env and ModelBot. The action mask comes from the base
+        env (which derives it from ``game_state.current_player``) — that is
+        the right mask whenever this is called during ``player``'s turn,
+        which is the only time SelfPlayEnv consults it in production.
+        """
+        from reinforcetactics.rl.observation import build_observation
 
-        # Global features: swap player-specific features
-        if "global_features" in obs:
-            global_feats = obs["global_features"].copy()
-            # [gold_p1, gold_p2, turn, units_p1, units_p2, current_player]
-            # Swap gold
-            global_feats[0], global_feats[1] = global_feats[1], global_feats[0]
-            # Swap unit counts
-            global_feats[3], global_feats[4] = global_feats[4], global_feats[3]
-            # Flip current player
-            global_feats[5] = 3 - global_feats[5]  # 1 -> 2, 2 -> 1
-            flipped["global_features"] = global_feats
-
-        # Action mask: recalculate from the game state for the current player.
-        # The mask from _get_obs() may be for the agent, not the opponent.
-        if "action_mask" in obs:
-            flipped["action_mask"] = self.env._get_action_mask()
-
-        return flipped
+        base_env = self.env.unwrapped
+        return build_observation(
+            base_env.game_state,
+            perspective_player=player,
+            action_mask=base_env._get_action_mask(),
+            fog_of_war=base_env.fog_of_war,
+        )
 
     def _resolve_action(self, action) -> np.ndarray:
         """
@@ -467,11 +468,16 @@ class SelfPlayEnv(gym.Wrapper):
             game_state.end_turn()
 
     def _get_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
-        """Get observation from a specific player's perspective."""
-        obs = self.env._get_obs()
-        if player != self.agent_player:
-            obs = self._flip_observation(obs)
-        return obs
+        """Get observation from a specific player's perspective.
+
+        For the agent, this returns the env's standard observation. For the
+        opponent, it rebuilds the observation from the opponent's POV via
+        ``build_observation`` so that fog-of-war visibility is applied
+        correctly (rather than reusing the agent's filtered grid/units).
+        """
+        if player == self.agent_player:
+            return self.env._get_obs()
+        return self._build_obs_for_player(player)
 
     def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
         """
