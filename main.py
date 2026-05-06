@@ -75,7 +75,13 @@ Examples:
         "--algorithm", type=str, default="ppo", choices=["ppo", "a2c", "dqn"], help="RL algorithm for training"
     )
     parser.add_argument("--timesteps", type=int, default=100000, help="Total training timesteps")
-    parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random", "self"], help="Opponent type")
+    parser.add_argument(
+        "--opponent",
+        type=str,
+        default="bot",
+        choices=["bot", "random", "noop", "self"],
+        help="Opponent type",
+    )
     parser.add_argument("--map-file", type=str, default=None, help="Path to map file (None for random)")
     parser.add_argument("--model-name", type=str, default=None, help="Name for saved model")
 

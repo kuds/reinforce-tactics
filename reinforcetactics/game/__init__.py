@@ -2,7 +2,7 @@
 Game mechanics module.
 """
 
-from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.game.bot import NoopBot, RandomBot, SimpleBot
 from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, LLMBot, OpenAIBot
 from reinforcetactics.game.llm_prompts import (
     PROMPT_BASIC,
@@ -18,6 +18,8 @@ from reinforcetactics.game.model_bot import ModelBot
 
 __all__ = [
     "GameMechanics",
+    "NoopBot",
+    "RandomBot",
     "SimpleBot",
     "LLMBot",
     "OpenAIBot",
