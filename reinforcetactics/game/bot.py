@@ -124,7 +124,7 @@ class RandomBot(BotUnitMixin):
         "attack_buff",
     )
 
-    def __init__(self, game_state, player=2, max_actions: int = 20):
+    def __init__(self, game_state, player=2, max_actions: int = 20, rng=None):
         """
         Initialize the bot.
 
@@ -132,10 +132,14 @@ class RandomBot(BotUnitMixin):
             game_state: GameState instance
             player: Player number for this bot
             max_actions: Maximum number of random actions to attempt per turn
+            rng: Optional ``random.Random`` instance for reproducibility. If
+                ``None``, the global ``random`` module is used (non-deterministic).
         """
         self.game_state = game_state
         self.bot_player = player
         self.max_actions = max_actions
+        # Both ``random`` and ``random.Random()`` instances expose ``.choice``.
+        self._rng = rng if rng is not None else random
 
     def take_turn(self):
         """Execute random legal actions, then end the turn."""
@@ -153,7 +157,7 @@ class RandomBot(BotUnitMixin):
             if not all_actions:
                 break  # Only end_turn available
 
-            action_key, action = random.choice(all_actions)
+            action_key, action = self._rng.choice(all_actions)
             try:
                 self._execute(action_key, action)
             except Exception:

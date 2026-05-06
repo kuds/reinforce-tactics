@@ -4,6 +4,7 @@ Supports both flat and hierarchical RL training
 """
 
 import logging
+import random
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -779,7 +780,14 @@ class StrategyGameEnv(gym.Env):
         if self.opponent_type == "bot":
             self.opponent = SimpleBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "random":
-            self.opponent = RandomBot(self.game_state, player=opponent_player)
+            # Derive a seeded RNG from gymnasium's np_random so the random
+            # opponent is reproducible whenever reset() is called with a seed.
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = RandomBot(
+                self.game_state,
+                player=opponent_player,
+                rng=random.Random(bot_seed),
+            )
         else:
             self.opponent = None
 

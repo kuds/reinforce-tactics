@@ -24,6 +24,7 @@ def evaluate_model(
     env: Any,
     n_episodes: int = 50,
     deterministic: bool = True,
+    seed: Any = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a trained model and return summary statistics.
@@ -36,6 +37,8 @@ def evaluate_model(
         env: Gymnasium environment (single, not vectorized).
         n_episodes: Number of evaluation episodes.
         deterministic: Use deterministic actions (recommended for eval).
+        seed: Optional integer seed. When provided, episode ``i`` is reset
+            with ``seed + i`` so results are reproducible across runs.
 
     Returns:
         Dict with keys: win_rate, avg_reward, std_reward, avg_length,
@@ -46,8 +49,11 @@ def evaluate_model(
     lengths = []
     has_action_masks = hasattr(env, "action_masks")
 
-    for _ in range(n_episodes):
-        obs, _ = env.reset()
+    for ep_idx in range(n_episodes):
+        if seed is not None:
+            obs, _ = env.reset(seed=int(seed) + ep_idx)
+        else:
+            obs, _ = env.reset()
         done = False
         ep_reward = 0.0
         ep_len = 0

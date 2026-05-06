@@ -121,6 +121,7 @@ def make_maskable_env(
     enabled_units: Optional[List[str]] = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    seed: Optional[int] = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -135,6 +136,9 @@ def make_maskable_env(
         enabled_units: List of enabled unit types (default all)
         action_space_type: 'multi_discrete' (default) or 'flat_discrete'
         max_flat_actions: Max actions for flat_discrete mode (default 512)
+        seed: Optional seed for reproducibility. When provided, the env's
+            ``np_random`` (and the random opponent's RNG) are seeded so that
+            episodes are deterministic across runs.
 
     Returns:
         ActionMaskedEnv ready for training
@@ -145,6 +149,9 @@ def make_maskable_env(
 
         # Flat Discrete (exact per-action masks, recommended):
         env = make_maskable_env(opponent="bot", action_space_type="flat_discrete")
+
+        # Reproducible eval against a random opponent:
+        env = make_maskable_env(opponent="random", seed=42)
     """
     env = StrategyGameEnv(
         map_file=map_file,
@@ -156,6 +163,8 @@ def make_maskable_env(
         action_space_type=action_space_type,
         max_flat_actions=max_flat_actions,
     )
+    if seed is not None:
+        env.reset(seed=seed)
     return ActionMaskedEnv(env, track_stats=track_stats)
 
 
