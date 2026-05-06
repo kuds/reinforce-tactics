@@ -27,25 +27,6 @@ def _ensure_headless_pygame():
     return pygame
 
 
-def _resolve_pixel_art_path() -> Optional[str]:
-    """Locate the bundled ``assets/sprites`` directory for pixel-art rendering.
-
-    Looks first in the current working directory, then walks up from this
-    file (the repo root ships ``assets/sprites/``). Returns ``None`` if the
-    directory can't be found, in which case the renderer falls back to
-    coloured rects + unit letters.
-    """
-    candidates = [Path.cwd() / "assets" / "sprites"]
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidates.append(parent / "assets" / "sprites")
-
-    for c in candidates:
-        if c.is_dir():
-            return str(c)
-    return None
-
-
 def record_game_to_video(
     game_states: List[Any],
     output_path: str = "game_replay.mp4",
@@ -73,12 +54,10 @@ def record_game_to_video(
     if not game_states:
         raise ValueError("No game states to record")
 
-    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
-
     frames = []
     for state_dict in game_states:
         gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
-        renderer = Renderer(gs, replay_mode=True, headless=True, sprites_path=sprites_path)
+        renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
         renderer.render()
         frames.append(renderer.get_rgb_array())
 
@@ -142,11 +121,9 @@ def record_evaluation_to_video(
     # Check whether the env supports action masking (ActionMaskedEnv)
     _has_masks = hasattr(env, "action_masks") and callable(env.action_masks)
 
-    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
-
     obs, info = env.reset()
     # Create headless renderer after reset so game_state is fresh
-    renderer = Renderer(_get_gs(), replay_mode=True, headless=True, sprites_path=sprites_path)
+    renderer = Renderer(_get_gs(), replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
     frames = []
 
@@ -256,9 +233,8 @@ def record_replay_to_video(
     offset_y += border
 
     # Create game state and headless renderer
-    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
     game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
-    renderer = Renderer(game_state, replay_mode=True, headless=True, sprites_path=sprites_path)
+    renderer = Renderer(game_state, replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
     frames = []
 

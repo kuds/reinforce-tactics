@@ -29,10 +29,30 @@ from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.settings import get_settings
 
 
+def _resolve_bundled_sprites_path():
+    """Locate the bundled ``assets/sprites`` directory.
+
+    Walks up from this file (the repo ships ``assets/sprites/`` at the
+    root) and also checks the current working directory. Returns ``None``
+    if the directory can't be found.
+    """
+    from pathlib import Path
+
+    candidates = [Path.cwd() / "assets" / "sprites"]
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidates.append(parent / "assets" / "sprites")
+
+    for c in candidates:
+        if c.is_dir():
+            return str(c)
+    return None
+
+
 class Renderer:
     """Handles all Pygame rendering."""
 
-    def __init__(self, game_state, replay_mode=False, viewing_player=None, headless=False, sprites_path=None):
+    def __init__(self, game_state, replay_mode=False, viewing_player=None, headless=False, pixel_art=None):
         """
         Initialize the renderer.
 
@@ -43,17 +63,19 @@ class Renderer:
                            If None, shows current player's view (or omniscient if no FOW).
             headless: If True, render to an offscreen surface without opening a window.
                      Useful for recording videos in notebooks or CI environments.
-            sprites_path: Optional path to a sprites root directory (containing
-                     ``tiles/`` and ``units/`` subdirectories). When provided,
-                     overrides the settings-based sprite paths and force-enables
-                     tile sprites so the renderer uses pixel art instead of
-                     fallback colored rects and unit letters.
+            pixel_art: Authoritative override for pixel-art rendering.
+                     ``None`` (default) uses ``settings.json``. ``True``
+                     resolves the bundled ``assets/sprites/`` directory and
+                     force-enables tile/unit sprites. ``False`` force-disables
+                     sprite loading and uses the fallback (coloured rects +
+                     unit letters), regardless of settings.
         """
         self.game_state = game_state
         self.replay_mode = replay_mode
         self.viewing_player = viewing_player  # For FOW perspective
         self.headless = headless
-        self._sprites_override = sprites_path
+        self._pixel_art = pixel_art
+        self._sprites_override = _resolve_bundled_sprites_path() if pixel_art is True else None
 
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
@@ -129,6 +151,12 @@ class Renderer:
         """
         tile_images = {}  # type_name -> base surface (single)
         tile_variants = {}  # type_name -> [surface, ...]
+
+        # pixel_art=False forces fallback rendering regardless of settings
+        if self._pixel_art is False:
+            self.tile_variants = {}
+            self.team_tile_variants = {}
+            return tile_images
 
         use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", False)
         tile_sprites_path = self._resolve_sprites_path("tiles")
@@ -235,6 +263,10 @@ class Renderer:
         """Load unit images from configured sprites path."""
         unit_images = {}
 
+        # pixel_art=False forces fallback rendering regardless of settings
+        if self._pixel_art is False:
+            return unit_images
+
         # Get the configured unit sprites path
         unit_sprites_path = self._resolve_sprites_path("units")
         if not unit_sprites_path:
@@ -257,6 +289,10 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
+        # pixel_art=False forces fallback rendering regardless of settings
+        if self._pixel_art is False:
+            return None
+
         animation_path = self._resolve_sprites_path("animation")
         if not animation_path:
             return None
@@ -838,8 +874,9 @@ class Renderer:
 
     def get_rgb_array(self):
         """Get the current screen as RGB array."""
-        # Convert pygame surface to numpy array
-        return np.transpose(np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2))
+        # array3d copies and does not lock the surface; pixels3d returns a
+        # locked view that can silently block subsequent blits.
+        return np.transpose(pygame.surfarray.array3d(self.screen), axes=(1, 0, 2))
 
     def set_unit_animation_state(self, unit, state):
         """
