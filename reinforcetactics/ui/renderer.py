@@ -610,6 +610,11 @@ class Renderer:
 
     def _draw_ui(self):
         """Draw UI elements."""
+        # In headless mode the screen is exactly the grid size, so any HUD
+        # drawn here would overlap the playfield. Skip it for video capture.
+        if self.headless:
+            return
+
         font = get_font(28)
         player_color = PLAYER_COLORS.get(self.game_state.current_player, theme.TEXT)
 
