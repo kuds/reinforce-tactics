@@ -21,6 +21,7 @@ from typing import Any, List, Optional
 
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
+from stable_baselines3.common.vec_env import VecNormalize
 
 from reinforcetactics.rl.evaluation import evaluate_model
 
@@ -183,3 +184,10 @@ class PeriodicEvalCallback(BaseCallback):
                 self.best_win_rate = m["win_rate"]
                 self._best_reward = m["avg_reward"]
                 self.model.save(str(self.save_dir / "best_model.zip"))
+                # If the training env is VecNormalize-wrapped, the model's
+                # value head was trained against normalized rewards — without
+                # the matching running-mean/std stats the saved policy isn't
+                # reloadable later. Persist them alongside best_model.zip so
+                # the pair stays consistent.
+                if isinstance(self.training_env, VecNormalize):
+                    self.training_env.save(str(self.save_dir / "best_vecnormalize.pkl"))
