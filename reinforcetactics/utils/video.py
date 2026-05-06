@@ -27,11 +27,32 @@ def _ensure_headless_pygame():
     return pygame
 
 
+def _resolve_pixel_art_path() -> Optional[str]:
+    """Locate the bundled ``assets/sprites`` directory for pixel-art rendering.
+
+    Looks first in the current working directory, then walks up from this
+    file (the repo root ships ``assets/sprites/``). Returns ``None`` if the
+    directory can't be found, in which case the renderer falls back to
+    coloured rects + unit letters.
+    """
+    candidates = [Path.cwd() / "assets" / "sprites"]
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidates.append(parent / "assets" / "sprites")
+
+    for c in candidates:
+        if c.is_dir():
+            return str(c)
+    return None
+
+
 def record_game_to_video(
     game_states: List[Any],
     output_path: str = "game_replay.mp4",
     fps: int = 4,
     map_file: Optional[str] = None,
+    scale: int = 4,
+    use_pixel_art: bool = False,
 ) -> str:
     """
     Record a sequence of game state snapshots to an MP4 video.
@@ -52,14 +73,16 @@ def record_game_to_video(
     if not game_states:
         raise ValueError("No game states to record")
 
+    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
+
     frames = []
     for state_dict in game_states:
         gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
-        renderer = Renderer(gs, replay_mode=True, headless=True)
+        renderer = Renderer(gs, replay_mode=True, headless=True, sprites_path=sprites_path)
         renderer.render()
         frames.append(renderer.get_rgb_array())
 
-    return _write_frames_to_video(frames, output_path, fps)
+    return _write_frames_to_video(frames, output_path, fps, scale=scale)
 
 
 def record_evaluation_to_video(
@@ -69,6 +92,8 @@ def record_evaluation_to_video(
     fps: int = 4,
     max_steps: int = 500,
     deterministic: bool = True,
+    scale: int = 4,
+    use_pixel_art: bool = False,
 ) -> Dict[str, Any]:
     """
     Run one episode of a trained model and record it to video.
@@ -88,6 +113,15 @@ def record_evaluation_to_video(
         fps: Frames per second for the output video
         max_steps: Maximum steps before stopping
         deterministic: Whether to use deterministic actions
+        scale: Integer upscale factor applied with nearest-neighbour
+               interpolation before encoding. The native render is
+               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map), which
+               is hard to read inline; the default of 4 produces a
+               crisp 768x768 video. Use 1 to disable.
+        use_pixel_art: If True, render with the bundled pixel-art tile
+               and unit sprites from ``assets/sprites/`` instead of the
+               default fallback (coloured rects + unit letters). Falls
+               back silently if the assets directory can't be located.
 
     Returns:
         Dict with keys:
@@ -108,9 +142,11 @@ def record_evaluation_to_video(
     # Check whether the env supports action masking (ActionMaskedEnv)
     _has_masks = hasattr(env, "action_masks") and callable(env.action_masks)
 
+    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
+
     obs, info = env.reset()
     # Create headless renderer after reset so game_state is fresh
-    renderer = Renderer(_get_gs(), replay_mode=True, headless=True)
+    renderer = Renderer(_get_gs(), replay_mode=True, headless=True, sprites_path=sprites_path)
 
     frames = []
 
@@ -141,7 +177,7 @@ def record_evaluation_to_video(
     for _ in range(fps):
         frames.append(frames[-1])
 
-    video_path = _write_frames_to_video(frames, output_path, fps)
+    video_path = _write_frames_to_video(frames, output_path, fps, scale=scale)
 
     gs = _get_gs()
     winner = info.get("winner") or (gs.winner if gs.game_over else None)
@@ -160,6 +196,8 @@ def record_replay_to_video(
     replay_data: Dict[str, Any],
     output_path: str = "replay.mp4",
     fps: int = 4,
+    scale: int = 4,
+    use_pixel_art: bool = False,
 ) -> str:
     """
     Record a saved replay file to MP4 video using headless rendering.
@@ -218,8 +256,9 @@ def record_replay_to_video(
     offset_y += border
 
     # Create game state and headless renderer
+    sprites_path = _resolve_pixel_art_path() if use_pixel_art else None
     game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
-    renderer = Renderer(game_state, replay_mode=True, headless=True)
+    renderer = Renderer(game_state, replay_mode=True, headless=True, sprites_path=sprites_path)
 
     frames = []
 
@@ -241,7 +280,7 @@ def record_replay_to_video(
     for _ in range(fps):
         frames.append(frames[-1])
 
-    return _write_frames_to_video(frames, output_path, fps)
+    return _write_frames_to_video(frames, output_path, fps, scale=scale)
 
 
 def _execute_replay_action(game_state, action, translate_fn):
@@ -322,8 +361,13 @@ def _execute_replay_action(game_state, action, translate_fn):
         logger.warning("Error executing replay action %s: %s", action_type, e)
 
 
-def _write_frames_to_video(frames: list, output_path: str, fps: int) -> str:
-    """Write a list of RGB numpy arrays to an MP4 video file."""
+def _write_frames_to_video(frames: list, output_path: str, fps: int, scale: int = 1) -> str:
+    """Write a list of RGB numpy arrays to an MP4 video file.
+
+    ``scale`` upscales each frame with nearest-neighbour interpolation
+    before encoding so small grids (a 6x6 map renders at 192x192 px)
+    produce crisp, readable video.
+    """
     import cv2
 
     if not frames:
@@ -332,12 +376,16 @@ def _write_frames_to_video(frames: list, output_path: str, fps: int) -> str:
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    height, width = frames[0].shape[:2]
+    src_h, src_w = frames[0].shape[:2]
+    scale = max(1, int(scale))
+    width, height = src_w * scale, src_h * scale
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     for frame in frames:
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        if scale != 1:
+            bgr = cv2.resize(bgr, (width, height), interpolation=cv2.INTER_NEAREST)
         writer.write(bgr)
 
     writer.release()

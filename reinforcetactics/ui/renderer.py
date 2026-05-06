@@ -32,7 +32,7 @@ from reinforcetactics.utils.settings import get_settings
 class Renderer:
     """Handles all Pygame rendering."""
 
-    def __init__(self, game_state, replay_mode=False, viewing_player=None, headless=False):
+    def __init__(self, game_state, replay_mode=False, viewing_player=None, headless=False, sprites_path=None):
         """
         Initialize the renderer.
 
@@ -43,11 +43,17 @@ class Renderer:
                            If None, shows current player's view (or omniscient if no FOW).
             headless: If True, render to an offscreen surface without opening a window.
                      Useful for recording videos in notebooks or CI environments.
+            sprites_path: Optional path to a sprites root directory (containing
+                     ``tiles/`` and ``units/`` subdirectories). When provided,
+                     overrides the settings-based sprite paths and force-enables
+                     tile sprites so the renderer uses pixel art instead of
+                     fallback colored rects and unit letters.
         """
         self.game_state = game_state
         self.replay_mode = replay_mode
         self.viewing_player = viewing_player  # For FOW perspective
         self.headless = headless
+        self._sprites_override = sprites_path
 
         # Initialize Pygame if not already initialized
         if not pygame.get_init():
@@ -105,6 +111,13 @@ class Renderer:
         # UI elements
         self._setup_ui_elements()
 
+    def _resolve_sprites_path(self, category):
+        """Resolve sprite directory for a category, honouring the override."""
+        if self._sprites_override:
+            subdir = {"units": "units", "tiles": "tiles", "animation": "units"}.get(category, category)
+            return os.path.join(self._sprites_override, subdir)
+        return self.settings.get_sprites_path(category)
+
     def _load_tile_images(self):
         """Load tile images, discover variants, and generate team-coloured
         structure variants.
@@ -117,8 +130,8 @@ class Renderer:
         tile_images = {}  # type_name -> base surface (single)
         tile_variants = {}  # type_name -> [surface, ...]
 
-        use_tile_sprites = self.settings.get("graphics.use_tile_sprites", False)
-        tile_sprites_path = self.settings.get_sprites_path("tiles")
+        use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", False)
+        tile_sprites_path = self._resolve_sprites_path("tiles")
 
         for tile_type, filename in TILE_IMAGES.items():
             variants = []
@@ -223,7 +236,7 @@ class Renderer:
         unit_images = {}
 
         # Get the configured unit sprites path
-        unit_sprites_path = self.settings.get_sprites_path("units")
+        unit_sprites_path = self._resolve_sprites_path("units")
         if not unit_sprites_path:
             return unit_images
 
@@ -244,7 +257,7 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        animation_path = self.settings.get_sprites_path("animation")
+        animation_path = self._resolve_sprites_path("animation")
         if not animation_path:
             return None
 
@@ -610,6 +623,11 @@ class Renderer:
 
     def _draw_ui(self):
         """Draw UI elements."""
+        # In headless mode the screen is exactly the grid size, so any HUD
+        # drawn here would overlap the playfield. Skip it for video capture.
+        if self.headless:
+            return
+
         font = get_font(28)
         player_color = PLAYER_COLORS.get(self.game_state.current_player, theme.TEXT)
 
