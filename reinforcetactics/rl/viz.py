@@ -72,8 +72,7 @@ def plot_eval_curves(
     from ``train_records`` (per-rollout, finer grid) and are skipped if
     that argument is None or empty.
     """
-    have_train = bool(train_records)
-    n_panels = 5 if have_train else 3
+    n_panels = 5 if train_records else 3
     fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4))
     if n_panels == 1:
         axes = [axes]
@@ -127,7 +126,7 @@ def plot_eval_curves(
     ax.set_title("Average Episode Length")
     ax.grid(True, alpha=0.3)
 
-    if have_train:
+    if train_records:
         train_ts = [r["timesteps"] for r in train_records]
 
         # Panel 4: approx_kl — near zero means policy is barely updating.
