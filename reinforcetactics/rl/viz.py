@@ -160,9 +160,7 @@ def plot_eval_curves(
     return _save_and_return(fig, charts_dir, "eval_curves.png")
 
 
-def _stack_inputs(
-    results: Sequence[dict], key: str, names: Iterable[str]
-) -> tuple[list[int], dict[str, list[float]]]:
+def _stack_inputs(results: Sequence[dict], key: str, names: Iterable[str]) -> tuple[list[int], dict[str, list[float]]]:
     """Pivot results[i][key][name] -> {name: [values aligned with timesteps]}.
 
     Skips evals that don't have the breakdown dict (e.g. older runs from
