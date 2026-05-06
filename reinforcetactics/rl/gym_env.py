@@ -14,7 +14,11 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import NoopBot, RandomBot, SimpleBot
+from reinforcetactics.game.bot import AdvancedBot, MediumBot, NoopBot, RandomBot, SimpleBot
+
+# Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
+# ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "noop"})
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
@@ -665,7 +669,7 @@ class StrategyGameEnv(gym.Env):
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
-        if self.opponent_type in ("bot", "random", "noop") and self.opponent is not None:
+        if self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent is not None:
             self.opponent.take_turn()
         # 'self' mode is handled externally by the training script
 
@@ -855,8 +859,12 @@ class StrategyGameEnv(gym.Env):
 
         # Reset opponent
         opponent_player = 3 - self.agent_player
-        if self.opponent_type == "bot":
+        if self.opponent_type in ("bot", "simple"):
             self.opponent = SimpleBot(self.game_state, player=opponent_player)
+        elif self.opponent_type == "medium":
+            self.opponent = MediumBot(self.game_state, player=opponent_player)
+        elif self.opponent_type == "advanced":
+            self.opponent = AdvancedBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "noop":
             self.opponent = NoopBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "random":
