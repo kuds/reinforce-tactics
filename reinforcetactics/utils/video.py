@@ -343,9 +343,13 @@ def _write_frames_to_video(frames: list, output_path: str, fps: int, scale: int 
     ``scale`` upscales each frame with nearest-neighbour interpolation
     before encoding so small grids (a 6x6 map renders at 192x192 px)
     produce crisp, readable video.
-    """
-    import cv2
 
+    Prefers ``imageio`` with the bundled ffmpeg backend (produces H.264
+    MP4s that play in QuickTime / browsers / VLC). Falls back to
+    ``cv2.VideoWriter`` with the legacy ``mp4v`` codec when the ffmpeg
+    backend is unavailable — that codec is readable by ``cv2`` but
+    is rejected or shows decode artefacts in many mainstream players.
+    """
     if not frames:
         raise ValueError("No frames to write")
 
@@ -355,17 +359,67 @@ def _write_frames_to_video(frames: list, output_path: str, fps: int, scale: int 
     src_h, src_w = frames[0].shape[:2]
     scale = max(1, int(scale))
     width, height = src_w * scale, src_h * scale
+
+    if scale != 1:
+        import cv2
+
+        upscaled = [cv2.resize(f, (width, height), interpolation=cv2.INTER_NEAREST) for f in frames]
+    else:
+        upscaled = list(frames)
+
+    try:
+        import imageio.v3 as iio
+        import imageio_ffmpeg  # noqa: F401
+
+        # yuv420p requires even width/height — INTER_NEAREST upscaling at
+        # any positive integer scale preserves divisibility from an even
+        # source, but defend if the source itself is odd-sized.
+        if width % 2 or height % 2:
+            import cv2
+
+            width += width % 2
+            height += height % 2
+            upscaled = [cv2.resize(f, (width, height), interpolation=cv2.INTER_NEAREST) for f in upscaled]
+
+        iio.imwrite(
+            output_path,
+            np.stack(upscaled),
+            fps=fps,
+            codec="libx264",
+            pixelformat="yuv420p",
+            macro_block_size=1,
+        )
+        logger.info(
+            "Video saved to %s (%d frames, %.1fs at %d fps, h264)",
+            output_path,
+            len(upscaled),
+            len(upscaled) / fps,
+            fps,
+        )
+        return output_path
+    except (ImportError, Exception) as exc:  # noqa: BLE001
+        logger.warning(
+            "imageio/ffmpeg unavailable (%s); falling back to cv2 mp4v (may not play in QuickTime/Preview)",
+            exc,
+        )
+
+    import cv2
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    for frame in frames:
+    for frame in upscaled:
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        if scale != 1:
-            bgr = cv2.resize(bgr, (width, height), interpolation=cv2.INTER_NEAREST)
         writer.write(bgr)
 
     writer.release()
-    logger.info("Video saved to %s (%d frames, %.1fs at %d fps)", output_path, len(frames), len(frames) / fps, fps)
+    logger.info(
+        "Video saved to %s (%d frames, %.1fs at %d fps, mp4v fallback)",
+        output_path,
+        len(upscaled),
+        len(upscaled) / fps,
+        fps,
+    )
     return output_path
 
 
