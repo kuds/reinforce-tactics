@@ -85,8 +85,25 @@ class Renderer:
         screen_width = game_state.grid.width * TILE_SIZE
         screen_height = game_state.grid.height * TILE_SIZE
         if headless:
-            # Offscreen rendering: plain Surface, no window
-            self.screen = pygame.Surface((screen_width, screen_height))
+            # Headless: prefer a dummy SDL display so the surface lives on
+            # a properly initialised SDL backbuffer. On some environments
+            # (notably Google Colab) a bare ``pygame.Surface`` can leave
+            # parts of the buffer uninitialised and show through as
+            # garbage in captured frames. Fall back to a plain Surface if
+            # the display can't be initialised, or if one already exists
+            # (so we don't clobber a live game window).
+            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+            existing = pygame.display.get_surface()
+            if existing is None:
+                try:
+                    if not pygame.display.get_init():
+                        pygame.display.init()
+                    self.screen = pygame.display.set_mode((screen_width, screen_height))
+                except pygame.error:
+                    self.screen = pygame.Surface((screen_width, screen_height))
+            else:
+                self.screen = pygame.Surface((screen_width, screen_height))
+            self.screen.fill((0, 0, 0))
         else:
             self.screen = pygame.display.set_mode((screen_width, screen_height))
             pygame.display.set_caption("Reinforce Tactics")
