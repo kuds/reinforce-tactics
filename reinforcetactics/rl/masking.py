@@ -116,6 +116,7 @@ def make_maskable_env(
     opponent: str = "bot",
     render_mode: Optional[str] = None,
     max_steps: int = 200,
+    max_turns: Optional[int] = None,
     reward_config: Optional[Dict[str, float]] = None,
     track_stats: bool = False,
     enabled_units: Optional[List[str]] = None,
@@ -158,6 +159,7 @@ def make_maskable_env(
         opponent=opponent,
         render_mode=render_mode,
         max_steps=max_steps,
+        max_turns=max_turns,
         reward_config=reward_config,
         enabled_units=enabled_units,
         action_space_type=action_space_type,
@@ -178,6 +180,7 @@ def _make_env_fn(
     enabled_units: Optional[List[str]] = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    max_turns: Optional[int] = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -191,6 +194,7 @@ def _make_env_fn(
             opponent=opponent,
             render_mode=None,  # No rendering in vectorized envs
             max_steps=max_steps,
+            max_turns=max_turns,
             reward_config=reward_config,
             enabled_units=enabled_units,
             action_space_type=action_space_type,
@@ -208,6 +212,7 @@ def make_maskable_vec_env(
     map_file: Optional[str] = None,
     opponent: str = "bot",
     max_steps: int = 200,
+    max_turns: Optional[int] = None,
     reward_config: Optional[Dict[str, float]] = None,
     seed: int = 0,
     use_subprocess: bool = True,
@@ -261,6 +266,7 @@ def make_maskable_vec_env(
             enabled_units,
             action_space_type,
             max_flat_actions,
+            max_turns,
         )
         for i in range(n_envs)
     ]

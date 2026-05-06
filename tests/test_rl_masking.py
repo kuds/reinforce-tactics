@@ -66,6 +66,21 @@ class TestMakeMaskableEnv:
         assert masks.ndim == 1
         env.close()
 
+    def test_max_turns_threaded_to_underlying_env(self):
+        """make_maskable_env should forward max_turns to StrategyGameEnv
+        and onto the underlying GameState."""
+        wrapped = make_maskable_env(opponent="random", max_turns=11)
+        # ActionMaskedEnv delegates attr access to the wrapped StrategyGameEnv
+        assert wrapped.max_turns == 11
+        assert wrapped.game_state.max_turns == 11
+        wrapped.close()
+
+    def test_max_turns_default_none(self):
+        wrapped = make_maskable_env(opponent="random")
+        assert wrapped.max_turns is None
+        assert wrapped.game_state.max_turns is None
+        wrapped.close()
+
 
 class TestMakeMaskableVecEnv:
     def test_dummy_vec_env_single(self):
@@ -78,6 +93,22 @@ class TestMakeMaskableVecEnv:
         vec = make_maskable_vec_env(n_envs=2, opponent="random", use_subprocess=False)
         obs = vec.reset()
         assert obs is not None
+        vec.close()
+
+    def test_max_turns_threaded_to_each_subenv(self):
+        """make_maskable_vec_env should forward max_turns to every sub-env."""
+        vec = make_maskable_vec_env(
+            n_envs=2,
+            opponent="random",
+            use_subprocess=False,
+            max_turns=9,
+        )
+        # DummyVecEnv exposes attrs across sub-envs via env_method / get_attr.
+        # Use a direct attribute fetch via the .envs list (DummyVecEnv only).
+        for sub in vec.envs:
+            # sub is the ActionMaskedEnv wrapper around StrategyGameEnv
+            assert sub.max_turns == 9
+            assert sub.game_state.max_turns == 9
         vec.close()
 
 
