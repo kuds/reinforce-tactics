@@ -32,6 +32,7 @@ def record_game_to_video(
     output_path: str = "game_replay.mp4",
     fps: int = 4,
     map_file: Optional[str] = None,
+    scale: int = 4,
 ) -> str:
     """
     Record a sequence of game state snapshots to an MP4 video.
@@ -59,7 +60,7 @@ def record_game_to_video(
         renderer.render()
         frames.append(renderer.get_rgb_array())
 
-    return _write_frames_to_video(frames, output_path, fps)
+    return _write_frames_to_video(frames, output_path, fps, scale=scale)
 
 
 def record_evaluation_to_video(
@@ -69,6 +70,7 @@ def record_evaluation_to_video(
     fps: int = 4,
     max_steps: int = 500,
     deterministic: bool = True,
+    scale: int = 4,
 ) -> Dict[str, Any]:
     """
     Run one episode of a trained model and record it to video.
@@ -88,6 +90,11 @@ def record_evaluation_to_video(
         fps: Frames per second for the output video
         max_steps: Maximum steps before stopping
         deterministic: Whether to use deterministic actions
+        scale: Integer upscale factor applied with nearest-neighbour
+               interpolation before encoding. The native render is
+               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map), which
+               is hard to read inline; the default of 4 produces a
+               crisp 768x768 video. Use 1 to disable.
 
     Returns:
         Dict with keys:
@@ -141,7 +148,7 @@ def record_evaluation_to_video(
     for _ in range(fps):
         frames.append(frames[-1])
 
-    video_path = _write_frames_to_video(frames, output_path, fps)
+    video_path = _write_frames_to_video(frames, output_path, fps, scale=scale)
 
     gs = _get_gs()
     winner = info.get("winner") or (gs.winner if gs.game_over else None)
@@ -160,6 +167,7 @@ def record_replay_to_video(
     replay_data: Dict[str, Any],
     output_path: str = "replay.mp4",
     fps: int = 4,
+    scale: int = 4,
 ) -> str:
     """
     Record a saved replay file to MP4 video using headless rendering.
@@ -241,7 +249,7 @@ def record_replay_to_video(
     for _ in range(fps):
         frames.append(frames[-1])
 
-    return _write_frames_to_video(frames, output_path, fps)
+    return _write_frames_to_video(frames, output_path, fps, scale=scale)
 
 
 def _execute_replay_action(game_state, action, translate_fn):
@@ -322,8 +330,13 @@ def _execute_replay_action(game_state, action, translate_fn):
         logger.warning("Error executing replay action %s: %s", action_type, e)
 
 
-def _write_frames_to_video(frames: list, output_path: str, fps: int) -> str:
-    """Write a list of RGB numpy arrays to an MP4 video file."""
+def _write_frames_to_video(frames: list, output_path: str, fps: int, scale: int = 1) -> str:
+    """Write a list of RGB numpy arrays to an MP4 video file.
+
+    ``scale`` upscales each frame with nearest-neighbour interpolation
+    before encoding so small grids (a 6x6 map renders at 192x192 px)
+    produce crisp, readable video.
+    """
     import cv2
 
     if not frames:
@@ -332,12 +345,16 @@ def _write_frames_to_video(frames: list, output_path: str, fps: int) -> str:
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    height, width = frames[0].shape[:2]
+    src_h, src_w = frames[0].shape[:2]
+    scale = max(1, int(scale))
+    width, height = src_w * scale, src_h * scale
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     for frame in frames:
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        if scale != 1:
+            bgr = cv2.resize(bgr, (width, height), interpolation=cv2.INTER_NEAREST)
         writer.write(bgr)
 
     writer.release()
