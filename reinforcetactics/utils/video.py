@@ -54,7 +54,6 @@ def record_game_to_video(
     if not game_states:
         raise ValueError("No game states to record")
 
-
     frames = []
     for state_dict in game_states:
         gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
@@ -121,7 +120,6 @@ def record_evaluation_to_video(
 
     # Check whether the env supports action masking (ActionMaskedEnv)
     _has_masks = hasattr(env, "action_masks") and callable(env.action_masks)
-
 
     obs, info = env.reset()
     # Create headless renderer after reset so game_state is fresh
