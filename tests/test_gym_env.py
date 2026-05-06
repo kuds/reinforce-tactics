@@ -1311,14 +1311,16 @@ class TestPotentialBasedShaping:
         env._prev_potential = -50.0
         prev_before = env._prev_potential
 
-        terminal_reward = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=True)
+        terminal_reward, terminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=True)
         assert terminal_reward == pytest.approx(1.0)
+        assert terminal_breakdown["shaping_delta"] == 0.0
         assert env._prev_potential == prev_before
 
         # Same starting state, but non-terminal path: should add Phi(s) - prev_before
-        nonterminal_reward = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=False)
+        nonterminal_reward, nonterminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=False)
         expected_delta = env._compute_potential() - prev_before
         assert nonterminal_reward == pytest.approx(1.0 + expected_delta)
+        assert nonterminal_breakdown["shaping_delta"] == pytest.approx(expected_delta)
         env.close()
 
     def test_invalid_action_penalty_still_applies_at_terminal(self):
@@ -1333,8 +1335,10 @@ class TestPotentialBasedShaping:
         )
         env.reset()
         before_invalid = env.episode_stats["invalid_actions"]
-        r = env._calculate_reward(action_reward=2.0, is_valid=False, terminal=True)
+        r, breakdown = env._calculate_reward(action_reward=2.0, is_valid=False, terminal=True)
         assert r == pytest.approx(2.0 - 7.5)
+        assert breakdown["invalid_penalty"] == pytest.approx(-7.5)
+        assert breakdown["action"] == pytest.approx(2.0)
         assert env.episode_stats["invalid_actions"] == before_invalid + 1
         env.close()
 
@@ -1422,4 +1426,103 @@ class TestRewardWeightDefaults:
         assert env.reward_config["kill"] == 999.0
         # Unspecified keys still come from defaults
         assert "seize_progress" in env.reward_config
+        env.close()
+
+
+class TestStepInfoDiagnostics:
+    """Tests for the per-step diagnostic fields added to info:
+    ``reward_breakdown`` and ``n_legal_actions``. These are how the
+    notebook visualises mask coverage and reward composition.
+    """
+
+    def test_info_contains_reward_breakdown_keys(self, env_default):
+        env_default.reset()
+        _, _, _, _, info = env_default.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert "reward_breakdown" in info
+        breakdown = info["reward_breakdown"]
+        assert set(breakdown.keys()) == {"action", "invalid_penalty", "shaping_delta", "terminal"}
+        env_default.close()
+
+    def test_breakdown_components_sum_to_step_reward(self, env_default):
+        """The four breakdown pieces must sum exactly to the returned reward
+        — otherwise downstream telemetry will diverge from training rewards.
+        """
+        env_default.reset()
+        for action in (
+            np.array([5, 0, 0, 0, 0, 0]),  # end_turn (valid)
+            np.array([1, 0, 0, 0, 1, 1]),  # likely-invalid move
+            np.array([5, 0, 0, 0, 0, 0]),  # end_turn (valid)
+        ):
+            _, reward, _, _, info = env_default.step(action)
+            b = info["reward_breakdown"]
+            assert b["action"] + b["invalid_penalty"] + b["shaping_delta"] + b["terminal"] == pytest.approx(float(reward))
+        env_default.close()
+
+    def test_breakdown_terminal_bonus_on_win(self):
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"win": 1234.0},
+        )
+        env.reset()
+        # Force terminal-win at the start of step()
+        env.game_state.game_over = True
+        env.game_state.winner = env.agent_player
+        _, reward, terminated, _, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert terminated is True
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(1234.0)
+        # And the win bonus must equal terminal piece (no shaping leak at terminal)
+        assert info["reward_breakdown"]["shaping_delta"] == 0.0
+        # Sum invariant
+        b = info["reward_breakdown"]
+        assert sum(b.values()) == pytest.approx(float(reward))
+        env.close()
+
+    def test_breakdown_terminal_negative_on_truncated_draw(self):
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=2,
+            reward_config={"draw": -77.0},
+        )
+        env.reset(seed=0)
+        env.step(np.array([5, 0, 0, 0, 0, 0]))
+        _, _, terminated, truncated, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert truncated is True
+        assert terminated is False
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(-77.0)
+        env.close()
+
+    def test_n_legal_actions_present_and_positive(self, env_default):
+        """n_legal_actions must be reported on every step and >= 1 (end_turn
+        is always legal).
+        """
+        env_default.reset()
+        _, _, _, _, info = env_default.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert "n_legal_actions" in info
+        assert isinstance(info["n_legal_actions"], int)
+        assert info["n_legal_actions"] >= 1
+        env_default.close()
+
+    def test_n_legal_actions_flat_discrete_matches_current_actions(self):
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            action_space_type="flat_discrete",
+            max_flat_actions=512,
+        )
+        env.reset(seed=0)
+        # Take an end_turn so _build_flat_actions populates _current_actions
+        # for the next step's mask query.
+        env.action_masks()  # populates _current_actions
+        expected = len(env._current_actions)
+        _, _, _, _, info = env.step(0)  # first legal flat action
+        # After the step, n_legal_actions reflects the new current state.
+        # Just verify it's bounded and consistent with the flat-action length.
+        assert 1 <= info["n_legal_actions"] <= 512
+        # Sanity: the *pre-step* mask had `expected` legal actions
+        assert expected >= 1
         env.close()

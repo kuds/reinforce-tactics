@@ -14,7 +14,7 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import RandomBot, SimpleBot
+from reinforcetactics.game.bot import NoopBot, RandomBot, SimpleBot
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
@@ -50,7 +50,7 @@ class StrategyGameEnv(gym.Env):
     def __init__(
         self,
         map_file: Optional[str] = None,
-        opponent: Optional[str] = "bot",  # 'bot', 'random', 'self', or None
+        opponent: Optional[str] = "bot",  # 'bot', 'random', 'noop', 'self', or None
         render_mode: Optional[str] = None,
         max_steps: int = 200,
         max_turns: Optional[int] = None,
@@ -67,7 +67,9 @@ class StrategyGameEnv(gym.Env):
 
         Args:
             map_file: Path to map CSV. If None, generates random map
-            opponent: Type of opponent ('bot', 'random', 'self', None for manual)
+            opponent: Type of opponent ('bot', 'random', 'noop', 'self',
+                None for manual). 'noop' is a stationary opponent that only
+                ends its turn — useful as a curriculum stage-0 / sanity check.
             render_mode: 'human' or 'rgb_array' or None
             max_steps: Maximum steps per episode
             max_turns: Maximum game turns before auto-draw (None = unlimited).
@@ -663,7 +665,7 @@ class StrategyGameEnv(gym.Env):
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
-        if self.opponent_type in ("bot", "random") and self.opponent is not None:
+        if self.opponent_type in ("bot", "random", "noop") and self.opponent is not None:
             self.opponent.take_turn()
         # 'self' mode is handled externally by the training script
 
@@ -696,7 +698,9 @@ class StrategyGameEnv(gym.Env):
 
         return potential
 
-    def _calculate_reward(self, action_reward: float, is_valid: bool, terminal: bool = False) -> float:
+    def _calculate_reward(
+        self, action_reward: float, is_valid: bool, terminal: bool = False
+    ) -> Tuple[float, Dict[str, float]]:
         """Calculate total reward including potential-based shaping terms.
 
         Args:
@@ -706,21 +710,37 @@ class StrategyGameEnv(gym.Env):
                 truncated). Potential-based shaping (Ng et al., 1999)
                 requires Phi(terminal) = 0 to preserve the optimal policy,
                 so the shaping delta is skipped on terminal steps.
+
+        Returns:
+            (total_reward, breakdown) where breakdown has keys
+            ``action``, ``invalid_penalty``, ``shaping_delta``. Terminal
+            (win/loss/draw) is summed in by the caller and stored under
+            ``terminal``.
         """
+        breakdown = {
+            "action": float(action_reward),
+            "invalid_penalty": 0.0,
+            "shaping_delta": 0.0,
+            "terminal": 0.0,
+        }
         reward = action_reward
 
         if not is_valid:
-            reward += self.reward_config["invalid_action"]
+            penalty = self.reward_config["invalid_action"]
+            reward += penalty
+            breakdown["invalid_penalty"] = float(penalty)
             self.episode_stats["invalid_actions"] += 1
 
         if not terminal:
             # Potential-based reward shaping: reward += Phi(s') - Phi(s)
             # This only rewards CHANGES in advantage, not maintaining a lead.
             current_potential = self._compute_potential()
-            reward += current_potential - self._prev_potential
+            delta = current_potential - self._prev_potential
+            reward += delta
+            breakdown["shaping_delta"] = float(delta)
             self._prev_potential = current_potential
 
-        return reward
+        return reward, breakdown
 
     def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
         """
@@ -757,25 +777,41 @@ class StrategyGameEnv(gym.Env):
         terminal = terminated or truncated
 
         # Calculate total reward
-        reward = self._calculate_reward(action_reward, is_valid, terminal=terminal)
+        reward, breakdown = self._calculate_reward(action_reward, is_valid, terminal=terminal)
         self.episode_stats["reward"] += reward
 
+        terminal_bonus = 0.0
         if terminated:
             if self.game_state.winner == self.agent_player:
-                reward += self.reward_config["win"]
+                terminal_bonus = self.reward_config["win"]
                 self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)
-                reward += self.reward_config.get("draw", 0.0)
+                terminal_bonus = self.reward_config.get("draw", 0.0)
                 self.episode_stats["winner"] = None
             else:
-                reward += self.reward_config["loss"]
+                terminal_bonus = self.reward_config["loss"]
                 self.episode_stats["winner"] = self.game_state.winner
         elif truncated:
             # Truncation penalty: agent hit step limit without finishing the game.
             # Without this, the agent has no incentive to end games decisively.
-            reward += self.reward_config.get("draw", 0.0)
+            terminal_bonus = self.reward_config.get("draw", 0.0)
             self.episode_stats["winner"] = None
+
+        reward += terminal_bonus
+        breakdown["terminal"] = float(terminal_bonus)
+
+        # Mask coverage diagnostic — count of legal actions visible to the
+        # policy at this step. For flat_discrete this is the number of bits
+        # set in the mask; for multi_discrete it's the size of the legal
+        # action set returned by the game state.
+        if self.action_space_type == "flat_discrete":
+            n_legal_actions = len(self._current_actions)
+        else:
+            legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+            # get_legal_actions returns lists of action dicts plus a boolean
+            # "end_turn" flag — count list lengths, then +1 for end_turn.
+            n_legal_actions = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
 
         # Get observation
         obs = self._get_obs()
@@ -788,6 +824,8 @@ class StrategyGameEnv(gym.Env):
             "turn": self.game_state.turn_number,
             "valid_action": is_valid,
             "action_type": action_dict["action_type"],
+            "reward_breakdown": breakdown,
+            "n_legal_actions": int(n_legal_actions),
         }
 
         return obs, reward, terminated, truncated, info
@@ -819,6 +857,8 @@ class StrategyGameEnv(gym.Env):
         opponent_player = 3 - self.agent_player
         if self.opponent_type == "bot":
             self.opponent = SimpleBot(self.game_state, player=opponent_player)
+        elif self.opponent_type == "noop":
+            self.opponent = NoopBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "random":
             # Derive a seeded RNG from gymnasium's np_random so the random
             # opponent is reproducible whenever reset() is called with a seed.

@@ -102,6 +102,26 @@ class BotUnitMixin:
         return best_pos
 
 
+class NoopBot(BotUnitMixin):
+    """Opponent that takes no actions and immediately ends its turn.
+
+    Useful as a curriculum stage-0 / sanity check for RL agents: with no
+    enemy units, no defenders, and a stationary HQ, even a random policy
+    will eventually walk a unit onto the enemy HQ and seize it. If an
+    agent fails to win against ``NoopBot``, the issue is in the policy
+    or reward signal — not the opponent strength or map difficulty.
+    """
+
+    def __init__(self, game_state, player=2):
+        self.game_state = game_state
+        self.bot_player = player
+
+    def take_turn(self):
+        """Do nothing; just end the turn."""
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
+
+
 class RandomBot(BotUnitMixin):
     """AI bot that picks uniformly random legal actions each turn.
 
