@@ -14,7 +14,7 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import SimpleBot
+from reinforcetactics.game.bot import RandomBot, SimpleBot
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
@@ -97,7 +97,7 @@ class StrategyGameEnv(gym.Env):
         if fog_of_war:
             self.game_state.update_visibility()
         self.opponent_type = opponent
-        self.opponent: Optional[SimpleBot] = None
+        self.opponent: Optional[Any] = None
         self.max_steps = max_steps
         self.current_step = 0
         self.hierarchical = hierarchical
@@ -626,9 +626,9 @@ class StrategyGameEnv(gym.Env):
                 if self.opponent_type and self.opponent_type != "self":
                     if not self.game_state.game_over:
                         self._opponent_turn()
+                        # Safety net: if the opponent's take_turn() did not end its
+                        # turn for some reason, end it here so play returns to the agent.
                         if not self.game_state.game_over:
-                            # Only end turn if opponent didn't already (SimpleBot
-                            # calls end_turn() internally; random opponent does not)
                             if self.game_state.current_player != self.agent_player:
                                 self.game_state.end_turn()
             elif action_type == 6:
@@ -644,66 +644,9 @@ class StrategyGameEnv(gym.Env):
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
-        if self.opponent_type == "bot":
-            if self.opponent:
-                self.opponent.take_turn()
-        elif self.opponent_type == "random":
-            self._random_opponent_turn()
+        if self.opponent_type in ("bot", "random") and self.opponent is not None:
+            self.opponent.take_turn()
         # 'self' mode is handled externally by the training script
-
-    def _random_opponent_turn(self, max_actions: int = 20):
-        """Execute random valid actions for the opponent player."""
-        opponent_player = 3 - self.agent_player
-        for _ in range(max_actions):
-            if self.game_state.game_over:
-                break
-            legal_actions = self.game_state.get_legal_actions(player=opponent_player)
-
-            # Collect all non-end-turn actions
-            all_actions = []
-            for action_key in [
-                "create_unit",
-                "move",
-                "attack",
-                "seize",
-                "paralyze",
-                "heal",
-                "cure",
-                "haste",
-                "defence_buff",
-                "attack_buff",
-            ]:
-                for action in legal_actions.get(action_key, []):
-                    all_actions.append((action_key, action))
-
-            if not all_actions:
-                break  # Only end_turn available, stop
-
-            # Pick a random action and execute it
-            action_key, action = random.choice(all_actions)
-            try:
-                if action_key == "create_unit":
-                    self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=opponent_player)
-                elif action_key == "move":
-                    self.game_state.move_unit(action["unit"], action["to_x"], action["to_y"])
-                elif action_key == "attack":
-                    self.game_state.attack(action["attacker"], action["target"])
-                elif action_key == "seize":
-                    self.game_state.seize(action["unit"])
-                elif action_key == "paralyze":
-                    self.game_state.paralyze(action["paralyzer"], action["target"])
-                elif action_key == "heal":
-                    self.game_state.heal(action["healer"], action["target"])
-                elif action_key == "cure":
-                    self.game_state.cure(action["curer"], action["target"])
-                elif action_key == "haste":
-                    self.game_state.haste(action["sorcerer"], action["target"])
-                elif action_key == "defence_buff":
-                    self.game_state.defence_buff(action["sorcerer"], action["target"])
-                elif action_key == "attack_buff":
-                    self.game_state.attack_buff(action["sorcerer"], action["target"])
-            except Exception:
-                continue  # Skip failed actions, try another
 
     def _compute_potential(self) -> float:
         """
@@ -833,8 +776,20 @@ class StrategyGameEnv(gym.Env):
             self.game_state.update_visibility()
 
         # Reset opponent
+        opponent_player = 3 - self.agent_player
         if self.opponent_type == "bot":
-            self.opponent = SimpleBot(self.game_state, player=2)
+            self.opponent = SimpleBot(self.game_state, player=opponent_player)
+        elif self.opponent_type == "random":
+            # Derive a seeded RNG from gymnasium's np_random so the random
+            # opponent is reproducible whenever reset() is called with a seed.
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = RandomBot(
+                self.game_state,
+                player=opponent_player,
+                rng=random.Random(bot_seed),
+            )
+        else:
+            self.opponent = None
 
         # Reset renderer
         if self.render_mode == "human" and self.renderer:

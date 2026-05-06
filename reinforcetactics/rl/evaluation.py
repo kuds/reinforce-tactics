@@ -24,6 +24,7 @@ def evaluate_model(
     env: Any,
     n_episodes: int = 50,
     deterministic: bool = True,
+    seed: Any = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a trained model and return summary statistics.
@@ -36,18 +37,27 @@ def evaluate_model(
         env: Gymnasium environment (single, not vectorized).
         n_episodes: Number of evaluation episodes.
         deterministic: Use deterministic actions (recommended for eval).
+        seed: Optional integer seed. When provided, episode ``i`` is reset
+            with ``seed + i`` so results are reproducible across runs.
 
     Returns:
         Dict with keys: win_rate, avg_reward, std_reward, avg_length,
-        std_length, wins, losses, draws, episodes.
+        std_length, wins, losses, draws, episodes, rewards, lengths.
+
+        ``rewards`` and ``lengths`` are the raw per-episode arrays (lists
+        of plain floats / ints), exposed so callers can plot full
+        distributions rather than only the mean ± std summary.
     """
     wins, losses, draws = 0, 0, 0
     rewards = []
     lengths = []
     has_action_masks = hasattr(env, "action_masks")
 
-    for _ in range(n_episodes):
-        obs, _ = env.reset()
+    for ep_idx in range(n_episodes):
+        if seed is not None:
+            obs, _ = env.reset(seed=int(seed) + ep_idx)
+        else:
+            obs, _ = env.reset()
         done = False
         ep_reward = 0.0
         ep_len = 0
@@ -89,12 +99,14 @@ def evaluate_model(
 
     return {
         "win_rate": wins / n_episodes if n_episodes > 0 else 0.0,
-        "avg_reward": float(rewards_arr.mean()),
-        "std_reward": float(rewards_arr.std()),
-        "avg_length": float(lengths_arr.mean()),
-        "std_length": float(lengths_arr.std()),
+        "avg_reward": float(rewards_arr.mean()) if n_episodes > 0 else 0.0,
+        "std_reward": float(rewards_arr.std()) if n_episodes > 0 else 0.0,
+        "avg_length": float(lengths_arr.mean()) if n_episodes > 0 else 0.0,
+        "std_length": float(lengths_arr.std()) if n_episodes > 0 else 0.0,
         "wins": wins,
         "losses": losses,
         "draws": draws,
         "episodes": n_episodes,
+        "rewards": [float(r) for r in rewards],
+        "lengths": [int(length) for length in lengths],
     }
