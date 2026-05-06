@@ -53,6 +53,7 @@ class StrategyGameEnv(gym.Env):
         opponent: Optional[str] = "bot",  # 'bot', 'random', 'self', or None
         render_mode: Optional[str] = None,
         max_steps: int = 200,
+        max_turns: Optional[int] = None,
         reward_config: Optional[Dict[str, float]] = None,
         hierarchical: bool = False,  # Enable for HRL
         goal_space_size: int = 64,  # For HRL goal space
@@ -69,6 +70,10 @@ class StrategyGameEnv(gym.Env):
             opponent: Type of opponent ('bot', 'random', 'self', None for manual)
             render_mode: 'human' or 'rgb_array' or None
             max_steps: Maximum steps per episode
+            max_turns: Maximum game turns before auto-draw (None = unlimited).
+                Setting this lets games end via game rules (terminated=True)
+                rather than only via env step truncation, which avoids the
+                value-bootstrapping mismatch in PPO at episode end.
             reward_config: Dict of reward weights
             hierarchical: Whether to use hierarchical action space
             goal_space_size: Size of goal space for HRL
@@ -91,7 +96,14 @@ class StrategyGameEnv(gym.Env):
         self.enabled_units = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
         # Fog of war setting
         self.fog_of_war = fog_of_war
-        self.game_state = GameState(map_data, num_players=2, enabled_units=self.enabled_units, fog_of_war=fog_of_war)
+        self.max_turns = max_turns
+        self.game_state = GameState(
+            map_data,
+            num_players=2,
+            max_turns=max_turns,
+            enabled_units=self.enabled_units,
+            fog_of_war=fog_of_war,
+        )
 
         # Initialize visibility at game start
         if fog_of_war:
@@ -106,7 +118,14 @@ class StrategyGameEnv(gym.Env):
         # Which player the RL agent controls (1 or 2). SelfPlayEnv may set to 2.
         self.agent_player = 1
 
-        # Reward configuration with defaults
+        # Reward configuration with defaults.
+        #
+        # Weights are tuned so that capturing the enemy HQ dominates the
+        # alternative of farming kills against a respawning opponent. Old
+        # defaults made a single kill (+10) worth more than a turn of seize
+        # progress (+1), pushing the policy into a kill-farm local optimum
+        # that never finishes the game. Now: capture (+200) >> a full kill
+        # loop, and seize_progress (+5) > a typical attack hit.
         default_reward_config = {
             "win": 1000.0,
             "loss": -1000.0,
@@ -116,15 +135,15 @@ class StrategyGameEnv(gym.Env):
             "structure_control": 1.0,
             "invalid_action": -10.0,
             "turn_penalty": -1.0,
-            # Action rewards (moved from hardcoded values for tunability)
-            "create_unit": 2.0,
-            "move": 0.1,
-            "damage_scale": 0.2,  # reward per damage point (was damage/5.0)
-            "kill": 10.0,
-            "seize_progress": 1.0,
-            "capture": 20.0,
+            # Action rewards
+            "create_unit": 0.5,
+            "move": 0.0,
+            "damage_scale": 0.05,  # reward per damage point
+            "kill": 5.0,
+            "seize_progress": 5.0,
+            "capture": 200.0,
             "cure": 5.0,
-            "heal_scale": 0.5,  # reward per HP healed (was heal/2.0)
+            "heal_scale": 0.5,  # reward per HP healed
             "paralyze": 8.0,
             "haste": 6.0,
             "defence_buff": 5.0,
@@ -677,19 +696,29 @@ class StrategyGameEnv(gym.Env):
 
         return potential
 
-    def _calculate_reward(self, action_reward: float, is_valid: bool) -> float:
-        """Calculate total reward including potential-based shaping terms."""
+    def _calculate_reward(self, action_reward: float, is_valid: bool, terminal: bool = False) -> float:
+        """Calculate total reward including potential-based shaping terms.
+
+        Args:
+            action_reward: Reward from the executed action.
+            is_valid: Whether the action was a valid game action.
+            terminal: True if this step ends the episode (terminated or
+                truncated). Potential-based shaping (Ng et al., 1999)
+                requires Phi(terminal) = 0 to preserve the optimal policy,
+                so the shaping delta is skipped on terminal steps.
+        """
         reward = action_reward
 
         if not is_valid:
             reward += self.reward_config["invalid_action"]
             self.episode_stats["invalid_actions"] += 1
 
-        # Potential-based reward shaping: reward += Phi(s') - Phi(s)
-        # This only rewards CHANGES in advantage, not maintaining a lead
-        current_potential = self._compute_potential()
-        reward += current_potential - self._prev_potential
-        self._prev_potential = current_potential
+        if not terminal:
+            # Potential-based reward shaping: reward += Phi(s') - Phi(s)
+            # This only rewards CHANGES in advantage, not maintaining a lead.
+            current_potential = self._compute_potential()
+            reward += current_potential - self._prev_potential
+            self._prev_potential = current_potential
 
         return reward
 
@@ -720,13 +749,16 @@ class StrategyGameEnv(gym.Env):
         action_dict = self._encode_action(action)
         action_reward, is_valid = self._execute_action(action_dict)
 
-        # Calculate total reward
-        reward = self._calculate_reward(action_reward, is_valid)
-        self.episode_stats["reward"] += reward
-
-        # Check termination
+        # Determine terminal status BEFORE shaping so potential-based shaping
+        # can be skipped on terminal steps (where Phi(terminal) must be 0
+        # for the shaping to be policy-invariant).
         terminated = self.game_state.game_over
         truncated = self.current_step >= self.max_steps
+        terminal = terminated or truncated
+
+        # Calculate total reward
+        reward = self._calculate_reward(action_reward, is_valid, terminal=terminal)
+        self.episode_stats["reward"] += reward
 
         if terminated:
             if self.game_state.winner == self.agent_player:
@@ -764,16 +796,24 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
-        # Reset game state (preserving enabled_units and fog_of_war configuration)
+        # Reset game state (preserving enabled_units, fog_of_war and max_turns)
         self.game_state = GameState(
-            self.initial_map_data, num_players=2, enabled_units=self.enabled_units, fog_of_war=self.fog_of_war
+            self.initial_map_data,
+            num_players=2,
+            max_turns=self.max_turns,
+            enabled_units=self.enabled_units,
+            fog_of_war=self.fog_of_war,
         )
         self.current_step = 0
-        self._prev_potential = 0.0
 
         # Initialize visibility at game start
         if self.fog_of_war:
             self.game_state.update_visibility()
+
+        # Initialize prev potential to Phi(s_0) so the first step's shaping
+        # delta is Phi(s_1) - Phi(s_0), preserving the policy-invariance
+        # property of potential-based reward shaping (Ng et al., 1999).
+        self._prev_potential = self._compute_potential()
 
         # Reset opponent
         opponent_player = 3 - self.agent_player
