@@ -137,15 +137,30 @@ def train_flat_baseline(args):
             device=args.device,
         )
 
-    # Callbacks
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=str(log_dir / "best_model"),
-        log_path=str(log_dir / "eval"),
-        eval_freq=args.eval_freq,
-        n_eval_episodes=args.n_eval_episodes,
-        deterministic=True,
-    )
+    # Callbacks. With action masking, use MaskableEvalCallback so masks are
+    # applied during evaluation — plain EvalCallback would let the policy
+    # pick invalid actions at eval time.
+    if use_masking:
+        from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
+
+        eval_callback = MaskableEvalCallback(
+            eval_env,
+            best_model_save_path=str(log_dir / "best_model"),
+            log_path=str(log_dir / "eval"),
+            eval_freq=args.eval_freq,
+            n_eval_episodes=args.n_eval_episodes,
+            deterministic=True,
+            use_masking=True,
+        )
+    else:
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=str(log_dir / "best_model"),
+            log_path=str(log_dir / "eval"),
+            eval_freq=args.eval_freq,
+            n_eval_episodes=args.n_eval_episodes,
+            deterministic=True,
+        )
 
     checkpoint_callback = CheckpointCallback(
         save_freq=args.checkpoint_freq, save_path=str(checkpoint_dir), name_prefix="flat_ppo"

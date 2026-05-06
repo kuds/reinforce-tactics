@@ -114,3 +114,54 @@ class TestEvaluateModel:
         result = evaluate_model(model, env, n_episodes=2)
         assert result["wins"] == 1
         assert result["losses"] == 1
+
+    def test_track_breakdown_default_omits_extra_keys(self):
+        env = _StubEnv([[(0.0, True, 1)]])
+        result = evaluate_model(_StubModel(), env, n_episodes=1)
+        assert "action_counts" not in result
+        assert "reward_components" not in result
+
+    def test_track_breakdown_accumulates_action_and_reward_breakdown(self):
+        # Stub env that emits action_type + reward_breakdown in step info.
+        class _BreakdownEnv(_StubEnv):
+            def __init__(self, episodes, agent_player=1):
+                super().__init__(episodes, agent_player=agent_player)
+
+            def step(self, action):
+                ep = self._episodes[self._idx]
+                r, term, winner = ep[self._step]
+                self._step += 1
+                info = {
+                    "action_type": 1,  # "move"
+                    "reward_breakdown": {
+                        "action": 0.5,
+                        "shaping_delta": 0.1,
+                        "invalid_penalty": 0.0,
+                        "terminal": 100.0 if term else 0.0,
+                    },
+                }
+                if term and winner is not None:
+                    info["episode_stats"] = {"winner": winner}
+                elif term:
+                    info["episode_stats"] = {"winner": None}
+                return {"obs": np.zeros(1)}, r, term, False, info
+
+        episodes = [
+            [(0.5, False, None), (0.5, True, 1)],  # 2 steps, win
+            [(0.5, False, None), (0.5, True, 2)],  # 2 steps, loss
+        ]
+        env = _BreakdownEnv(episodes)
+
+        result = evaluate_model(_StubModel(), env, n_episodes=2, track_breakdown=True)
+
+        assert result["action_counts"]["move"] == 4  # 2 eps * 2 steps
+        assert result["action_counts"]["create_unit"] == 0
+        assert result["reward_components"]["action"] == 2.0  # 0.5 * 4
+        assert result["reward_components"]["terminal"] == 200.0  # 100 per terminal step
+
+    def test_track_breakdown_handles_missing_info_fields(self):
+        # Stub env without action_type / reward_breakdown — counters stay 0.
+        env = _StubEnv([[(0.0, True, 1)]])
+        result = evaluate_model(_StubModel(), env, n_episodes=1, track_breakdown=True)
+        assert sum(result["action_counts"].values()) == 0
+        assert all(v == 0.0 for v in result["reward_components"].values())

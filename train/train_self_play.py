@@ -34,11 +34,11 @@ from typing import Any, List, Optional
 
 import numpy as np
 import torch
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.callbacks import (
     BaseCallback,
     CallbackList,
     CheckpointCallback,
-    EvalCallback,
 )
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import VecMonitor
@@ -338,14 +338,17 @@ def train_self_play(args) -> Path:
     )
     callbacks.append(checkpoint_callback)
 
-    # Evaluation callback (evaluate against self)
-    eval_callback = EvalCallback(
+    # Evaluation callback (evaluate against self). MaskableEvalCallback
+    # forwards action masks during evaluation so MaskablePPO selects only
+    # valid actions — using SB3's plain EvalCallback would ignore masks.
+    eval_callback = MaskableEvalCallback(
         eval_env,
         best_model_save_path=str(log_dir / "best_model"),
         log_path=str(log_dir / "eval"),
         eval_freq=args.eval_freq,
         n_eval_episodes=args.n_eval_episodes,
         deterministic=True,
+        use_masking=True,
     )
     callbacks.append(eval_callback)
 
