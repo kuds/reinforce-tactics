@@ -5,6 +5,8 @@ stable-baselines3
 sb3-contrib
 numpy
 opencv-python
+imageio
+imageio-ffmpeg
 torch
 tensorboard
 matplotlib
