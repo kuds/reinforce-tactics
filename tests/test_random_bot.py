@@ -254,6 +254,12 @@ class TestEvaluateModelSeeding:
         assert m_a["avg_reward"] == m_b["avg_reward"]
         assert m_a["avg_length"] == m_b["avg_length"]
 
+        # Raw per-episode arrays should also be reproducible and JSON-friendly.
+        assert m_a["rewards"] == m_b["rewards"]
+        assert m_a["lengths"] == m_b["lengths"]
+        assert all(isinstance(r, float) for r in m_a["rewards"])
+        assert all(isinstance(length, int) for length in m_a["lengths"])
+
     def test_evaluate_model_no_seed_still_works(self):
         """evaluate_model() with seed=None must still complete without error."""
         model = _ScriptedModel()
