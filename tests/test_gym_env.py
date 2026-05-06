@@ -1194,3 +1194,232 @@ class TestActionMaskingWrapper:
         assert "action_type_distribution" in stats
 
         wrapped_env.close()
+
+
+# ==============================================================================
+# 11. MAX_TURNS, POTENTIAL-BASED SHAPING, AND TERMINAL HANDLING
+# ==============================================================================
+
+
+class TestMaxTurns:
+    """Tests for the max_turns parameter and natural game termination.
+
+    `max_turns` lets games end via game rules (terminated=True) rather than
+    only via env step truncation, which avoids PPO bootstrapping V(s')
+    when the intended outcome is a draw penalty.
+    """
+
+    def test_max_turns_passed_to_game_state(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None, max_turns=15)
+        assert env.max_turns == 15
+        assert env.game_state.max_turns == 15
+        env.close()
+
+    def test_max_turns_default_is_none(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        assert env.max_turns is None
+        assert env.game_state.max_turns is None
+        env.close()
+
+    def test_max_turns_preserved_across_reset(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None, max_turns=7)
+        env.reset()
+        env.step(np.array([5, 0, 0, 0, 0, 0]))
+        env.reset()
+        assert env.game_state.max_turns == 7
+        env.close()
+
+    def test_max_turns_triggers_terminated_not_truncated(self):
+        """When max_turns is hit, the env should terminate (game-rules) and
+        report winner=None, not truncate. PPO bootstraps V(s') on truncation;
+        terminated=True ensures the draw penalty is the actual return.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=10_000,  # well beyond what max_turns=3 will use
+            max_turns=3,
+        )
+        env.reset(seed=0)
+        terminated = truncated = False
+        for _ in range(2_000):
+            _, _, terminated, truncated, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+            if terminated or truncated:
+                break
+        assert terminated is True
+        assert truncated is False
+        assert env.game_state.winner is None
+        assert env.game_state.turn_number >= 3
+        env.close()
+
+    def test_max_turns_applies_draw_reward_at_termination(self):
+        """The draw branch in step() must fire when max_turns terminates."""
+        custom = {"draw": -123.0}
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=10_000,
+            max_turns=2,
+            reward_config=custom,
+        )
+        env.reset(seed=0)
+        last_reward = 0.0
+        for _ in range(2_000):
+            _, last_reward, terminated, truncated, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+            if terminated or truncated:
+                break
+        # Last step's reward should include the -123 draw penalty.
+        # turn_penalty also fires on the same step, so reward <= -123.
+        assert last_reward <= -123.0
+        env.close()
+
+
+class TestPotentialBasedShaping:
+    """Tests for potential-based reward shaping (Ng et al., 1999).
+
+    Two invariants matter:
+    1. _prev_potential after reset() equals Phi(s_0), so the first step's
+       shaping delta is Phi(s_1) - Phi(s_0), not Phi(s_1) - 0.
+    2. Phi(terminal) is treated as 0 — no shaping delta on terminal/truncated
+       steps. Otherwise the shaping corrupts the win/loss/draw signal.
+    """
+
+    def test_prev_potential_initialized_to_phi_s0_after_reset(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        env.reset()
+        # _prev_potential must match the freshly-computed potential, not 0.
+        assert env._prev_potential == env._compute_potential()
+        env.close()
+
+    def test_prev_potential_reinitialized_after_second_reset(self):
+        env = StrategyGameEnv(map_file=None, opponent="random", render_mode=None)
+        env.reset()
+        # Mutate _prev_potential to ensure the next reset overwrites it
+        env._prev_potential = -999.0
+        env.reset()
+        assert env._prev_potential == env._compute_potential()
+        env.close()
+
+    def test_no_shaping_delta_on_terminal_calculate_reward(self):
+        """On a terminal step, _calculate_reward must skip the shaping delta
+        and leave _prev_potential untouched.
+        """
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        env.reset()
+        env._prev_potential = -50.0
+        prev_before = env._prev_potential
+
+        terminal_reward = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=True)
+        assert terminal_reward == pytest.approx(1.0)
+        assert env._prev_potential == prev_before
+
+        # Same starting state, but non-terminal path: should add Phi(s) - prev_before
+        nonterminal_reward = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=False)
+        expected_delta = env._compute_potential() - prev_before
+        assert nonterminal_reward == pytest.approx(1.0 + expected_delta)
+        env.close()
+
+    def test_invalid_action_penalty_still_applies_at_terminal(self):
+        """Even on terminal steps, the invalid_action penalty should fire.
+        Only the shaping delta is skipped at termination.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"invalid_action": -7.5},
+        )
+        env.reset()
+        before_invalid = env.episode_stats["invalid_actions"]
+        r = env._calculate_reward(action_reward=2.0, is_valid=False, terminal=True)
+        assert r == pytest.approx(2.0 - 7.5)
+        assert env.episode_stats["invalid_actions"] == before_invalid + 1
+        env.close()
+
+    def test_terminal_step_skips_shaping_in_full_step_loop(self):
+        """End-to-end: when game_over fires inside step(), the returned
+        reward should not contain a shaping delta — only action_reward + terminal.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "win": 1000.0,
+                "loss": -1000.0,
+                "draw": 0.0,
+                "income_diff": 0.0,
+                "unit_diff": 0.0,
+                "structure_control": 0.0,
+                "turn_penalty": 0.0,
+                "invalid_action": -10.0,
+            },
+        )
+        env.reset()
+        # Force terminal at the start of step()
+        env.game_state.game_over = True
+        env.game_state.winner = 1
+        # Pre-set prev_potential to a non-zero value to make any stale delta visible
+        env._prev_potential = -42.0
+        _, reward, terminated, _, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert terminated is True
+        # Reward is exactly the win bonus — no shaping leaked, no turn_penalty.
+        assert reward == pytest.approx(1000.0)
+        env.close()
+
+
+class TestRewardWeightDefaults:
+    """Defaults are tuned so HQ capture dominates kill-farming.
+
+    Guards against accidental regressions in the default reward config
+    that previously caused 0% win rate (kill-farm local optimum).
+    """
+
+    def test_default_capture_dominates_kill_loop(self):
+        """A single capture must outweigh a full episode of kills."""
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        rc = env.reward_config
+        # Even 10 kills + their damage (~3 dmg each) shouldn't beat one capture.
+        kill_loop = 10 * (rc["kill"] + 3 * rc["damage_scale"])
+        assert rc["capture"] > kill_loop
+        env.close()
+
+    def test_default_seize_progress_at_least_as_strong_as_kill(self):
+        """A turn of seize_progress should be competitive with a kill."""
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        rc = env.reward_config
+        assert rc["seize_progress"] >= rc["kill"]
+        env.close()
+
+    def test_default_move_does_not_farm_reward(self):
+        """`move` should not provide a meaningful per-action bonus that
+        the agent can farm by shuffling units.
+        """
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        assert env.reward_config["move"] == pytest.approx(0.0)
+        env.close()
+
+    def test_default_win_loss_draw_unchanged(self):
+        """Terminal rewards should remain at their established magnitudes."""
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        rc = env.reward_config
+        assert rc["win"] == 1000.0
+        assert rc["loss"] == -1000.0
+        assert rc["draw"] == -200.0
+        env.close()
+
+    def test_user_reward_config_overrides_defaults(self):
+        """Caller-provided reward_config must still override the new defaults."""
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"capture": 1.0, "kill": 999.0},
+        )
+        assert env.reward_config["capture"] == 1.0
+        assert env.reward_config["kill"] == 999.0
+        # Unspecified keys still come from defaults
+        assert "seize_progress" in env.reward_config
+        env.close()
