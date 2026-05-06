@@ -2,6 +2,7 @@
 AI bots for computer opponents with support for all unit types.
 """
 
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 from reinforcetactics.constants import (
@@ -99,6 +100,90 @@ class BotUnitMixin:
                 best_pos = pos
 
         return best_pos
+
+
+class RandomBot(BotUnitMixin):
+    """AI bot that picks uniformly random legal actions each turn.
+
+    Useful as a weak training opponent for RL agents and for sanity-checking
+    environment dynamics. Picks actions uniformly from the set of currently
+    legal non-end-turn actions, then ends its turn.
+    """
+
+    # Action keys to sample from (all legal action types except end_turn).
+    _SAMPLE_ACTION_KEYS = (
+        "create_unit",
+        "move",
+        "attack",
+        "seize",
+        "paralyze",
+        "heal",
+        "cure",
+        "haste",
+        "defence_buff",
+        "attack_buff",
+    )
+
+    def __init__(self, game_state, player=2, max_actions: int = 20):
+        """
+        Initialize the bot.
+
+        Args:
+            game_state: GameState instance
+            player: Player number for this bot
+            max_actions: Maximum number of random actions to attempt per turn
+        """
+        self.game_state = game_state
+        self.bot_player = player
+        self.max_actions = max_actions
+
+    def take_turn(self):
+        """Execute random legal actions, then end the turn."""
+        for _ in range(self.max_actions):
+            if self.game_state.game_over:
+                break
+
+            legal_actions = self.game_state.get_legal_actions(player=self.bot_player)
+
+            all_actions = []
+            for action_key in self._SAMPLE_ACTION_KEYS:
+                for action in legal_actions.get(action_key, []):
+                    all_actions.append((action_key, action))
+
+            if not all_actions:
+                break  # Only end_turn available
+
+            action_key, action = random.choice(all_actions)
+            try:
+                self._execute(action_key, action)
+            except Exception:
+                continue  # Skip failed actions, try another
+
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
+
+    def _execute(self, action_key: str, action: Dict[str, Any]) -> None:
+        """Dispatch a sampled action to the appropriate game-state method."""
+        if action_key == "create_unit":
+            self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=self.bot_player)
+        elif action_key == "move":
+            self.game_state.move_unit(action["unit"], action["to_x"], action["to_y"])
+        elif action_key == "attack":
+            self.game_state.attack(action["attacker"], action["target"])
+        elif action_key == "seize":
+            self.game_state.seize(action["unit"])
+        elif action_key == "paralyze":
+            self.game_state.paralyze(action["paralyzer"], action["target"])
+        elif action_key == "heal":
+            self.game_state.heal(action["healer"], action["target"])
+        elif action_key == "cure":
+            self.game_state.cure(action["curer"], action["target"])
+        elif action_key == "haste":
+            self.game_state.haste(action["sorcerer"], action["target"])
+        elif action_key == "defence_buff":
+            self.game_state.defence_buff(action["sorcerer"], action["target"])
+        elif action_key == "attack_buff":
+            self.game_state.attack_buff(action["sorcerer"], action["target"])
 
 
 class SimpleBot(BotUnitMixin):
