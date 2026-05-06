@@ -874,8 +874,9 @@ class Renderer:
 
     def get_rgb_array(self):
         """Get the current screen as RGB array."""
-        # Convert pygame surface to numpy array
-        return np.transpose(np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2))
+        # array3d copies and does not lock the surface; pixels3d returns a
+        # locked view that can silently block subsequent blits.
+        return np.transpose(pygame.surfarray.array3d(self.screen), axes=(1, 0, 2))
 
     def set_unit_animation_state(self, unit, state):
         """
