@@ -15,14 +15,14 @@ from gymnasium import spaces
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import AdvancedBot, MediumBot, NoopBot, RandomBot, SimpleBot
-
-# Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
-# ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "noop"})
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
+
+# Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
+# ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "noop"})
 
 
 class StrategyGameEnv(gym.Env):
