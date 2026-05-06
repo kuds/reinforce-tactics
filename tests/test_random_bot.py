@@ -234,12 +234,8 @@ class TestEvaluateModelSeeding:
     def test_evaluate_model_seed_reproducible(self):
         """evaluate_model(seed=X) must produce identical metrics across runs."""
         model = _ScriptedModel()
-        env_a = make_maskable_env(
-            map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20, seed=11
-        )
-        env_b = make_maskable_env(
-            map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20, seed=11
-        )
+        env_a = make_maskable_env(map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20, seed=11)
+        env_b = make_maskable_env(map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20, seed=11)
 
         m_a = evaluate_model(model, env_a, n_episodes=3, seed=11)
         m_b = evaluate_model(model, env_b, n_episodes=3, seed=11)
@@ -263,9 +259,7 @@ class TestEvaluateModelSeeding:
     def test_evaluate_model_no_seed_still_works(self):
         """evaluate_model() with seed=None must still complete without error."""
         model = _ScriptedModel()
-        env = make_maskable_env(
-            map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20
-        )
+        env = make_maskable_env(map_file="maps/1v1/beginner.csv", opponent="random", max_steps=20)
         metrics = evaluate_model(model, env, n_episodes=2)
         env.close()
 
