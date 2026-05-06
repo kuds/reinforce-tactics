@@ -32,7 +32,7 @@ def record_game_to_video(
     output_path: str = "game_replay.mp4",
     fps: int = 4,
     map_file: Optional[str] = None,
-    scale: int = 4,
+    scale: int = 1,
     use_pixel_art: bool = False,
 ) -> str:
     """
@@ -71,7 +71,7 @@ def record_evaluation_to_video(
     fps: int = 4,
     max_steps: int = 500,
     deterministic: bool = True,
-    scale: int = 4,
+    scale: int = 1,
     use_pixel_art: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -94,9 +94,9 @@ def record_evaluation_to_video(
         deterministic: Whether to use deterministic actions
         scale: Integer upscale factor applied with nearest-neighbour
                interpolation before encoding. The native render is
-               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map), which
-               is hard to read inline; the default of 4 produces a
-               crisp 768x768 video. Use 1 to disable.
+               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map). The
+               default of 1 writes the native resolution; pass a larger
+               integer (e.g. 4) for a crisp upscaled video.
         use_pixel_art: If True, render with the bundled pixel-art tile
                and unit sprites from ``assets/sprites/`` instead of the
                default fallback (coloured rects + unit letters). Falls
@@ -173,7 +173,7 @@ def record_replay_to_video(
     replay_data: Dict[str, Any],
     output_path: str = "replay.mp4",
     fps: int = 4,
-    scale: int = 4,
+    scale: int = 1,
     use_pixel_art: bool = False,
 ) -> str:
     """
