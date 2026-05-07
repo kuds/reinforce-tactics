@@ -53,6 +53,18 @@ ppo:
   ent_coef: 0.05
   vf_coef: 0.5
   max_grad_norm: 0.5
+  # SB3 defaults `net_arch` to [64, 64], which is undersized for this env:
+  # ~734 input dims (grid + units + global + action_mask) feeding a 64-dim
+  # bottleneck before a flat-discrete head with up to 512 logits. The
+  # policy literally has fewer hidden dims than action choices. Bump to
+  # [256, 256] (~150K params total) so the value head can actually
+  # distinguish board states across map transitions -- previous runs
+  # showed catastrophic value dislocation on starter -> beginner that's
+  # plausibly capacity-limited as well as transfer-limited.
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
 
 # Curriculum:
 #   starter map: noop -> random -> simple -> medium

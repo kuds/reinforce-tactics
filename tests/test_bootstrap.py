@@ -283,6 +283,17 @@ class TestBootstrapConfig:
         # because the seize signal was suppressed.
         assert by_name["starter_noop"].reward_config is None
         assert by_name["beginner_noop"].reward_config is None
+        # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
+        # undersized for a Dict obs (~734 input dims) feeding a flat-
+        # discrete head with up to 512 logits. The shipped config bumps
+        # both pi and vf to at least [128, 128]. Catches accidental
+        # removal of the policy_kwargs block.
+        pk = cfg.ppo.policy_kwargs or {}
+        net_arch = pk.get("net_arch")
+        assert net_arch is not None, "expected ppo.policy_kwargs.net_arch in shipped config"
+        assert isinstance(net_arch, dict)
+        assert min(net_arch["pi"]) >= 128
+        assert min(net_arch["vf"]) >= 128
 
     def test_reward_config_override_merges_with_defaults(self):
         # Stage override should *merge* over BootstrapEnvDefaults.reward_config,
