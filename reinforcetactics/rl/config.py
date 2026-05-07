@@ -68,6 +68,11 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     use_action_masking: bool = True
     device: str = "auto"
+    # Forwarded to MaskablePPO/PPO as ``policy_kwargs``. Use to set
+    # ``net_arch`` (e.g. ``{"net_arch": {"pi": [256, 256], "vf": [256, 256]}}``)
+    # or wire in a custom features extractor. ``None`` keeps SB3's defaults
+    # (MlpPolicy: ``[64, 64]``; CombinedExtractor for Dict obs spaces).
+    policy_kwargs: Optional[Dict[str, Any]] = None
 
     def as_sb3_kwargs(self) -> Dict[str, Any]:
         """Return the subset of fields accepted by PPO/MaskablePPO __init__."""

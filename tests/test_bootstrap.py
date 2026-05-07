@@ -266,12 +266,34 @@ class TestBootstrapConfig:
         assert by_name["beginner_noop"].max_turns >= 30
         assert by_name["beginner_noop"].ent_coef is not None
         assert by_name["beginner_noop"].ent_coef > cfg.ppo.ent_coef
-        # Reward-shape override on beginner stages: HQ capture is much
-        # harder than elimination on the bigger map, so the two terminal
-        # rewards must be equalized (or capture <= elimination).
+        # Reward-shape override on beginner stages WITH opponents: HQ
+        # capture is much harder than elimination on the bigger map, so
+        # the two terminal rewards must be equalized (or capture <=
+        # elimination).
         beginner_random = by_name["beginner_random"]
         assert beginner_random.reward_config is not None
         assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
+        # Noop stages MUST inherit the env defaults rather than the
+        # elimination-friendly override -- on noop there are no enemy
+        # units to eliminate (NoopBot never builds), so HQ capture is the
+        # ONLY win path. We want the env's default heavy HQ-capture
+        # signal (5000 + 300/turn seize), not the equalised 3000/50.
+        # Regression: an earlier config applied the override to
+        # beginner_noop and the agent spent 650k+ steps spamming end_turn
+        # because the seize signal was suppressed.
+        assert by_name["starter_noop"].reward_config is None
+        assert by_name["beginner_noop"].reward_config is None
+        # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
+        # undersized for a Dict obs (~734 input dims) feeding a flat-
+        # discrete head with up to 512 logits. The shipped config bumps
+        # both pi and vf to at least [128, 128]. Catches accidental
+        # removal of the policy_kwargs block.
+        pk = cfg.ppo.policy_kwargs or {}
+        net_arch = pk.get("net_arch")
+        assert net_arch is not None, "expected ppo.policy_kwargs.net_arch in shipped config"
+        assert isinstance(net_arch, dict)
+        assert min(net_arch["pi"]) >= 128
+        assert min(net_arch["vf"]) >= 128
 
     def test_reward_config_override_merges_with_defaults(self):
         # Stage override should *merge* over BootstrapEnvDefaults.reward_config,

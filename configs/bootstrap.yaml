@@ -53,6 +53,18 @@ ppo:
   ent_coef: 0.05
   vf_coef: 0.5
   max_grad_norm: 0.5
+  # SB3 defaults `net_arch` to [64, 64], which is undersized for this env:
+  # ~734 input dims (grid + units + global + action_mask) feeding a 64-dim
+  # bottleneck before a flat-discrete head with up to 512 logits. The
+  # policy literally has fewer hidden dims than action choices. Bump to
+  # [256, 256] (~150K params total) so the value head can actually
+  # distinguish board states across map transitions -- previous runs
+  # showed catastrophic value dislocation on starter -> beginner that's
+  # plausibly capacity-limited as well as transfer-limited.
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
 
 # Curriculum:
 #   starter map: noop -> random -> simple -> medium
@@ -76,14 +88,22 @@ ppo:
 # Per-stage overrides handle the starter -> beginner transition:
 #   - max_steps / max_turns:  bigger map needs ~3x the turn budget
 #                             (units take longer to traverse).
-#   - ent_coef:               one-time bump on `beginner_noop` to break the
-#                             starter-map policy out of its rut, cooled in
-#                             subsequent stages.
-#   - reward_config:          beginner-map geometry makes HQ capture much
-#                             harder than elimination, so we equalize the
-#                             two terminal rewards (was 5000/1000) and drop
+#   - ent_coef:               modestly elevated on the first beginner
+#                             stages so the policy can adapt navigation
+#                             to a bigger map without regressing.
+#   - reward_config:          ONLY on beginner stages WITH opponents.
+#                             Beginner-map geometry makes HQ capture much
+#                             harder than elimination once enemy units are
+#                             on the board, so we equalize the two terminal
+#                             rewards (was 5000/1000) and drop
 #                             `seize_progress` so the agent stops being
-#                             paid to start seizes it can't finish.
+#                             paid to start seizes it can't finish in
+#                             contested space.
+#                             NOT applied to `beginner_noop`: that stage
+#                             has no enemy units (NoopBot never builds), so
+#                             HQ capture is the ONLY win path. It inherits
+#                             the env defaults (5000 HQ, 300 seize/turn)
+#                             which are well-tuned for that goal.
 #
 # Starter stages use `patience: 1` so we promote at the first hit of the
 # threshold rather than letting the policy keep training on a saturated
@@ -135,17 +155,14 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    # First stage on the new map -> entropy shock to forget starter
-    # heuristics, plus the elimination-friendly shaping below.
-    ent_coef: 0.10
-    reward_config:
-      # Beginner map: HQ capture is impractical, elimination is the natural
-      # endpoint. Equalize the terminal rewards and stop paying the agent
-      # to *start* seizes that won't finish.
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
+    # First stage on the new map. Modest entropy bump (0.07 vs cfg default
+    # 0.05) so the policy can adapt to longer paths without losing the
+    # HQ-capture strategy learned on starter_noop. We deliberately do NOT
+    # override reward_config here -- HQ capture is the ONLY win path on
+    # noop (NoopBot has no units, never builds), so we want the env's
+    # default heavy HQ-capture signal (5000 + 300/turn seize) intact. The
+    # elimination-friendly shaping below kicks in once opponents appear.
+    ent_coef: 0.07
 
   - name: beginner_balanced_random
     map_file: maps/1v1/beginner.csv
