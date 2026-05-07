@@ -121,6 +121,24 @@ stages:
     patience: 1
     max_timesteps: 500_000
     n_eval_episodes: 30
+    # Higher entropy on the FIRST stage breaks the "dead policy" trap a
+    # freshly-initialised PPO can fall into against a deterministic
+    # opponent: with no opponent variance, a near-uniform initial policy's
+    # argmax tends to land on `end_turn`, every rollout produces the same
+    # draw reward, the value function flattens, advantages collapse to
+    # ~0, and gradients can't shift the mode. Higher entropy makes
+    # stochastic exploration occasionally produce a winning trajectory,
+    # which restores gradient signal.
+    ent_coef: 0.10
+    # Tiny create_unit bonus to break reward symmetry: end_turn nets
+    # -20 (turn_penalty) per turn, building a unit nets +10 (this) - 20
+    # = -10. Strict ordering create_unit > end_turn, so the policy's
+    # value function has at least one direction to climb out of the
+    # constant baseline. This is the *only* override on noop stages --
+    # the env defaults' HQ-capture signal (5000 + 300/turn seize) is
+    # exactly what we want to teach here, untouched.
+    reward_config:
+      create_unit: 10.0
 
   - name: starter_random
     map_file: maps/1v1/starter.csv
@@ -155,14 +173,14 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    # First stage on the new map. Modest entropy bump (0.07 vs cfg default
-    # 0.05) so the policy can adapt to longer paths without losing the
-    # HQ-capture strategy learned on starter_noop. We deliberately do NOT
-    # override reward_config here -- HQ capture is the ONLY win path on
-    # noop (NoopBot has no units, never builds), so we want the env's
-    # default heavy HQ-capture signal (5000 + 300/turn seize) intact. The
-    # elimination-friendly shaping below kicks in once opponents appear.
-    ent_coef: 0.07
+    # Same dead-policy guards as `starter_noop`: NoopBot is deterministic,
+    # so without high entropy + a non-zero per-action reward the policy
+    # can stall on whatever its argmax was at stage entry. ent_coef=0.10
+    # matches starter_noop's exploration budget; create_unit=+10 keeps
+    # build > end_turn at every step.
+    ent_coef: 0.10
+    reward_config:
+      create_unit: 10.0
 
   - name: beginner_balanced_random
     map_file: maps/1v1/beginner.csv

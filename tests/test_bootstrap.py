@@ -273,16 +273,39 @@ class TestBootstrapConfig:
         beginner_random = by_name["beginner_random"]
         assert beginner_random.reward_config is not None
         assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
-        # Noop stages MUST inherit the env defaults rather than the
-        # elimination-friendly override -- on noop there are no enemy
-        # units to eliminate (NoopBot never builds), so HQ capture is the
-        # ONLY win path. We want the env's default heavy HQ-capture
-        # signal (5000 + 300/turn seize), not the equalised 3000/50.
-        # Regression: an earlier config applied the override to
-        # beginner_noop and the agent spent 650k+ steps spamming end_turn
-        # because the seize signal was suppressed.
-        assert by_name["starter_noop"].reward_config is None
-        assert by_name["beginner_noop"].reward_config is None
+        # Noop stages must NOT carry the elimination-friendly bundle
+        # (win_by_hq_capture=3000, win_by_elimination=3000, seize_progress=50,
+        # capture=2000) -- on noop NoopBot never builds units so HQ capture
+        # is the ONLY win path, and the env's default heavy HQ-capture
+        # signal (5000 + 300/turn seize) is exactly what we want to teach.
+        # Regression: an earlier config applied that bundle to beginner_noop
+        # and the agent spent 650k+ steps spamming end_turn because the
+        # seize signal was suppressed.
+        #
+        # Noop stages MAY override `create_unit` -- a small per-action
+        # bonus that breaks the "dead policy" trap a freshly-initialised
+        # PPO falls into against a deterministic opponent (without it,
+        # every rollout produces the same draw, advantages collapse to
+        # ~0, gradients can't shift the mode).
+        for noop_name in ("starter_noop", "beginner_noop"):
+            stage = by_name[noop_name]
+            resolved = stage.resolve_reward_config(cfg.env)
+            assert resolved is not None, f"{noop_name} should resolve a reward config"
+            # Default HQ-capture / seize signals must survive intact.
+            assert resolved["win_by_hq_capture"] >= 5000.0, noop_name
+            assert resolved["seize_progress"] >= 300.0, noop_name
+            assert resolved["capture"] >= 1000.0, noop_name
+            # Elimination should not have been boosted into parity: on noop
+            # nothing can be eliminated, so equalising the two would be
+            # misleading shaping.
+            assert resolved["win_by_elimination"] <= 1000.0, noop_name
+            # The only override we expect is `create_unit` (the dead-policy
+            # trap mitigation). If a stage adds more, fail loud so a future
+            # editor has to acknowledge the change here.
+            override = stage.reward_config or {}
+            assert set(override.keys()) <= {"create_unit"}, (
+                f"{noop_name} reward_config has unexpected overrides: {override}"
+            )
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
