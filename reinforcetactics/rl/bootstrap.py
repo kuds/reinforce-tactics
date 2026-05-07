@@ -265,7 +265,10 @@ def _default_model_factory(vec_env, cfg: BootstrapConfig, output_dir: Path):
         "MultiInputPolicy",
         vec_env,
         seed=cfg.seed,
-        verbose=1,
+        # SB3 verbose=1 prints rollout/train tables every iteration, which
+        # drowns out the curriculum's per-eval WR line. TensorBoard logging
+        # is independent of this setting so curves still land on disk.
+        verbose=0,
         tensorboard_log=str(output_dir / "tensorboard"),
         **cfg.ppo.as_sb3_kwargs(),
     )
