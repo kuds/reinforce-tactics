@@ -235,6 +235,12 @@ class TestBootstrapConfig:
             "beginner_simple",
             "beginner_medium",
         ]
+        # Regression: PyYAML 1.1 parses ``3e-4`` (no decimal) as a string,
+        # which then fails deep inside SB3's lr-schedule check. Every
+        # numeric PPO field must round-trip as a number.
+        assert isinstance(cfg.ppo.learning_rate, (int, float))
+        assert isinstance(cfg.ppo.ent_coef, (int, float))
+        assert isinstance(cfg.ppo.clip_range, (int, float))
 
 
 # ---------------------------------------------------------------------------
