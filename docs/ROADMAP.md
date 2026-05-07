@@ -38,12 +38,12 @@ tracked here:
 - Self-play data generation, replay buffer, LR scheduling, checkpointing
 - Game-compatible `AlphaZeroBot` for tournament play
 - 22 comprehensive tests in `test_alphazero.py`
-- Training script: `train/train_alphazero.py`
+- Training script: `scripts/train/train_alphazero.py`
 
 ### Feudal RL (Hierarchical) Implementation ✅
 - Manager-Worker PPO with variable-step GAE and intrinsic rewards
 - `FeudalRolloutBuffer` with separate manager/worker storage
-- Full training loop with TensorBoard logging (`train/train_feudal_rl.py`)
+- Full training loop with TensorBoard logging (`scripts/train/train_feudal_rl.py`)
 - CLI arguments: `--manager-horizon`, `--worker-reward-alpha`, `--manager-lr-scale`
 
 ### AdvancedBot & RL Bug Fixes ✅
@@ -236,7 +236,7 @@ Each dimension is sampled conditioned on all prior choices:
    decomposition works without the feudal hierarchy. Update `masking.py`. (~150 lines)
 
 5. **Training CLI** — add `--autoregressive`, `--ar-embedding-dim`, `--ar-head-hidden`
-   flags to `train/train_feudal_rl.py`. Add `--mode autoregressive` for standalone
+   flags to `scripts/train/train_feudal_rl.py`. Add `--mode autoregressive` for standalone
    non-feudal training. (~50 lines)
 
 6. **Tests** (`tests/test_autoregressive.py`) — conditional mask exactness, network

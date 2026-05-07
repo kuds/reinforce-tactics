@@ -58,9 +58,9 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 
 ### Training & Documentation
 - [x] `main.py` - Complete CLI entry point with train/evaluate/play modes
-- [x] `train/train_self_play.py` - Self-play training with opponent pool
-- [x] `train/train_feudal_rl.py` - Feudal RL training
-- [x] `train/train_alphazero.py` - AlphaZero training
+- [x] `scripts/train/train_self_play.py` - Self-play training with opponent pool
+- [x] `scripts/train/train_feudal_rl.py` - Feudal RL training
+- [x] `scripts/train/train_alphazero.py` - AlphaZero training
 - [x] `README.md` - Comprehensive documentation
 - [x] `docs-site/` - Docusaurus documentation site deployed at reinforcetactics.com
 - [x] Docker support for containerized deployment

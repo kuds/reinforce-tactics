@@ -312,7 +312,7 @@ class TestBotFactory:
 
     def test_bot_factory_create_bot_with_model_path(self):
         """Test that create_bot handles ModelBot with model_path."""
-        from game.bot_factory import create_bot
+        from reinforcetactics.app.bot_factory import create_bot
         from reinforcetactics.utils.settings import get_settings
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
@@ -332,7 +332,7 @@ class TestBotFactory:
 
     def test_bot_factory_modelbot_without_path_raises_error(self):
         """Test that creating ModelBot without model_path raises ValueError."""
-        from game.bot_factory import create_bot
+        from reinforcetactics.app.bot_factory import create_bot
         from reinforcetactics.utils.settings import get_settings
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)
@@ -347,7 +347,7 @@ class TestBotFactory:
 
     def test_bot_factory_create_bots_from_config_with_modelbot(self):
         """Test that create_bots_from_config handles ModelBot configs."""
-        from game.bot_factory import create_bots_from_config
+        from reinforcetactics.app.bot_factory import create_bots_from_config
         from reinforcetactics.utils.settings import get_settings
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from game.bot_factory import create_bot
+from reinforcetactics.app.bot_factory import create_bot
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import AdvancedBot, MediumBot
 from reinforcetactics.tournament import (

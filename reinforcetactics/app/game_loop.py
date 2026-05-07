@@ -8,8 +8,8 @@ This module manages the main game loop, game session, and game modes.
 import pandas as pd
 import pygame
 
-from game.bot_factory import create_bots_from_config
-from game.input_handler import InputHandler
+from reinforcetactics.app.bot_factory import create_bots_from_config
+from reinforcetactics.app.input_handler import InputHandler
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.ui.menus import (
     GameOverMenu,

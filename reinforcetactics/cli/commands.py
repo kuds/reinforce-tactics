@@ -239,7 +239,7 @@ def play_mode(_args):
         # Import game components to validate they exist
         import pygame
 
-        from game.game_loop import load_saved_game, start_new_game, watch_replay
+        from reinforcetactics.app.game_loop import load_saved_game, start_new_game, watch_replay
         from reinforcetactics.ui.menus import MainMenu
     except ImportError as e:
         print(f"❌ Error importing game components: {e}")
