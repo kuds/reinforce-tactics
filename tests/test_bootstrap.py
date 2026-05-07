@@ -225,12 +225,15 @@ class TestBootstrapConfig:
         repo_root = Path(__file__).resolve().parents[1]
         cfg = load_bootstrap_config(repo_root / "configs" / "bootstrap.yaml")
         names = [s.name for s in cfg.stages]
-        # Ensure the expected curriculum is intact (catches accidental edits
-        # that drop stages or reorder them).
+        # Ensure the expected curriculum is intact. The `beginner_noop`
+        # bridge stage between `starter_medium` and `beginner_random` is
+        # what gives the policy a chance to learn navigation on the new map
+        # before facing an opponent -- catch accidental removal.
         assert names == [
             "starter_random",
             "starter_simple",
             "starter_medium",
+            "beginner_noop",
             "beginner_random",
             "beginner_simple",
             "beginner_medium",
@@ -242,14 +245,54 @@ class TestBootstrapConfig:
         assert isinstance(cfg.ppo.ent_coef, (int, float))
         assert isinstance(cfg.ppo.clip_range, (int, float))
         # Beginner stages bump max_turns / max_steps for the bigger map and
-        # raise ent_coef on `beginner_random` to break out of the previous
+        # raise ent_coef on `beginner_noop` to break out of the previous
         # map's policy. Catch accidental removal of these overrides.
         by_name = {s.name: s for s in cfg.stages}
         assert by_name["starter_random"].max_turns is None
-        assert by_name["beginner_random"].max_turns is not None
-        assert by_name["beginner_random"].max_turns >= 30
-        assert by_name["beginner_random"].ent_coef is not None
-        assert by_name["beginner_random"].ent_coef > cfg.ppo.ent_coef
+        assert by_name["beginner_noop"].max_turns is not None
+        assert by_name["beginner_noop"].max_turns >= 30
+        assert by_name["beginner_noop"].ent_coef is not None
+        assert by_name["beginner_noop"].ent_coef > cfg.ppo.ent_coef
+        # Reward-shape override on beginner stages: HQ capture is much
+        # harder than elimination on the bigger map, so the two terminal
+        # rewards must be equalized (or capture <= elimination).
+        beginner_random = by_name["beginner_random"]
+        assert beginner_random.reward_config is not None
+        assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
+
+    def test_reward_config_override_merges_with_defaults(self):
+        # Stage override should *merge* over BootstrapEnvDefaults.reward_config,
+        # not replace it. So a stage that only overrides one key still gets
+        # the rest of the env defaults.
+        defaults = BootstrapEnvDefaults(reward_config={"win": 5000.0, "loss": -5000.0, "draw": -5000.0})
+        stage = CurriculumStage(
+            name="s",
+            map_file="m.csv",
+            opponent="random",
+            reward_config={"win": 3000.0, "win_by_elimination": 3000.0},
+        )
+        resolved = stage.resolve_reward_config(defaults)
+        assert resolved == {
+            "win": 3000.0,  # overridden
+            "loss": -5000.0,  # inherited
+            "draw": -5000.0,  # inherited
+            "win_by_elimination": 3000.0,  # added by stage
+        }
+
+    def test_reward_config_resolves_to_defaults_when_unset(self):
+        defaults = BootstrapEnvDefaults(reward_config={"win": 5000.0, "loss": -5000.0})
+        stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
+        assert stage.resolve_reward_config(defaults) == {"win": 5000.0, "loss": -5000.0}
+
+    def test_reward_config_returns_none_when_nothing_specified(self):
+        defaults = BootstrapEnvDefaults(reward_config=None)
+        stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
+        assert stage.resolve_reward_config(defaults) is None
+
+    def test_rejects_non_mapping_reward_config(self):
+        common = dict(name="s", map_file="m.csv", opponent="random")
+        with pytest.raises(TypeError, match="reward_config"):
+            CurriculumStage(**common, reward_config=[1, 2, 3]).validate()
 
 
 class TestCurriculumStageResolution:
