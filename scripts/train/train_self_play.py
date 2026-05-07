@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 import numpy as np
-import torch
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.callbacks import (
     BaseCallback,
@@ -43,6 +42,7 @@ from stable_baselines3.common.callbacks import (
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import VecMonitor
 
+from reinforcetactics.rl.config import TrainingConfig, config_to_argparse_defaults, load_config
 from reinforcetactics.rl.masking import make_maskable_vec_env
 
 # Local imports
@@ -51,6 +51,15 @@ from reinforcetactics.rl.self_play import (
     SelfPlayEnv,
     make_self_play_env,
     make_self_play_vec_env,
+)
+from reinforcetactics.rl.training_utils import (
+    COMMON_ARG_MAPPING,
+    EVAL_ARG_MAPPING,
+    LOGGING_ARG_MAPPING,
+    PPO_ARG_MAPPING,
+    finish_wandb,
+    init_wandb,
+    resolve_device,
 )
 
 # Configure logging
@@ -515,21 +524,10 @@ def train_mixed(args) -> Path:
 
 
 _ARG_TO_CONFIG_PATH = {
-    "max_steps": "env.max_steps",
-    "n_envs": "env.n_envs",
-    "total_timesteps": "total_timesteps",
-    "seed": "seed",
-    "device": "ppo.device",
-    "learning_rate": "ppo.learning_rate",
-    "n_steps": "ppo.n_steps",
-    "batch_size": "ppo.batch_size",
-    "n_epochs": "ppo.n_epochs",
-    "gamma": "ppo.gamma",
-    "gae_lambda": "ppo.gae_lambda",
-    "clip_range": "ppo.clip_range",
-    "ent_coef": "ppo.ent_coef",
-    "vf_coef": "ppo.vf_coef",
-    "max_grad_norm": "ppo.max_grad_norm",
+    **COMMON_ARG_MAPPING,
+    **PPO_ARG_MAPPING,
+    **EVAL_ARG_MAPPING,
+    **LOGGING_ARG_MAPPING,
     "swap_players": "self_play.swap_players",
     "opponent_update_freq": "self_play.opponent_update_freq",
     "use_opponent_pool": "self_play.use_opponent_pool",
@@ -538,14 +536,15 @@ _ARG_TO_CONFIG_PATH = {
     "add_to_pool_freq": "self_play.add_to_pool_freq",
     "min_win_rate_for_pool": "self_play.min_win_rate_for_pool",
     "bot_ratio": "self_play.bot_ratio",
-    "eval_freq": "eval.eval_freq",
-    "n_eval_episodes": "eval.n_eval_episodes",
-    "checkpoint_freq": "eval.checkpoint_freq",
-    "log_dir": "logging.log_dir",
-    "wandb": "logging.wandb",
-    "wandb_project": "logging.wandb_project",
-    "wandb_entity": "logging.wandb_entity",
 }
+
+
+def _script_default_config() -> TrainingConfig:
+    """Self-play preset on top of TrainingConfig() defaults."""
+    cfg = TrainingConfig(algorithm="self_play", total_timesteps=5_000_000)
+    cfg.env.n_envs = 8
+    cfg.logging.wandb_project = "reinforcetactics-selfplay"
+    return cfg
 
 
 def main():
@@ -554,83 +553,75 @@ def main():
     pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
     pre_args, _ = pre_parser.parse_known_args()
 
+    cfg = load_config(pre_args.config) if pre_args.config else _script_default_config()
+
     parser = argparse.ArgumentParser(
         description="Train RL agents with self-play",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[pre_parser],
     )
 
-    # Training mode
+    # Script-only flags (not stored in TrainingConfig).
     parser.add_argument("--mode", type=str, default="self-play", choices=["self-play", "mixed"], help="Training mode")
+    parser.add_argument("--no-subprocess", action="store_true", help="Use DummyVecEnv instead of SubprocVecEnv")
+    parser.add_argument("--enabled-units", type=str, default=None, help="Comma-separated list of enabled unit types")
+    parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume from")
 
     # Self-play settings
-    parser.add_argument("--swap-players", action="store_true", default=True, help="Randomly swap player order each episode")
-    parser.add_argument("--opponent-update-freq", type=int, default=10000, help="How often to update opponent model (steps)")
+    parser.add_argument("--swap-players", action="store_true", help="Randomly swap player order each episode")
+    parser.add_argument("--opponent-update-freq", type=int, help="How often to update opponent model (steps)")
 
     # Opponent pool settings
     parser.add_argument("--use-opponent-pool", action="store_true", help="Use pool of historical opponents")
-    parser.add_argument("--pool-size", type=int, default=10, help="Maximum size of opponent pool")
+    parser.add_argument("--pool-size", type=int, help="Maximum size of opponent pool")
     parser.add_argument(
         "--pool-strategy",
         type=str,
-        default="uniform",
         choices=["uniform", "recent", "prioritized"],
         help="Opponent selection strategy",
     )
-    parser.add_argument("--add-to-pool-freq", type=int, default=50000, help="How often to add model to pool (steps)")
-    parser.add_argument("--min-win-rate-for-pool", type=float, default=0.55, help="Minimum win rate to add model to pool")
+    parser.add_argument("--add-to-pool-freq", type=int, help="How often to add model to pool (steps)")
+    parser.add_argument("--min-win-rate-for-pool", type=float, help="Minimum win rate to add model to pool")
 
     # Mixed training settings
-    parser.add_argument("--bot-ratio", type=float, default=0.3, help="Ratio of training against bots (mixed mode)")
+    parser.add_argument("--bot-ratio", type=float, help="Ratio of training against bots (mixed mode)")
 
     # Environment settings
-    parser.add_argument("--n-envs", type=int, default=8, help="Number of parallel environments")
-    parser.add_argument("--max-steps", type=int, default=200, help="Maximum steps per episode")
-    parser.add_argument("--no-subprocess", action="store_true", help="Use DummyVecEnv instead of SubprocVecEnv")
-    parser.add_argument("--enabled-units", type=str, default=None, help="Comma-separated list of enabled unit types")
+    parser.add_argument("--n-envs", type=int, help="Number of parallel environments")
+    parser.add_argument("--max-steps", type=int, help="Maximum steps per episode")
 
     # Training settings
-    parser.add_argument("--total-timesteps", type=int, default=5000000, help="Total training timesteps")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    parser.add_argument("--device", type=str, default="auto", help="Device: cpu, cuda, or auto")
+    parser.add_argument("--total-timesteps", type=int, help="Total training timesteps")
+    parser.add_argument("--seed", type=int, help="Random seed")
+    parser.add_argument("--device", type=str, help="Device: cpu, cuda, or auto")
 
     # PPO hyperparameters
-    parser.add_argument("--learning-rate", type=float, default=3e-4, help="Learning rate")
-    parser.add_argument("--n-steps", type=int, default=2048, help="Number of steps per update")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
-    parser.add_argument("--n-epochs", type=int, default=10, help="Number of epochs per update")
-    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
-    parser.add_argument("--gae-lambda", type=float, default=0.95, help="GAE lambda")
-    parser.add_argument("--clip-range", type=float, default=0.2, help="PPO clip range")
-    parser.add_argument("--ent-coef", type=float, default=0.05, help="Entropy coefficient")
-    parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
-    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Max gradient norm")
+    parser.add_argument("--learning-rate", type=float, help="Learning rate")
+    parser.add_argument("--n-steps", type=int, help="Number of steps per update")
+    parser.add_argument("--batch-size", type=int, help="Batch size")
+    parser.add_argument("--n-epochs", type=int, help="Number of epochs per update")
+    parser.add_argument("--gamma", type=float, help="Discount factor")
+    parser.add_argument("--gae-lambda", type=float, help="GAE lambda")
+    parser.add_argument("--clip-range", type=float, help="PPO clip range")
+    parser.add_argument("--ent-coef", type=float, help="Entropy coefficient")
+    parser.add_argument("--vf-coef", type=float, help="Value function coefficient")
+    parser.add_argument("--max-grad-norm", type=float, help="Max gradient norm")
 
     # Evaluation settings
-    parser.add_argument("--eval-freq", type=int, default=10000, help="Evaluation frequency")
-    parser.add_argument("--n-eval-episodes", type=int, default=10, help="Number of evaluation episodes")
-    parser.add_argument("--checkpoint-freq", type=int, default=50000, help="Checkpoint save frequency")
+    parser.add_argument("--eval-freq", type=int, help="Evaluation frequency")
+    parser.add_argument("--n-eval-episodes", type=int, help="Number of evaluation episodes")
+    parser.add_argument("--checkpoint-freq", type=int, help="Checkpoint save frequency")
 
     # Logging settings
-    parser.add_argument("--log-dir", type=str, default="./logs", help="Logging directory")
-    parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint to resume from")
-
-    # Weights & Biases
+    parser.add_argument("--log-dir", type=str, help="Logging directory")
     parser.add_argument("--wandb", action="store_true", help="Use Weights & Biases logging")
-    parser.add_argument("--wandb-project", type=str, default="reinforcetactics-selfplay", help="W&B project name")
-    parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
+    parser.add_argument("--wandb-project", type=str, help="W&B project name")
+    parser.add_argument("--wandb-entity", type=str, help="W&B entity name")
 
-    if pre_args.config:
-        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
-
-        cfg = load_config(pre_args.config)
-        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
+    parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args()
-
-    # Set device
-    if args.device == "auto":
-        args.device = "cuda" if torch.cuda.is_available() else "cpu"
+    args.device = resolve_device(args.device)
 
     # Print settings
     logger.info("Starting training on %s", args.device)
@@ -639,20 +630,13 @@ def main():
     logger.info("Parallel envs: %d", args.n_envs)
     logger.info("Opponent pool: %s", "enabled" if args.use_opponent_pool else "disabled")
 
-    # Initialize W&B if requested
-    if args.wandb:
-        try:
-            import wandb
-
-            wandb.init(
-                project=args.wandb_project,
-                entity=args.wandb_entity,
-                config=vars(args),
-                name=f"{args.mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            )
-            logger.info("Weights & Biases initialized")
-        except ImportError:
-            logger.warning("wandb not installed, skipping W&B logging")
+    wandb_active = init_wandb(
+        enabled=args.wandb,
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        config=vars(args),
+        run_name_prefix=args.mode,
+    )
 
     # Train
     if args.mode == "self-play":
@@ -662,13 +646,7 @@ def main():
 
     logger.info("Training complete! Logs saved to: %s", log_dir)
 
-    if args.wandb:
-        try:
-            import wandb
-
-            wandb.finish()
-        except Exception:
-            pass
+    finish_wandb(wandb_active)
 
 
 if __name__ == "__main__":

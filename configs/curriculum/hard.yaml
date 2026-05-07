@@ -3,9 +3,7 @@
 algorithm: maskable_ppo
 
 env:
-  opponent: bot
   max_steps: 300
-  action_space_type: multi_discrete
   reward_config:
     win: 1000.0
     loss: -1000.0

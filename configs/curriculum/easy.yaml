@@ -4,8 +4,6 @@ algorithm: maskable_ppo
 
 env:
   opponent: random
-  max_steps: 200
-  action_space_type: multi_discrete
   reward_config:
     win: 1000.0
     loss: -1000.0

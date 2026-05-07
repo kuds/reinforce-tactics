@@ -19,34 +19,35 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 # Local imports
+from reinforcetactics.rl.config import TrainingConfig, config_to_argparse_defaults, load_config
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.rl.masking import ActionMaskedEnv, make_maskable_env, make_maskable_vec_env
+from reinforcetactics.rl.training_utils import (
+    COMMON_ARG_MAPPING,
+    EVAL_ARG_MAPPING,
+    LOGGING_ARG_MAPPING,
+    PPO_ARG_MAPPING,
+    finish_wandb,
+    init_wandb,
+    resolve_device,
+)
 
 
-def make_env(rank: int, seed: int = 0, opponent: str = "bot", use_masking: bool = False):
-    """
-    Utility function for multiprocessed env.
-
-    Args:
-        rank: Index of the subprocess
-        seed: Random seed
-        opponent: Opponent type
-        use_masking: Whether to wrap env for action masking
-    """
+def make_env(rank: int, seed: int = 0, opponent: str = "bot", max_steps: int = 200, use_masking: bool = False):
+    """Build a thunk for vectorized env construction."""
 
     def _init():
         env = StrategyGameEnv(
             map_file=None,  # Random maps
             opponent=opponent,
             render_mode=None,
-            max_steps=500,
+            max_steps=max_steps,
         )
         env.reset(seed=seed + rank)
         if use_masking:
@@ -80,17 +81,22 @@ def train_flat_baseline(args):
     if use_masking:
         # Use masking-compatible vectorized environments
         env = make_maskable_vec_env(
-            n_envs=args.n_envs, opponent=args.opponent, seed=args.seed, use_subprocess=(args.n_envs > 1)
+            n_envs=args.n_envs,
+            opponent=args.opponent,
+            max_steps=args.max_steps,
+            seed=args.seed,
+            use_subprocess=(args.n_envs > 1),
         )
         # Create eval environment with masking
-        eval_env = make_maskable_env(opponent=args.opponent, render_mode=None)
+        eval_env = make_maskable_env(opponent=args.opponent, max_steps=args.max_steps, render_mode=None)
     else:
         # Standard environments without masking
-        if args.n_envs > 1:
-            env = SubprocVecEnv([make_env(i, args.seed, args.opponent, use_masking=False) for i in range(args.n_envs)])
-        else:
-            env = DummyVecEnv([make_env(0, args.seed, args.opponent, use_masking=False)])
-        eval_env = StrategyGameEnv(opponent=args.opponent, render_mode=None)
+        thunks = [
+            make_env(i, args.seed, args.opponent, max_steps=args.max_steps, use_masking=False)
+            for i in range(args.n_envs)
+        ]
+        env = SubprocVecEnv(thunks) if args.n_envs > 1 else DummyVecEnv(thunks)
+        eval_env = StrategyGameEnv(opponent=args.opponent, max_steps=args.max_steps, render_mode=None)
 
     # Create model - use MaskablePPO if action masking is enabled
     if use_masking:
@@ -203,8 +209,8 @@ def train_feudal_rl(args):
     (log_dir / "best_model").mkdir(exist_ok=True)
 
     # Create environments (single env for feudal — hierarchy is per-episode stateful)
-    env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=500)
-    eval_env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=500)
+    env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
+    eval_env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
 
     # Create agent
     agent = FeudalRLAgent(
@@ -306,35 +312,25 @@ def train_feudal_rl(args):
     return log_dir
 
 
+# Map argparse dests to dotted TrainingConfig paths. Common PPO/eval/logging
+# entries come from training_utils so they don't drift between scripts.
 _ARG_TO_CONFIG_PATH = {
-    "opponent": "env.opponent",
-    "n_envs": "env.n_envs",
-    "total_timesteps": "total_timesteps",
-    "seed": "seed",
-    "device": "ppo.device",
-    "learning_rate": "ppo.learning_rate",
-    "n_steps": "ppo.n_steps",
-    "batch_size": "ppo.batch_size",
-    "n_epochs": "ppo.n_epochs",
-    "gamma": "ppo.gamma",
-    "gae_lambda": "ppo.gae_lambda",
-    "clip_range": "ppo.clip_range",
-    "ent_coef": "ppo.ent_coef",
-    "vf_coef": "ppo.vf_coef",
-    "max_grad_norm": "ppo.max_grad_norm",
-    "use_action_masking": "ppo.use_action_masking",
+    **COMMON_ARG_MAPPING,
+    **PPO_ARG_MAPPING,
+    **EVAL_ARG_MAPPING,
+    **LOGGING_ARG_MAPPING,
     "manager_horizon": "feudal.manager_horizon",
     "worker_reward_alpha": "feudal.worker_reward_alpha",
     "manager_lr_scale": "feudal.manager_lr_scale",
     "worker_lr_scale": "feudal.worker_lr_scale",
-    "eval_freq": "eval.eval_freq",
-    "n_eval_episodes": "eval.n_eval_episodes",
-    "checkpoint_freq": "eval.checkpoint_freq",
-    "log_dir": "logging.log_dir",
-    "wandb": "logging.wandb",
-    "wandb_project": "logging.wandb_project",
-    "wandb_entity": "logging.wandb_entity",
 }
+
+
+def _script_default_config() -> TrainingConfig:
+    """Defaults specific to this script, layered on top of TrainingConfig()."""
+    cfg = TrainingConfig(algorithm="feudal", total_timesteps=10_000_000)
+    cfg.env.max_steps = 500
+    return cfg
 
 
 def main():
@@ -345,79 +341,67 @@ def main():
     pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
     pre_args, _ = pre_parser.parse_known_args()
 
+    # Build the effective default config: dataclass defaults <- script preset
+    # <- file overrides (CLI overrides come later from argparse itself).
+    cfg = load_config(pre_args.config) if pre_args.config else _script_default_config()
+
     parser = argparse.ArgumentParser(
         description="Train RL agents for Reinforce Tactics",
         parents=[pre_parser],
     )
 
-    # Training mode
+    # Script-only flags (not stored in TrainingConfig) keep their argparse defaults.
     parser.add_argument(
         "--mode", type=str, default="flat", choices=["flat", "feudal"], help="Training mode: flat baseline or feudal RL"
     )
-
-    # Environment args
-    parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random", "self"], help="Opponent type")
-    parser.add_argument("--n-envs", type=int, default=4, help="Number of parallel environments")
     parser.add_argument(
         "--use-action-masking",
         action="store_true",
         help="Use MaskablePPO with action masking (recommended for faster training)",
     )
 
-    # Training args
-    parser.add_argument("--total-timesteps", type=int, default=10000000, help="Total training timesteps")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    parser.add_argument("--device", type=str, default="auto", help="Device: cpu, cuda, or auto")
+    # Config-backed args. Defaults come from `cfg` via parser.set_defaults below;
+    # leaving `default=` off here makes it explicit there's a single source of truth.
+    parser.add_argument("--opponent", type=str, choices=["bot", "random", "self"], help="Opponent type")
+    parser.add_argument("--n-envs", type=int, help="Number of parallel environments")
+    parser.add_argument("--max-steps", type=int, help="Maximum steps per episode")
+    parser.add_argument("--total-timesteps", type=int, help="Total training timesteps")
+    parser.add_argument("--seed", type=int, help="Random seed")
+    parser.add_argument("--device", type=str, help="Device: cpu, cuda, or auto")
 
-    # PPO hyperparameters
-    parser.add_argument("--learning-rate", type=float, default=3e-4, help="Learning rate")
-    parser.add_argument("--n-steps", type=int, default=2048, help="Number of steps per update")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
-    parser.add_argument("--n-epochs", type=int, default=10, help="Number of epochs per update")
-    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
-    parser.add_argument("--gae-lambda", type=float, default=0.95, help="GAE lambda")
-    parser.add_argument("--clip-range", type=float, default=0.2, help="PPO clip range")
-    parser.add_argument("--ent-coef", type=float, default=0.05, help="Entropy coefficient")
-    parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
-    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Max gradient norm")
+    parser.add_argument("--learning-rate", type=float, help="Learning rate")
+    parser.add_argument("--n-steps", type=int, help="Number of steps per update")
+    parser.add_argument("--batch-size", type=int, help="Batch size")
+    parser.add_argument("--n-epochs", type=int, help="Number of epochs per update")
+    parser.add_argument("--gamma", type=float, help="Discount factor")
+    parser.add_argument("--gae-lambda", type=float, help="GAE lambda")
+    parser.add_argument("--clip-range", type=float, help="PPO clip range")
+    parser.add_argument("--ent-coef", type=float, help="Entropy coefficient")
+    parser.add_argument("--vf-coef", type=float, help="Value function coefficient")
+    parser.add_argument("--max-grad-norm", type=float, help="Max gradient norm")
 
-    # Feudal RL hyperparameters
-    parser.add_argument("--manager-horizon", type=int, default=10, help="Worker steps between manager goal updates")
+    parser.add_argument("--manager-horizon", type=int, help="Worker steps between manager goal updates")
     parser.add_argument(
         "--worker-reward-alpha",
         type=float,
-        default=0.5,
         help="Weight of extrinsic reward in worker reward (0=intrinsic only, 1=extrinsic only)",
     )
-    parser.add_argument(
-        "--manager-lr-scale", type=float, default=1.0, help="Manager learning rate multiplier relative to base LR"
-    )
-    parser.add_argument(
-        "--worker-lr-scale", type=float, default=1.0, help="Worker learning rate multiplier relative to base LR"
-    )
+    parser.add_argument("--manager-lr-scale", type=float, help="Manager learning rate multiplier relative to base LR")
+    parser.add_argument("--worker-lr-scale", type=float, help="Worker learning rate multiplier relative to base LR")
 
-    # Evaluation args
-    parser.add_argument("--eval-freq", type=int, default=10000, help="Evaluation frequency")
-    parser.add_argument("--n-eval-episodes", type=int, default=10, help="Number of evaluation episodes")
-    parser.add_argument("--checkpoint-freq", type=int, default=50000, help="Checkpoint save frequency")
+    parser.add_argument("--eval-freq", type=int, help="Evaluation frequency")
+    parser.add_argument("--n-eval-episodes", type=int, help="Number of evaluation episodes")
+    parser.add_argument("--checkpoint-freq", type=int, help="Checkpoint save frequency")
 
-    # Logging args
-    parser.add_argument("--log-dir", type=str, default="./logs", help="Logging directory")
+    parser.add_argument("--log-dir", type=str, help="Logging directory")
     parser.add_argument("--wandb", action="store_true", help="Use Weights & Biases logging")
-    parser.add_argument("--wandb-project", type=str, default="reinforcetactics", help="W&B project name")
-    parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
+    parser.add_argument("--wandb-project", type=str, help="W&B project name")
+    parser.add_argument("--wandb-entity", type=str, help="W&B entity name")
 
-    if pre_args.config:
-        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
-
-        cfg = load_config(pre_args.config)
-        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
+    parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args()
-
-    # Set device
-    if args.device == "auto":
-        args.device = "cuda" if torch.cuda.is_available() else "cpu"
+    args.device = resolve_device(args.device)
 
     print(f"\n🚀 Starting training on {args.device}")
     print(f"Mode: {args.mode}")
@@ -425,20 +409,13 @@ def main():
     print(f"Total timesteps: {args.total_timesteps:,}")
     print(f"Parallel envs: {args.n_envs}")
 
-    # Initialize W&B if requested
-    if args.wandb:
-        try:
-            import wandb
-
-            wandb.init(
-                project=args.wandb_project,
-                entity=args.wandb_entity,
-                config=vars(args),
-                name=f"{args.mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            )
-            print("✅ Weights & Biases initialized")
-        except ImportError:
-            print("⚠️  wandb not installed, skipping W&B logging")
+    wandb_active = init_wandb(
+        enabled=args.wandb,
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        config=vars(args),
+        run_name_prefix=args.mode,
+    )
 
     # Train
     if args.mode == "flat":
@@ -449,8 +426,7 @@ def main():
     print("\n✅ Training complete!")
     print(f"Logs saved to: {log_dir}")
 
-    if args.wandb:
-        wandb.finish()
+    finish_wandb(wandb_active)
 
 
 if __name__ == "__main__":

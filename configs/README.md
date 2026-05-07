@@ -1,7 +1,9 @@
 # Training configs
 
-YAML configs for the training scripts in `train/`. Replaces previous
-hardcoded hyperparameter dicts.
+YAML configs for the training scripts in `train/`. The dataclasses in
+`reinforcetactics/rl/config.py` (`TrainingConfig`, `PPOConfig`, …) are the
+source of truth for defaults; the files here only declare values that
+differ from those defaults. Add a key only when you need to change it.
 
 ## Files
 
