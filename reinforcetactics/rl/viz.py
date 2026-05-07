@@ -86,7 +86,9 @@ def plot_eval_curves(
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Win Rate (%)")
     ax.set_title(f"Win Rate vs {opponent_label}" if opponent_label else "Win Rate")
-    ax.set_xscale("log") if eval_ts and eval_ts[0] > 0 else None
+    # Linear x-axis matching the other four panels in this row. The
+    # previous log scale was added to surface the t=4 baseline eval but
+    # made the panel hard to compare with the rest of the dashboard.
     ax.set_ylim(-5, 105)
     ax.axhline(y=70, color="green", linestyle="--", alpha=0.5, label="70% target")
     ax.legend(fontsize=8)
