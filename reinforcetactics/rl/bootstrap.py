@@ -1,0 +1,406 @@
+"""
+Curriculum-based PPO bootstrapping.
+
+Trains a single MaskablePPO policy through a sequence of stages
+(map x opponent combinations) before handing the resulting checkpoint
+off to self-play. Each stage runs until ``PromotionCallback`` reports
+that the win rate has held above the stage's threshold for
+``patience`` evaluations, at which point ``model.learn()`` returns
+early and the runner moves to the next stage.
+
+If a stage exhausts its ``max_timesteps`` budget without promoting,
+the runner raises :class:`CurriculumStalled`. Bumping the budget alone
+usually masks a real issue (reward shaping, hyperparams), so failing
+loud is the default.
+
+Usage:
+
+    from reinforcetactics.rl.bootstrap import (
+        load_bootstrap_config,
+        run_curriculum,
+    )
+
+    cfg = load_bootstrap_config("configs/bootstrap.yaml")
+    result = run_curriculum(cfg, output_dir="benchmarks/bootstrap")
+    # result["final_model_path"] -> ready for self-play warm start
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, Optional, Union
+
+try:
+    import yaml  # type: ignore
+except ImportError:  # pragma: no cover
+    yaml = None
+
+from reinforcetactics.rl.config import PPOConfig
+
+ConfigPath = Union[str, Path]
+
+
+class CurriculumStalled(RuntimeError):
+    """Raised when a stage exhausts its budget without promoting.
+
+    Attributes:
+        stage_name: Name of the failing stage.
+        achieved_win_rate: Best win rate observed during the stage.
+        threshold: Promotion threshold the stage was required to clear.
+        timesteps: Stage timestep budget that was exhausted.
+    """
+
+    def __init__(
+        self,
+        stage_name: str,
+        achieved_win_rate: float,
+        threshold: float,
+        timesteps: int,
+    ) -> None:
+        self.stage_name = stage_name
+        self.achieved_win_rate = achieved_win_rate
+        self.threshold = threshold
+        self.timesteps = timesteps
+        super().__init__(
+            f"Stage '{stage_name}' stalled at {timesteps:,} timesteps: "
+            f"best win_rate {achieved_win_rate:.1%} did not reach "
+            f"threshold {threshold:.1%}"
+        )
+
+
+@dataclass
+class CurriculumStage:
+    """One curriculum step: a (map, opponent) pair with a promotion criterion."""
+
+    name: str
+    map_file: str
+    opponent: str
+    promotion_win_rate: float = 0.9
+    patience: int = 2
+    max_timesteps: int = 1_000_000
+    n_eval_episodes: int = 30
+
+    def validate(self) -> None:
+        if not self.name:
+            raise ValueError("stage.name must be non-empty")
+        if not self.map_file:
+            raise ValueError(f"stage '{self.name}': map_file must be set")
+        if self.opponent not in ("random", "simple", "bot", "medium", "advanced", "noop"):
+            raise ValueError(
+                f"stage '{self.name}': unknown opponent '{self.opponent}'. "
+                "Expected one of: random, simple, bot, medium, advanced, noop"
+            )
+        if not 0.0 <= self.promotion_win_rate <= 1.0:
+            raise ValueError(f"stage '{self.name}': promotion_win_rate must be in [0, 1]")
+        if self.patience < 1:
+            raise ValueError(f"stage '{self.name}': patience must be >= 1")
+        if self.max_timesteps <= 0:
+            raise ValueError(f"stage '{self.name}': max_timesteps must be > 0")
+        if self.n_eval_episodes <= 0:
+            raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
+
+
+@dataclass
+class BootstrapEnvDefaults:
+    """Env settings shared across all stages (map_file/opponent come from stages)."""
+
+    max_steps: int = 400
+    max_turns: Optional[int] = 20
+    enabled_units: Optional[List[str]] = None
+    action_space_type: str = "flat_discrete"
+    max_flat_actions: int = 512
+    reward_config: Optional[Dict[str, float]] = None
+
+
+@dataclass
+class BootstrapConfig:
+    """Full bootstrap-curriculum configuration."""
+
+    stages: List[CurriculumStage]
+    ppo: PPOConfig = field(default_factory=PPOConfig)
+    env: BootstrapEnvDefaults = field(default_factory=BootstrapEnvDefaults)
+    eval_freq: int = 50_000
+    n_envs: int = 4
+    seed: int = 0
+
+    def validate(self) -> None:
+        if not self.stages:
+            raise ValueError("BootstrapConfig.stages must be non-empty")
+        seen = set()
+        for stage in self.stages:
+            stage.validate()
+            if stage.name in seen:
+                raise ValueError(f"duplicate stage name: '{stage.name}'")
+            seen.add(stage.name)
+        if self.eval_freq <= 0:
+            raise ValueError("eval_freq must be > 0")
+        if self.n_envs <= 0:
+            raise ValueError("n_envs must be > 0")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "seed": self.seed,
+            "n_envs": self.n_envs,
+            "eval_freq": self.eval_freq,
+            "env": asdict(self.env),
+            "ppo": asdict(self.ppo),
+            "stages": [asdict(s) for s in self.stages],
+        }
+
+
+def _build_dataclass_from_mapping(cls, raw: Mapping[str, Any]):
+    valid = {f.name for f in fields(cls)}
+    unknown = set(raw.keys()) - valid
+    if unknown:
+        raise ValueError(f"Unknown keys for {cls.__name__}: {sorted(unknown)}. Valid keys: {sorted(valid)}")
+    return cls(**{k: v for k, v in raw.items() if k in valid})
+
+
+def config_from_dict(data: Mapping[str, Any]) -> BootstrapConfig:
+    """Construct a :class:`BootstrapConfig` from a plain dict."""
+    if not isinstance(data, Mapping):
+        raise TypeError(f"Bootstrap config must be a mapping, got {type(data).__name__}")
+
+    valid_keys = {"seed", "n_envs", "eval_freq", "env", "ppo", "stages"}
+    unknown = set(data.keys()) - valid_keys
+    if unknown:
+        raise ValueError(f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}")
+
+    raw_stages = data.get("stages") or []
+    if not isinstance(raw_stages, list):
+        raise TypeError(f"'stages' must be a list, got {type(raw_stages).__name__}")
+    stages = [_build_dataclass_from_mapping(CurriculumStage, s) for s in raw_stages]
+
+    env_raw = data.get("env") or {}
+    if not isinstance(env_raw, Mapping):
+        raise TypeError(f"'env' must be a mapping, got {type(env_raw).__name__}")
+    env = _build_dataclass_from_mapping(BootstrapEnvDefaults, env_raw)
+
+    ppo_raw = data.get("ppo") or {}
+    if not isinstance(ppo_raw, Mapping):
+        raise TypeError(f"'ppo' must be a mapping, got {type(ppo_raw).__name__}")
+    ppo = _build_dataclass_from_mapping(PPOConfig, ppo_raw)
+
+    cfg = BootstrapConfig(
+        stages=stages,
+        ppo=ppo,
+        env=env,
+        eval_freq=int(data.get("eval_freq", 50_000)),
+        n_envs=int(data.get("n_envs", 4)),
+        seed=int(data.get("seed", 0)),
+    )
+    cfg.validate()
+    return cfg
+
+
+def load_bootstrap_config(path: ConfigPath) -> BootstrapConfig:
+    """Load and validate a bootstrap config from YAML or JSON."""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Bootstrap config not found: {p}")
+    text = p.read_text(encoding="utf-8")
+    suffix = p.suffix.lower()
+    if suffix in (".yaml", ".yml"):
+        if yaml is None:
+            raise ImportError(
+                f"Cannot load '{p}': PyYAML is not installed. Install with `pip install PyYAML` or use a .json config."
+            )
+        data = yaml.safe_load(text) or {}
+    elif suffix == ".json":
+        data = json.loads(text) if text.strip() else {}
+    else:
+        raise ValueError(f"Unsupported config extension '{suffix}' for {p}. Use .yaml, .yml, or .json.")
+    if not isinstance(data, Mapping):
+        raise TypeError(f"Config file {p} must contain a mapping at the top level.")
+    return config_from_dict(dict(data))
+
+
+# ---------------------------------------------------------------------------
+# Default builders. Tests / advanced callers can pass replacements through
+# `run_curriculum(..., train_env_factory=..., model_factory=...)` to avoid
+# importing sb3-contrib or constructing real environments.
+# ---------------------------------------------------------------------------
+
+
+def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
+    from reinforcetactics.rl.masking import make_maskable_vec_env
+
+    return make_maskable_vec_env(
+        n_envs=cfg.n_envs,
+        map_file=stage.map_file,
+        opponent=stage.opponent,
+        max_steps=cfg.env.max_steps,
+        max_turns=cfg.env.max_turns,
+        reward_config=cfg.env.reward_config,
+        enabled_units=cfg.env.enabled_units,
+        action_space_type=cfg.env.action_space_type,
+        max_flat_actions=cfg.env.max_flat_actions,
+        seed=cfg.seed,
+        use_subprocess=False,
+    )
+
+
+def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
+    from reinforcetactics.rl.masking import make_maskable_env
+
+    return make_maskable_env(
+        map_file=stage.map_file,
+        opponent=stage.opponent,
+        max_steps=cfg.env.max_steps,
+        max_turns=cfg.env.max_turns,
+        reward_config=cfg.env.reward_config,
+        enabled_units=cfg.env.enabled_units,
+        action_space_type=cfg.env.action_space_type,
+        max_flat_actions=cfg.env.max_flat_actions,
+        seed=cfg.seed,
+    )
+
+
+def _default_model_factory(vec_env, cfg: BootstrapConfig, output_dir: Path):
+    from sb3_contrib import MaskablePPO
+
+    return MaskablePPO(
+        "MultiInputPolicy",
+        vec_env,
+        seed=cfg.seed,
+        verbose=1,
+        tensorboard_log=str(output_dir / "tensorboard"),
+        **cfg.ppo.as_sb3_kwargs(),
+    )
+
+
+def run_curriculum(
+    cfg: BootstrapConfig,
+    output_dir: ConfigPath,
+    *,
+    train_env_factory: Optional[Callable[[CurriculumStage, BootstrapConfig], Any]] = None,
+    eval_env_factory: Optional[Callable[[CurriculumStage, BootstrapConfig], Any]] = None,
+    model_factory: Optional[Callable[..., Any]] = None,
+    progress_bar: bool = False,
+) -> Dict[str, Any]:
+    """Train through every stage in ``cfg.stages``, advancing on promotion.
+
+    Args:
+        cfg: Validated :class:`BootstrapConfig`.
+        output_dir: Root directory for stage subfolders, tensorboard logs,
+            and the final checkpoint.
+        train_env_factory: ``(stage, cfg) -> vec_env``. Defaults to
+            ``make_maskable_vec_env`` with the cfg's env defaults.
+        eval_env_factory: ``(stage, cfg) -> env``. Defaults to
+            ``make_maskable_env``.
+        model_factory: ``(vec_env, cfg, output_dir) -> model``. Called once
+            for the first stage; later stages reuse the model via
+            ``model.set_env(...)``. Defaults to MaskablePPO.
+        progress_bar: Forwarded to ``model.learn()``.
+
+    Returns:
+        Dict with keys ``model``, ``history`` (list of per-stage dicts),
+        ``final_model_path``, ``metrics_callback``.
+
+    Raises:
+        CurriculumStalled: if any stage hits its ``max_timesteps`` without
+            the promotion criterion.
+    """
+    from reinforcetactics.rl.callbacks import (
+        PeriodicEvalCallback,
+        PromotionCallback,
+        TrainingMetricsCallback,
+    )
+
+    cfg.validate()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    train_env_factory = train_env_factory or _default_train_env_factory
+    eval_env_factory = eval_env_factory or _default_eval_env_factory
+    model_factory = model_factory or _default_model_factory
+
+    metrics_callback = TrainingMetricsCallback()
+    history: List[Dict[str, Any]] = []
+    model = None
+
+    for stage in cfg.stages:
+        stage_dir = output_dir / stage.name
+        stage_dir.mkdir(parents=True, exist_ok=True)
+
+        vec_env = train_env_factory(stage, cfg)
+        eval_env = eval_env_factory(stage, cfg)
+
+        if model is None:
+            model = model_factory(vec_env, cfg, output_dir)
+        else:
+            model.set_env(vec_env)
+
+        eval_cb = PeriodicEvalCallback(
+            eval_env=eval_env,
+            eval_freq=cfg.eval_freq,
+            n_eval_episodes=stage.n_eval_episodes,
+            save_dir=stage_dir,
+        )
+        promote_cb = PromotionCallback(
+            eval_callback=eval_cb,
+            threshold=stage.promotion_win_rate,
+            patience=stage.patience,
+        )
+        callbacks = [metrics_callback, eval_cb, promote_cb]
+
+        print(
+            f"\n=== Stage '{stage.name}' :: map={stage.map_file}, "
+            f"opp={stage.opponent}, target WR >= "
+            f"{stage.promotion_win_rate:.0%} (patience={stage.patience}), "
+            f"budget={stage.max_timesteps:,} steps ==="
+        )
+
+        model.learn(
+            total_timesteps=stage.max_timesteps,
+            callback=callbacks,
+            reset_num_timesteps=False,
+            progress_bar=progress_bar,
+        )
+
+        stage_final = stage_dir / "stage_final.zip"
+        model.save(str(stage_final))
+
+        history.append(
+            {
+                "stage": stage.name,
+                "map_file": stage.map_file,
+                "opponent": stage.opponent,
+                "promoted": promote_cb.promoted,
+                "best_win_rate": eval_cb.best_win_rate,
+                "results": list(eval_cb.results),
+                "stage_final_path": str(stage_final),
+            }
+        )
+
+        # Best-effort cleanup; vec envs hold subprocess handles when
+        # use_subprocess=True. Don't let close-time errors mask training
+        # outcomes.
+        for env_obj in (vec_env, eval_env):
+            close = getattr(env_obj, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if not promote_cb.promoted:
+            raise CurriculumStalled(
+                stage_name=stage.name,
+                achieved_win_rate=eval_cb.best_win_rate,
+                threshold=stage.promotion_win_rate,
+                timesteps=stage.max_timesteps,
+            )
+
+    final_path = output_dir / "final_model.zip"
+    assert model is not None  # validate() guarantees stages is non-empty
+    model.save(str(final_path))
+
+    return {
+        "model": model,
+        "history": history,
+        "final_model_path": str(final_path),
+        "metrics_callback": metrics_callback,
+    }
