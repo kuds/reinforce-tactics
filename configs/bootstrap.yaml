@@ -58,6 +58,13 @@ ppo:
 # map (random -> simple -> medium). The medium thresholds are lower than
 # 90% because medium is a strong baseline; if you hit them, self-play has
 # plenty to work with.
+#
+# Per-stage `max_steps`, `max_turns`, and `ent_coef` overrides handle the
+# starter -> beginner transition: the bigger map needs ~2x the turn budget
+# (units take longer to traverse) and a one-time entropy bump on
+# `beginner_random` to break the previous map's deterministic policy out
+# of its rut. Subsequent beginner stages keep the larger turn budget but
+# cool the entropy back toward baseline as the policy adapts.
 stages:
   - name: starter_random
     map_file: maps/1v1/starter.csv
@@ -90,6 +97,13 @@ stages:
     patience: 2
     max_timesteps: 1_500_000
     n_eval_episodes: 30
+    # Bigger map -> longer episodes; bump turn/step budget so games can
+    # actually finish instead of truncating to draws.
+    max_steps: 800
+    max_turns: 40
+    # Entropy shock to forget the starter-map policy. Cooled in subsequent
+    # beginner stages.
+    ent_coef: 0.10
 
   - name: beginner_simple
     map_file: maps/1v1/beginner.csv
@@ -98,6 +112,9 @@ stages:
     patience: 2
     max_timesteps: 2_500_000
     n_eval_episodes: 30
+    max_steps: 800
+    max_turns: 40
+    ent_coef: 0.07
 
   - name: beginner_medium
     map_file: maps/1v1/beginner.csv
@@ -106,3 +123,7 @@ stages:
     patience: 2
     max_timesteps: 4_000_000
     n_eval_episodes: 30
+    max_steps: 800
+    max_turns: 40
+    # Back to baseline once the policy has adapted to the bigger map.
+    ent_coef: 0.05

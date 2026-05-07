@@ -241,6 +241,49 @@ class TestBootstrapConfig:
         assert isinstance(cfg.ppo.learning_rate, (int, float))
         assert isinstance(cfg.ppo.ent_coef, (int, float))
         assert isinstance(cfg.ppo.clip_range, (int, float))
+        # Beginner stages bump max_turns / max_steps for the bigger map and
+        # raise ent_coef on `beginner_random` to break out of the previous
+        # map's policy. Catch accidental removal of these overrides.
+        by_name = {s.name: s for s in cfg.stages}
+        assert by_name["starter_random"].max_turns is None
+        assert by_name["beginner_random"].max_turns is not None
+        assert by_name["beginner_random"].max_turns >= 30
+        assert by_name["beginner_random"].ent_coef is not None
+        assert by_name["beginner_random"].ent_coef > cfg.ppo.ent_coef
+
+
+class TestCurriculumStageResolution:
+    def test_resolves_to_defaults_when_unset(self):
+        env = BootstrapEnvDefaults(max_steps=400, max_turns=20)
+        ppo = PPOConfig(ent_coef=0.05)
+        stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
+        assert stage.resolve_max_steps(env) == 400
+        assert stage.resolve_max_turns(env) == 20
+        assert stage.resolve_ent_coef(ppo) == pytest.approx(0.05)
+
+    def test_resolves_to_override_when_set(self):
+        env = BootstrapEnvDefaults(max_steps=400, max_turns=20)
+        ppo = PPOConfig(ent_coef=0.05)
+        stage = CurriculumStage(
+            name="s",
+            map_file="m.csv",
+            opponent="random",
+            max_steps=800,
+            max_turns=40,
+            ent_coef=0.10,
+        )
+        assert stage.resolve_max_steps(env) == 800
+        assert stage.resolve_max_turns(env) == 40
+        assert stage.resolve_ent_coef(ppo) == pytest.approx(0.10)
+
+    def test_rejects_invalid_overrides(self):
+        common = dict(name="s", map_file="m.csv", opponent="random")
+        with pytest.raises(ValueError, match="max_steps"):
+            CurriculumStage(**common, max_steps=0).validate()
+        with pytest.raises(ValueError, match="max_turns"):
+            CurriculumStage(**common, max_turns=-1).validate()
+        with pytest.raises(ValueError, match="ent_coef"):
+            CurriculumStage(**common, ent_coef=-0.01).validate()
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +318,10 @@ class _FakeModel:
     # the stub here and (below) setting ``cb.model = self``.
     logger: _StubLogger = field(default_factory=_StubLogger)
     ep_info_buffer: list = field(default_factory=list)
+    # Tracks the value of ``ent_coef`` that the runner set immediately
+    # before each ``learn()`` call, parallel to ``learn_calls``.
+    ent_coef: float = 0.0
+    ent_coef_at_learn: List[float] = field(default_factory=list)
     _current_stage_idx: int = 0
     _stage_names: List[str] = field(default_factory=list)
 
@@ -291,6 +338,9 @@ class _FakeModel:
     ) -> None:
         stage_name = self._stage_names[self._current_stage_idx]
         program = list(self.win_rate_program.get(stage_name, []))
+        # Snapshot whatever ``ent_coef`` the runner mutated us to prior
+        # to this learn() call.
+        self.ent_coef_at_learn.append(float(self.ent_coef))
 
         # SB3 wires up callbacks before _on_step; mimic the parts we use.
         # Don't set ``cb.logger`` directly: BaseCallback.logger is a
@@ -416,6 +466,70 @@ class TestRunCurriculum:
         # All envs were closed.
         assert all(e.closed for e in train_envs)
         assert all(e.closed for e in eval_envs)
+
+    def test_applies_per_stage_ent_coef_and_env_overrides(self, tmp_path):
+        # First stage inherits everything from cfg defaults; second stage
+        # provides explicit overrides for max_steps, max_turns, and
+        # ent_coef.
+        stages = [
+            _stage("a", patience=2),
+            CurriculumStage(
+                name="b",
+                map_file="maps/1v1/beginner.csv",
+                opponent="simple",
+                promotion_win_rate=0.9,
+                patience=2,
+                max_timesteps=10_000,
+                n_eval_episodes=2,
+                max_steps=800,
+                max_turns=40,
+                ent_coef=0.10,
+            ),
+        ]
+        program = {"a": [0.95, 0.95], "b": [0.95, 0.95]}
+
+        train_calls: List[Dict[str, Any]] = []
+
+        def train_env_factory(stage, cfg_arg):
+            # Mirror what the default factory does: resolve via the
+            # stage's helpers so the test exercises the same code path.
+            train_calls.append(
+                {
+                    "name": stage.name,
+                    "max_steps": stage.resolve_max_steps(cfg_arg.env),
+                    "max_turns": stage.resolve_max_turns(cfg_arg.env),
+                }
+            )
+            return _FakeEnv()
+
+        def eval_env_factory(stage, cfg_arg):
+            return _FakeEnv()
+
+        cfg = _make_cfg(stages)
+        fake_model = _FakeModel(
+            win_rate_program=program,
+            _stage_names=[s.name for s in stages],
+        )
+
+        def model_factory(vec_env, cfg_arg, output_dir):
+            return fake_model
+
+        run_curriculum(
+            cfg,
+            output_dir=tmp_path,
+            train_env_factory=train_env_factory,
+            eval_env_factory=eval_env_factory,
+            model_factory=model_factory,
+        )
+
+        # Stage 'a' inherits cfg.env / cfg.ppo defaults.
+        assert train_calls[0]["max_steps"] == cfg.env.max_steps
+        assert train_calls[0]["max_turns"] == cfg.env.max_turns
+        assert fake_model.ent_coef_at_learn[0] == pytest.approx(cfg.ppo.ent_coef)
+        # Stage 'b' uses overrides.
+        assert train_calls[1]["max_steps"] == 800
+        assert train_calls[1]["max_turns"] == 40
+        assert fake_model.ent_coef_at_learn[1] == pytest.approx(0.10)
 
     def test_raises_when_stage_stalls(self, tmp_path):
         stages = [_stage("a", patience=2), _stage("b", "simple", patience=2)]
