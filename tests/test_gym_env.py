@@ -112,6 +112,23 @@ class TestEnvironmentCreation:
         assert env.opponent_type == "random"
         env.close()
 
+    def test_initialization_opponent_balanced_random(self):
+        """``balanced_random`` instantiates BalancedRandomBot.
+
+        Curriculum stepping stone between ``noop`` (zero opponent actions)
+        and ``random`` (RandomBot's default 20 actions/turn). Action
+        throughput scales with the bot's army size: one build attempt plus
+        one random action per owned unit per turn -- see configs/bootstrap.yaml.
+        """
+        from reinforcetactics.game.bot import BalancedRandomBot
+
+        env = StrategyGameEnv(map_file=None, opponent="balanced_random", render_mode=None)
+        env.reset(seed=0)
+
+        assert env.opponent_type == "balanced_random"
+        assert isinstance(env.opponent, BalancedRandomBot)
+        env.close()
+
     def test_initialization_opponent_self(self):
         """Test initialization with opponent='self' (self-play)."""
         env = StrategyGameEnv(map_file=None, opponent="self", render_mode=None)
