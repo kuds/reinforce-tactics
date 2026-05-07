@@ -266,12 +266,23 @@ class TestBootstrapConfig:
         assert by_name["beginner_noop"].max_turns >= 30
         assert by_name["beginner_noop"].ent_coef is not None
         assert by_name["beginner_noop"].ent_coef > cfg.ppo.ent_coef
-        # Reward-shape override on beginner stages: HQ capture is much
-        # harder than elimination on the bigger map, so the two terminal
-        # rewards must be equalized (or capture <= elimination).
+        # Reward-shape override on beginner stages WITH opponents: HQ
+        # capture is much harder than elimination on the bigger map, so
+        # the two terminal rewards must be equalized (or capture <=
+        # elimination).
         beginner_random = by_name["beginner_random"]
         assert beginner_random.reward_config is not None
         assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
+        # Noop stages MUST inherit the env defaults rather than the
+        # elimination-friendly override -- on noop there are no enemy
+        # units to eliminate (NoopBot never builds), so HQ capture is the
+        # ONLY win path. We want the env's default heavy HQ-capture
+        # signal (5000 + 300/turn seize), not the equalised 3000/50.
+        # Regression: an earlier config applied the override to
+        # beginner_noop and the agent spent 650k+ steps spamming end_turn
+        # because the seize signal was suppressed.
+        assert by_name["starter_noop"].reward_config is None
+        assert by_name["beginner_noop"].reward_config is None
 
     def test_reward_config_override_merges_with_defaults(self):
         # Stage override should *merge* over BootstrapEnvDefaults.reward_config,
