@@ -8,6 +8,10 @@ Reusable SB3 callbacks for RL training.
   env steps, mirroring SB3's ``EvalCallback`` contract while capturing
   the project's full win/loss/draw breakdown plus optional per-step
   action-type counts and reward-component sums.
+- ``PromotionCallback`` watches a paired ``PeriodicEvalCallback`` and
+  exits ``model.learn()`` early once a configurable win-rate threshold
+  is sustained for ``patience`` consecutive evaluations. Used by the
+  bootstrap-curriculum runner to advance between stages.
 
 Both callbacks are designed to work with ``MaskablePPO`` from sb3-contrib
 as well as plain ``PPO`` from stable-baselines3 — they don't import
@@ -183,3 +187,63 @@ class PeriodicEvalCallback(BaseCallback):
                 self.best_win_rate = m["win_rate"]
                 self._best_reward = m["avg_reward"]
                 self.model.save(str(self.save_dir / "best_model.zip"))
+
+
+class PromotionCallback(BaseCallback):
+    """Stop ``model.learn()`` early when a paired :class:`PeriodicEvalCallback`
+    reports sustained win-rate above a threshold.
+
+    The callback consumes ``eval_callback.results`` rather than running its
+    own evaluation, so ordering matters: pass ``PeriodicEvalCallback`` first
+    in the SB3 ``CallbackList`` (or as an earlier list element) so this
+    callback sees freshly-appended results on the same step.
+
+    Returns ``False`` from :meth:`_on_step` once ``patience`` consecutive
+    evaluations have ``win_rate >= threshold``. SB3 honours the ``False``
+    return by exiting the current ``learn()`` call cleanly. The bootstrap
+    curriculum runner inspects :attr:`promoted` afterwards to decide whether
+    to advance to the next stage or raise ``CurriculumStalled``.
+    """
+
+    def __init__(
+        self,
+        eval_callback: "PeriodicEvalCallback",
+        threshold: float,
+        patience: int = 2,
+        verbose: int = 1,
+    ) -> None:
+        super().__init__(verbose=verbose)
+        if patience < 1:
+            raise ValueError(f"patience must be >= 1, got {patience}")
+        if not 0.0 <= threshold <= 1.0:
+            raise ValueError(f"threshold must be in [0, 1], got {threshold}")
+        self.eval_callback = eval_callback
+        self.threshold = float(threshold)
+        self.patience = int(patience)
+        self._consumed: int = 0
+        self._streak: int = 0
+        self.promoted: bool = False
+
+    def _on_step(self) -> bool:
+        # Consume any results the eval callback has appended since we last
+        # looked. Iterating handles the unusual case of multiple new results
+        # in a single step (shouldn't happen in practice but is cheap to
+        # support and keeps the streak accounting correct).
+        results = self.eval_callback.results
+        while self._consumed < len(results):
+            wr = float(results[self._consumed]["win_rate"])
+            if wr >= self.threshold:
+                self._streak += 1
+            else:
+                self._streak = 0
+            self._consumed += 1
+            if self._streak >= self.patience:
+                self.promoted = True
+                if self.verbose:
+                    print(
+                        f"  [promote] win_rate >= {self.threshold:.0%} for "
+                        f"{self._streak} consecutive evals at "
+                        f"{self.num_timesteps:,} steps — advancing"
+                    )
+                return False
+        return True

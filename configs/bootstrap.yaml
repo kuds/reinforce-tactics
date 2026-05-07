@@ -1,0 +1,108 @@
+# PPO bootstrap curriculum.
+#
+# Trains a single MaskablePPO policy through a sequence of stages, advancing
+# only when the eval win-rate stays at or above `promotion_win_rate` for
+# `patience` consecutive evaluations. The final checkpoint is intended as a
+# warm-start for self-play (notebooks/ppo_training.ipynb).
+#
+# Hard cutoff between stages (no opponent mixing). If a stage exhausts its
+# `max_timesteps` budget without promoting, the runner raises
+# CurriculumStalled — investigate (reward shaping, hyperparams) before
+# raising the budget blindly.
+seed: 42
+n_envs: 4
+eval_freq: 50_000
+
+env:
+  max_steps: 400
+  max_turns: 20
+  enabled_units: [W, M, A]
+  action_space_type: flat_discrete
+  reward_config:
+    win_by_hq_capture: 5000.0
+    win_by_elimination: 1000.0
+    win: 5000.0
+    loss: -5000.0
+    draw: -5000.0
+    income_diff: 0.5
+    unit_diff: 1.0
+    structure_control: 10.0
+    create_unit: 0.0
+    move: 0.0
+    damage_scale: 0.0
+    kill: 0.0
+    seize_progress: 300.0
+    capture: 1000.0
+    cure: 0.0
+    heal_scale: 0.0
+    paralyze: 0.0
+    haste: 0.0
+    defence_buff: 0.0
+    attack_buff: 0.0
+    invalid_action: -10.0
+    turn_penalty: -20.0
+
+ppo:
+  learning_rate: 3e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+
+# Six-stage ramp: starter map (random -> simple -> medium), then beginner
+# map (random -> simple -> medium). The medium thresholds are lower than
+# 90% because medium is a strong baseline; if you hit them, self-play has
+# plenty to work with.
+stages:
+  - name: starter_random
+    map_file: maps/1v1/starter.csv
+    opponent: random
+    promotion_win_rate: 0.90
+    patience: 2
+    max_timesteps: 1_000_000
+    n_eval_episodes: 30
+
+  - name: starter_simple
+    map_file: maps/1v1/starter.csv
+    opponent: simple
+    promotion_win_rate: 0.90
+    patience: 2
+    max_timesteps: 2_000_000
+    n_eval_episodes: 30
+
+  - name: starter_medium
+    map_file: maps/1v1/starter.csv
+    opponent: medium
+    promotion_win_rate: 0.75
+    patience: 2
+    max_timesteps: 3_000_000
+    n_eval_episodes: 30
+
+  - name: beginner_random
+    map_file: maps/1v1/beginner.csv
+    opponent: random
+    promotion_win_rate: 0.90
+    patience: 2
+    max_timesteps: 1_500_000
+    n_eval_episodes: 30
+
+  - name: beginner_simple
+    map_file: maps/1v1/beginner.csv
+    opponent: simple
+    promotion_win_rate: 0.90
+    patience: 2
+    max_timesteps: 2_500_000
+    n_eval_episodes: 30
+
+  - name: beginner_medium
+    map_file: maps/1v1/beginner.csv
+    opponent: medium
+    promotion_win_rate: 0.70
+    patience: 2
+    max_timesteps: 4_000_000
+    n_eval_episodes: 30
