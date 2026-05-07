@@ -72,7 +72,15 @@ class CurriculumStalled(RuntimeError):
 
 @dataclass
 class CurriculumStage:
-    """One curriculum step: a (map, opponent) pair with a promotion criterion."""
+    """One curriculum step: a (map, opponent) pair with a promotion criterion.
+
+    The ``max_steps``, ``max_turns``, and ``ent_coef`` fields are optional
+    overrides; when ``None`` the runner falls back to ``BootstrapEnvDefaults``
+    / ``PPOConfig``. The intended use is bumping ``max_turns`` and
+    ``max_steps`` on a larger map (units take more turns to traverse) and
+    raising ``ent_coef`` on the first stage of a new map to crack the
+    previous stage's policy out of a deterministic groove.
+    """
 
     name: str
     map_file: str
@@ -81,6 +89,10 @@ class CurriculumStage:
     patience: int = 2
     max_timesteps: int = 1_000_000
     n_eval_episodes: int = 30
+    # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
+    max_steps: Optional[int] = None
+    max_turns: Optional[int] = None
+    ent_coef: Optional[float] = None
 
     def validate(self) -> None:
         if not self.name:
@@ -100,6 +112,21 @@ class CurriculumStage:
             raise ValueError(f"stage '{self.name}': max_timesteps must be > 0")
         if self.n_eval_episodes <= 0:
             raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
+        if self.max_steps is not None and self.max_steps <= 0:
+            raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
+        if self.max_turns is not None and self.max_turns <= 0:
+            raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
+        if self.ent_coef is not None and self.ent_coef < 0:
+            raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+
+    def resolve_max_steps(self, defaults: "BootstrapEnvDefaults") -> int:
+        return self.max_steps if self.max_steps is not None else defaults.max_steps
+
+    def resolve_max_turns(self, defaults: "BootstrapEnvDefaults") -> Optional[int]:
+        return self.max_turns if self.max_turns is not None else defaults.max_turns
+
+    def resolve_ent_coef(self, ppo: PPOConfig) -> float:
+        return self.ent_coef if self.ent_coef is not None else ppo.ent_coef
 
 
 @dataclass
@@ -231,8 +258,8 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
         n_envs=cfg.n_envs,
         map_file=stage.map_file,
         opponent=stage.opponent,
-        max_steps=cfg.env.max_steps,
-        max_turns=cfg.env.max_turns,
+        max_steps=stage.resolve_max_steps(cfg.env),
+        max_turns=stage.resolve_max_turns(cfg.env),
         reward_config=cfg.env.reward_config,
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
@@ -248,8 +275,8 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
     return make_maskable_env(
         map_file=stage.map_file,
         opponent=stage.opponent,
-        max_steps=cfg.env.max_steps,
-        max_turns=cfg.env.max_turns,
+        max_steps=stage.resolve_max_steps(cfg.env),
+        max_turns=stage.resolve_max_turns(cfg.env),
         reward_config=cfg.env.reward_config,
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
@@ -336,6 +363,15 @@ def run_curriculum(
         else:
             model.set_env(vec_env)
 
+        # Apply per-stage entropy override. SB3 reads ``model.ent_coef`` fresh
+        # inside every ``train()`` step, so live mutation works without
+        # rebuilding the model. The starter -> beginner transition is the
+        # primary use case: bumping entropy lets the policy break out of the
+        # previous map's deterministic groove and re-explore.
+        ent_coef = stage.resolve_ent_coef(cfg.ppo)
+        if hasattr(model, "ent_coef"):
+            model.ent_coef = ent_coef
+
         eval_cb = PeriodicEvalCallback(
             eval_env=eval_env,
             eval_freq=cfg.eval_freq,
@@ -349,11 +385,15 @@ def run_curriculum(
         )
         callbacks = [metrics_callback, eval_cb, promote_cb]
 
+        max_steps = stage.resolve_max_steps(cfg.env)
+        max_turns = stage.resolve_max_turns(cfg.env)
         print(
             f"\n=== Stage '{stage.name}' :: map={stage.map_file}, "
             f"opp={stage.opponent}, target WR >= "
             f"{stage.promotion_win_rate:.0%} (patience={stage.patience}), "
-            f"budget={stage.max_timesteps:,} steps ==="
+            f"budget={stage.max_timesteps:,} steps, "
+            f"max_steps={max_steps}, max_turns={max_turns}, "
+            f"ent_coef={ent_coef:.3f} ==="
         )
 
         model.learn(
