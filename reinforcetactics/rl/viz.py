@@ -26,7 +26,7 @@ from typing import Any, Iterable, Optional, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from reinforcetactics.rl.evaluation import ACTION_TYPE_NAMES, REWARD_COMPONENTS
+from reinforcetactics.rl.evaluation import ACTION_TYPE_NAMES, END_REASONS, REWARD_COMPONENTS
 
 # Stable colour assignments so cross-figure comparisons stay coherent.
 _REWARD_COMPONENT_COLORS = {
@@ -86,7 +86,9 @@ def plot_eval_curves(
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Win Rate (%)")
     ax.set_title(f"Win Rate vs {opponent_label}" if opponent_label else "Win Rate")
-    ax.set_xscale("log") if eval_ts and eval_ts[0] > 0 else None
+    # Linear x-axis matching the other four panels in this row. The
+    # previous log scale was added to surface the t=4 baseline eval but
+    # made the panel hard to compare with the rest of the dashboard.
     ax.set_ylim(-5, 105)
     ax.axhline(y=70, color="green", linestyle="--", alpha=0.5, label="70% target")
     ax.legend(fontsize=8)
@@ -274,3 +276,83 @@ def plot_action_distribution(
     ax.grid(True, alpha=0.3, axis="y")
     fig.tight_layout()
     return _save_and_return(fig, charts_dir, "action_distribution.png")
+
+
+# Outcome × end-reason colour palette. Same hue per outcome (green=win,
+# red=loss, grey=draw) with shading by reason so a stacked bar reads
+# "this eval was 90% wins, almost all by HQ capture" at a glance.
+_OUTCOME_REASON_COLORS = {
+    "wins_by_hq_capture": "#1b5e20",
+    "wins_by_elimination": "#4caf50",
+    "wins_by_max_turns_draw": "#a5d6a7",  # shouldn't happen (draw isn't a win), kept for symmetry
+    "wins_by_max_steps_truncate": "#c8e6c9",
+    "losses_by_hq_capture": "#b71c1c",
+    "losses_by_elimination": "#f44336",
+    "losses_by_max_turns_draw": "#ef9a9a",
+    "losses_by_max_steps_truncate": "#ffcdd2",
+    "draws_by_hq_capture": "#424242",
+    "draws_by_elimination": "#616161",
+    "draws_by_max_turns_draw": "#9e9e9e",
+    "draws_by_max_steps_truncate": "#e0e0e0",
+}
+
+
+def plot_outcome_breakdown(
+    results: Sequence[dict],
+    *,
+    charts_dir: Optional[Any] = None,
+    drop_unused: bool = True,
+) -> Optional[plt.Figure]:
+    """Stacked bar of outcome × end-reason per eval.
+
+    Reads from ``r["outcome_reasons"]`` (always populated by
+    ``evaluate_model``). Shows whether wins are coming from HQ captures
+    (the intended goal) or from elimination, and whether losses are
+    structural (HQ-captured by opponent) or symmetric (own units wiped
+    out). Surfaces failure modes invisible in a single win-rate number.
+
+    Reading guide:
+    - mostly dark green ``wins_by_hq_capture``: agent has learned the
+      win condition and converts material advantage into HQ pressure.
+    - light green ``wins_by_elimination`` dominating: agent is winning
+      via attrition; if the opponent never resigns this often means
+      lucky outcomes rather than goal-directed play.
+    - grey ``draws_by_max_turns_draw`` band: agent is timing out.
+    """
+    timesteps = []
+    rows: list[dict] = []
+    for r in results:
+        if "outcome_reasons" not in r:
+            continue
+        timesteps.append(r["timesteps"])
+        rows.append(r["outcome_reasons"])
+    if not timesteps:
+        print("No outcome_reasons recorded — re-run training with the updated evaluate_model.")
+        return None
+
+    keys = [f"{outcome}_by_{reason}" for outcome in ("wins", "losses", "draws") for reason in END_REASONS]
+    arr = np.array([[row.get(k, 0) for row in rows] for k in keys], dtype=float)
+
+    if drop_unused:
+        keep = [i for i, _ in enumerate(keys) if arr[i].max() > 0]
+        if not keep:
+            keep = list(range(len(keys)))
+        keys = [keys[i] for i in keep]
+        arr = arr[keep]
+
+    colors = [_OUTCOME_REASON_COLORS.get(k, "#888") for k in keys]
+
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    bottom = np.zeros(len(timesteps))
+    width = max(1, int((max(timesteps) - min(timesteps)) / max(1, len(timesteps) - 1) * 0.8)) if len(timesteps) > 1 else 1
+    for k, color, counts in zip(keys, colors, arr):
+        ax.bar(timesteps, counts, bottom=bottom, color=color, label=k, width=width, edgecolor="white", linewidth=0.3)
+        bottom = bottom + counts
+
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Episodes")
+    ax.set_title("Eval outcome × end-reason per eval")
+    ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "outcome_breakdown.png")

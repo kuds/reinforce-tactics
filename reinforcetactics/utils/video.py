@@ -122,7 +122,7 @@ def record_evaluation_to_video(
     agent_player = getattr(_inner, "agent_player", 1)
     opponent_player = 3 - agent_player
 
-    def _snapshot(action_type=None, reward=None, reward_breakdown=None, valid_action=None):
+    def _snapshot(action_type=None, unit_type=None, reward=None, reward_breakdown=None, valid_action=None):
         gs = _get_gs()
         agent_units = [u for u in gs.units if u.player == agent_player]
         opp_units = [u for u in gs.units if u.player == opponent_player]
@@ -130,6 +130,7 @@ def record_evaluation_to_video(
             "turn": gs.turn_number,
             "current_player": gs.current_player,
             "action_type": action_type,
+            "unit_type": unit_type,
             "reward": reward,
             "reward_breakdown": dict(reward_breakdown) if reward_breakdown else None,
             "valid_action": valid_action,
@@ -139,6 +140,11 @@ def record_evaluation_to_video(
             "opponent_gold": gs.player_gold.get(opponent_player, 0),
             "agent_hp_total": sum(getattr(u, "health", 0) for u in agent_units),
             "opponent_hp_total": sum(getattr(u, "health", 0) for u in opp_units),
+            # Capturable tiles owned by each player (towers + buildings + HQ).
+            # Reads via the same helper used by the env's structure_control
+            # potential term, so the chart and reward signal stay in sync.
+            "agent_structures": len(gs.grid.get_capturable_tiles(player=agent_player)),
+            "opponent_structures": len(gs.grid.get_capturable_tiles(player=opponent_player)),
         }
 
     # Check whether the env supports action masking (ActionMaskedEnv)
@@ -172,6 +178,7 @@ def record_evaluation_to_video(
         step_stats.append(
             _snapshot(
                 action_type=info.get("action_type"),
+                unit_type=info.get("unit_type"),
                 reward=float(reward),
                 reward_breakdown=info.get("reward_breakdown"),
                 valid_action=info.get("valid_action"),
@@ -193,9 +200,37 @@ def record_evaluation_to_video(
     winner = info.get("winner") or (gs.winner if gs.game_over else None)
     episode_stats = info.get("episode_stats", {})
 
+    # Save the recorded game's action history as a standard replay JSON
+    # next to the MP4. GameState.save_replay_to_file builds the canonical
+    # replay format (game_info + actions) and writes it via FileIO; the
+    # same JSON is loadable by FileIO.load_replay and replayable through
+    # record_replay_to_video / the in-game replay viewer. Matches the
+    # video filename so .mp4 and .json stay paired (agent_replay_best.mp4
+    # ↔ agent_replay_best.json).
+    #
+    # GameState's game_info records winner / total_turns / game_over but
+    # not the env's end_reason classification (hq_capture / elimination /
+    # max_turns_draw / max_steps_truncate). Patch it in here so a reader
+    # can see *how* the game ended without re-deriving it from actions[].
+    replay_path: Optional[str] = None
+    try:
+        replay_path = gs.save_replay_to_file(str(Path(output_path).with_suffix(".json")))
+        if replay_path:
+            import json as _json
+
+            with open(replay_path, "r", encoding="utf-8") as _f:
+                _replay_data = _json.load(_f)
+            _replay_data.setdefault("game_info", {})["end_reason"] = info.get("end_reason")
+            with open(replay_path, "w", encoding="utf-8") as _f:
+                _json.dump(_replay_data, _f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not save replay JSON next to %s: %s", output_path, exc)
+
     return {
         "video_path": video_path,
+        "replay_path": replay_path,
         "winner": winner,
+        "end_reason": info.get("end_reason"),
         "total_reward": total_reward,
         "steps": steps,
         "episode_stats": episode_stats,
