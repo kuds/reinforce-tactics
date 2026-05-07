@@ -9,7 +9,6 @@ import torch
 
 from reinforcetactics.rl.feudal_rl import (
     AutoregressiveActionHead,
-    AutoregressiveWorkerNetwork,
     FeudalRLAgent,
     FeudalRolloutBuffer,
     StructuredMaskProvider,

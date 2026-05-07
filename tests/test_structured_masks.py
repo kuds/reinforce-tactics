@@ -119,7 +119,6 @@ class TestStructuredVsFlatConsistency:
 
 class TestEncodeStructuredAction:
     def test_round_trip_through_step(self, env):
-        masks = env.structured_action_masks()
         # End turn is always available; verify the encoded action is accepted.
         action = StrategyGameEnv.encode_structured_action(
             atype=5, sx=0, sy=0, tx=0, ty=0, unit_type_idx=0
