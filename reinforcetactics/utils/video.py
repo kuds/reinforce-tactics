@@ -200,8 +200,22 @@ def record_evaluation_to_video(
     winner = info.get("winner") or (gs.winner if gs.game_over else None)
     episode_stats = info.get("episode_stats", {})
 
+    # Save the recorded game's action history as a standard replay JSON
+    # next to the MP4. GameState.save_replay_to_file builds the canonical
+    # replay format (game_info + actions) and writes it via FileIO; the
+    # same JSON is loadable by FileIO.load_replay and replayable through
+    # record_replay_to_video / the in-game replay viewer. Matches the
+    # video filename so .mp4 and .json stay paired (agent_replay_best.mp4
+    # ↔ agent_replay_best.json).
+    replay_path: Optional[str] = None
+    try:
+        replay_path = gs.save_replay_to_file(str(Path(output_path).with_suffix(".json")))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not save replay JSON next to %s: %s", output_path, exc)
+
     return {
         "video_path": video_path,
+        "replay_path": replay_path,
         "winner": winner,
         "end_reason": info.get("end_reason"),
         "total_reward": total_reward,
