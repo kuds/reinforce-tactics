@@ -3,7 +3,7 @@
 A prioritized, phased plan for growing Reinforce Tactics from a solid alpha into a
 complete RL education platform. Each phase builds on the previous one.
 
-> **Last updated:** February 2026
+> **Last updated:** May 2026
 > Status legend: ✅ Complete | 🟡 Partial | ⬚ Not Started
 
 ---
@@ -14,9 +14,38 @@ complete RL education platform. Each phase builds on the previous one.
 |-------|-------------|----------|
 | **Phase 1** | Fix Foundations & Quick Wins | **75%** — 3 of 4 items complete |
 | **Phase 2** | Educational Scaffolding | **0%** — 0 of 4 items complete |
-| **Phase 3** | RL Depth & Model Zoo | **25%** — 1 of 4 items complete, 1 partial |
+| **Phase 3** | RL Depth & Model Zoo | **~25%** — 0 of 7 items complete, 2 partial (3.2 is 4 of 6 sub-tasks done) |
 | **Phase 4** | LLM & Benchmark Polish | **12%** — 0 of 4 items complete, 2 partial |
 | **Phase 5** | Platform Expansion | **10%** — 0 of 5 items complete, 2 partial |
+
+---
+
+## Algorithm & System Status
+
+Snapshot of where each trainer / bot type stands. "In tournament" means
+present in the latest `tournament_results/` directory.
+
+### Trainers (learn weights)
+
+| | Code | Config | Training notebook | In tournament | Status / biggest gap |
+|---|---|---|---|---|---|
+| **PPO (MaskablePPO)** | ✅ `make_maskable_env`, `masking.py` | ✅ `maskable_ppo.yaml`, `ppo_baseline.yaml`, `self_play.yaml` | ✅ `ppo_training.ipynb` | ❌ | Trained checkpoint not yet entered into the ladder |
+| **Feudal RL** | ✅ `feudal_rl.py`, action masking + AR head opt-in | ✅ `feudal_rl.yaml` | ✅ `feudal_rl_training.ipynb` | ❌ | Trained checkpoint not entered; no A/B between independent and AR worker yet |
+| **AlphaZero** | ✅ `alphazero_net.py`, MCTS | ✅ `alphazero.yaml` | ❌ | ❌ | No training notebook, no checkpoint, policy head bakes in grid size (`alphazero_net.py:90`) so won't share weights or AR head with PPO/feudal |
+| **Autoregressive head** (AlphaStar-style) | ✅ in feudal worker (`AutoregressiveActionHead`, `StructuredMaskProvider`, mask-plumbed PPO update) | shares `feudal_rl.yaml` via `--autoregressive-worker` flag | shares feudal notebook | ❌ | Architecture in place + 42 tests; never actually trained, no PPO or AlphaZero variant yet |
+
+### Bots (inference only)
+
+| | Status | Notes |
+|---|---|---|
+| **LLM bots** (Claude, ChatGPT, Gemini) | ✅ in `bot_tournament.ipynb`, `llm_bot_tournament.ipynb` | Already on the ladder; `Gemini 3.0 Flash` placed 2nd, others below `MediumBot` |
+| **Scripted bots** (Random/Noop/Simple/Medium/Advanced) | ✅ done | `AdvancedBot` is currently top of the tournament |
+
+### Top-level gaps (cross-cutting)
+
+1. **None of the three trainers have a checkpoint on the tournament ladder.** The ladder shows AdvancedBot beats LLMs, but says nothing about PPO/Feudal/AlphaZero vs. AdvancedBot — the actual point of the project.
+2. **AlphaZero is the least-validated trainer:** no training notebook, no checkpoint, and the flat policy head will need the same AR-head retrofit as feudal got before it can scale beyond small maps.
+3. **The AR head only lives inside feudal.** Standalone PPO and AlphaZero variants of Phase 3.2 are still open.
 
 ---
 
@@ -189,7 +218,7 @@ Deepen the RL capabilities and ship pre-trained artifacts.
 - Add `examples/play_against_model.py` that loads a model and renders a game.
 - Users can immediately see what different training budgets produce.
 
-### 3.2 Auto-Regressive Action Decomposition ⬚
+### 3.2 Auto-Regressive Action Decomposition 🟡
 **Priority:** **High — prerequisite before training on 10x14+ and 20x20 maps.**
 
 The current MultiDiscrete space (10 × 8 × W × H × W × H) with independent per-dimension
@@ -201,53 +230,110 @@ masking suffers from combinatorial explosion on larger maps:
 | 10×14    | 1.6M        | Significant              |
 | 20×20    | 12.8M       | Severe                   |
 
-Auto-regressive decomposition keeps each step small (≤20 choices) regardless of map size
+Auto-regressive decomposition keeps each step small (≤H·W choices) regardless of map size
 and enables *exact* conditional masking that eliminates all invalid action combinations.
 
-**Decomposition order:**
+**Decomposition order (as shipped — joint spatial heads, simpler than the original spec):**
 ```
-action_type(10) → from_x(W) → from_y(H) → unit_type(8) → to_x(W) → to_y(H)
+action_type(A) → src_xy(H·W) → unit_type(U) → tgt_xy(H·W)
 ```
+Each stage is sampled conditioned on all prior choices:
+`P(at) → P(src|at) → P(ut|at, src) → P(tgt|at, src)`.
+The `src_xy → tgt_xy` joint heads replace the original `from_x → from_y → to_x → to_y`
+4-stage spec because the underlying legality data already pairs (x, y).
 
-Each dimension is sampled conditioned on all prior choices:
-`P(at) → P(fx|at) → P(fy|at,fx) → P(ut|at,fx,fy) → P(tx|...) → P(ty|...)`
+**Implementation steps:**
 
-**Implementation steps (6 sub-tasks):**
+1. ✅ **Conditional mask builder** (`gym_env.py`) — `StructuredActionMasks` dataclass +
+   `StrategyGameEnv.structured_action_masks()` build atype/source/target/unit_type from a
+   single `get_legal_actions()` call. Tests in `test_structured_masks.py` verify exact
+   equivalence to the existing flat enumeration.
 
-1. **Conditional mask builder** (`gym_env.py`) — precompute a nested lookup from
-   `get_legal_actions()` so that, given choices so far, the exact valid mask for the
-   next dimension can be retrieved in O(1). Same single `get_legal_actions()` call per
-   step as the current `_build_masks()`. (~80 lines)
+2. ✅ **Auto-regressive policy network** — `AutoregressiveActionHead` in `feudal_rl.py`
+   (rather than a standalone module — fine for now since feudal is the only consumer).
+   Stage-by-stage logits with optional per-stage masks; `sample`, `sample_with_provider`,
+   and `evaluate` mirror the joint factorization. Source-position embedding feeds the
+   unit_type and target heads so each is genuinely conditioned on the chosen source.
 
-2. **Auto-regressive policy network** (`reinforcetactics/rl/autoregressive.py`) — new
-   module. Shared CNN+MLP backbone produces hidden state; 6 sequential MLP heads each
-   take the hidden state plus learned embeddings of all previously sampled dimensions.
-   Conditional masks applied as logit masking before sampling. Includes `sample_action()`
-   and `evaluate_action()` for PPO. (~250 lines)
+3. ✅ **Feudal RL integration** — `autoregressive_worker=True` flag on `FeudalRLAgent`.
+   `AutoregressiveWorkerNetwork` is a drop-in for `WorkerNetwork`. Conditional masks
+   applied at sample time are stored in the buffer (`FeudalRolloutBuffer(store_masks=True)`)
+   and replayed through `evaluate_action` during the PPO update so old/new log-probs are
+   computed under identical mask supports.
 
-3. **Feudal RL integration** (`feudal_rl.py`) — add `autoregressive=True` flag to
-   `FeudalRLAgent`. When enabled, `AutoRegressiveWorker` replaces the independent-head
-   `WorkerNetwork`. Per-dimension masks stored in the rollout buffer alongside actions
-   (small cost: 6 bool arrays per step vs. 20×20×3 float32 observation tensors). (~150
-   lines modified)
+4. ⬚ **Standalone PPO mode** — `action_space_type='autoregressive'` on `StrategyGameEnv`,
+   plus an SB3-compatible policy wrapper so the AR head works without the feudal hierarchy.
+   *Still open.*
 
-4. **Standalone PPO mode** — add `action_space_type='autoregressive'` to
-   `StrategyGameEnv`, create SB3-compatible policy wrapper so auto-regressive
-   decomposition works without the feudal hierarchy. Update `masking.py`. (~150 lines)
+5. ⬚ **Training CLI** — `--autoregressive-worker` flag on `scripts/train/train_feudal_rl.py`,
+   plus `--mode autoregressive` once 3.2.4 lands. *Still open.*
 
-5. **Training CLI** — add `--autoregressive`, `--ar-embedding-dim`, `--ar-head-hidden`
-   flags to `scripts/train/train_feudal_rl.py`. Add `--mode autoregressive` for standalone
-   non-feudal training. (~50 lines)
+6. ✅ **Tests** — 42 new tests across `test_structured_masks.py`,
+   `test_autoregressive_head.py`, `test_autoregressive_rollout.py`. End-to-end check
+   confirms every action recorded during a real rollout has its bits set in the mask
+   actually applied at sample time (i.e. the policy provably samples only legal actions
+   during training).
 
-6. **Tests** (`tests/test_autoregressive.py`) — conditional mask exactness, network
-   output shapes, gradient flow, round-trip validity (sampled action ∈ legal actions),
-   evaluate/sample log-prob consistency, 20×20 smoke test. (~200 lines)
-
-**Scaling note:** Sequential sampling (6 small MLP forwards) is negligible overhead
-for a turn-based game. The CNN backbone dominates inference time regardless.
+**Open follow-ups inside this work:**
+- 3.2.4 + 3.2.5 above (standalone PPO + CLI flag).
+- Inference-time masking for the AR worker's `select_action` — currently unmasked because
+  `select_action` has no env reference; tractable as a small follow-up if we thread an
+  `action_masks` argument or env handle.
+- Apply the AR head retrofit to AlphaZero (`alphazero_net.py:90` is the same flat
+  `Linear(32·H·W, A·H·W)` shape that 3.2 fixes for feudal).
 
 **Prerequisite for:** Training on maps larger than 6×6 at competitive sample efficiency.
 Should be completed before large-map curriculum stages in Phase 5.1.
+
+### 3.5 Behavioral-Cloning Bootstrap from `AdvancedBot` ⬚
+**Priority:** Medium — local stand-in for AlphaStar's human-replay SL phase.
+
+AlphaStar relied on supervised pretraining from human replays to give policies a strong
+prior before RL. We don't have replays, but we have `AdvancedBot`, the strongest scripted
+bot. A short BC phase should give any of the three trainers a sane warm-start, and is
+particularly valuable for the AR worker (its joint distribution is wider than the legacy
+6-head independent worker, so cold-start exploration is harder).
+
+**Steps:**
+1. **Trajectory collector** — `scripts/collect_advancedbot_trajectories.py` rolls
+   AdvancedBot vs. AdvancedBot games and dumps `(obs, structured_masks, action)` triples
+   to disk.
+2. **BC pretrain loop** — minimize cross-entropy of `AutoregressiveActionHead.evaluate`
+   against the recorded action under the recorded masks. Reuses the head's existing
+   `evaluate(features, action, masks)` signature, no new network code.
+3. **Action-prior auxiliary loss** — small `-log p_policy(bot_action | s)` term added
+   to PPO with a coefficient that decays over training. The local analogue of AlphaStar's
+   z-conditioning decay; mitigates BC distribution shift once RL takes over.
+4. **A/B harness** — same seed and config, `BC + RL` vs. `RL only`. Win rate vs.
+   `AdvancedBot` and time-to-first-win are the headline numbers.
+
+### 3.6 Extend Auto-Regressive Head to PPO and AlphaZero ⬚
+**Priority:** Medium — closes 3.2.4 and unblocks AlphaZero scaling.
+
+Currently `AutoregressiveActionHead` lives inside `feudal_rl.py`. Two natural extensions:
+
+- **MaskablePPO + AR head.** Extract `AutoregressiveActionHead` to
+  `reinforcetactics/rl/autoregressive.py`, build an SB3-compatible policy that uses it,
+  wire the structured-mask path through the PPO rollout buffer.
+- **AlphaZero + AR head.** The `Linear(32·H·W, A·H·W)` policy head in `alphazero_net.py`
+  is the same shape problem the feudal worker had. Replace with the AR head, joint priors
+  computed via the chain rule for MCTS compatibility. Lets AlphaZero scale to larger maps
+  and share architecture work with the other two trainers.
+
+### 3.7 Validate the AR Worker (A/B vs. Legacy Feudal) ⬚
+**Priority:** High — decision-grade test of whether the 3.2 work was worth shipping.
+
+Train two feudal runs from the same seed, identical hyperparameters, single difference:
+`autoregressive_worker=False` vs. `=True`. Expected results:
+
+- **Invalid-action rate** drops to ~0 with AR (the masking is exact).
+- **Win rate vs. `AdvancedBot`** improves, or at least matches sample-efficiency.
+- **Joint log-likelihood of expert moves** (from the BC trajectories in 3.5) should be
+  meaningfully higher under AR — the legacy worker can't represent the dependencies.
+
+If the win-rate doesn't improve, the AR head is correct but exploration-bound, and 3.5
+(BC bootstrap) is the next thing to try. Either way, the result settles whether to
+default `autoregressive_worker=True`.
 
 ### 3.3 AlphaZero & Feudal RL Documentation 🟡
 **Priority:** Medium — these are impressive but invisible.
@@ -271,8 +357,9 @@ Should be completed before large-map curriculum stages in Phase 5.1.
 - Toggle with a keyboard shortcut during evaluation.
 
 **Milestone:** At the end of Phase 3, the project has a model zoo, auto-regressive action
-decomposition enabling large-map training (10×14, 20×20), and documentation for advanced
-topics.
+decomposition wired through PPO and AlphaZero (not just feudal), validated against the
+legacy worker via A/B, and documentation for advanced topics. PPO, Feudal, and AlphaZero
+each have at least one trained checkpoint on the tournament ladder beating `AdvancedBot`.
 
 ---
 
@@ -390,22 +477,34 @@ Items within a phase can be parallelized across contributors.
 
 Based on current progress, the highest-impact work to tackle next:
 
-1. **Phase 1.2 — Baseline Training Benchmarks**: The last remaining Phase 1 item.
+1. **Get trained checkpoints onto the tournament ladder** (covers Phase 3.1 for PPO and
+   Feudal, plus an AlphaZero training notebook as an extension). Right now the ladder
+   shows `AdvancedBot` and LLMs but says nothing about whether any of the three trainers
+   actually beats `AdvancedBot` — which is the project's headline question.
+
+2. **Phase 3.7 — Validate the AR worker (A/B vs. legacy feudal)**. Settles whether the
+   AR head landed in 3.2 should become the default. Cheap to run once a feudal training
+   script exists.
+
+3. **Phase 3.5 — BC bootstrap from `AdvancedBot`**. Local stand-in for AlphaStar's
+   replay-based SL pretraining; especially useful as a warm-start for the AR worker
+   in step 2.
+
+4. **Phase 1.2 — Baseline Training Benchmarks**: The last remaining Phase 1 item.
    Publishing reference training curves unblocks users from validating their own runs.
 
-2. **Phase 2.1 — Beginner RL Environment**: The single most impactful change for
+5. **Phase 2.1 — Beginner RL Environment**: The single most impactful change for
    newcomers. A simplified 6×6 environment with fast convergence lowers the barrier
    to entry dramatically.
 
-3. **Phase 2.2 — Core RL Documentation**: Five documentation pages that make the
+6. **Phase 2.2 — Core RL Documentation**: Five documentation pages that make the
    existing RL infrastructure accessible. The code is solid; the docs are the gap.
 
-4. **Phase 3.2 — Auto-Regressive Action Decomposition**: The critical path item for
-   scaling beyond 6×6 maps. Must be completed before training on 10×14 or 20×20 maps
-   (Phase 5.1 curriculum stages). Current per-dimension masking over-approximation
-   becomes severe at larger map sizes (12.8M combinations at 20×20).
+7. **Phase 3.6 — Extend AR head to PPO and AlphaZero**: Closes the standalone-PPO
+   subtask of 3.2 and lets AlphaZero scale beyond 6×6 (its policy head is the same
+   flat `Linear(32·H·W, A·H·W)` shape that 3.2 fixed for feudal).
 
-5. **Phase 3.3 — AlphaZero & Feudal RL Docs**: Both algorithms are fully implemented
+8. **Phase 3.3 — AlphaZero & Feudal RL Docs**: Both algorithms are fully implemented
    and tested but have zero documentation. Writing these pages would surface work
    that's already done.
 
