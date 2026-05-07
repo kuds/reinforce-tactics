@@ -784,10 +784,49 @@ class StrategyGameEnv(gym.Env):
         reward, breakdown = self._calculate_reward(action_reward, is_valid, terminal=terminal)
         self.episode_stats["reward"] += reward
 
+        # Classify how the episode ended so eval/diagnostics can split
+        # win/loss/draw counts by the actual game-over condition, AND so
+        # the terminal bonus can differentiate HQ-capture wins from
+        # elimination wins (the policy should prefer the former). The env
+        # does not track this directly, so reconstruct from observable
+        # state at the terminal step:
+        #   hq_capture     - terminated with a winner and the loser still
+        #                    has units alive (only HQ capture ends the game
+        #                    while both sides have units in play; see
+        #                    mechanics.seize_structure tile.type == "h").
+        #   elimination    - terminated with a winner and the loser has
+        #                    zero units (game_state._check_player_eliminated).
+        #   max_turns_draw - terminated with no winner (game_state.end_turn
+        #                    line 825-827 sets game_over with winner=None).
+        #   max_steps_truncate - env step counter hit max_steps before the
+        #                    game produced a terminal state.
+        end_reason: Optional[str] = None
+        if terminated:
+            winner = self.game_state.winner
+            if winner is None:
+                end_reason = "max_turns_draw"
+            else:
+                loser = 3 - winner
+                loser_units = sum(1 for u in self.game_state.units if u.player == loser)
+                end_reason = "elimination" if loser_units == 0 else "hq_capture"
+        elif truncated:
+            end_reason = "max_steps_truncate"
+
         terminal_bonus = 0.0
         if terminated:
             if self.game_state.winner == self.agent_player:
-                terminal_bonus = self.reward_config["win"]
+                # Differentiate win-by-HQ-capture (intended goal) from
+                # win-by-elimination (alternative path that doesn't transfer
+                # to bigger maps). Falls back to the unified "win" key when
+                # the per-reason keys aren't configured, preserving
+                # backwards-compatibility with older reward_config dicts.
+                rc = self.reward_config
+                if end_reason == "hq_capture" and "win_by_hq_capture" in rc:
+                    terminal_bonus = rc["win_by_hq_capture"]
+                elif end_reason == "elimination" and "win_by_elimination" in rc:
+                    terminal_bonus = rc["win_by_elimination"]
+                else:
+                    terminal_bonus = rc.get("win", 0.0)
                 self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)
@@ -819,32 +858,6 @@ class StrategyGameEnv(gym.Env):
 
         # Get observation
         obs = self._get_obs()
-
-        # Classify how the episode ended so eval/diagnostics can split
-        # win/loss/draw counts by the actual game-over condition. The env
-        # does not track this directly, so reconstruct from observable
-        # state at the terminal step:
-        #   hq_capture     - terminated with a winner and the loser still
-        #                    has units alive (only HQ capture ends the game
-        #                    while both sides have units in play; see
-        #                    mechanics.seize_structure tile.type == "h").
-        #   elimination    - terminated with a winner and the loser has
-        #                    zero units (game_state._check_player_eliminated).
-        #   max_turns_draw - terminated with no winner (game_state.end_turn
-        #                    line 825-827 sets game_over with winner=None).
-        #   max_steps_truncate - env step counter hit max_steps before the
-        #                    game produced a terminal state.
-        end_reason: Optional[str] = None
-        if terminated:
-            winner = self.game_state.winner
-            if winner is None:
-                end_reason = "max_turns_draw"
-            else:
-                loser = 3 - winner
-                loser_units = sum(1 for u in self.game_state.units if u.player == loser)
-                end_reason = "elimination" if loser_units == 0 else "hq_capture"
-        elif truncated:
-            end_reason = "max_steps_truncate"
 
         # Info dict
         info = {
