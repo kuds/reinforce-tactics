@@ -207,9 +207,22 @@ def record_evaluation_to_video(
     # record_replay_to_video / the in-game replay viewer. Matches the
     # video filename so .mp4 and .json stay paired (agent_replay_best.mp4
     # ↔ agent_replay_best.json).
+    #
+    # GameState's game_info records winner / total_turns / game_over but
+    # not the env's end_reason classification (hq_capture / elimination /
+    # max_turns_draw / max_steps_truncate). Patch it in here so a reader
+    # can see *how* the game ended without re-deriving it from actions[].
     replay_path: Optional[str] = None
     try:
         replay_path = gs.save_replay_to_file(str(Path(output_path).with_suffix(".json")))
+        if replay_path:
+            import json as _json
+
+            with open(replay_path, "r", encoding="utf-8") as _f:
+                _replay_data = _json.load(_f)
+            _replay_data.setdefault("game_info", {})["end_reason"] = info.get("end_reason")
+            with open(replay_path, "w", encoding="utf-8") as _f:
+                _json.dump(_replay_data, _f, indent=2)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not save replay JSON next to %s: %s", output_path, exc)
 
