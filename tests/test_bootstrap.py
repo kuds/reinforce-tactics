@@ -220,16 +220,16 @@ class TestBootstrapConfig:
         with pytest.raises(ValueError, match="unknown opponent"):
             config_from_dict(bad)
 
-    def test_accepts_random_1_opponent(self):
-        # The single-action-per-turn random bot is a curriculum stepping
-        # stone between `noop` and `random`; ensure validation accepts it.
+    def test_accepts_balanced_random_opponent(self):
+        # BalancedRandomBot is a curriculum stepping stone between `noop`
+        # and `random`; ensure validation accepts the opponent string.
         cfg = config_from_dict(
             {
                 **VALID_DICT,
-                "stages": [{**VALID_DICT["stages"][0], "opponent": "random_1"}],
+                "stages": [{**VALID_DICT["stages"][0], "opponent": "balanced_random"}],
             }
         )
-        assert cfg.stages[0].opponent == "random_1"
+        assert cfg.stages[0].opponent == "balanced_random"
 
     def test_shipped_config_loads(self):
         # The repo's configs/bootstrap.yaml should always be valid.
@@ -241,11 +241,12 @@ class TestBootstrapConfig:
         # what gives the policy a chance to learn navigation on the new map
         # before facing an opponent -- catch accidental removal.
         assert names == [
+            "starter_noop",
             "starter_random",
             "starter_simple",
             "starter_medium",
             "beginner_noop",
-            "beginner_random_1",
+            "beginner_balanced_random",
             "beginner_random",
             "beginner_simple",
             "beginner_medium",

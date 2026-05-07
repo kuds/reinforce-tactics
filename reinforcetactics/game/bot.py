@@ -210,6 +210,101 @@ class RandomBot(BotUnitMixin):
             self.game_state.attack_buff(action["sorcerer"], action["target"])
 
 
+class BalancedRandomBot(RandomBot):
+    """Random opponent whose action throughput scales with army size.
+
+    Each turn:
+      1. Optionally build one random unit (if a ``create_unit`` action is
+         legal -- i.e. the bot can afford to spawn one and there is a free
+         building tile).
+      2. For every owned unit, pick one random legal action involving that
+         unit and execute it (move / attack / seize / heal / buff). Units
+         with no legal actions sit out the turn.
+      3. End the turn.
+
+    Compared to ``RandomBot(max_actions=1)``, this baseline keeps applying
+    pressure even after losing units (it can still build) and makes the
+    pressure proportional to the bot's current unit count instead of
+    capping at one action regardless of army size. That avoids the
+    pathological case where the agent kills the bot's only unit and the
+    bot then "stalemates" itself, picking the build action only ~1 in
+    ``len(_SAMPLE_ACTION_KEYS)`` of the time.
+
+    Use as a curriculum stepping stone between ``NoopBot`` (zero actions
+    per turn) and ``RandomBot`` (up to ``max_actions=20`` actions per
+    turn) -- see configs/bootstrap.yaml.
+    """
+
+    # Map action_key -> attribute on the action dict that identifies the
+    # actor unit. ``create_unit`` is handled out-of-band because it has no
+    # actor unit.
+    _ACTOR_FIELDS: Dict[str, str] = {
+        "move": "unit",
+        "attack": "attacker",
+        "seize": "unit",
+        "heal": "healer",
+        "cure": "curer",
+        "paralyze": "paralyzer",
+        "haste": "sorcerer",
+        "defence_buff": "sorcerer",
+        "attack_buff": "sorcerer",
+    }
+
+    def __init__(self, game_state, player: int = 2, rng=None) -> None:
+        # Skip RandomBot.__init__'s ``max_actions`` arg; it doesn't apply
+        # here. Wire up the same fields it sets.
+        self.game_state = game_state
+        self.bot_player = player
+        self._rng = rng if rng is not None else random
+
+    def take_turn(self) -> None:
+        if self.game_state.game_over:
+            return
+
+        legal_actions = self.game_state.get_legal_actions(player=self.bot_player)
+
+        # Step 1: maybe build one unit. Recompute legal actions afterwards
+        # because the new unit may shift positions / affordability.
+        creates = legal_actions.get("create_unit", [])
+        if creates:
+            try:
+                self._execute("create_unit", self._rng.choice(creates))
+            except Exception:
+                pass
+            if self.game_state.game_over:
+                return
+            legal_actions = self.game_state.get_legal_actions(player=self.bot_player)
+
+        # Step 2: bucket non-create legal actions by the unit that
+        # performs them, then pick one per unit. Iterating ``self.game_state.units``
+        # in order keeps turn-to-turn behaviour deterministic given the RNG
+        # seed (RandomBot relies on the same property).
+        actions_by_unit: Dict[int, List[Tuple[str, Dict[str, Any]]]] = {}
+        for action_key, actor_field in self._ACTOR_FIELDS.items():
+            for action in legal_actions.get(action_key, []):
+                actor = action.get(actor_field)
+                if actor is None:
+                    continue
+                actions_by_unit.setdefault(id(actor), []).append((action_key, action))
+
+        for unit in list(self.game_state.units):
+            if getattr(unit, "player", None) != self.bot_player:
+                continue
+            unit_actions = actions_by_unit.get(id(unit))
+            if not unit_actions:
+                continue
+            action_key, action = self._rng.choice(unit_actions)
+            try:
+                self._execute(action_key, action)
+            except Exception:
+                continue
+            if self.game_state.game_over:
+                return
+
+        if not self.game_state.game_over:
+            self.game_state.end_turn()
+
+
 class SimpleBot(BotUnitMixin):
     """Simple AI bot for player 2 with basic unit type awareness."""
 

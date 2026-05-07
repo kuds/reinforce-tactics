@@ -109,10 +109,18 @@ class CurriculumStage:
             raise ValueError("stage.name must be non-empty")
         if not self.map_file:
             raise ValueError(f"stage '{self.name}': map_file must be set")
-        if self.opponent not in ("random", "random_1", "simple", "bot", "medium", "advanced", "noop"):
+        if self.opponent not in (
+            "random",
+            "balanced_random",
+            "simple",
+            "bot",
+            "medium",
+            "advanced",
+            "noop",
+        ):
             raise ValueError(
                 f"stage '{self.name}': unknown opponent '{self.opponent}'. "
-                "Expected one of: random, random_1, simple, bot, medium, advanced, noop"
+                "Expected one of: random, balanced_random, simple, bot, medium, advanced, noop"
             )
         if not 0.0 <= self.promotion_win_rate <= 1.0:
             raise ValueError(f"stage '{self.name}': promotion_win_rate must be in [0, 1]")

@@ -15,7 +15,14 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import AdvancedBot, MediumBot, NoopBot, RandomBot, SimpleBot
+from reinforcetactics.game.bot import (
+    AdvancedBot,
+    BalancedRandomBot,
+    MediumBot,
+    NoopBot,
+    RandomBot,
+    SimpleBot,
+)
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
@@ -47,10 +54,12 @@ class StructuredActionMasks:
 # Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
 # ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
 # ``"random"`` runs RandomBot with its default ``max_actions=20`` (more of a
-# stress test than a weak baseline). ``"random_1"`` performs exactly one
-# random action per turn -- a lighter perturbation suitable as a curriculum
-# stepping stone between ``"noop"`` and ``"random"``; see configs/bootstrap.yaml.
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "random_1", "noop"})
+# stress test than a weak baseline). ``"balanced_random"`` runs
+# BalancedRandomBot, whose action throughput scales with army size (one
+# build attempt + one random action per owned unit per turn) -- a lighter,
+# more resilient stepping stone between ``"noop"`` and ``"random"``;
+# see configs/bootstrap.yaml.
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "balanced_random", "noop"})
 
 
 class StrategyGameEnv(gym.Env):
@@ -1033,17 +1042,24 @@ class StrategyGameEnv(gym.Env):
             self.opponent = AdvancedBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "noop":
             self.opponent = NoopBot(self.game_state, player=opponent_player)
-        elif self.opponent_type in ("random", "random_1"):
+        elif self.opponent_type == "random":
             # Derive a seeded RNG from gymnasium's np_random so the random
             # opponent is reproducible whenever reset() is called with a seed.
-            # ``random_1`` caps RandomBot at one action per turn (a lighter
-            # perturbation than the default 20-action stress test).
             bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            max_actions = 1 if self.opponent_type == "random_1" else 20
             self.opponent = RandomBot(
                 self.game_state,
                 player=opponent_player,
-                max_actions=max_actions,
+                rng=random.Random(bot_seed),
+            )
+        elif self.opponent_type == "balanced_random":
+            # One build attempt + one random action per owned unit per turn,
+            # so action throughput scales with army size. A more resilient
+            # stepping stone than RandomBot capped at low max_actions: the
+            # bot keeps producing pressure proportional to its current units.
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = BalancedRandomBot(
+                self.game_state,
+                player=opponent_player,
                 rng=random.Random(bot_seed),
             )
         else:

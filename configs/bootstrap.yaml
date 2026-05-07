@@ -55,16 +55,23 @@ ppo:
   max_grad_norm: 0.5
 
 # Curriculum:
-#   starter map (random -> simple -> medium)
-#     -> bridge stages on beginner: noop -> random_1 -> random -> simple -> medium
+#   starter map: noop -> random -> simple -> medium
+#   beginner map: noop -> balanced_random -> random -> simple -> medium
 #
-# The beginner ramp uses three opponent intensities to give the agent a
-# smooth gradient of "opponent uncertainty":
-#   - noop:      opponent does literally nothing (pure navigation/seize)
-#   - random_1:  opponent takes exactly ONE random action per turn (light
-#                perturbation; closer to the agent's own action throughput)
-#   - random:    opponent takes up to 20 random actions per turn (the
-#                stress-test baseline; same as the original `random` opponent)
+# Both maps start with NoopBot (a stage-0 sanity check: with no enemy
+# action at all, even a weak policy should be able to walk a unit onto
+# the enemy HQ and seize it). This catches "agent can't navigate at all"
+# before adding opponent dynamics.
+#
+# Opponent intensity on the beginner ramp:
+#   - noop:             opponent takes no actions; pure navigation/seize.
+#   - balanced_random:  one build attempt + one random action per owned
+#                       unit per turn (BalancedRandomBot). Action
+#                       throughput scales with army size, which avoids the
+#                       pathological case of RandomBot(max_actions=1)
+#                       stalling out after losing its only unit.
+#   - random:           up to 20 random actions per turn (the stress-test
+#                       baseline; the original `random` opponent).
 #
 # Per-stage overrides handle the starter -> beginner transition:
 #   - max_steps / max_turns:  bigger map needs ~3x the turn budget
@@ -83,6 +90,18 @@ ppo:
 # reward signal -- that's how the previous run produced std=0.0 fully
 # deterministic policies that didn't transfer.
 stages:
+  - name: starter_noop
+    map_file: maps/1v1/starter.csv
+    opponent: noop
+    # NoopBot is a stage-0 sanity check: agent should be able to walk a
+    # unit onto the enemy HQ and seize it even with zero opposition. Tight
+    # patience because if the agent can't beat noop, longer training
+    # won't help -- the issue is policy or reward, not opponent strength.
+    promotion_win_rate: 0.95
+    patience: 1
+    max_timesteps: 500_000
+    n_eval_episodes: 30
+
   - name: starter_random
     map_file: maps/1v1/starter.csv
     opponent: random
@@ -128,9 +147,13 @@ stages:
       seize_progress: 50.0
       capture: 2000.0
 
-  - name: beginner_random_1
+  - name: beginner_balanced_random
     map_file: maps/1v1/beginner.csv
-    opponent: random_1   # one random action per turn; lighter than `random`
+    # BalancedRandomBot: one build + one random action per owned unit per
+    # turn. Lighter than full `random` (20 actions/turn) but resilient --
+    # action throughput scales with army size, so killing the bot's units
+    # doesn't stall the game.
+    opponent: balanced_random
     promotion_win_rate: 0.85
     patience: 2
     max_timesteps: 1_500_000
