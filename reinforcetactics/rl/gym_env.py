@@ -6,6 +6,7 @@ Supports both flat and hierarchical RL training
 import logging
 import random
 import traceback
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import gymnasium as gym
@@ -19,6 +20,28 @@ from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StructuredActionMasks:
+    """
+    Decision-tree-aligned masks for autoregressive policies.
+
+    Sampling order: atype -> source -> (unit_type if create_unit) -> target.
+    Spatial arrays are indexed (y, x) = (row, col), matching the flat-mask
+    convention ``flat_idx = atype * H * W + y * W + x``.
+
+    Fields:
+        atype:     (A,) bool             — legal action types
+        source:    (A, H, W) bool        — legal source cells per atype
+        target:    {(atype, sx, sy): (H, W) bool} — legal target cells given (atype, source)
+        unit_type: {(sx, sy): (U,) bool} — legal unit types per building cell (create_unit)
+    """
+
+    atype: np.ndarray
+    source: np.ndarray
+    target: Dict[Tuple[int, int, int], np.ndarray] = field(default_factory=dict)
+    unit_type: Dict[Tuple[int, int], np.ndarray] = field(default_factory=dict)
 
 # Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
 # ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
@@ -358,6 +381,99 @@ class StrategyGameEnv(gym.Env):
                 ut_mask[0] = True
 
         return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
+
+    def _build_structured_masks(self) -> StructuredActionMasks:
+        """
+        Build dependent masks aligned with an autoregressive policy:
+        p(atype) * p(source | atype) * p(unit_type | atype, source) * p(target | atype, source).
+
+        For action_types where the source position is implicit (create_unit, end_turn)
+        the source cell is the building / canonical (0, 0). For end_turn (atype=5) a
+        single trivial (sx, sy, tx, ty) = (0, 0, 0, 0) entry is recorded so callers
+        do not need a special case.
+        """
+        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+
+        H, W = self.grid_height, self.grid_width
+        num_action_types = 10
+        num_unit_types = 8
+
+        atype = np.zeros(num_action_types, dtype=bool)
+        source = np.zeros((num_action_types, H, W), dtype=bool)
+        target: Dict[Tuple[int, int, int], np.ndarray] = {}
+        unit_type: Dict[Tuple[int, int], np.ndarray] = {}
+
+        unit_type_to_idx = UNIT_TYPE_TO_IDX
+
+        def _pos(action, fields):
+            if isinstance(fields, str):
+                o = action[fields]
+                return o.x, o.y
+            return action[fields[0]], action[fields[1]]
+
+        def _mark_target(at_idx: int, sx: int, sy: int, tx: int, ty: int) -> None:
+            key = (at_idx, sx, sy)
+            m = target.get(key)
+            if m is None:
+                m = np.zeros((H, W), dtype=bool)
+                target[key] = m
+            m[ty, tx] = True
+
+        for key, (at_idx, src_fields, tgt_fields) in self._ACTION_KEY_MAP.items():
+            for action in legal_actions.get(key, []):
+                tx, ty = _pos(action, tgt_fields)
+                if src_fields is not None:
+                    sx, sy = _pos(action, src_fields)
+                else:
+                    # create_unit: source = building position = target
+                    sx, sy = tx, ty
+
+                atype[at_idx] = True
+                source[at_idx, sy, sx] = True
+                _mark_target(at_idx, sx, sy, tx, ty)
+
+                if key == "create_unit":
+                    ut_idx = unit_type_to_idx.get(action["unit_type"], 0)
+                    ukey = (sx, sy)
+                    m = unit_type.get(ukey)
+                    if m is None:
+                        m = np.zeros(num_unit_types, dtype=bool)
+                        unit_type[ukey] = m
+                    m[ut_idx] = True
+
+        # End turn: always legal, single canonical entry.
+        atype[5] = True
+        source[5, 0, 0] = True
+        end_t = np.zeros((H, W), dtype=bool)
+        end_t[0, 0] = True
+        target[(5, 0, 0)] = end_t
+
+        return StructuredActionMasks(
+            atype=atype, source=source, target=target, unit_type=unit_type
+        )
+
+    def structured_action_masks(self) -> StructuredActionMasks:
+        """
+        Public accessor for autoregressive-policy masks.
+
+        Returns dependent masks aligned with the factorization
+        p(atype) * p(source | atype) * p(unit_type | atype, source) * p(target | ...).
+        Use ``encode_structured_action`` to convert a sampled tuple into the
+        existing 6-vector action format.
+        """
+        return self._build_structured_masks()
+
+    @staticmethod
+    def encode_structured_action(
+        atype: int,
+        sx: int,
+        sy: int,
+        tx: int,
+        ty: int,
+        unit_type_idx: int = 0,
+    ) -> np.ndarray:
+        """Pack a sampled autoregressive tuple into the env's 6-vector action."""
+        return np.array([atype, unit_type_idx, sx, sy, tx, ty], dtype=np.int32)
 
     def _build_flat_actions(self):
         """
