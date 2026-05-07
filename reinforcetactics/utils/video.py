@@ -118,6 +118,29 @@ def record_evaluation_to_video(
     def _get_gs():
         return _inner.game_state
 
+    # Agent player id (defaults to 1 if the env doesn't expose it)
+    agent_player = getattr(_inner, "agent_player", 1)
+    opponent_player = 3 - agent_player
+
+    def _snapshot(action_type=None, reward=None, reward_breakdown=None, valid_action=None):
+        gs = _get_gs()
+        agent_units = [u for u in gs.units if u.player == agent_player]
+        opp_units = [u for u in gs.units if u.player == opponent_player]
+        return {
+            "turn": gs.turn_number,
+            "current_player": gs.current_player,
+            "action_type": action_type,
+            "reward": reward,
+            "reward_breakdown": dict(reward_breakdown) if reward_breakdown else None,
+            "valid_action": valid_action,
+            "agent_units": len(agent_units),
+            "opponent_units": len(opp_units),
+            "agent_gold": gs.player_gold.get(agent_player, 0),
+            "opponent_gold": gs.player_gold.get(opponent_player, 0),
+            "agent_hp_total": sum(getattr(u, "health", 0) for u in agent_units),
+            "opponent_hp_total": sum(getattr(u, "health", 0) for u in opp_units),
+        }
+
     # Check whether the env supports action masking (ActionMaskedEnv)
     _has_masks = hasattr(env, "action_masks") and callable(env.action_masks)
 
@@ -126,6 +149,7 @@ def record_evaluation_to_video(
     renderer = Renderer(_get_gs(), replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
     frames = []
+    step_stats: List[Dict[str, Any]] = [_snapshot()]
 
     # Capture initial state
     renderer.render()
@@ -144,6 +168,15 @@ def record_evaluation_to_video(
         total_reward += reward
         steps += 1
         done = terminated or truncated
+
+        step_stats.append(
+            _snapshot(
+                action_type=info.get("action_type"),
+                reward=float(reward),
+                reward_breakdown=info.get("reward_breakdown"),
+                valid_action=info.get("valid_action"),
+            )
+        )
 
         # Capture frame after each action
         renderer.game_state = _get_gs()
@@ -166,6 +199,7 @@ def record_evaluation_to_video(
         "total_reward": total_reward,
         "steps": steps,
         "episode_stats": episode_stats,
+        "step_stats": step_stats,
     }
 
 
