@@ -54,23 +54,34 @@ ppo:
   vf_coef: 0.5
   max_grad_norm: 0.5
 
-# Six-stage ramp: starter map (random -> simple -> medium), then beginner
-# map (random -> simple -> medium). The medium thresholds are lower than
-# 90% because medium is a strong baseline; if you hit them, self-play has
-# plenty to work with.
+# Curriculum:
+#   starter map (random -> simple -> medium)
+#     -> bridge: beginner_noop (learn navigation/HQ-capture on the new map
+#        without any pushback before adding an opponent)
+#     -> beginner map (random -> simple -> medium)
 #
-# Per-stage `max_steps`, `max_turns`, and `ent_coef` overrides handle the
-# starter -> beginner transition: the bigger map needs ~2x the turn budget
-# (units take longer to traverse) and a one-time entropy bump on
-# `beginner_random` to break the previous map's deterministic policy out
-# of its rut. Subsequent beginner stages keep the larger turn budget but
-# cool the entropy back toward baseline as the policy adapts.
+# Per-stage overrides handle the starter -> beginner transition:
+#   - max_steps / max_turns:  bigger map needs ~3x the turn budget
+#                             (units take longer to traverse).
+#   - ent_coef:               one-time bump on `beginner_noop` to break the
+#                             starter-map policy out of its rut, cooled in
+#                             subsequent stages.
+#   - reward_config:          beginner-map geometry makes HQ capture much
+#                             harder than elimination, so we equalize the
+#                             two terminal rewards (was 5000/1000) and drop
+#                             `seize_progress` so the agent stops being
+#                             paid to start seizes it can't finish.
+#
+# Starter stages use `patience: 1` so we promote at the first hit of the
+# threshold rather than letting the policy keep training on a saturated
+# reward signal -- that's how the previous run produced std=0.0 fully
+# deterministic policies that didn't transfer.
 stages:
   - name: starter_random
     map_file: maps/1v1/starter.csv
     opponent: random
     promotion_win_rate: 0.90
-    patience: 2
+    patience: 1
     max_timesteps: 1_000_000
     n_eval_episodes: 30
 
@@ -78,7 +89,7 @@ stages:
     map_file: maps/1v1/starter.csv
     opponent: simple
     promotion_win_rate: 0.90
-    patience: 2
+    patience: 1
     max_timesteps: 2_000_000
     n_eval_episodes: 30
 
@@ -86,44 +97,76 @@ stages:
     map_file: maps/1v1/starter.csv
     opponent: medium
     promotion_win_rate: 0.75
-    patience: 2
+    patience: 1
     max_timesteps: 3_000_000
     n_eval_episodes: 30
+
+  - name: beginner_noop
+    map_file: maps/1v1/beginner.csv
+    opponent: noop
+    promotion_win_rate: 0.90
+    patience: 2
+    max_timesteps: 1_000_000
+    n_eval_episodes: 30
+    max_steps: 800
+    max_turns: 60
+    # First stage on the new map -> entropy shock to forget starter
+    # heuristics, plus the elimination-friendly shaping below.
+    ent_coef: 0.10
+    reward_config:
+      # Beginner map: HQ capture is impractical, elimination is the natural
+      # endpoint. Equalize the terminal rewards and stop paying the agent
+      # to *start* seizes that won't finish.
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0
 
   - name: beginner_random
     map_file: maps/1v1/beginner.csv
     opponent: random
-    promotion_win_rate: 0.90
+    promotion_win_rate: 0.75
     patience: 2
-    max_timesteps: 1_500_000
+    max_timesteps: 2_000_000
     n_eval_episodes: 30
-    # Bigger map -> longer episodes; bump turn/step budget so games can
-    # actually finish instead of truncating to draws.
     max_steps: 800
-    max_turns: 40
-    # Entropy shock to forget the starter-map policy. Cooled in subsequent
-    # beginner stages.
-    ent_coef: 0.10
+    max_turns: 60
+    # Cooled from beginner_noop -- policy already broken out of starter rut.
+    ent_coef: 0.07
+    reward_config:
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0
 
   - name: beginner_simple
     map_file: maps/1v1/beginner.csv
     opponent: simple
-    promotion_win_rate: 0.90
+    promotion_win_rate: 0.85
     patience: 2
     max_timesteps: 2_500_000
     n_eval_episodes: 30
     max_steps: 800
-    max_turns: 40
-    ent_coef: 0.07
+    max_turns: 60
+    ent_coef: 0.05
+    reward_config:
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0
 
   - name: beginner_medium
     map_file: maps/1v1/beginner.csv
     opponent: medium
-    promotion_win_rate: 0.70
+    promotion_win_rate: 0.65
     patience: 2
     max_timesteps: 4_000_000
     n_eval_episodes: 30
     max_steps: 800
-    max_turns: 40
-    # Back to baseline once the policy has adapted to the bigger map.
+    max_turns: 60
     ent_coef: 0.05
+    reward_config:
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0

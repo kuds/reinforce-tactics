@@ -74,12 +74,19 @@ class CurriculumStalled(RuntimeError):
 class CurriculumStage:
     """One curriculum step: a (map, opponent) pair with a promotion criterion.
 
-    The ``max_steps``, ``max_turns``, and ``ent_coef`` fields are optional
-    overrides; when ``None`` the runner falls back to ``BootstrapEnvDefaults``
-    / ``PPOConfig``. The intended use is bumping ``max_turns`` and
-    ``max_steps`` on a larger map (units take more turns to traverse) and
-    raising ``ent_coef`` on the first stage of a new map to crack the
-    previous stage's policy out of a deterministic groove.
+    The ``max_steps``, ``max_turns``, ``ent_coef``, and ``reward_config``
+    fields are optional overrides; when ``None`` the runner falls back to
+    ``BootstrapEnvDefaults`` / ``PPOConfig``. Typical use cases:
+
+    - Bump ``max_turns`` and ``max_steps`` on a larger map (units take more
+      turns to traverse).
+    - Raise ``ent_coef`` on the first stage of a new map to crack the
+      previous stage's policy out of a deterministic groove.
+    - Override ``reward_config`` keys (merged into the env defaults) when a
+      new map's geometry changes which win condition is achievable -- e.g.
+      a sprawling map where HQ-capture is impractical and elimination is
+      the natural endpoint, so you flip ``win_by_hq_capture`` /
+      ``win_by_elimination`` weights for that stage only.
     """
 
     name: str
@@ -93,6 +100,9 @@ class CurriculumStage:
     max_steps: Optional[int] = None
     max_turns: Optional[int] = None
     ent_coef: Optional[float] = None
+    # Reward-config override is *merged* over the env default (not replaced)
+    # so per-stage entries only need to spell out the keys that change.
+    reward_config: Optional[Dict[str, float]] = None
 
     def validate(self) -> None:
         if not self.name:
@@ -118,6 +128,10 @@ class CurriculumStage:
             raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
         if self.ent_coef is not None and self.ent_coef < 0:
             raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+        if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
+            raise TypeError(
+                f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
+            )
 
     def resolve_max_steps(self, defaults: "BootstrapEnvDefaults") -> int:
         return self.max_steps if self.max_steps is not None else defaults.max_steps
@@ -127,6 +141,19 @@ class CurriculumStage:
 
     def resolve_ent_coef(self, ppo: PPOConfig) -> float:
         return self.ent_coef if self.ent_coef is not None else ppo.ent_coef
+
+    def resolve_reward_config(self, defaults: "BootstrapEnvDefaults") -> Optional[Dict[str, float]]:
+        """Return the reward config to use for this stage.
+
+        Per-stage overrides are merged on top of ``defaults.reward_config``,
+        so a stage only needs to spell out the keys it changes. Returns
+        ``None`` when neither side has anything (env will fall back to its
+        own built-in defaults).
+        """
+        base = dict(defaults.reward_config) if defaults.reward_config else {}
+        if self.reward_config:
+            base.update(self.reward_config)
+        return base if base else None
 
 
 @dataclass
@@ -260,7 +287,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
         opponent=stage.opponent,
         max_steps=stage.resolve_max_steps(cfg.env),
         max_turns=stage.resolve_max_turns(cfg.env),
-        reward_config=cfg.env.reward_config,
+        reward_config=stage.resolve_reward_config(cfg.env),
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
@@ -277,7 +304,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
         opponent=stage.opponent,
         max_steps=stage.resolve_max_steps(cfg.env),
         max_turns=stage.resolve_max_turns(cfg.env),
-        reward_config=cfg.env.reward_config,
+        reward_config=stage.resolve_reward_config(cfg.env),
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
@@ -387,13 +414,15 @@ def run_curriculum(
 
         max_steps = stage.resolve_max_steps(cfg.env)
         max_turns = stage.resolve_max_turns(cfg.env)
+        reward_overrides = stage.reward_config or {}
+        reward_note = f", reward overrides={sorted(reward_overrides.keys())}" if reward_overrides else ""
         print(
             f"\n=== Stage '{stage.name}' :: map={stage.map_file}, "
             f"opp={stage.opponent}, target WR >= "
             f"{stage.promotion_win_rate:.0%} (patience={stage.patience}), "
             f"budget={stage.max_timesteps:,} steps, "
             f"max_steps={max_steps}, max_turns={max_turns}, "
-            f"ent_coef={ent_coef:.3f} ==="
+            f"ent_coef={ent_coef:.3f}{reward_note} ==="
         )
 
         model.learn(
