@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import nn
 
@@ -312,6 +313,297 @@ class WorkerNetwork(nn.Module):
         return log_prob, entropy, value
 
 
+class AutoregressiveActionHead(nn.Module):
+    """
+    AlphaStar-style autoregressive head over the env's 6-tuple action
+    [action_type, unit_type, src_x, src_y, tgt_x, tgt_y].
+
+    Joint distribution factorizes as
+        p(atype) * p(src_xy | atype) * p(unit_type | atype, src) * p(tgt_xy | atype, src).
+
+    Replaces the WorkerNetwork's product-of-marginals 6-head independent
+    Categoricals. The independent product cannot represent dependencies
+    between dimensions (e.g. "if action_type=move, source must be one of
+    *my* units"), which is exactly what the existing per-dimension mask
+    over-approximates.
+
+    All sub-head masks are optional; when present they zero out illegal
+    logits prior to softmax. Mask plumbing into the rollout buffer is a
+    follow-up — at this stage the head is structurally autoregressive but
+    can be used unmasked.
+
+    Mask shapes (all bool):
+        atype:      (B, A)
+        src:        (B, H * W)
+        unit_type:  (B, U)         — for the unit-type pick at the chosen src
+        target:     (B, H * W)     — for the target pick at the chosen src
+    """
+
+    def __init__(
+        self,
+        feature_dim: int,
+        grid_height: int,
+        grid_width: int,
+        num_action_types: int = 10,
+        num_unit_types: int = 8,
+        hidden_dim: int = 256,
+        atype_emb_dim: int = 32,
+        src_emb_dim: int = 32,
+    ):
+        super().__init__()
+        self.H = grid_height
+        self.W = grid_width
+        self.A = num_action_types
+        self.U = num_unit_types
+
+        # Stage 1: action type
+        self.atype_logits = nn.Linear(feature_dim, num_action_types)
+        self.atype_emb = nn.Embedding(num_action_types, atype_emb_dim)
+
+        # Stage 2: source position, conditioned on (features, atype)
+        self.src_trunk = nn.Sequential(
+            nn.Linear(feature_dim + atype_emb_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, grid_height * grid_width),
+        )
+
+        # Source-position embedding shared by stages 3 and 4.
+        # Coordinates are normalized to [0, 1] before the linear projection
+        # so that this layer remains valid if the grid size changes.
+        self.src_pos_proj = nn.Linear(2, src_emb_dim)
+
+        tail_in = feature_dim + atype_emb_dim + src_emb_dim
+        # Stage 3: unit type (only meaningful for create_unit)
+        self.ut_head = nn.Sequential(
+            nn.Linear(tail_in, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_unit_types),
+        )
+        # Stage 4: target position
+        self.tgt_head = nn.Sequential(
+            nn.Linear(tail_in, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, grid_height * grid_width),
+        )
+
+    @staticmethod
+    def _apply_mask(logits: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
+        if mask is None:
+            return logits
+        return logits.masked_fill(~mask, -1e9)
+
+    def _src_pos_emb(self, sx: torch.Tensor, sy: torch.Tensor) -> torch.Tensor:
+        x_norm = sx.float() / max(self.W - 1, 1)
+        y_norm = sy.float() / max(self.H - 1, 1)
+        return self.src_pos_proj(torch.stack([x_norm, y_norm], dim=-1))
+
+    def _atype_dist(self, features: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        return torch.distributions.Categorical(
+            logits=self._apply_mask(self.atype_logits(features), mask)
+        )
+
+    def _src_dist(self, features: torch.Tensor, atype: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        ae = self.atype_emb(atype)
+        logits = self.src_trunk(torch.cat([features, ae], dim=-1))
+        return torch.distributions.Categorical(logits=self._apply_mask(logits, mask))
+
+    def _tail_input(self, features: torch.Tensor, atype: torch.Tensor, sx: torch.Tensor, sy: torch.Tensor) -> torch.Tensor:
+        ae = self.atype_emb(atype)
+        se = self._src_pos_emb(sx, sy)
+        return torch.cat([features, ae, se], dim=-1)
+
+    def _ut_dist(self, features, atype, sx, sy, mask=None):
+        return torch.distributions.Categorical(
+            logits=self._apply_mask(self.ut_head(self._tail_input(features, atype, sx, sy)), mask)
+        )
+
+    def _tgt_dist(self, features, atype, sx, sy, mask=None):
+        return torch.distributions.Categorical(
+            logits=self._apply_mask(self.tgt_head(self._tail_input(features, atype, sx, sy)), mask)
+        )
+
+    def sample(
+        self,
+        features: torch.Tensor,
+        masks: Optional[Dict[str, torch.Tensor]] = None,
+        deterministic: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Sample an action autoregressively.
+
+        Returns:
+            action: (B, 6) long — [atype, unit_type, src_x, src_y, tgt_x, tgt_y]
+            log_prob: (B,) float — joint log probability of the sampled action
+        """
+        masks = masks or {}
+
+        atype_dist = self._atype_dist(features, masks.get("atype"))
+        atype = atype_dist.probs.argmax(dim=-1) if deterministic else atype_dist.sample()
+        lp_a = atype_dist.log_prob(atype)
+
+        src_dist = self._src_dist(features, atype, masks.get("src"))
+        src_idx = src_dist.probs.argmax(dim=-1) if deterministic else src_dist.sample()
+        lp_s = src_dist.log_prob(src_idx)
+        sy = (src_idx // self.W).long()
+        sx = (src_idx % self.W).long()
+
+        ut_dist = self._ut_dist(features, atype, sx, sy, masks.get("unit_type"))
+        ut = ut_dist.probs.argmax(dim=-1) if deterministic else ut_dist.sample()
+        lp_u = ut_dist.log_prob(ut)
+
+        tgt_dist = self._tgt_dist(features, atype, sx, sy, masks.get("target"))
+        tgt_idx = tgt_dist.probs.argmax(dim=-1) if deterministic else tgt_dist.sample()
+        lp_t = tgt_dist.log_prob(tgt_idx)
+        ty = (tgt_idx // self.W).long()
+        tx = (tgt_idx % self.W).long()
+
+        action = torch.stack([atype, ut, sx, sy, tx, ty], dim=1).long()
+        log_prob = lp_a + lp_s + lp_u + lp_t
+        return action, log_prob
+
+    def evaluate(
+        self,
+        features: torch.Tensor,
+        action: torch.Tensor,
+        masks: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute joint log_prob and entropy of `action` under the AR policy.
+
+        Args:
+            action: (B, 6) long — [atype, unit_type, src_x, src_y, tgt_x, tgt_y]
+
+        Returns:
+            log_prob: (B,)
+            entropy: (B,)  — sum of per-stage entropies (chain-rule decomposition)
+        """
+        masks = masks or {}
+        atype = action[:, 0].long()
+        ut = action[:, 1].long()
+        sx = action[:, 2].long()
+        sy = action[:, 3].long()
+        tx = action[:, 4].long()
+        ty = action[:, 5].long()
+
+        atype_dist = self._atype_dist(features, masks.get("atype"))
+        src_dist = self._src_dist(features, atype, masks.get("src"))
+        ut_dist = self._ut_dist(features, atype, sx, sy, masks.get("unit_type"))
+        tgt_dist = self._tgt_dist(features, atype, sx, sy, masks.get("target"))
+
+        src_idx = sy * self.W + sx
+        tgt_idx = ty * self.W + tx
+
+        log_prob = (
+            atype_dist.log_prob(atype)
+            + src_dist.log_prob(src_idx)
+            + ut_dist.log_prob(ut)
+            + tgt_dist.log_prob(tgt_idx)
+        )
+        entropy = atype_dist.entropy() + src_dist.entropy() + ut_dist.entropy() + tgt_dist.entropy()
+        return log_prob, entropy
+
+
+class AutoregressiveWorkerNetwork(nn.Module):
+    """
+    Drop-in replacement for ``WorkerNetwork`` with an AlphaStar-style
+    autoregressive policy head.
+
+    Same external API as ``WorkerNetwork`` (``forward``, ``sample_action``,
+    ``evaluate_action``) so ``FeudalRLAgent`` can swap between the two via
+    a constructor flag without touching its rollout/update code.
+    """
+
+    def __init__(
+        self,
+        feature_dim: int = 512,
+        goal_embedding_dim: int = 64,
+        grid_width: int = 20,
+        grid_height: int = 20,
+        num_action_types: int = 10,
+        num_unit_types: int = 8,
+        hidden_dim: int = 256,
+    ):
+        super().__init__()
+
+        # Mirror WorkerNetwork's action_space_dims for diagnostic compatibility.
+        self.action_space_dims = [
+            num_action_types,
+            num_unit_types,
+            grid_width,
+            grid_height,
+            grid_width,
+            grid_height,
+        ]
+        self.grid_width = grid_width
+        self.grid_height = grid_height
+
+        self.goal_embedding = nn.Sequential(
+            nn.Linear(3, goal_embedding_dim),
+            nn.ReLU(),
+            nn.Linear(goal_embedding_dim, goal_embedding_dim),
+            nn.ReLU(),
+        )
+
+        combined_dim = feature_dim + goal_embedding_dim
+        self.trunk = nn.Sequential(
+            nn.Linear(combined_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, hidden_dim),
+            nn.ReLU(),
+        )
+
+        self.head = AutoregressiveActionHead(
+            feature_dim=hidden_dim,
+            grid_height=grid_height,
+            grid_width=grid_width,
+            num_action_types=num_action_types,
+            num_unit_types=num_unit_types,
+            hidden_dim=hidden_dim,
+        )
+
+        self.value_head = nn.Linear(hidden_dim, 1)
+
+    def _shared(self, features: torch.Tensor, goal: torch.Tensor) -> torch.Tensor:
+        goal_emb = self.goal_embedding(goal.float())
+        return self.trunk(torch.cat([features, goal_emb], dim=1))
+
+    def forward(self, features: torch.Tensor, goal: torch.Tensor) -> Tuple[None, torch.Tensor]:
+        """
+        Mirrors ``WorkerNetwork.forward`` for interface compatibility.
+
+        The autoregressive head cannot expose a flat list of independent
+        per-dimension logits, so the first return value is None (the AR
+        head's ``sample`` / ``evaluate`` methods are the supported API).
+        Returns ``(None, value)``.
+        """
+        h = self._shared(features, goal)
+        return None, self.value_head(h)
+
+    def sample_action(
+        self,
+        features: torch.Tensor,
+        goal: torch.Tensor,
+        masks: Optional[Dict[str, torch.Tensor]] = None,
+        deterministic: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = self._shared(features, goal)
+        action, log_prob = self.head.sample(h, masks=masks, deterministic=deterministic)
+        value = self.value_head(h)
+        return action, log_prob, value
+
+    def evaluate_action(
+        self,
+        features: torch.Tensor,
+        goal: torch.Tensor,
+        action: torch.Tensor,
+        masks: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = self._shared(features, goal)
+        log_prob, entropy = self.head.evaluate(h, action, masks=masks)
+        value = self.value_head(h)
+        return log_prob, entropy, value
+
+
 def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda, segment_lengths=None):
     """
     Compute Generalized Advantage Estimation.
@@ -473,11 +765,13 @@ class FeudalRLAgent:
         grid_height: int = 20,
         agent_player: int = 1,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        autoregressive_worker: bool = False,
     ):
         self.device = device
         self.grid_width = grid_width
         self.grid_height = grid_height
         self.agent_player = agent_player
+        self.autoregressive_worker = autoregressive_worker
 
         # Feature extractor (shared)
         self.feature_extractor = SpatialFeatureExtractor(observation_space, features_dim=512).to(device)
@@ -487,10 +781,23 @@ class FeudalRLAgent:
             device
         )
 
-        # Worker network
-        self.worker = WorkerNetwork(
-            feature_dim=512, goal_embedding_dim=64, action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height]
-        ).to(device)
+        # Worker network. The autoregressive variant samples action dimensions
+        # in dependency order p(atype) p(src|atype) p(ut|atype, src) p(tgt|atype, src),
+        # which is the AlphaStar factorization and a prerequisite for replacing
+        # the per-dimension over-approximation mask with a per-stage exact mask.
+        if autoregressive_worker:
+            self.worker = AutoregressiveWorkerNetwork(
+                feature_dim=512,
+                goal_embedding_dim=64,
+                grid_width=grid_width,
+                grid_height=grid_height,
+            ).to(device)
+        else:
+            self.worker = WorkerNetwork(
+                feature_dim=512,
+                goal_embedding_dim=64,
+                action_space_dims=[10, 8, grid_width, grid_height, grid_width, grid_height],
+            ).to(device)
 
         # Current goal (maintained across steps)
         self.current_goal: Optional[torch.Tensor] = None
@@ -530,8 +837,13 @@ class FeudalRLAgent:
             # Worker selects action conditioned on goal
             assert self.current_goal is not None
             if deterministic:
-                action_logits, _ = self.worker(features, self.current_goal)
-                action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
+                if self.autoregressive_worker:
+                    action, _, _ = self.worker.sample_action(
+                        features, self.current_goal, deterministic=True
+                    )
+                else:
+                    action_logits, _ = self.worker(features, self.current_goal)
+                    action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
             else:
                 action, _, _ = self.worker.sample_action(features, self.current_goal)
 
