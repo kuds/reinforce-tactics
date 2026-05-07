@@ -92,8 +92,7 @@ def train_flat_baseline(args):
     else:
         # Standard environments without masking
         thunks = [
-            make_env(i, args.seed, args.opponent, max_steps=args.max_steps, use_masking=False)
-            for i in range(args.n_envs)
+            make_env(i, args.seed, args.opponent, max_steps=args.max_steps, use_masking=False) for i in range(args.n_envs)
         ]
         env = SubprocVecEnv(thunks) if args.n_envs > 1 else DummyVecEnv(thunks)
         eval_env = StrategyGameEnv(opponent=args.opponent, max_steps=args.max_steps, render_mode=None)
