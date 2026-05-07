@@ -56,9 +56,15 @@ ppo:
 
 # Curriculum:
 #   starter map (random -> simple -> medium)
-#     -> bridge: beginner_noop (learn navigation/HQ-capture on the new map
-#        without any pushback before adding an opponent)
-#     -> beginner map (random -> simple -> medium)
+#     -> bridge stages on beginner: noop -> random_1 -> random -> simple -> medium
+#
+# The beginner ramp uses three opponent intensities to give the agent a
+# smooth gradient of "opponent uncertainty":
+#   - noop:      opponent does literally nothing (pure navigation/seize)
+#   - random_1:  opponent takes exactly ONE random action per turn (light
+#                perturbation; closer to the agent's own action throughput)
+#   - random:    opponent takes up to 20 random actions per turn (the
+#                stress-test baseline; same as the original `random` opponent)
 #
 # Per-stage overrides handle the starter -> beginner transition:
 #   - max_steps / max_turns:  bigger map needs ~3x the turn budget
@@ -122,6 +128,22 @@ stages:
       seize_progress: 50.0
       capture: 2000.0
 
+  - name: beginner_random_1
+    map_file: maps/1v1/beginner.csv
+    opponent: random_1   # one random action per turn; lighter than `random`
+    promotion_win_rate: 0.85
+    patience: 2
+    max_timesteps: 1_500_000
+    n_eval_episodes: 30
+    max_steps: 800
+    max_turns: 60
+    ent_coef: 0.07
+    reward_config:
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0
+
   - name: beginner_random
     map_file: maps/1v1/beginner.csv
     opponent: random
@@ -131,8 +153,8 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    # Cooled from beginner_noop -- policy already broken out of starter rut.
-    ent_coef: 0.07
+    # Cooled further -- agent has now seen both noop and random_1.
+    ent_coef: 0.05
     reward_config:
       win_by_hq_capture: 3000.0
       win_by_elimination: 3000.0

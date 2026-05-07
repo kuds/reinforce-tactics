@@ -46,7 +46,11 @@ class StructuredActionMasks:
 
 # Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
 # ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "noop"})
+# ``"random"`` runs RandomBot with its default ``max_actions=20`` (more of a
+# stress test than a weak baseline). ``"random_1"`` performs exactly one
+# random action per turn -- a lighter perturbation suitable as a curriculum
+# stepping stone between ``"noop"`` and ``"random"``; see configs/bootstrap.yaml.
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "random_1", "noop"})
 
 
 class StrategyGameEnv(gym.Env):
@@ -1029,13 +1033,17 @@ class StrategyGameEnv(gym.Env):
             self.opponent = AdvancedBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "noop":
             self.opponent = NoopBot(self.game_state, player=opponent_player)
-        elif self.opponent_type == "random":
+        elif self.opponent_type in ("random", "random_1"):
             # Derive a seeded RNG from gymnasium's np_random so the random
             # opponent is reproducible whenever reset() is called with a seed.
+            # ``random_1`` caps RandomBot at one action per turn (a lighter
+            # perturbation than the default 20-action stress test).
             bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            max_actions = 1 if self.opponent_type == "random_1" else 20
             self.opponent = RandomBot(
                 self.game_state,
                 player=opponent_player,
+                max_actions=max_actions,
                 rng=random.Random(bot_seed),
             )
         else:
