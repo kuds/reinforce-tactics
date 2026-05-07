@@ -195,9 +195,7 @@ class TestBootstrapConfig:
             config_from_dict(bad)
 
     def test_rejects_unknown_stage_field(self):
-        bad = {**VALID_DICT, "stages": [
-            {**VALID_DICT["stages"][0], "bogus": 1}
-        ]}
+        bad = {**VALID_DICT, "stages": [{**VALID_DICT["stages"][0], "bogus": 1}]}
         with pytest.raises(ValueError, match="Unknown keys for CurriculumStage"):
             config_from_dict(bad)
 
@@ -317,9 +315,7 @@ class _FakeModel:
                 )
                 return
         # No early exit -> stage exhausted its budget without promoting.
-        self.learn_calls.append(
-            {"stage": stage_name, "total_timesteps": total_timesteps, "exited_early": False}
-        )
+        self.learn_calls.append({"stage": stage_name, "total_timesteps": total_timesteps, "exited_early": False})
 
     def save(self, path: str) -> None:
         self.save_calls.append(path)
@@ -389,9 +385,7 @@ class TestRunCurriculum:
             "a": [0.95, 0.95],
             "b": [0.92, 0.93],
         }
-        cfg, mf, tef, eef, train_envs, eval_envs, get_model = _setup_run(
-            stages, program, tmp_path
-        )
+        cfg, mf, tef, eef, train_envs, eval_envs, get_model = _setup_run(stages, program, tmp_path)
 
         result = run_curriculum(
             cfg,

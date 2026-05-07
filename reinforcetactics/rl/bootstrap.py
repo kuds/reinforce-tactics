@@ -154,10 +154,7 @@ def _build_dataclass_from_mapping(cls, raw: Mapping[str, Any]):
     valid = {f.name for f in fields(cls)}
     unknown = set(raw.keys()) - valid
     if unknown:
-        raise ValueError(
-            f"Unknown keys for {cls.__name__}: {sorted(unknown)}. "
-            f"Valid keys: {sorted(valid)}"
-        )
+        raise ValueError(f"Unknown keys for {cls.__name__}: {sorted(unknown)}. Valid keys: {sorted(valid)}")
     return cls(**{k: v for k, v in raw.items() if k in valid})
 
 
@@ -169,9 +166,7 @@ def config_from_dict(data: Mapping[str, Any]) -> BootstrapConfig:
     valid_keys = {"seed", "n_envs", "eval_freq", "env", "ppo", "stages"}
     unknown = set(data.keys()) - valid_keys
     if unknown:
-        raise ValueError(
-            f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}"
-        )
+        raise ValueError(f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}")
 
     raw_stages = data.get("stages") or []
     if not isinstance(raw_stages, list):
@@ -210,17 +205,13 @@ def load_bootstrap_config(path: ConfigPath) -> BootstrapConfig:
     if suffix in (".yaml", ".yml"):
         if yaml is None:
             raise ImportError(
-                f"Cannot load '{p}': PyYAML is not installed. "
-                "Install with `pip install PyYAML` or use a .json config."
+                f"Cannot load '{p}': PyYAML is not installed. Install with `pip install PyYAML` or use a .json config."
             )
         data = yaml.safe_load(text) or {}
     elif suffix == ".json":
         data = json.loads(text) if text.strip() else {}
     else:
-        raise ValueError(
-            f"Unsupported config extension '{suffix}' for {p}. "
-            "Use .yaml, .yml, or .json."
-        )
+        raise ValueError(f"Unsupported config extension '{suffix}' for {p}. Use .yaml, .yml, or .json.")
     if not isinstance(data, Mapping):
         raise TypeError(f"Config file {p} must contain a mapping at the top level.")
     return config_from_dict(dict(data))
