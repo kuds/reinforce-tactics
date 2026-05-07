@@ -98,13 +98,13 @@ python main.py --mode stats
 
 ```bash
 # AlphaZero with MCTS
-python train/train_alphazero.py
+python scripts/train/train_alphazero.py
 
 # Feudal RL (hierarchical manager-worker)
-python train/train_feudal_rl.py
+python scripts/train/train_feudal_rl.py
 
 # Self-play training
-python train/train_self_play.py
+python scripts/train/train_self_play.py
 ```
 
 ### Use as Gymnasium Environment
@@ -167,22 +167,24 @@ reinforce-tactics/
 ├── main.py                    # CLI entry point (train/evaluate/play/stats)
 ├── pyproject.toml             # Package config and dependencies
 ├── reinforcetactics/          # Main package
+│   ├── app/                   # Game loop, input handler, action executor, bot factory
+│   ├── cli/                   # CLI command implementations (train/evaluate/play/stats)
 │   ├── core/                  # Game state, units, grid, visibility
 │   ├── game/                  # Mechanics, bots (rule-based, LLM, model, AlphaZero)
 │   ├── rl/                    # Gymnasium env, AlphaZero, Feudal RL, MCTS, self-play
 │   ├── tournament/            # Tournament runner, ELO ratings, scheduling
 │   ├── ui/                    # Pygame renderer, menus, map editor, sprites
-│   └── utils/                 # File I/O, replay, settings, language, fonts
-├── cli/                       # CLI command implementations
-├── game/                      # Game loop, input handler, action executor
+│   └── utils/                 # File I/O, replay, settings, language, fonts, deps
+├── scripts/                   # Standalone scripts (training, eval, tournaments, asset gen)
+│   └── train/                 # Training entry points (self-play, AlphaZero, Feudal RL)
 ├── maps/                      # CSV map files (1v1, 1v1v1, 2v2)
-├── train/                     # Training scripts (self-play, AlphaZero, Feudal RL)
-├── eval/                      # Evaluation scripts
+├── configs/                   # YAML configs for training scripts
 ├── tests/                     # Test suite
 ├── examples/                  # Example scripts and demos
 ├── notebooks/                 # Jupyter notebooks (PPO training, tournaments)
 ├── docker/                    # Docker configs for tournaments
 ├── assets/                    # Sprite sheets
+├── images/                    # README images and demo media
 ├── docs-site/                 # Docusaurus documentation site
 └── benchmarks/                # Performance benchmarks
 ```

@@ -225,7 +225,7 @@ class TestBotFactoryMediumBot:
 
     def test_bot_factory_creates_mediumbot(self):
         """Test that bot factory can create MediumBot."""
-        from game.bot_factory import create_bot
+        from reinforcetactics.app.bot_factory import create_bot
         from reinforcetactics.utils.settings import get_settings
 
         map_data = FileIO.generate_random_map(10, 10, num_players=2)

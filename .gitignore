@@ -30,3 +30,10 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+
+# RL training and evaluation artifacts
+/tournament_results
+/checkpoints
+/models
+/tensorboard
+/logs

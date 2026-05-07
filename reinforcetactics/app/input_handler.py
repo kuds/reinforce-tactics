@@ -6,7 +6,7 @@ This module manages user input state and event handling for the game loop.
 
 import pygame
 
-from game.action_executor import handle_action_menu_result
+from reinforcetactics.app.action_executor import handle_action_menu_result
 from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
 

@@ -25,7 +25,7 @@ changed the weights.
 - (c) Alternate which network's gradients flow through the feature extractor each epoch.
 
 ### 2. No action masking in feudal mode
-**Location:** `reinforcetactics/rl/feudal_rl.py:641`, `train/train_feudal_rl.py:191`
+**Location:** `reinforcetactics/rl/feudal_rl.py:641`, `scripts/train/train_feudal_rl.py:191`
 
 The worker samples actions freely without consulting the `action_mask` from the
 environment. The flat PPO baseline supports `MaskablePPO`, but the feudal agent

@@ -1,6 +1,6 @@
 # MaskablePPO baseline training config.
 #
-# Run: python train/train_feudal_rl.py --config configs/maskable_ppo.yaml
+# Run: python scripts/train/train_feudal_rl.py --config configs/maskable_ppo.yaml
 algorithm: maskable_ppo
 total_timesteps: 10000000
 seed: 0

@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pygame
 import pytest
 
-from game.input_handler import InputHandler
+from reinforcetactics.app.input_handler import InputHandler
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import SimpleBot
 
