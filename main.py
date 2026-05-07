@@ -27,8 +27,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from cli.commands import evaluate_mode, play_mode, stats_mode, train_mode
-from utils.dependency_checker import check_dependencies
+from reinforcetactics.cli.commands import evaluate_mode, play_mode, stats_mode, train_mode
+from reinforcetactics.utils.dependency_checker import check_dependencies
 
 
 def main():

@@ -8,19 +8,19 @@ Runs the full AlphaZero training pipeline:
 
 Usage:
     # Basic training with defaults
-    python train/train_alphazero.py
+    python scripts/train/train_alphazero.py
 
     # Train on a specific map with more simulations
-    python train/train_alphazero.py --map-file maps/1v1/beginner.csv --num-simulations 200
+    python scripts/train/train_alphazero.py --map-file maps/1v1/beginner.csv --num-simulations 200
 
     # Resume from checkpoint
-    python train/train_alphazero.py --resume checkpoints/alphazero/alphazero_iter_0050.pt
+    python scripts/train/train_alphazero.py --resume checkpoints/alphazero/alphazero_iter_0050.pt
 
     # Train with GPU
-    python train/train_alphazero.py --device cuda
+    python scripts/train/train_alphazero.py --device cuda
 
     # Quick test run
-    python train/train_alphazero.py --iterations 2 --games-per-iter 2 --num-simulations 10
+    python scripts/train/train_alphazero.py --iterations 2 --games-per-iter 2 --num-simulations 10
 """
 
 import argparse

@@ -21,8 +21,8 @@ hardcoded hyperparameter dicts.
 Training scripts accept `--config` and any CLI flag overrides:
 
 ```bash
-python train/train_feudal_rl.py --config configs/maskable_ppo.yaml
-python train/train_feudal_rl.py --config configs/maskable_ppo.yaml \
+python scripts/train/train_feudal_rl.py --config configs/maskable_ppo.yaml
+python scripts/train/train_feudal_rl.py --config configs/maskable_ppo.yaml \
     --total-timesteps 50000 --seed 42
 ```
 
