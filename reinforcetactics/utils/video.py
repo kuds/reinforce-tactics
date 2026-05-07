@@ -139,6 +139,11 @@ def record_evaluation_to_video(
             "opponent_gold": gs.player_gold.get(opponent_player, 0),
             "agent_hp_total": sum(getattr(u, "health", 0) for u in agent_units),
             "opponent_hp_total": sum(getattr(u, "health", 0) for u in opp_units),
+            # Capturable tiles owned by each player (towers + buildings + HQ).
+            # Reads via the same helper used by the env's structure_control
+            # potential term, so the chart and reward signal stay in sync.
+            "agent_structures": len(gs.grid.get_capturable_tiles(player=agent_player)),
+            "opponent_structures": len(gs.grid.get_capturable_tiles(player=opponent_player)),
         }
 
     # Check whether the env supports action masking (ActionMaskedEnv)
@@ -196,6 +201,7 @@ def record_evaluation_to_video(
     return {
         "video_path": video_path,
         "winner": winner,
+        "end_reason": info.get("end_reason"),
         "total_reward": total_reward,
         "steps": steps,
         "episode_stats": episode_stats,

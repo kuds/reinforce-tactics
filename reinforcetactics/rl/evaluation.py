@@ -38,6 +38,10 @@ ACTION_TYPE_NAMES = (
 # Reward components emitted in info["reward_breakdown"] by StrategyGameEnv.
 REWARD_COMPONENTS = ("action", "shaping_delta", "invalid_penalty", "terminal")
 
+# Episode-end reasons emitted in info["end_reason"] by StrategyGameEnv.
+# See gym_env.py for the classification rules.
+END_REASONS = ("hq_capture", "elimination", "max_turns_draw", "max_steps_truncate")
+
 
 def evaluate_model(
     model: Any,
@@ -83,6 +87,13 @@ def evaluate_model(
     rewards = []
     lengths = []
     has_action_masks = hasattr(env, "action_masks")
+
+    # Outcome × end-reason matrix accumulated per episode. Keys are
+    # f"{outcome}_by_{reason}" e.g. "wins_by_hq_capture",
+    # "losses_by_elimination". Always populated (cheap; one read of the
+    # final info dict per episode).
+    outcome_reasons = {f"{outcome}_by_{reason}": 0 for outcome in ("wins", "losses", "draws") for reason in END_REASONS}
+    end_reasons = {reason: 0 for reason in END_REASONS}
 
     if track_breakdown:
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
@@ -132,10 +143,18 @@ def evaluate_model(
 
         if winner == agent_player:
             wins += 1
+            outcome = "wins"
         elif winner is not None:
             losses += 1
+            outcome = "losses"
         else:
             draws += 1
+            outcome = "draws"
+
+        reason = info.get("end_reason")
+        if reason in END_REASONS:
+            end_reasons[reason] += 1
+            outcome_reasons[f"{outcome}_by_{reason}"] += 1
 
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
@@ -152,6 +171,8 @@ def evaluate_model(
         "episodes": n_episodes,
         "rewards": [float(r) for r in rewards],
         "lengths": [int(length) for length in lengths],
+        "end_reasons": end_reasons,
+        "outcome_reasons": outcome_reasons,
     }
     if track_breakdown:
         result["action_counts"] = action_counts

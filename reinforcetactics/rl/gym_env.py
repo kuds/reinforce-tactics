@@ -820,11 +820,38 @@ class StrategyGameEnv(gym.Env):
         # Get observation
         obs = self._get_obs()
 
+        # Classify how the episode ended so eval/diagnostics can split
+        # win/loss/draw counts by the actual game-over condition. The env
+        # does not track this directly, so reconstruct from observable
+        # state at the terminal step:
+        #   hq_capture     - terminated with a winner and the loser still
+        #                    has units alive (only HQ capture ends the game
+        #                    while both sides have units in play; see
+        #                    mechanics.seize_structure tile.type == "h").
+        #   elimination    - terminated with a winner and the loser has
+        #                    zero units (game_state._check_player_eliminated).
+        #   max_turns_draw - terminated with no winner (game_state.end_turn
+        #                    line 825-827 sets game_over with winner=None).
+        #   max_steps_truncate - env step counter hit max_steps before the
+        #                    game produced a terminal state.
+        end_reason: Optional[str] = None
+        if terminated:
+            winner = self.game_state.winner
+            if winner is None:
+                end_reason = "max_turns_draw"
+            else:
+                loser = 3 - winner
+                loser_units = sum(1 for u in self.game_state.units if u.player == loser)
+                end_reason = "elimination" if loser_units == 0 else "hq_capture"
+        elif truncated:
+            end_reason = "max_steps_truncate"
+
         # Info dict
         info = {
             "episode_stats": self.episode_stats.copy() if terminated or truncated else {},
             "game_over": terminated,
             "winner": self.game_state.winner if terminated else None,
+            "end_reason": end_reason,
             "turn": self.game_state.turn_number,
             "valid_action": is_valid,
             "action_type": action_dict["action_type"],

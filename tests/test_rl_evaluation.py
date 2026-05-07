@@ -165,3 +165,46 @@ class TestEvaluateModel:
         result = evaluate_model(_StubModel(), env, n_episodes=1, track_breakdown=True)
         assert sum(result["action_counts"].values()) == 0
         assert all(v == 0.0 for v in result["reward_components"].values())
+
+    def test_end_reasons_recorded_when_env_emits_them(self):
+        # Env emits info["end_reason"] on terminal steps; evaluate_model
+        # should classify each episode under both end_reasons and the
+        # outcome_reasons matrix.
+        class _ReasonEnv(_StubEnv):
+            def __init__(self, episodes_with_reasons, agent_player=1):
+                # episodes: list of (reward, terminated, winner, end_reason) tuples.
+                super().__init__([[(r, t, w) for r, t, w, _ in ep] for ep in episodes_with_reasons], agent_player=agent_player)
+                self._reasons = [[reason for _, _, _, reason in ep] for ep in episodes_with_reasons]
+
+            def step(self, action):
+                ep_reasons = self._reasons[self._idx]
+                step_idx = self._step
+                obs, r, term, trunc, info = super().step(action)
+                if term and ep_reasons[step_idx] is not None:
+                    info["end_reason"] = ep_reasons[step_idx]
+                return obs, r, term, trunc, info
+
+        episodes = [
+            [(0.0, True, 1, "hq_capture")],  # win by HQ capture
+            [(0.0, True, 1, "elimination")],  # win by elimination
+            [(0.0, True, 2, "hq_capture")],  # loss by HQ capture
+            [(0.0, True, None, "max_turns_draw")],  # draw
+        ]
+        env = _ReasonEnv(episodes)
+        result = evaluate_model(_StubModel(), env, n_episodes=4)
+
+        assert result["end_reasons"]["hq_capture"] == 2
+        assert result["end_reasons"]["elimination"] == 1
+        assert result["end_reasons"]["max_turns_draw"] == 1
+        assert result["end_reasons"]["max_steps_truncate"] == 0
+        assert result["outcome_reasons"]["wins_by_hq_capture"] == 1
+        assert result["outcome_reasons"]["wins_by_elimination"] == 1
+        assert result["outcome_reasons"]["losses_by_hq_capture"] == 1
+        assert result["outcome_reasons"]["draws_by_max_turns_draw"] == 1
+
+    def test_end_reasons_zero_when_env_does_not_emit(self):
+        # Existing envs without end_reason should not error; counters stay 0.
+        env = _StubEnv([[(0.0, True, 1)]])
+        result = evaluate_model(_StubModel(), env, n_episodes=1)
+        assert sum(result["end_reasons"].values()) == 0
+        assert sum(result["outcome_reasons"].values()) == 0
