@@ -21,7 +21,6 @@ from reinforcetactics.rl.bootstrap import (
 from reinforcetactics.rl.callbacks import PeriodicEvalCallback, PromotionCallback
 from reinforcetactics.rl.config import PPOConfig
 
-
 # ---------------------------------------------------------------------------
 # PromotionCallback unit tests (no env / no real model needed)
 # ---------------------------------------------------------------------------
