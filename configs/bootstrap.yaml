@@ -43,7 +43,7 @@ env:
     turn_penalty: -20.0
 
 ppo:
-  learning_rate: 3e-4
+  learning_rate: 3.0e-4
   n_steps: 2048
   batch_size: 64
   n_epochs: 10
