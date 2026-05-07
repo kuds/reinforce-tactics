@@ -15,6 +15,36 @@ from torch import nn
 _OBS_KEYS = ("grid", "units", "global_features")
 
 
+def _apply_action_masks(
+    action_logits: List[torch.Tensor],
+    action_masks: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """Set logits at masked-out (False) positions to -inf so Categorical
+    sampling can never pick them. Each mask is bool, shape (B, dim_i) or
+    (dim_i,); the latter is broadcast across the batch. A mask that is
+    entirely False (no legal action in that dim) is left untouched —
+    setting every logit to -inf would NaN the softmax. End-turn is always
+    legal in dim 0, so an all-False mask in any other dim is a bug
+    upstream rather than something to silently mask away here.
+    """
+    if len(action_masks) != len(action_logits):
+        raise ValueError(f"Got {len(action_masks)} masks for {len(action_logits)} action heads")
+    masked = []
+    for logits, mask in zip(action_logits, action_masks):
+        if mask is None:
+            masked.append(logits)
+            continue
+        mask_t = mask.to(dtype=torch.bool, device=logits.device)
+        if mask_t.dim() == 1:
+            mask_t = mask_t.unsqueeze(0).expand_as(logits)
+        # Skip masking if no legal action in this dim (avoids NaN softmax).
+        if not mask_t.any():
+            masked.append(logits)
+            continue
+        masked.append(logits.masked_fill(~mask_t, float("-inf")))
+    return masked
+
+
 class SpatialFeatureExtractor(BaseFeaturesExtractor):
     """
     CNN-based feature extractor for spatial game state.
@@ -231,16 +261,26 @@ class WorkerNetwork(nn.Module):
         # Value head
         self.value_head = nn.Linear(256, 1)
 
-    def forward(self, features: torch.Tensor, goal: torch.Tensor) -> Tuple[list, torch.Tensor]:
+    def forward(
+        self,
+        features: torch.Tensor,
+        goal: torch.Tensor,
+        action_masks: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[list, torch.Tensor]:
         """
         Forward pass.
 
         Args:
             features: (batch, feature_dim)
             goal: (batch, 3) - [goal_x, goal_y, goal_type]
+            action_masks: Optional list of 6 boolean tensors aligned with
+                ``action_space_dims``. Each tensor has shape (batch, dim_i)
+                or (dim_i,) (broadcast). Disallowed actions get -inf logit
+                so Categorical sampling never picks them. End-turn (a single
+                always-legal action) is the safety net the env guarantees.
 
         Returns:
-            action_logits: List of (batch, action_dim) tensors
+            action_logits: List of (batch, action_dim) tensors (post-mask)
             value: (batch, 1)
         """
         # Embed goal
@@ -253,21 +293,29 @@ class WorkerNetwork(nn.Module):
         # Compute action logits
         action_logits = [head(x) for head in self.action_heads]
 
+        if action_masks is not None:
+            action_logits = _apply_action_masks(action_logits, action_masks)
+
         # Compute value
         value = self.value_head(x)
 
         return action_logits, value
 
-    def sample_action(self, features: torch.Tensor, goal: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample_action(
+        self,
+        features: torch.Tensor,
+        goal: torch.Tensor,
+        action_masks: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Sample an action.
+        Sample an action. ``action_masks`` is forwarded to ``forward``.
 
         Returns:
             action: (batch, len(action_space_dims))
             log_prob: (batch,)
             value: (batch, 1)
         """
-        action_logits, value = self.forward(features, goal)
+        action_logits, value = self.forward(features, goal, action_masks=action_masks)
 
         # Sample from each dimension
         actions = []
@@ -285,17 +333,24 @@ class WorkerNetwork(nn.Module):
         return action, log_prob, value
 
     def evaluate_action(
-        self, features: torch.Tensor, goal: torch.Tensor, action: torch.Tensor
+        self,
+        features: torch.Tensor,
+        goal: torch.Tensor,
+        action: torch.Tensor,
+        action_masks: Optional[List[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Evaluate a given action.
+        Evaluate a given action. When ``action_masks`` is provided it must
+        match the masks used at sample time — otherwise the new log_prob is
+        computed under a different distribution than the old one and PPO's
+        importance-sampling ratio is biased.
 
         Returns:
             log_prob: (batch,)
             entropy: (batch,)
             value: (batch, 1)
         """
-        action_logits, value = self.forward(features, goal)
+        action_logits, value = self.forward(features, goal, action_masks=action_masks)
 
         log_probs = []
         entropies = []
@@ -360,6 +415,11 @@ class FeudalRolloutBuffer:
         self.w_goals = []
         self.w_rewards = []
         self.w_dones = []
+        # Per-dim action masks captured at sample time. Either a list of
+        # 6-tuples (each entry a np.bool array sized to that worker dim) or
+        # an empty list if the env didn't provide masks. Stored so update()
+        # can re-apply the same masking and keep PPO ratios well-defined.
+        self.w_action_masks: List[Tuple[np.ndarray, ...]] = []
 
         # Manager storage (one per goal-setting event)
         self.m_obs_grid = []
@@ -373,7 +433,17 @@ class FeudalRolloutBuffer:
         self.m_segment_lengths = []
 
     def add_worker_step(
-        self, obs, action, log_prob, value, goal, extrinsic_reward, intrinsic_reward, done, worker_reward_alpha
+        self,
+        obs,
+        action,
+        log_prob,
+        value,
+        goal,
+        extrinsic_reward,
+        intrinsic_reward,
+        done,
+        worker_reward_alpha,
+        action_masks=None,
     ):
         """Add a single worker step to the buffer."""
         self.w_obs_grid.append(obs["grid"])
@@ -385,6 +455,8 @@ class FeudalRolloutBuffer:
         self.w_goals.append(goal)
         self.w_rewards.append(intrinsic_reward + worker_reward_alpha * extrinsic_reward)
         self.w_dones.append(done)
+        if action_masks is not None:
+            self.w_action_masks.append(tuple(np.asarray(m, dtype=bool) for m in action_masks))
 
     def add_manager_step(self, obs, goal, log_prob, value):
         """Record a goal-setting event (reward/done filled later)."""
@@ -406,6 +478,18 @@ class FeudalRolloutBuffer:
         """Check whether the buffer contains any finalized manager segments."""
         return len(self.m_rewards) > 0
 
+    @property
+    def has_action_masks(self) -> bool:
+        """True iff the rollout captured per-dim worker masks for every step.
+
+        Works both before and after ``finalize()``. Pre-finalize the field is
+        a list of per-step tuples (length matches w_rewards). Post-finalize
+        it is a tuple of stacked arrays (length 6, matching the action dims).
+        """
+        if isinstance(self.w_action_masks, tuple):
+            return len(self.w_action_masks) > 0
+        return len(self.w_action_masks) == len(self.w_rewards) and len(self.w_action_masks) > 0
+
     def finalize(self):
         """Convert all lists to numpy arrays."""
         self.w_obs_grid = np.stack(self.w_obs_grid)
@@ -417,6 +501,13 @@ class FeudalRolloutBuffer:
         self.w_goals = np.array(self.w_goals, dtype=np.float32)
         self.w_rewards = np.array(self.w_rewards, dtype=np.float32)
         self.w_dones = np.array(self.w_dones, dtype=np.float32)
+        # Pivot from list-of-tuples to tuple-of-arrays so each dim can be
+        # batch-indexed: w_action_masks[dim_i] is shape (N, dim_size_i).
+        # Skipped (left as []) when no masks were captured — update() then
+        # falls back to the un-masked code path.
+        if self.has_action_masks:
+            n_dims = len(self.w_action_masks[0])
+            self.w_action_masks = tuple(np.stack([step_masks[d] for step_masks in self.w_action_masks]) for d in range(n_dims))
 
         if self.has_manager_data:
             self.m_obs_grid = np.stack(self.m_obs_grid)
@@ -498,16 +589,27 @@ class FeudalRLAgent:
         self.manager_horizon = 10  # Update goal every N steps
 
     def select_action(
-        self, observation: Dict[str, np.ndarray], deterministic: bool = False
+        self,
+        observation: Dict[str, np.ndarray],
+        deterministic: bool = False,
+        action_masks: Optional[Tuple[np.ndarray, ...]] = None,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Select action using manager-worker hierarchy.
+
+        Args:
+            action_masks: Optional 6-tuple of per-dimension bool numpy arrays
+                from ``env.action_masks()`` (multi_discrete mode). Applied to
+                the worker's logits so illegal actions cannot be sampled or
+                argmax'd. Manager goals are not masked (goal space is
+                unconstrained by env legality).
 
         Returns:
             action: Primitive action array
             goal: Current goal (for logging/debugging)
         """
         obs_tensor = self._obs_to_tensor(observation)
+        worker_masks = self._masks_to_tensors(action_masks)
 
         # Extract features
         with torch.no_grad():
@@ -530,14 +632,23 @@ class FeudalRLAgent:
             # Worker selects action conditioned on goal
             assert self.current_goal is not None
             if deterministic:
-                action_logits, _ = self.worker(features, self.current_goal)
+                action_logits, _ = self.worker(features, self.current_goal, action_masks=worker_masks)
                 action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
             else:
-                action, _, _ = self.worker.sample_action(features, self.current_goal)
+                action, _, _ = self.worker.sample_action(features, self.current_goal, action_masks=worker_masks)
 
             self.goal_step_counter += 1
 
         return action.cpu().numpy()[0], self.current_goal.cpu().numpy()[0]
+
+    def _masks_to_tensors(self, action_masks: Optional[Tuple[np.ndarray, ...]]) -> Optional[List[torch.Tensor]]:
+        """Convert a tuple of per-dim numpy bool masks (from env.action_masks())
+        into a list of torch tensors on self.device, matching the worker's
+        action_space_dims. Returns None if no masks supplied.
+        """
+        if action_masks is None:
+            return None
+        return [torch.as_tensor(m, dtype=torch.bool, device=self.device) for m in action_masks]
 
     def reset_goal(self):
         """Reset current goal (call at episode start)."""
@@ -592,15 +703,15 @@ class FeudalRLAgent:
         """
         Collect n_steps of experience using the feudal hierarchy.
 
-        Args:
-            env: Gymnasium environment
-            n_steps: Number of environment steps to collect
-            gamma: Discount factor
-            gae_lambda: GAE lambda
-            worker_reward_alpha: Weight of extrinsic reward in worker reward
+        When the env exposes ``action_masks()`` (multi_discrete StrategyGameEnv),
+        per-dim masks are captured at each step, applied to the worker's
+        logits, and stashed in the buffer so ``update()`` re-applies the
+        same masking — keeping PPO's importance-sampling ratio well-defined.
 
-        Returns:
-            Filled FeudalRolloutBuffer with computed advantages
+        End reasons and reward breakdowns from ``info`` are accumulated on
+        the returned buffer (``buf.end_reasons``, ``buf.reward_breakdown``)
+        so the training loop can surface diagnostics that mirror the
+        PPO notebook's eval cards.
         """
         buf = FeudalRolloutBuffer()
         obs = self._last_obs
@@ -610,12 +721,18 @@ class FeudalRLAgent:
         # Prevents closing a segment from a previous rollout in a fresh buffer.
         manager_segment_open = False
 
+        env_supports_masks = hasattr(env, "action_masks")
+        end_reasons: List[str] = []
+        reward_breakdown_sums: Dict[str, float] = {}
+
         self.feature_extractor.eval()
         self.manager.eval()
         self.worker.eval()
 
         for _ in range(n_steps):
             obs_tensor = self._obs_to_tensor(obs)
+            step_masks_np = env.action_masks() if env_supports_masks else None
+            worker_mask_tensors = self._masks_to_tensors(step_masks_np)
 
             with torch.no_grad():
                 features = self.feature_extractor(obs_tensor)
@@ -638,12 +755,18 @@ class FeudalRLAgent:
                     manager_segment_open = True
 
                 # Worker selects action conditioned on goal (single forward pass)
-                action, w_log_prob, w_value = self.worker.sample_action(features, self.current_goal)
+                action, w_log_prob, w_value = self.worker.sample_action(
+                    features, self.current_goal, action_masks=worker_mask_tensors
+                )
 
             # Step environment
             action_np = action.cpu().numpy()[0]
-            next_obs, ext_reward, terminated, truncated, _info = env.step(action_np)
+            next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
             done = terminated or truncated
+
+            # Surface info diagnostics so the training loop can show them.
+            for k, v in info.get("reward_breakdown", {}).items():
+                reward_breakdown_sums[k] = reward_breakdown_sums.get(k, 0.0) + float(v)
 
             # Compute intrinsic reward
             assert self.current_goal is not None
@@ -661,6 +784,7 @@ class FeudalRLAgent:
                 int_reward,
                 done,
                 worker_reward_alpha,
+                action_masks=step_masks_np,
             )
 
             manager_reward_accum += ext_reward
@@ -673,6 +797,9 @@ class FeudalRLAgent:
                 manager_reward_accum = 0.0
                 manager_step_count = 0
                 manager_segment_open = False
+                reason = info.get("end_reason")
+                if reason is not None:
+                    end_reasons.append(reason)
                 obs, _ = env.reset()
                 self.reset_goal()
             else:
@@ -696,6 +823,8 @@ class FeudalRLAgent:
 
         buf.finalize()
         buf.compute_advantages(last_w_value.item(), last_m_value.item(), gamma, gae_lambda)
+        buf.end_reasons = end_reasons
+        buf.reward_breakdown = reward_breakdown_sums
 
         self.feature_extractor.train()
         self.manager.train()
@@ -737,6 +866,14 @@ class FeudalRLAgent:
         w_adv = torch.as_tensor(buf.w_advantages).to(self.device)
         w_ret = torch.as_tensor(buf.w_returns).to(self.device)
         w_goals_t = torch.as_tensor(buf.w_goals).float().to(self.device)
+        # Per-dim worker masks: tuple of bool tensors (N, dim_i). These are
+        # only used inside the inner training loop where we slice by mini-
+        # batch index. None when collect_rollout couldn't capture masks
+        # (e.g. test envs without action_masks()).
+        if buf.has_action_masks:
+            w_masks_t = tuple(torch.as_tensor(m, dtype=torch.bool, device=self.device) for m in buf.w_action_masks)
+        else:
+            w_masks_t = None
 
         if n_manager > 0:
             m_goals_t = torch.as_tensor(buf.m_goals).float().to(self.device)
@@ -772,7 +909,8 @@ class FeudalRLAgent:
                 b_goals = w_goals_t[idx]
 
                 features = self.feature_extractor(b_obs)
-                new_lp, entropy, values = self.worker.evaluate_action(features, b_goals, b_actions)
+                b_masks = [m[idx] for m in w_masks_t] if w_masks_t is not None else None
+                new_lp, entropy, values = self.worker.evaluate_action(features, b_goals, b_actions, action_masks=b_masks)
 
                 ratio = torch.exp(new_lp - b_old_lp)
                 surr1 = ratio * b_adv

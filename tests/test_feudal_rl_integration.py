@@ -639,3 +639,209 @@ class TestActionRanges:
             assert 0 <= goal[0] < GRID_W
             assert 0 <= goal[1] < GRID_H
             assert 0 <= goal[2] < 4
+
+
+# ---------------------------------------------------------------------------
+# Worker action masking (pass-2 parity with PPO)
+# ---------------------------------------------------------------------------
+
+
+def _make_masks(legal_at, legal_ut, legal_fx, legal_fy, legal_tx, legal_ty):
+    """Build a 6-tuple of bool masks shaped like env.action_masks() for the
+    multi_discrete worker dims [10, 8, GRID_W, GRID_H, GRID_W, GRID_H]."""
+    at = np.zeros(10, dtype=bool)
+    ut = np.zeros(8, dtype=bool)
+    fx = np.zeros(GRID_W, dtype=bool)
+    fy = np.zeros(GRID_H, dtype=bool)
+    tx = np.zeros(GRID_W, dtype=bool)
+    ty = np.zeros(GRID_H, dtype=bool)
+    at[list(legal_at)] = True
+    ut[list(legal_ut)] = True
+    fx[list(legal_fx)] = True
+    fy[list(legal_fy)] = True
+    tx[list(legal_tx)] = True
+    ty[list(legal_ty)] = True
+    return (at, ut, fx, fy, tx, ty)
+
+
+class MaskedMockEnv(MockEnv):
+    """MockEnv that also exposes ``action_masks()`` like StrategyGameEnv
+    (multi_discrete mode). Always allows action_type=5 (end_turn) plus the
+    extras passed at construction so tests can pin down exactly which
+    actions the worker is permitted to sample.
+    """
+
+    def __init__(self, episode_length=50, extra_legal_action_types=()):
+        super().__init__(episode_length=episode_length)
+        self._masks = _make_masks(
+            legal_at=(5,) + tuple(extra_legal_action_types),
+            legal_ut=(0,),
+            legal_fx=(0,),
+            legal_fy=(0,),
+            legal_tx=(0,),
+            legal_ty=(0,),
+        )
+
+    def action_masks(self):
+        return self._masks
+
+
+class TestWorkerActionMasking:
+    def test_select_action_respects_masks(self):
+        torch.manual_seed(0)
+        np.random.seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        obs = _make_obs()
+        # Only end_turn (action_type=5) is legal.
+        masks = _make_masks(legal_at=(5,), legal_ut=(0,), legal_fx=(0,), legal_fy=(0,), legal_tx=(0,), legal_ty=(0,))
+        # Sample many times; sampled action_type must always be 5.
+        for _ in range(20):
+            action, _ = agent.select_action(obs, deterministic=False, action_masks=masks)
+            assert action[0] == 5, f"masked action_type leaked: {action[0]}"
+
+    def test_select_action_deterministic_respects_masks(self):
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        obs = _make_obs()
+        masks = _make_masks(legal_at=(5,), legal_ut=(0,), legal_fx=(0,), legal_fy=(0,), legal_tx=(0,), legal_ty=(0,))
+        action, _ = agent.select_action(obs, deterministic=True, action_masks=masks)
+        assert action[0] == 5
+
+    def test_collect_rollout_captures_masks(self):
+        """When env exposes action_masks(), the rollout buffer should store
+        per-dim masks aligned with worker.action_space_dims."""
+        torch.manual_seed(0)
+        np.random.seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = MaskedMockEnv(episode_length=50)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=20, gamma=0.99, gae_lambda=0.95)
+        assert buf.has_action_masks
+        # Six per-dim mask arrays, each shape (n_steps, dim_i).
+        assert len(buf.w_action_masks) == 6
+        assert buf.w_action_masks[0].shape == (20, 10)
+        assert buf.w_action_masks[1].shape == (20, 8)
+        # All sampled actions should be at the (single) legal end_turn slot.
+        assert (buf.w_actions[:, 0] == 5).all()
+
+    def test_collect_rollout_no_masks_when_env_unsupported(self):
+        """Plain MockEnv has no action_masks(); rollout still works (no masks)."""
+        torch.manual_seed(0)
+        np.random.seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = MockEnv(episode_length=50)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95)
+        assert not buf.has_action_masks
+        assert buf.w_action_masks == []
+
+    def test_update_runs_with_masks(self):
+        """update() must complete and produce finite losses when masks are stored."""
+        torch.manual_seed(0)
+        np.random.seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = MaskedMockEnv(episode_length=50)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=32, gamma=0.99, gae_lambda=0.95)
+        metrics = agent.update(buf, n_epochs=2, batch_size=8, clip_range=0.2, ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5)
+        for k, v in metrics.items():
+            assert np.isfinite(v), f"{k} not finite: {v}"
+
+    def test_evaluate_action_under_masks_matches_sample(self):
+        """sample_action and evaluate_action must produce the same log_prob
+        when given the same masks — otherwise PPO's ratio is biased."""
+        torch.manual_seed(7)
+        worker = WorkerNetwork(
+            feature_dim=64, goal_embedding_dim=32, action_space_dims=[10, 8, GRID_W, GRID_H, GRID_W, GRID_H]
+        )
+        features = torch.rand(1, 64)
+        goal = torch.rand(1, 3)
+        masks = _make_masks(legal_at=(5,), legal_ut=(0,), legal_fx=(0,), legal_fy=(0,), legal_tx=(0,), legal_ty=(0,))
+        mask_tensors = [torch.as_tensor(m) for m in masks]
+        action, sample_lp, _ = worker.sample_action(features, goal, action_masks=mask_tensors)
+        eval_lp, _, _ = worker.evaluate_action(features, goal, action, action_masks=mask_tensors)
+        assert torch.allclose(sample_lp, eval_lp, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Rollout info surfacing (end_reason / reward_breakdown)
+# ---------------------------------------------------------------------------
+
+
+class InfoMockEnv(MockEnv):
+    """MockEnv that emits info['end_reason'] and info['reward_breakdown']
+    so tests can verify the rollout aggregates them."""
+
+    def step(self, action):
+        self.step_count += 1
+        obs = _make_obs()
+        obs["units"][0, 0, 1] = 1
+        reward = 1.0
+        terminated = self.step_count >= self.episode_length
+        info = {
+            "reward_breakdown": {"action": 0.5, "shaping_delta": 0.3, "terminal": 0.2 if terminated else 0.0},
+        }
+        if terminated:
+            info["winner"] = 1
+            info["end_reason"] = "hq_capture"
+        return obs, reward, False if terminated else False, terminated, info  # noqa: SIM210 (kept for clarity: no terminate, only truncate at end)
+
+
+class TestRolloutInfoSurfacing:
+    def test_end_reasons_collected(self):
+        torch.manual_seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = InfoMockEnv(episode_length=5)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        # 12 steps → at least 2 episode boundaries.
+        buf = agent.collect_rollout(env, n_steps=12, gamma=0.99, gae_lambda=0.95)
+        assert hasattr(buf, "end_reasons")
+        assert len(buf.end_reasons) >= 2
+        assert all(r == "hq_capture" for r in buf.end_reasons)
+
+    def test_reward_breakdown_summed(self):
+        torch.manual_seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = InfoMockEnv(episode_length=5)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95)
+        assert hasattr(buf, "reward_breakdown")
+        # 10 steps × 0.5 action component
+        assert abs(buf.reward_breakdown["action"] - 5.0) < 1e-4
+        assert abs(buf.reward_breakdown["shaping_delta"] - 3.0) < 1e-4
+
+    def test_no_info_when_env_silent(self):
+        """When the env doesn't emit reward_breakdown / end_reason, the buf
+        should still be populated (with empty containers) — not raise."""
+        torch.manual_seed(0)
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training()
+        env = MockEnv(episode_length=5)
+        obs, _ = env.reset()
+        agent._last_obs = obs
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95)
+        assert buf.reward_breakdown == {}
+        assert buf.end_reasons == []
