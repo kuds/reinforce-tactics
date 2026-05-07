@@ -510,9 +510,7 @@ class AutoregressiveActionHead(nn.Module):
         return self.src_pos_proj(torch.stack([x_norm, y_norm], dim=-1))
 
     def _atype_dist(self, features: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        return torch.distributions.Categorical(
-            logits=self._apply_mask(self.atype_logits(features), mask)
-        )
+        return torch.distributions.Categorical(logits=self._apply_mask(self.atype_logits(features), mask))
 
     def _src_dist(self, features: torch.Tensor, atype: torch.Tensor, mask: Optional[torch.Tensor] = None):
         ae = self.atype_emb(atype)
@@ -661,12 +659,7 @@ class AutoregressiveActionHead(nn.Module):
         src_idx = sy * self.W + sx
         tgt_idx = ty * self.W + tx
 
-        log_prob = (
-            atype_dist.log_prob(atype)
-            + src_dist.log_prob(src_idx)
-            + ut_dist.log_prob(ut)
-            + tgt_dist.log_prob(tgt_idx)
-        )
+        log_prob = atype_dist.log_prob(atype) + src_dist.log_prob(src_idx) + ut_dist.log_prob(ut) + tgt_dist.log_prob(tgt_idx)
         entropy = atype_dist.entropy() + src_dist.entropy() + ut_dist.entropy() + tgt_dist.entropy()
         return log_prob, entropy
 
@@ -779,9 +772,7 @@ class AutoregressiveWorkerNetwork(nn.Module):
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
         h = self._shared(features, goal)
-        action, log_prob, conditional_masks = self.head.sample_with_provider(
-            h, provider, deterministic=deterministic
-        )
+        action, log_prob, conditional_masks = self.head.sample_with_provider(h, provider, deterministic=deterministic)
         value = self.value_head(h)
         return action, log_prob, value, conditional_masks
 
@@ -1103,9 +1094,7 @@ class FeudalRLAgent:
                 # AR worker has no env-mask plumbing at inference time; the
                 # legacy per-dim ``worker_masks`` would not match its head
                 # API, so they are dropped here.
-                action, _, _ = self.worker.sample_action(
-                    features, self.current_goal, deterministic=deterministic
-                )
+                action, _, _ = self.worker.sample_action(features, self.current_goal, deterministic=deterministic)
             elif deterministic:
                 action_logits, _ = self.worker(features, self.current_goal, action_masks=worker_masks)
                 action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
@@ -1245,9 +1234,7 @@ class FeudalRLAgent:
                     action, w_log_prob, w_value, cond_masks = self.worker.sample_action_with_provider(
                         features, self.current_goal, provider
                     )
-                    ar_step_masks_np = {
-                        k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()
-                    }
+                    ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
                 else:
                     action, w_log_prob, w_value = self.worker.sample_action(
                         features, self.current_goal, action_masks=worker_mask_tensors
@@ -1414,14 +1401,10 @@ class FeudalRLAgent:
                         "unit_type": torch.as_tensor(buf.w_mask_unit_type[idx]).to(self.device),
                         "target": torch.as_tensor(buf.w_mask_target[idx]).to(self.device),
                     }
-                    new_lp, entropy, values = self.worker.evaluate_action(
-                        features, b_goals, b_actions, masks=b_ar_masks
-                    )
+                    new_lp, entropy, values = self.worker.evaluate_action(features, b_goals, b_actions, masks=b_ar_masks)
                 else:
                     b_masks = [m[idx] for m in w_masks_t] if w_masks_t is not None else None
-                    new_lp, entropy, values = self.worker.evaluate_action(
-                        features, b_goals, b_actions, action_masks=b_masks
-                    )
+                    new_lp, entropy, values = self.worker.evaluate_action(features, b_goals, b_actions, action_masks=b_masks)
 
                 ratio = torch.exp(new_lp - b_old_lp)
                 surr1 = ratio * b_adv

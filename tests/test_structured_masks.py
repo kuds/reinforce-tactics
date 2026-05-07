@@ -103,9 +103,7 @@ class TestStructuredVsFlatConsistency:
         for (at, sx, sy), tmask in masks.target.items():
             ys, xs = np.where(tmask)
             for y, x in zip(ys.tolist(), xs.tolist()):
-                assert (at, sx, sy, x, y) in flat_no_ut, (
-                    f"structured implies illegal action {(at, sx, sy, x, y)}"
-                )
+                assert (at, sx, sy, x, y) in flat_no_ut, f"structured implies illegal action {(at, sx, sy, x, y)}"
 
     def test_unit_type_keys_subset_of_create_sources(self, env):
         masks = env.structured_action_masks()
@@ -120,9 +118,7 @@ class TestStructuredVsFlatConsistency:
 class TestEncodeStructuredAction:
     def test_round_trip_through_step(self, env):
         # End turn is always available; verify the encoded action is accepted.
-        action = StrategyGameEnv.encode_structured_action(
-            atype=5, sx=0, sy=0, tx=0, ty=0, unit_type_idx=0
-        )
+        action = StrategyGameEnv.encode_structured_action(atype=5, sx=0, sy=0, tx=0, ty=0, unit_type_idx=0)
         assert action.shape == (6,)
         assert action.dtype == np.int32
         obs, reward, terminated, truncated, info = env.step(action)

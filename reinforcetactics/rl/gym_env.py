@@ -43,6 +43,7 @@ class StructuredActionMasks:
     target: Dict[Tuple[int, int, int], np.ndarray] = field(default_factory=dict)
     unit_type: Dict[Tuple[int, int], np.ndarray] = field(default_factory=dict)
 
+
 # Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
 # ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
 _BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "noop"})
@@ -448,9 +449,7 @@ class StrategyGameEnv(gym.Env):
         end_t[0, 0] = True
         target[(5, 0, 0)] = end_t
 
-        return StructuredActionMasks(
-            atype=atype, source=source, target=target, unit_type=unit_type
-        )
+        return StructuredActionMasks(atype=atype, source=source, target=target, unit_type=unit_type)
 
     def structured_action_masks(self) -> StructuredActionMasks:
         """

@@ -26,9 +26,7 @@ def _seed_torch():
 
 @pytest.fixture
 def head():
-    return AutoregressiveActionHead(
-        feature_dim=64, grid_height=8, grid_width=10, num_action_types=10, num_unit_types=8
-    )
+    return AutoregressiveActionHead(feature_dim=64, grid_height=8, grid_width=10, num_action_types=10, num_unit_types=8)
 
 
 @pytest.fixture
@@ -63,11 +61,11 @@ class TestAutoregressiveHeadShapes:
     def test_sampled_indices_in_range(self, head, features):
         action, _ = head.sample(features)
         assert (action[:, 0] >= 0).all() and (action[:, 0] < 10).all()  # atype
-        assert (action[:, 1] >= 0).all() and (action[:, 1] < 8).all()   # unit_type
+        assert (action[:, 1] >= 0).all() and (action[:, 1] < 8).all()  # unit_type
         assert (action[:, 2] >= 0).all() and (action[:, 2] < 10).all()  # src_x (W=10)
-        assert (action[:, 3] >= 0).all() and (action[:, 3] < 8).all()   # src_y (H=8)
+        assert (action[:, 3] >= 0).all() and (action[:, 3] < 8).all()  # src_y (H=8)
         assert (action[:, 4] >= 0).all() and (action[:, 4] < 10).all()  # tgt_x
-        assert (action[:, 5] >= 0).all() and (action[:, 5] < 8).all()   # tgt_y
+        assert (action[:, 5] >= 0).all() and (action[:, 5] < 8).all()  # tgt_y
 
     def test_evaluate_matches_sample_logprob(self, head, features):
         action, lp_sample = head.sample(features)
@@ -108,9 +106,7 @@ class TestAutoregressiveHeadMasks:
         atype_mask[:, 5] = True
         src_mask = torch.zeros(4, 8 * 10, dtype=torch.bool)
         src_mask[:, 0] = True  # only (sx=0, sy=0) legal
-        action, _ = head.sample(
-            features, masks={"atype": atype_mask, "src": src_mask}
-        )
+        action, _ = head.sample(features, masks={"atype": atype_mask, "src": src_mask})
         assert (action[:, 2] == 0).all()  # src_x
         assert (action[:, 3] == 0).all()  # src_y
 
@@ -120,9 +116,7 @@ class TestAutoregressiveHeadMasks:
         # Pin target to (tx=3, ty=2) -> idx = 2*10 + 3 = 23
         tgt_mask = torch.zeros(4, 8 * 10, dtype=torch.bool)
         tgt_mask[:, 23] = True
-        action, _ = head.sample(
-            features, masks={"atype": atype_mask, "target": tgt_mask}
-        )
+        action, _ = head.sample(features, masks={"atype": atype_mask, "target": tgt_mask})
         assert (action[:, 4] == 3).all()  # tgt_x
         assert (action[:, 5] == 2).all()  # tgt_y
 
@@ -167,9 +161,7 @@ class TestAutoregressiveHeadBackprop:
 
 class TestAutoregressiveWorkerNetwork:
     def test_sample_action_signature(self):
-        worker = AutoregressiveWorkerNetwork(
-            feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8
-        )
+        worker = AutoregressiveWorkerNetwork(feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8)
         features = torch.randn(2, 64)
         goal = torch.tensor([[3.0, 4.0, 1.0], [0.0, 0.0, 0.0]])
         action, log_prob, value = worker.sample_action(features, goal)
@@ -178,9 +170,7 @@ class TestAutoregressiveWorkerNetwork:
         assert value.shape == (2, 1)
 
     def test_evaluate_action_matches_sample(self):
-        worker = AutoregressiveWorkerNetwork(
-            feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8
-        )
+        worker = AutoregressiveWorkerNetwork(feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8)
         features = torch.randn(2, 64)
         goal = torch.tensor([[3.0, 4.0, 1.0], [0.0, 0.0, 0.0]])
         action, lp_sample, _ = worker.sample_action(features, goal)
@@ -189,9 +179,7 @@ class TestAutoregressiveWorkerNetwork:
         assert entropy.shape == (2,)
 
     def test_forward_returns_none_logits(self):
-        worker = AutoregressiveWorkerNetwork(
-            feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8
-        )
+        worker = AutoregressiveWorkerNetwork(feature_dim=64, goal_embedding_dim=16, grid_width=10, grid_height=8)
         features = torch.randn(2, 64)
         goal = torch.zeros(2, 3)
         logits, value = worker(features, goal)

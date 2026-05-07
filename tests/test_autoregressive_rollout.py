@@ -74,9 +74,7 @@ class TestSampleWithProvider:
     def test_returns_legal_action_for_env_masks(self, env):
         sm = env.structured_action_masks()
         provider = StructuredMaskProvider(sm, env.grid_height, env.grid_width)
-        head = AutoregressiveActionHead(
-            feature_dim=32, grid_height=env.grid_height, grid_width=env.grid_width
-        )
+        head = AutoregressiveActionHead(feature_dim=32, grid_height=env.grid_height, grid_width=env.grid_width)
         features = torch.randn(1, 32)
         # Repeat many times to catch any rare illegal sample.
         for _ in range(50):
@@ -96,9 +94,7 @@ class TestSampleWithProvider:
     def test_evaluate_with_returned_masks_is_exact(self, env):
         sm = env.structured_action_masks()
         provider = StructuredMaskProvider(sm, env.grid_height, env.grid_width)
-        head = AutoregressiveActionHead(
-            feature_dim=32, grid_height=env.grid_height, grid_width=env.grid_width
-        )
+        head = AutoregressiveActionHead(feature_dim=32, grid_height=env.grid_height, grid_width=env.grid_width)
         features = torch.randn(1, 32)
         action, lp_sample, masks = head.sample_with_provider(features, provider)
         lp_eval, _ = head.evaluate(features, action, masks=masks)
@@ -134,9 +130,7 @@ class TestRolloutBufferMaskStorage:
             "target": np.zeros(16, dtype=bool),
         }
         for _ in range(3):
-            buf.add_worker_step(
-                obs, np.zeros(6, dtype=np.int64), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5, masks=masks
-            )
+            buf.add_worker_step(obs, np.zeros(6, dtype=np.int64), 0.0, 0.0, np.zeros(3), 0.0, 0.0, False, 0.5, masks=masks)
             buf.add_manager_step(obs, np.zeros(3), 0.0, 0.0)
         buf.end_manager_segment(0.0, False, 1)
         buf.finalize()
