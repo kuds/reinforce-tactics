@@ -122,7 +122,7 @@ def record_evaluation_to_video(
     agent_player = getattr(_inner, "agent_player", 1)
     opponent_player = 3 - agent_player
 
-    def _snapshot(action_type=None, reward=None, reward_breakdown=None, valid_action=None):
+    def _snapshot(action_type=None, unit_type=None, reward=None, reward_breakdown=None, valid_action=None):
         gs = _get_gs()
         agent_units = [u for u in gs.units if u.player == agent_player]
         opp_units = [u for u in gs.units if u.player == opponent_player]
@@ -130,6 +130,7 @@ def record_evaluation_to_video(
             "turn": gs.turn_number,
             "current_player": gs.current_player,
             "action_type": action_type,
+            "unit_type": unit_type,
             "reward": reward,
             "reward_breakdown": dict(reward_breakdown) if reward_breakdown else None,
             "valid_action": valid_action,
@@ -177,6 +178,7 @@ def record_evaluation_to_video(
         step_stats.append(
             _snapshot(
                 action_type=info.get("action_type"),
+                unit_type=info.get("unit_type"),
                 reward=float(reward),
                 reward_breakdown=info.get("reward_breakdown"),
                 valid_action=info.get("valid_action"),

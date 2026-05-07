@@ -855,6 +855,13 @@ class StrategyGameEnv(gym.Env):
             "turn": self.game_state.turn_number,
             "valid_action": is_valid,
             "action_type": action_dict["action_type"],
+            # Surface unit_type only for create_unit (action_type=0) actions —
+            # so per-game diagnostics can break the create_unit bar down by
+            # which unit was actually spawned (W/M/A/etc.). None for other
+            # actions to keep readers from accidentally treating it as
+            # meaningful (e.g. for moves the action_dict has a unit_type
+            # field describing the moving unit, but that's a different thing).
+            "unit_type": action_dict.get("unit_type") if action_dict["action_type"] == 0 and is_valid else None,
             "reward_breakdown": breakdown,
             "n_legal_actions": int(n_legal_actions),
         }
