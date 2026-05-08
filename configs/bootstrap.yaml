@@ -130,15 +130,33 @@ stages:
     # stochastic exploration occasionally produce a winning trajectory,
     # which restores gradient signal.
     ent_coef: 0.10
-    # Tiny create_unit bonus to break reward symmetry: end_turn nets
-    # -20 (turn_penalty) per turn, building a unit nets +10 (this) - 20
-    # = -10. Strict ordering create_unit > end_turn, so the policy's
-    # value function has at least one direction to climb out of the
-    # constant baseline. This is the *only* override on noop stages --
-    # the env defaults' HQ-capture signal (5000 + 300/turn seize) is
-    # exactly what we want to teach here, untouched.
+    # Reward shape on noop stages is tuned to break the structural bias
+    # toward `end_turn` we observed in earlier runs (PPO drifted
+    # 19% -> 26% end_turn over 50k steps even with create_unit=+30 and
+    # ent_coef=0.10). Two changes:
+    #
+    # 1. `turn_penalty: 0`. NoopBot puts no time pressure on the agent --
+    #    a global -20/turn penalty just creates a constant negative
+    #    baseline that makes "end the turn faster" structurally
+    #    attractive even though it doesn't actually shorten the
+    #    fixed-length episode. Removing it gives `end_turn` a neutral
+    #    value (0) instead of a positive one (escaping more penalty),
+    #    which lets the positive signals below dominate.
+    #
+    # 2. `create_unit: 10`, `move: 0.5`. Tiny per-action positives that
+    #    establish a strict ordering: seize_progress (300) > capture
+    #    (1000) > create_unit (10) > move (0.5) > end_turn (0). Any
+    #    non-end_turn action is strictly preferred, so the policy has
+    #    to *learn* that end_turn is right in some states (no legal
+    #    units to act with), not default to it.
+    #
+    # The HQ-capture defaults (5000 + 300/turn seize + 1000 capture) are
+    # left intact -- HQ capture is the only winning path on noop and
+    # we want maximum signal there.
     reward_config:
+      turn_penalty: 0.0
       create_unit: 10.0
+      move: 0.5
 
   - name: starter_random
     map_file: maps/1v1/starter.csv
@@ -173,14 +191,17 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    # Same dead-policy guards as `starter_noop`: NoopBot is deterministic,
-    # so without high entropy + a non-zero per-action reward the policy
-    # can stall on whatever its argmax was at stage entry. ent_coef=0.10
-    # matches starter_noop's exploration budget; create_unit=+10 keeps
-    # build > end_turn at every step.
+    # Same dead-policy guards as `starter_noop`: ent_coef=0.10 to keep
+    # exploration alive, plus the same reward overrides
+    # (turn_penalty: 0, create_unit: 10, move: 0.5) that establish a
+    # strict positive ordering over non-`end_turn` actions and remove
+    # the structural bias toward `end_turn`. See starter_noop's comment
+    # block for the full rationale.
     ent_coef: 0.10
     reward_config:
+      turn_penalty: 0.0
       create_unit: 10.0
+      move: 0.5
 
   - name: beginner_balanced_random
     map_file: maps/1v1/beginner.csv
