@@ -9,21 +9,22 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from reinforcetactics.rl.bootstrap import (
-    BootstrapConfig,
-    BootstrapEnvDefaults,
-    CurriculumStage,
-    CurriculumStalled,
-    config_from_dict,
-    load_bootstrap_config,
-    run_curriculum,
-)
+from reinforcetactics.rl.bootstrap import CurriculumStalled, run_curriculum
 from reinforcetactics.rl.callbacks import (
     EntropyScheduleCallback,
     PeriodicEvalCallback,
     PromotionCallback,
 )
-from reinforcetactics.rl.config import PPOConfig
+from reinforcetactics.rl.config import (
+    CurriculumConfig,
+    CurriculumStage,
+    EnvConfig,
+    EvalConfig,
+    PPOConfig,
+    TrainingConfig,
+    config_from_dict,
+    load_config,
+)
 
 # ---------------------------------------------------------------------------
 # PromotionCallback unit tests (no env / no real model needed)
@@ -132,15 +133,15 @@ class TestPromotionCallback:
 
 
 # ---------------------------------------------------------------------------
-# BootstrapConfig loading and validation
+# Curriculum loading and validation via TrainingConfig
 # ---------------------------------------------------------------------------
 
 
 VALID_DICT: Dict[str, Any] = {
+    "algorithm": "maskable_ppo",
     "seed": 7,
-    "n_envs": 2,
-    "eval_freq": 1000,
     "env": {
+        "n_envs": 2,
         "max_steps": 100,
         "max_turns": 20,
         "enabled_units": ["W"],
@@ -150,47 +151,54 @@ VALID_DICT: Dict[str, Any] = {
         "learning_rate": 3e-4,
         "n_steps": 256,
     },
-    "stages": [
-        {
-            "name": "stage_a",
-            "map_file": "maps/1v1/starter.csv",
-            "opponent": "random",
-            "promotion_win_rate": 0.9,
-            "patience": 2,
-            "max_timesteps": 5000,
-            "n_eval_episodes": 5,
-        },
-        {
-            "name": "stage_b",
-            "map_file": "maps/1v1/starter.csv",
-            "opponent": "simple",
-            "promotion_win_rate": 0.8,
-            "patience": 1,
-            "max_timesteps": 5000,
-            "n_eval_episodes": 5,
-        },
-    ],
+    "eval": {
+        "eval_freq": 1000,
+    },
+    "curriculum": {
+        "stages": [
+            {
+                "name": "stage_a",
+                "map_file": "maps/1v1/starter.csv",
+                "opponent": "random",
+                "promotion_win_rate": 0.9,
+                "patience": 2,
+                "max_timesteps": 5000,
+                "n_eval_episodes": 5,
+            },
+            {
+                "name": "stage_b",
+                "map_file": "maps/1v1/starter.csv",
+                "opponent": "simple",
+                "promotion_win_rate": 0.8,
+                "patience": 1,
+                "max_timesteps": 5000,
+                "n_eval_episodes": 5,
+            },
+        ],
+    },
 }
 
 
-class TestBootstrapConfig:
+class TestCurriculumLoading:
     def test_round_trips_through_dict(self):
         cfg = config_from_dict(VALID_DICT)
         assert cfg.seed == 7
-        assert cfg.n_envs == 2
-        assert cfg.eval_freq == 1000
-        assert len(cfg.stages) == 2
-        assert cfg.stages[0].name == "stage_a"
-        assert cfg.stages[1].opponent == "simple"
+        assert cfg.env.n_envs == 2
+        assert cfg.eval.eval_freq == 1000
+        assert len(cfg.curriculum.stages) == 2
+        assert cfg.curriculum.stages[0].name == "stage_a"
+        assert cfg.curriculum.stages[1].opponent == "simple"
         assert isinstance(cfg.ppo, PPOConfig)
-        assert isinstance(cfg.env, BootstrapEnvDefaults)
+        assert isinstance(cfg.env, EnvConfig)
+        assert isinstance(cfg.curriculum, CurriculumConfig)
+        assert isinstance(cfg.curriculum.stages[0], CurriculumStage)
 
     def test_round_trips_through_yaml_file(self, tmp_path):
         path = tmp_path / "bootstrap.yaml"
         path.write_text(yaml.safe_dump(VALID_DICT), encoding="utf-8")
-        cfg = load_bootstrap_config(path)
-        assert len(cfg.stages) == 2
-        assert cfg.stages[0].promotion_win_rate == pytest.approx(0.9)
+        cfg = load_config(path)
+        assert len(cfg.curriculum.stages) == 2
+        assert cfg.curriculum.stages[0].promotion_win_rate == pytest.approx(0.9)
 
     def test_rejects_unknown_top_level_key(self):
         bad = dict(VALID_DICT)
@@ -199,57 +207,51 @@ class TestBootstrapConfig:
             config_from_dict(bad)
 
     def test_rejects_unknown_stage_field(self):
-        bad = {**VALID_DICT, "stages": [{**VALID_DICT["stages"][0], "bogus": 1}]}
+        bad = {
+            **VALID_DICT,
+            "curriculum": {
+                "stages": [{**VALID_DICT["curriculum"]["stages"][0], "bogus": 1}],
+            },
+        }
         with pytest.raises(ValueError, match="Unknown keys for CurriculumStage"):
             config_from_dict(bad)
 
-    def test_rejects_empty_stages(self):
-        bad = {**VALID_DICT, "stages": []}
-        with pytest.raises(ValueError, match="stages must be non-empty"):
-            config_from_dict(bad)
+    def test_empty_stages_loads_but_runner_rejects(self, tmp_path):
+        # An empty curriculum is a valid TrainingConfig (other algorithms
+        # don't use it); it's run_curriculum that requires a non-empty list.
+        cfg = config_from_dict({**VALID_DICT, "curriculum": {"stages": []}})
+        assert cfg.curriculum.stages == []
+        with pytest.raises(ValueError, match="cfg.curriculum.stages is empty"):
+            run_curriculum(cfg, output_dir=tmp_path)
 
     def test_rejects_duplicate_stage_names(self):
-        bad = {
-            **VALID_DICT,
-            "stages": [VALID_DICT["stages"][0], VALID_DICT["stages"][0]],
-        }
+        stage = VALID_DICT["curriculum"]["stages"][0]
+        bad = {**VALID_DICT, "curriculum": {"stages": [stage, stage]}}
         with pytest.raises(ValueError, match="duplicate stage name"):
             config_from_dict(bad)
 
     def test_rejects_unknown_opponent(self):
-        bad = {
-            **VALID_DICT,
-            "stages": [{**VALID_DICT["stages"][0], "opponent": "godlike"}],
-        }
+        stage = {**VALID_DICT["curriculum"]["stages"][0], "opponent": "godlike"}
+        bad = {**VALID_DICT, "curriculum": {"stages": [stage]}}
         with pytest.raises(ValueError, match="unknown opponent"):
             config_from_dict(bad)
 
     def test_accepts_balanced_random_opponent(self):
-        # BalancedRandomBot is a curriculum stepping stone between `noop`
-        # and `random`; ensure validation accepts the opponent string.
-        cfg = config_from_dict(
-            {
-                **VALID_DICT,
-                "stages": [{**VALID_DICT["stages"][0], "opponent": "balanced_random"}],
-            }
-        )
-        assert cfg.stages[0].opponent == "balanced_random"
+        stage = {**VALID_DICT["curriculum"]["stages"][0], "opponent": "balanced_random"}
+        cfg = config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
+        assert cfg.curriculum.stages[0].opponent == "balanced_random"
 
     def test_shipped_config_loads(self):
-        # The repo's configs/bootstrap.yaml should always be valid.
         repo_root = Path(__file__).resolve().parents[1]
-        cfg = load_bootstrap_config(repo_root / "configs" / "bootstrap.yaml")
-        names = [s.name for s in cfg.stages]
+        cfg = load_config(repo_root / "configs" / "bootstrap.yaml")
+        names = [s.name for s in cfg.curriculum.stages]
         # Earlier iterations included `noop` stages on each map as a
         # stage-0 sanity check; they actively prevented PPO from
         # learning (no opponent variance -> constant returns ->
-        # advantages collapse to ~0 -> policy never updates). Running
-        # logs showed 250k+ steps with std=0.0 every eval. Reverting
+        # advantages collapse to ~0 -> policy never updates). Reverting
         # to the original 6-stage layout (now 7, with the
         # `beginner_balanced_random` bridge for the map shift) lets
         # opponent randomness drive exploration the way PPO needs.
-        # Regression: catch any future re-introduction of noop stages
-        # without acknowledgement.
         assert names == [
             "starter_random",
             "starter_simple",
@@ -263,15 +265,12 @@ class TestBootstrapConfig:
         assert "starter_noop" not in names, "noop stages broke PPO learning in earlier runs -- removing them was deliberate"
         assert "beginner_noop" not in names
         # Regression: PyYAML 1.1 parses ``3e-4`` (no decimal) as a string,
-        # which then fails deep inside SB3's lr-schedule check. Every
-        # numeric PPO field must round-trip as a number.
+        # which then fails deep inside SB3's lr-schedule check.
         assert isinstance(cfg.ppo.learning_rate, (int, float))
         assert isinstance(cfg.ppo.ent_coef, (int, float))
         assert isinstance(cfg.ppo.clip_range, (int, float))
-        by_name = {s.name: s for s in cfg.stages}
-        # Starter stages inherit env defaults (no per-stage overrides --
-        # the original starter map config worked with the global env
-        # defaults; we don't need to special-case it).
+        by_name = {s.name: s for s in cfg.curriculum.stages}
+        # Starter stages inherit env defaults (no per-stage overrides).
         assert by_name["starter_random"].max_turns is None
         assert by_name["starter_random"].ent_coef is None
         # Beginner stages bump max_turns / max_steps for the bigger map.
@@ -279,17 +278,9 @@ class TestBootstrapConfig:
         assert first_beginner.max_turns is not None
         assert first_beginner.max_turns >= 30
         # Entropy bump on the FIRST beginner stage (map-shift exploration
-        # shock). Cooled on later stages. The shipped config now drives
-        # the random-opponent stages with a {start, end, schedule}
-        # mapping so the coefficient anneals down as the policy
-        # approaches the threshold; resolving against the PPO default
-        # gives the *initial* value (= schedule['start']) which still
-        # has to clear the global default to count as a bump.
+        # shock). Cooled on later stages.
         assert first_beginner.ent_coef is not None
         assert first_beginner.resolve_ent_coef(cfg.ppo) > cfg.ppo.ent_coef
-        # And: the schedule must actually anneal (start > end), otherwise
-        # we paid for the schedule machinery without getting the
-        # commitment-phase cooling that justified introducing it.
         sched = first_beginner.resolve_ent_coef_schedule()
         assert sched is not None, "first beginner stage should drive an entropy schedule"
         assert sched["start"] > sched["end"]
@@ -302,8 +293,7 @@ class TestBootstrapConfig:
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
-        # both pi and vf to at least [128, 128]. Catches accidental
-        # removal of the policy_kwargs block.
+        # both pi and vf to at least [128, 128].
         pk = cfg.ppo.policy_kwargs or {}
         net_arch = pk.get("net_arch")
         assert net_arch is not None, "expected ppo.policy_kwargs.net_arch in shipped config"
@@ -312,17 +302,17 @@ class TestBootstrapConfig:
         assert min(net_arch["vf"]) >= 128
 
     def test_reward_config_override_merges_with_defaults(self):
-        # Stage override should *merge* over BootstrapEnvDefaults.reward_config,
-        # not replace it. So a stage that only overrides one key still gets
+        # Stage override should *merge* over env.reward_config, not
+        # replace it. So a stage that only overrides one key still gets
         # the rest of the env defaults.
-        defaults = BootstrapEnvDefaults(reward_config={"win": 5000.0, "loss": -5000.0, "draw": -5000.0})
+        env = EnvConfig(reward_config={"win": 5000.0, "loss": -5000.0, "draw": -5000.0})
         stage = CurriculumStage(
             name="s",
             map_file="m.csv",
             opponent="random",
             reward_config={"win": 3000.0, "win_by_elimination": 3000.0},
         )
-        resolved = stage.resolve_reward_config(defaults)
+        resolved = stage.resolve_reward_config(env)
         assert resolved == {
             "win": 3000.0,  # overridden
             "loss": -5000.0,  # inherited
@@ -331,14 +321,14 @@ class TestBootstrapConfig:
         }
 
     def test_reward_config_resolves_to_defaults_when_unset(self):
-        defaults = BootstrapEnvDefaults(reward_config={"win": 5000.0, "loss": -5000.0})
+        env = EnvConfig(reward_config={"win": 5000.0, "loss": -5000.0})
         stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
-        assert stage.resolve_reward_config(defaults) == {"win": 5000.0, "loss": -5000.0}
+        assert stage.resolve_reward_config(env) == {"win": 5000.0, "loss": -5000.0}
 
     def test_reward_config_returns_none_when_nothing_specified(self):
-        defaults = BootstrapEnvDefaults(reward_config=None)
+        env = EnvConfig(reward_config=None)
         stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
-        assert stage.resolve_reward_config(defaults) is None
+        assert stage.resolve_reward_config(env) is None
 
     def test_rejects_non_mapping_reward_config(self):
         common = dict(name="s", map_file="m.csv", opponent="random")
@@ -348,7 +338,7 @@ class TestBootstrapConfig:
 
 class TestCurriculumStageResolution:
     def test_resolves_to_defaults_when_unset(self):
-        env = BootstrapEnvDefaults(max_steps=400, max_turns=20)
+        env = EnvConfig(max_steps=400, max_turns=20)
         ppo = PPOConfig(ent_coef=0.05)
         stage = CurriculumStage(name="s", map_file="m.csv", opponent="random")
         assert stage.resolve_max_steps(env) == 400
@@ -356,7 +346,7 @@ class TestCurriculumStageResolution:
         assert stage.resolve_ent_coef(ppo) == pytest.approx(0.05)
 
     def test_resolves_to_override_when_set(self):
-        env = BootstrapEnvDefaults(max_steps=400, max_turns=20)
+        env = EnvConfig(max_steps=400, max_turns=20)
         ppo = PPOConfig(ent_coef=0.05)
         stage = CurriculumStage(
             name="s",
@@ -546,14 +536,14 @@ class _FakeModel:
         Path(path).write_text("fake-checkpoint", encoding="utf-8")
 
 
-def _make_cfg(stages: List[CurriculumStage]) -> BootstrapConfig:
-    cfg = BootstrapConfig(
-        stages=stages,
-        ppo=PPOConfig(),
-        env=BootstrapEnvDefaults(enabled_units=["W"]),
-        eval_freq=1,
-        n_envs=1,
+def _make_cfg(stages: List[CurriculumStage]) -> TrainingConfig:
+    cfg = TrainingConfig(
+        algorithm="maskable_ppo",
         seed=0,
+        env=EnvConfig(n_envs=1, enabled_units=["W"]),
+        ppo=PPOConfig(),
+        eval=EvalConfig(eval_freq=1),
+        curriculum=CurriculumConfig(stages=stages),
     )
     cfg.validate()
     return cfg
@@ -580,7 +570,7 @@ def _setup_run(stages, win_rate_program, tmp_path):
         nonlocal fake_model
         fake_model = _FakeModel(
             win_rate_program=win_rate_program,
-            _stage_names=[s.name for s in cfg_arg.stages],
+            _stage_names=[s.name for s in cfg_arg.curriculum.stages],
         )
         return fake_model
 
@@ -726,10 +716,7 @@ class TestRunCurriculum:
 
         # The exception carries a partial result so notebook
         # diagnostics / replay-video helpers can run after a stall
-        # instead of discarding everything. ``history`` should
-        # contain one entry (the stalled stage 'a'), and the saved
-        # ``final_model.zip`` should exist on disk so callers can
-        # ``MaskablePPO.load(...)`` it for replay generation.
+        # instead of discarding everything.
         partial = excinfo.value.partial_result()
         assert partial["stalled"] is True
         assert partial["stalled_stage"] == "a"

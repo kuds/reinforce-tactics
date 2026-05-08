@@ -13,31 +13,30 @@ the runner raises :class:`CurriculumStalled`. Bumping the budget alone
 usually masks a real issue (reward shaping, hyperparams), so failing
 loud is the default.
 
+Configuration lives in :class:`reinforcetactics.rl.config.TrainingConfig`:
+``cfg.curriculum.stages`` defines the curriculum, ``cfg.env`` / ``cfg.ppo``
+are shared across stages, and each stage may override ``max_steps``,
+``max_turns``, ``ent_coef``, ``reward_config``, or ``opponent_kwargs``
+on a per-stage basis. ``cfg.eval.eval_freq`` and ``cfg.env.n_envs``
+drive eval cadence and parallelism respectively.
+
 Usage:
 
-    from reinforcetactics.rl.bootstrap import (
-        load_bootstrap_config,
-        run_curriculum,
-    )
+    from reinforcetactics.rl.bootstrap import run_curriculum
+    from reinforcetactics.rl.config import load_config
 
-    cfg = load_bootstrap_config("configs/bootstrap.yaml")
+    cfg = load_config("configs/bootstrap.yaml")
     result = run_curriculum(cfg, output_dir="benchmarks/bootstrap")
     # result["final_model_path"] -> ready for self-play warm start
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
-try:
-    import yaml  # type: ignore
-except ImportError:  # pragma: no cover
-    yaml = None
-
-from reinforcetactics.rl.config import PPOConfig
+from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
 
 ConfigPath = Union[str, Path]
 
@@ -107,281 +106,6 @@ class CurriculumStalled(RuntimeError):
         }
 
 
-@dataclass
-class CurriculumStage:
-    """One curriculum step: a (map, opponent) pair with a promotion criterion.
-
-    The ``max_steps``, ``max_turns``, ``ent_coef``, and ``reward_config``
-    fields are optional overrides; when ``None`` the runner falls back to
-    ``BootstrapEnvDefaults`` / ``PPOConfig``. Typical use cases:
-
-    - Bump ``max_turns`` and ``max_steps`` on a larger map (units take more
-      turns to traverse).
-    - Raise ``ent_coef`` on the first stage of a new map to crack the
-      previous stage's policy out of a deterministic groove.
-    - Override ``reward_config`` keys (merged into the env defaults) when a
-      new map's geometry changes which win condition is achievable -- e.g.
-      a sprawling map where HQ-capture is impractical and elimination is
-      the natural endpoint, so you flip ``win_by_hq_capture`` /
-      ``win_by_elimination`` weights for that stage only.
-    """
-
-    name: str
-    map_file: str
-    opponent: str
-    promotion_win_rate: float = 0.9
-    patience: int = 2
-    max_timesteps: int = 1_000_000
-    n_eval_episodes: int = 30
-    # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
-    max_steps: Optional[int] = None
-    max_turns: Optional[int] = None
-    # Either a constant float (held throughout the stage) or a mapping
-    # ``{start, end, schedule}`` describing a per-stage anneal. Mapping
-    # form drives :class:`EntropyScheduleCallback` so exploration can be
-    # cooled as the policy approaches its promotion threshold; sustained
-    # high entropy was producing ±15% WR oscillation in adjacent evals
-    # on the random-opponent stages and preventing convergence past
-    # ~60% WR even though the threshold was 75%.
-    ent_coef: Optional[Union[float, Dict[str, Any]]] = None
-    # Reward-config override is *merged* over the env default (not replaced)
-    # so per-stage entries only need to spell out the keys that change.
-    reward_config: Optional[Dict[str, float]] = None
-    # Extra kwargs forwarded to the opponent constructor (e.g.
-    # ``{max_actions: 10}`` for ``RandomBot``). None / empty = use bot defaults.
-    opponent_kwargs: Optional[Dict[str, Any]] = None
-
-    def validate(self) -> None:
-        if not self.name:
-            raise ValueError("stage.name must be non-empty")
-        if not self.map_file:
-            raise ValueError(f"stage '{self.name}': map_file must be set")
-        if self.opponent not in (
-            "random",
-            "balanced_random",
-            "simple",
-            "bot",
-            "medium",
-            "advanced",
-            "noop",
-        ):
-            raise ValueError(
-                f"stage '{self.name}': unknown opponent '{self.opponent}'. "
-                "Expected one of: random, balanced_random, simple, bot, medium, advanced, noop"
-            )
-        if not 0.0 <= self.promotion_win_rate <= 1.0:
-            raise ValueError(f"stage '{self.name}': promotion_win_rate must be in [0, 1]")
-        if self.patience < 1:
-            raise ValueError(f"stage '{self.name}': patience must be >= 1")
-        if self.max_timesteps <= 0:
-            raise ValueError(f"stage '{self.name}': max_timesteps must be > 0")
-        if self.n_eval_episodes <= 0:
-            raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
-        if self.max_steps is not None and self.max_steps <= 0:
-            raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
-        if self.max_turns is not None and self.max_turns <= 0:
-            raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
-        if self.ent_coef is not None:
-            if isinstance(self.ent_coef, Mapping):
-                unknown = set(self.ent_coef.keys()) - {"start", "end", "schedule"}
-                if unknown:
-                    raise ValueError(
-                        f"stage '{self.name}': ent_coef schedule has unknown keys {sorted(unknown)}. "
-                        "Valid keys: start, end, schedule"
-                    )
-                for required in ("start", "end"):
-                    if required not in self.ent_coef:
-                        raise ValueError(f"stage '{self.name}': ent_coef schedule missing required key '{required}'")
-                    val = self.ent_coef[required]
-                    if not isinstance(val, (int, float)) or val < 0:
-                        raise ValueError(
-                            f"stage '{self.name}': ent_coef.{required} must be a non-negative number, got {val!r}"
-                        )
-                schedule_kind = self.ent_coef.get("schedule", "linear")
-                if schedule_kind not in ("linear", "cosine"):
-                    raise ValueError(
-                        f"stage '{self.name}': ent_coef.schedule must be 'linear' or 'cosine', got {schedule_kind!r}"
-                    )
-            elif isinstance(self.ent_coef, (int, float)):
-                if self.ent_coef < 0:
-                    raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
-            else:
-                raise TypeError(
-                    f"stage '{self.name}': ent_coef must be a number or a "
-                    f"{{start, end, schedule}} mapping, got {type(self.ent_coef).__name__}"
-                )
-        if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
-            raise TypeError(
-                f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
-            )
-        if self.opponent_kwargs is not None and not isinstance(self.opponent_kwargs, Mapping):
-            raise TypeError(
-                f"stage '{self.name}': opponent_kwargs override must be a mapping, got {type(self.opponent_kwargs).__name__}"
-            )
-
-    def resolve_max_steps(self, defaults: "BootstrapEnvDefaults") -> int:
-        return self.max_steps if self.max_steps is not None else defaults.max_steps
-
-    def resolve_max_turns(self, defaults: "BootstrapEnvDefaults") -> Optional[int]:
-        return self.max_turns if self.max_turns is not None else defaults.max_turns
-
-    def resolve_ent_coef(self, ppo: PPOConfig) -> float:
-        """Return the *initial* entropy coefficient for the stage.
-
-        For a constant override this is the value itself; for a schedule
-        mapping it's ``schedule['start']`` so ``model.ent_coef`` is
-        seeded correctly before the schedule callback takes over.
-        """
-        if self.ent_coef is None:
-            return ppo.ent_coef
-        if isinstance(self.ent_coef, Mapping):
-            return float(self.ent_coef["start"])
-        return float(self.ent_coef)
-
-    def resolve_ent_coef_schedule(self) -> Optional[Dict[str, Any]]:
-        """Return ``{start, end, schedule}`` if ``ent_coef`` is a mapping, else ``None``.
-
-        ``None`` means a constant coefficient (no callback installed); a
-        dict means the runner should attach :class:`EntropyScheduleCallback`
-        for this stage with ``total_timesteps=stage.max_timesteps``.
-        """
-        if isinstance(self.ent_coef, Mapping):
-            return {
-                "start": float(self.ent_coef["start"]),
-                "end": float(self.ent_coef["end"]),
-                "schedule": str(self.ent_coef.get("schedule", "linear")),
-            }
-        return None
-
-    def resolve_reward_config(self, defaults: "BootstrapEnvDefaults") -> Optional[Dict[str, float]]:
-        """Return the reward config to use for this stage.
-
-        Per-stage overrides are merged on top of ``defaults.reward_config``,
-        so a stage only needs to spell out the keys it changes. Returns
-        ``None`` when neither side has anything (env will fall back to its
-        own built-in defaults).
-        """
-        base = dict(defaults.reward_config) if defaults.reward_config else {}
-        if self.reward_config:
-            base.update(self.reward_config)
-        return base if base else None
-
-
-@dataclass
-class BootstrapEnvDefaults:
-    """Env settings shared across all stages (map_file/opponent come from stages)."""
-
-    max_steps: int = 400
-    max_turns: Optional[int] = 20
-    enabled_units: Optional[List[str]] = None
-    action_space_type: str = "flat_discrete"
-    max_flat_actions: int = 512
-    reward_config: Optional[Dict[str, float]] = None
-
-
-@dataclass
-class BootstrapConfig:
-    """Full bootstrap-curriculum configuration."""
-
-    stages: List[CurriculumStage]
-    ppo: PPOConfig = field(default_factory=PPOConfig)
-    env: BootstrapEnvDefaults = field(default_factory=BootstrapEnvDefaults)
-    eval_freq: int = 50_000
-    n_envs: int = 4
-    seed: int = 0
-
-    def validate(self) -> None:
-        if not self.stages:
-            raise ValueError("BootstrapConfig.stages must be non-empty")
-        seen = set()
-        for stage in self.stages:
-            stage.validate()
-            if stage.name in seen:
-                raise ValueError(f"duplicate stage name: '{stage.name}'")
-            seen.add(stage.name)
-        if self.eval_freq <= 0:
-            raise ValueError("eval_freq must be > 0")
-        if self.n_envs <= 0:
-            raise ValueError("n_envs must be > 0")
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "seed": self.seed,
-            "n_envs": self.n_envs,
-            "eval_freq": self.eval_freq,
-            "env": asdict(self.env),
-            "ppo": asdict(self.ppo),
-            "stages": [asdict(s) for s in self.stages],
-        }
-
-
-def _build_dataclass_from_mapping(cls, raw: Mapping[str, Any]):
-    valid = {f.name for f in fields(cls)}
-    unknown = set(raw.keys()) - valid
-    if unknown:
-        raise ValueError(f"Unknown keys for {cls.__name__}: {sorted(unknown)}. Valid keys: {sorted(valid)}")
-    return cls(**{k: v for k, v in raw.items() if k in valid})
-
-
-def config_from_dict(data: Mapping[str, Any]) -> BootstrapConfig:
-    """Construct a :class:`BootstrapConfig` from a plain dict."""
-    if not isinstance(data, Mapping):
-        raise TypeError(f"Bootstrap config must be a mapping, got {type(data).__name__}")
-
-    valid_keys = {"seed", "n_envs", "eval_freq", "env", "ppo", "stages"}
-    unknown = set(data.keys()) - valid_keys
-    if unknown:
-        raise ValueError(f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}")
-
-    raw_stages = data.get("stages") or []
-    if not isinstance(raw_stages, list):
-        raise TypeError(f"'stages' must be a list, got {type(raw_stages).__name__}")
-    stages = [_build_dataclass_from_mapping(CurriculumStage, s) for s in raw_stages]
-
-    env_raw = data.get("env") or {}
-    if not isinstance(env_raw, Mapping):
-        raise TypeError(f"'env' must be a mapping, got {type(env_raw).__name__}")
-    env = _build_dataclass_from_mapping(BootstrapEnvDefaults, env_raw)
-
-    ppo_raw = data.get("ppo") or {}
-    if not isinstance(ppo_raw, Mapping):
-        raise TypeError(f"'ppo' must be a mapping, got {type(ppo_raw).__name__}")
-    ppo = _build_dataclass_from_mapping(PPOConfig, ppo_raw)
-
-    cfg = BootstrapConfig(
-        stages=stages,
-        ppo=ppo,
-        env=env,
-        eval_freq=int(data.get("eval_freq", 50_000)),
-        n_envs=int(data.get("n_envs", 4)),
-        seed=int(data.get("seed", 0)),
-    )
-    cfg.validate()
-    return cfg
-
-
-def load_bootstrap_config(path: ConfigPath) -> BootstrapConfig:
-    """Load and validate a bootstrap config from YAML or JSON."""
-    p = Path(path)
-    if not p.is_file():
-        raise FileNotFoundError(f"Bootstrap config not found: {p}")
-    text = p.read_text(encoding="utf-8")
-    suffix = p.suffix.lower()
-    if suffix in (".yaml", ".yml"):
-        if yaml is None:
-            raise ImportError(
-                f"Cannot load '{p}': PyYAML is not installed. Install with `pip install PyYAML` or use a .json config."
-            )
-        data = yaml.safe_load(text) or {}
-    elif suffix == ".json":
-        data = json.loads(text) if text.strip() else {}
-    else:
-        raise ValueError(f"Unsupported config extension '{suffix}' for {p}. Use .yaml, .yml, or .json.")
-    if not isinstance(data, Mapping):
-        raise TypeError(f"Config file {p} must contain a mapping at the top level.")
-    return config_from_dict(dict(data))
-
-
 # ---------------------------------------------------------------------------
 # Default builders. Tests / advanced callers can pass replacements through
 # `run_curriculum(..., train_env_factory=..., model_factory=...)` to avoid
@@ -389,11 +113,11 @@ def load_bootstrap_config(path: ConfigPath) -> BootstrapConfig:
 # ---------------------------------------------------------------------------
 
 
-def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
+def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
     from reinforcetactics.rl.masking import make_maskable_vec_env
 
     return make_maskable_vec_env(
-        n_envs=cfg.n_envs,
+        n_envs=cfg.env.n_envs,
         map_file=stage.map_file,
         opponent=stage.opponent,
         max_steps=stage.resolve_max_steps(cfg.env),
@@ -408,7 +132,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
     )
 
 
-def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
+def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
     from reinforcetactics.rl.masking import make_maskable_env
 
     return make_maskable_env(
@@ -425,7 +149,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
     )
 
 
-def _default_model_factory(vec_env, cfg: BootstrapConfig, output_dir: Path):
+def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
     from sb3_contrib import MaskablePPO
 
     return MaskablePPO(
@@ -444,7 +168,7 @@ def _default_model_factory(vec_env, cfg: BootstrapConfig, output_dir: Path):
 def _write_stage_config(
     *,
     stage: CurriculumStage,
-    cfg: BootstrapConfig,
+    cfg: TrainingConfig,
     stage_dir: Path,
     output_dir: Path,
     promoted: bool,
@@ -488,8 +212,8 @@ def _write_stage_config(
             "patience": stage.patience,
             "max_timesteps": stage.max_timesteps,
             "n_eval_episodes": stage.n_eval_episodes,
-            "n_envs": cfg.n_envs,
-            "eval_freq": cfg.eval_freq,
+            "n_envs": cfg.env.n_envs,
+            "eval_freq": cfg.eval.eval_freq,
             "promoted": promoted,
             "best_win_rate": best_win_rate,
             "output_dir": str(output_dir),
@@ -499,24 +223,25 @@ def _write_stage_config(
 
 
 def run_curriculum(
-    cfg: BootstrapConfig,
+    cfg: TrainingConfig,
     output_dir: ConfigPath,
     *,
-    train_env_factory: Optional[Callable[[CurriculumStage, BootstrapConfig], Any]] = None,
-    eval_env_factory: Optional[Callable[[CurriculumStage, BootstrapConfig], Any]] = None,
+    train_env_factory: Optional[Callable[[CurriculumStage, TrainingConfig], Any]] = None,
+    eval_env_factory: Optional[Callable[[CurriculumStage, TrainingConfig], Any]] = None,
     model_factory: Optional[Callable[..., Any]] = None,
     progress_bar: bool = False,
 ) -> Dict[str, Any]:
-    """Train through every stage in ``cfg.stages``, advancing on promotion.
+    """Train through every stage in ``cfg.curriculum.stages``.
 
     Args:
-        cfg: Validated :class:`BootstrapConfig`.
+        cfg: Validated :class:`TrainingConfig` with a non-empty
+            ``cfg.curriculum.stages``.
         output_dir: Root directory for stage subfolders, tensorboard logs,
             and the final checkpoint.
         train_env_factory: ``(stage, cfg) -> vec_env``. Defaults to
-            ``make_maskable_vec_env`` with the cfg's env defaults.
+            ``make_maskable_vec_env`` with the resolved per-stage env.
         eval_env_factory: ``(stage, cfg) -> env``. Defaults to
-            ``make_maskable_env``.
+            ``make_maskable_env`` with the resolved per-stage env.
         model_factory: ``(vec_env, cfg, output_dir) -> model``. Called once
             for the first stage; later stages reuse the model via
             ``model.set_env(...)``. Defaults to MaskablePPO.
@@ -538,6 +263,9 @@ def run_curriculum(
     )
 
     cfg.validate()
+    if not cfg.curriculum.stages:
+        raise ValueError("cfg.curriculum.stages is empty; nothing to run")
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -549,7 +277,7 @@ def run_curriculum(
     history: List[Dict[str, Any]] = []
     model = None
 
-    for stage in cfg.stages:
+    for stage in cfg.curriculum.stages:
         stage_dir = output_dir / stage.name
         stage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -573,7 +301,7 @@ def run_curriculum(
 
         eval_cb = PeriodicEvalCallback(
             eval_env=eval_env,
-            eval_freq=cfg.eval_freq,
+            eval_freq=cfg.eval.eval_freq,
             n_eval_episodes=stage.n_eval_episodes,
             save_dir=stage_dir,
         )
