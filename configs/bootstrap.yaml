@@ -67,102 +67,47 @@ ppo:
       vf: [256, 256]
 
 # Curriculum:
-#   starter map: noop -> random -> simple -> medium
-#   beginner map: noop -> balanced_random -> random -> simple -> medium
+#   starter map:  random -> simple -> medium
+#   beginner map: balanced_random -> random -> simple -> medium
 #
-# Both maps start with NoopBot (a stage-0 sanity check: with no enemy
-# action at all, even a weak policy should be able to walk a unit onto
-# the enemy HQ and seize it). This catches "agent can't navigate at all"
-# before adding opponent dynamics.
+# Earlier iterations included `noop` stages on each map as a stage-0
+# sanity check. They didn't work as intended: a NoopBot opponent
+# produces zero state variance, so PPO rollouts produce constant
+# returns, the value function fits a constant baseline, advantages
+# collapse to ~0, and the policy stops updating. The "easier"
+# environment is actually the hardest for PPO. The original 6-stage
+# curriculum (no noop) converged on starter_random / simple / medium
+# in ~250k steps each because RandomBot's actions inject the variance
+# PPO needs to learn from. We trust opponent randomness for
+# exploration rather than trying to remove it.
 #
 # Opponent intensity on the beginner ramp:
-#   - noop:             opponent takes no actions; pure navigation/seize.
 #   - balanced_random:  one build attempt + one random action per owned
-#                       unit per turn (BalancedRandomBot). Action
-#                       throughput scales with army size, which avoids the
-#                       pathological case of RandomBot(max_actions=1)
-#                       stalling out after losing its only unit.
+#                       unit per turn (BalancedRandomBot). Lighter than
+#                       full `random` and resilient -- action throughput
+#                       scales with the bot's army size, so killing its
+#                       units doesn't stall the game.
 #   - random:           up to 20 random actions per turn (the stress-test
 #                       baseline; the original `random` opponent).
 #
 # Per-stage overrides handle the starter -> beginner transition:
 #   - max_steps / max_turns:  bigger map needs ~3x the turn budget
 #                             (units take longer to traverse).
-#   - ent_coef:               modestly elevated on the first beginner
-#                             stages so the policy can adapt navigation
-#                             to a bigger map without regressing.
-#   - reward_config:          ONLY on beginner stages WITH opponents.
-#                             Beginner-map geometry makes HQ capture much
-#                             harder than elimination once enemy units are
-#                             on the board, so we equalize the two terminal
-#                             rewards (was 5000/1000) and drop
-#                             `seize_progress` so the agent stops being
-#                             paid to start seizes it can't finish in
-#                             contested space.
-#                             NOT applied to `beginner_noop`: that stage
-#                             has no enemy units (NoopBot never builds), so
-#                             HQ capture is the ONLY win path. It inherits
-#                             the env defaults (5000 HQ, 300 seize/turn)
-#                             which are well-tuned for that goal.
+#   - ent_coef:               bumped on the FIRST beginner stage as a
+#                             one-shot exploration shock for the map
+#                             change, then cooled on subsequent stages.
+#   - reward_config:          beginner-map geometry makes HQ capture
+#                             much harder than elimination, so we
+#                             equalize the two terminal rewards
+#                             (was 5000/1000) and drop `seize_progress`
+#                             so the agent stops being paid to start
+#                             seizes it can't finish in contested space.
 #
 # Starter stages use `patience: 1` so we promote at the first hit of the
 # threshold rather than letting the policy keep training on a saturated
-# reward signal -- that's how the previous run produced std=0.0 fully
-# deterministic policies that didn't transfer.
+# reward signal -- earlier runs that promoted at patience=2 produced
+# std=0.0 fully deterministic policies that didn't transfer.
 stages:
-  - name: starter_noop
-    map_file: maps/1v1/starter.csv
-    opponent: noop
-    # NoopBot is a stage-0 sanity check: agent should be able to walk a
-    # unit onto the enemy HQ and seize it even with zero opposition. Tight
-    # patience because if the agent can't beat noop, longer training
-    # won't help -- the issue is policy or reward, not opponent strength.
-    promotion_win_rate: 0.95
-    patience: 1
-    max_timesteps: 500_000
-    n_eval_episodes: 30
-    # Higher entropy on the FIRST stage breaks the "dead policy" trap a
-    # freshly-initialised PPO can fall into against a deterministic
-    # opponent: with no opponent variance, a near-uniform initial policy's
-    # argmax tends to land on `end_turn`, every rollout produces the same
-    # draw reward, the value function flattens, advantages collapse to
-    # ~0, and gradients can't shift the mode. Higher entropy makes
-    # stochastic exploration occasionally produce a winning trajectory,
-    # which restores gradient signal.
-    ent_coef: 0.10
-    # Reward shape on noop stages is tuned to break the structural bias
-    # toward `end_turn` we observed in earlier runs (PPO drifted
-    # 19% -> 26% end_turn over 50k steps even with create_unit=+30 and
-    # ent_coef=0.10). Three changes:
-    #
-    # 1. `turn_penalty: 0`. NoopBot puts no time pressure on the agent --
-    #    a global -20/turn penalty just creates a constant negative
-    #    baseline that makes "end the turn faster" structurally
-    #    attractive even though it doesn't actually shorten the
-    #    fixed-length episode. Removing it gives `end_turn` a neutral
-    #    value (0) instead of a positive one (escaping more penalty),
-    #    which lets the positive signals below dominate.
-    #
-    # 2. `create_unit: 30`, `move: 5`. Per-action positives sized so the
-    #    strict ordering survives gradient noise:
-    #      seize_progress (300) > capture (1000) >> create_unit (30)
-    #        > move (5) > end_turn (0)
-    #    The first attempt used create=10 / move=0.5, which broke the
-    #    "100% end_turn" lock (agent now does 1 build per game) but
-    #    the policy converged at a local minimum where every state after
-    #    the first build still picks `end_turn` -- move=0.5 was too
-    #    small relative to gradient noise to flip the argmax. Boosting
-    #    move to ~17% of create's value gives PPO room to learn that
-    #    moving units around accrues real reward.
-    #
-    # The HQ-capture defaults (5000 + 300/turn seize + 1000 capture) are
-    # left intact -- HQ capture is the only winning path on noop and
-    # we want maximum signal there.
-    reward_config:
-      turn_penalty: 0.0
-      create_unit: 30.0
-      move: 5.0
-
   - name: starter_random
     map_file: maps/1v1/starter.csv
     opponent: random
@@ -187,27 +132,6 @@ stages:
     max_timesteps: 3_000_000
     n_eval_episodes: 30
 
-  - name: beginner_noop
-    map_file: maps/1v1/beginner.csv
-    opponent: noop
-    promotion_win_rate: 0.90
-    patience: 2
-    max_timesteps: 1_000_000
-    n_eval_episodes: 30
-    max_steps: 800
-    max_turns: 60
-    # Same dead-policy guards as `starter_noop`: ent_coef=0.10 to keep
-    # exploration alive, plus the same reward overrides
-    # (turn_penalty: 0, create_unit: 30, move: 5) that establish a
-    # strict positive ordering over non-`end_turn` actions and remove
-    # the structural bias toward `end_turn`. See starter_noop's comment
-    # block for the full rationale.
-    ent_coef: 0.10
-    reward_config:
-      turn_penalty: 0.0
-      create_unit: 30.0
-      move: 5.0
-
   - name: beginner_balanced_random
     map_file: maps/1v1/beginner.csv
     # BalancedRandomBot: one build + one random action per owned unit per
@@ -221,7 +145,10 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    ent_coef: 0.07
+    # First stage on the new map -> entropy bump so the policy can
+    # adapt navigation to the bigger map without immediately
+    # over-committing to starter heuristics that no longer reach the HQ.
+    ent_coef: 0.10
     reward_config:
       win_by_hq_capture: 3000.0
       win_by_elimination: 3000.0
@@ -237,8 +164,8 @@ stages:
     n_eval_episodes: 30
     max_steps: 800
     max_turns: 60
-    # Cooled further -- agent has now seen both noop and random_1.
-    ent_coef: 0.05
+    # Cooled now that the policy has adapted to the bigger map.
+    ent_coef: 0.07
     reward_config:
       win_by_hq_capture: 3000.0
       win_by_elimination: 3000.0
