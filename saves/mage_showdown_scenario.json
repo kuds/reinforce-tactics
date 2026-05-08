@@ -65,6 +65,26 @@
       "original_y": 5
     },
     {
+      "type": "S",
+      "x": 6,
+      "y": 4,
+      "player": 1,
+      "health": 10,
+      "paralyzed_turns": 0,
+      "paralyze_cooldown": 0,
+      "can_move": true,
+      "can_attack": true,
+      "haste_cooldown": 0,
+      "is_hasted": false,
+      "distance_moved": 0,
+      "defence_buff_cooldown": 0,
+      "attack_buff_cooldown": 0,
+      "defence_buff_turns": 0,
+      "attack_buff_turns": 0,
+      "original_x": 6,
+      "original_y": 4
+    },
+    {
       "type": "C",
       "x": 3,
       "y": 4,
@@ -87,7 +107,7 @@
     {
       "type": "W",
       "x": 6,
-      "y": 4,
+      "y": 6,
       "player": 1,
       "health": 15,
       "paralyzed_turns": 0,
@@ -102,7 +122,7 @@
       "defence_buff_turns": 0,
       "attack_buff_turns": 0,
       "original_x": 6,
-      "original_y": 4
+      "original_y": 6
     },
     {
       "type": "K",
@@ -123,6 +143,26 @@
       "attack_buff_turns": 0,
       "original_x": 5,
       "original_y": 5
+    },
+    {
+      "type": "A",
+      "x": 7,
+      "y": 3,
+      "player": 1,
+      "health": 15,
+      "paralyzed_turns": 0,
+      "paralyze_cooldown": 0,
+      "can_move": true,
+      "can_attack": true,
+      "haste_cooldown": 0,
+      "is_hasted": false,
+      "distance_moved": 0,
+      "defence_buff_cooldown": 0,
+      "attack_buff_cooldown": 0,
+      "defence_buff_turns": 0,
+      "attack_buff_turns": 0,
+      "original_x": 7,
+      "original_y": 3
     },
     {
       "type": "M",
@@ -165,6 +205,26 @@
       "original_y": 18
     },
     {
+      "type": "S",
+      "x": 17,
+      "y": 19,
+      "player": 2,
+      "health": 10,
+      "paralyzed_turns": 0,
+      "paralyze_cooldown": 0,
+      "can_move": true,
+      "can_attack": true,
+      "haste_cooldown": 0,
+      "is_hasted": false,
+      "distance_moved": 0,
+      "defence_buff_cooldown": 0,
+      "attack_buff_cooldown": 0,
+      "defence_buff_turns": 0,
+      "attack_buff_turns": 0,
+      "original_x": 17,
+      "original_y": 19
+    },
+    {
       "type": "C",
       "x": 20,
       "y": 19,
@@ -187,7 +247,7 @@
     {
       "type": "W",
       "x": 17,
-      "y": 19,
+      "y": 17,
       "player": 2,
       "health": 15,
       "paralyzed_turns": 0,
@@ -202,7 +262,7 @@
       "defence_buff_turns": 0,
       "attack_buff_turns": 0,
       "original_x": 17,
-      "original_y": 19
+      "original_y": 17
     },
     {
       "type": "K",
@@ -223,6 +283,26 @@
       "attack_buff_turns": 0,
       "original_x": 18,
       "original_y": 18
+    },
+    {
+      "type": "A",
+      "x": 16,
+      "y": 20,
+      "player": 2,
+      "health": 15,
+      "paralyzed_turns": 0,
+      "paralyze_cooldown": 0,
+      "can_move": true,
+      "can_attack": true,
+      "haste_cooldown": 0,
+      "is_hasted": false,
+      "distance_moved": 0,
+      "defence_buff_cooldown": 0,
+      "attack_buff_cooldown": 0,
+      "defence_buff_turns": 0,
+      "attack_buff_turns": 0,
+      "original_x": 16,
+      "original_y": 20
     }
   ],
   "tiles": [],
