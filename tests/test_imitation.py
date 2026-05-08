@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 
 from reinforcetactics.rl.imitation import (
-    DemonstrationDataset,
     NUM_ACTION_TYPES,
     NUM_UNIT_TYPES,
+    DemonstrationDataset,
     behavior_clone,
     collect_demonstrations,
     record_episode,
@@ -69,7 +69,7 @@ class TestDemonstrationCollection:
         offsets = np.cumsum([0, at, ut, fx, fy, tx, ty])
         for i in range(n):
             for dim, val in enumerate(ds.actions[i]):
-                lo, hi = offsets[dim], offsets[dim + 1]
+                lo = offsets[dim]
                 assert ds.masks_concat[i, lo + int(val)], (
                     f"Sample {i} dim {dim} value {val} not in mask"
                 )
