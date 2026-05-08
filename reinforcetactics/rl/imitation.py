@@ -124,9 +124,7 @@ class DemonstrationDataset:
 
         # Stack observation dict (assumes consistent key set).
         keys = list(demos[0].obs.keys())
-        obs_stacked: Dict[str, np.ndarray] = {
-            k: np.stack([d.obs[k] for d in demos], axis=0) for k in keys
-        }
+        obs_stacked: Dict[str, np.ndarray] = {k: np.stack([d.obs[k] for d in demos], axis=0) for k in keys}
 
         actions = np.stack([d.action for d in demos], axis=0).astype(np.int64)
 
@@ -295,9 +293,7 @@ class _ActionRecorder:
     # -- snapshot helpers --------------------------------------------------
 
     def _snapshot(self, action: np.ndarray) -> None:
-        flat, at, ut, fx, fy, tx, ty = _compute_masks(
-            self.game_state, self.width, self.height, self.enabled_units
-        )
+        flat, at, ut, fx, fy, tx, ty = _compute_masks(self.game_state, self.width, self.height, self.enabled_units)
 
         obs = build_observation(
             self.game_state,
@@ -314,14 +310,7 @@ class _ActionRecorder:
         a_type = int(action[0])
         a_unit = int(action[1])
         a_fx, a_fy, a_tx, a_ty = (int(action[2]), int(action[3]), int(action[4]), int(action[5]))
-        if not (
-            at[a_type]
-            and ut[a_unit]
-            and fx[a_fx]
-            and fy[a_fy]
-            and tx[a_tx]
-            and ty[a_ty]
-        ):
+        if not (at[a_type] and ut[a_unit] and fx[a_fx] and fy[a_fy] and tx[a_tx] and ty[a_ty]):
             logger.debug(
                 "Skipping demonstration with mask-illegal action %s (likely sanitization edge)",
                 action.tolist(),
@@ -433,9 +422,7 @@ class _ActionRecorder:
 
         def wrapped():
             if self._is_demonstrator_turn():
-                self._snapshot(
-                    np.array([5, self._default_unit_idx(), 0, 0, 0, 0], dtype=np.int64)
-                )
+                self._snapshot(np.array([5, self._default_unit_idx(), 0, 0, 0, 0], dtype=np.int64))
             return original()
 
         return wrapped
@@ -686,9 +673,7 @@ def behavior_clone(
             actions = _to_tensor(dataset.actions[batch_idx]).long()
             masks = _to_tensor(dataset.masks_concat[batch_idx])
 
-            _values, log_prob, _entropy = policy.evaluate_actions(
-                obs_batch, actions, action_masks=masks
-            )
+            _values, log_prob, _entropy = policy.evaluate_actions(obs_batch, actions, action_masks=masks)
             loss = -log_prob.mean()
 
             optimizer.zero_grad()
@@ -770,10 +755,7 @@ def make_warm_started_model(
     try:
         from sb3_contrib import MaskablePPO
     except ImportError as exc:
-        raise ImportError(
-            "sb3-contrib is required for imitation warm-start. "
-            "Install with: pip install sb3-contrib"
-        ) from exc
+        raise ImportError("sb3-contrib is required for imitation warm-start. Install with: pip install sb3-contrib") from exc
 
     dataset = collect_demonstrations(
         n_episodes=n_episodes,

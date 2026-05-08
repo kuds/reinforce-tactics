@@ -70,9 +70,7 @@ class TestDemonstrationCollection:
         for i in range(n):
             for dim, val in enumerate(ds.actions[i]):
                 lo = offsets[dim]
-                assert ds.masks_concat[i, lo + int(val)], (
-                    f"Sample {i} dim {dim} value {val} not in mask"
-                )
+                assert ds.masks_concat[i, lo + int(val)], f"Sample {i} dim {dim} value {val} not in mask"
 
     def test_observation_keys(self, small_dataset):
         for k in ("grid", "units", "global_features", "action_mask"):
