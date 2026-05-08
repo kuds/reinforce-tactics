@@ -160,8 +160,8 @@ class CurriculumStage:
     """
 
     name: str = ""
-    map_file: Optional[str] = None
-    opponent: Optional[str] = None
+    map_file: str = ""
+    opponent: str = ""
     promotion_win_rate: float = 0.9
     patience: int = 2
     max_timesteps: int = 1_000_000
@@ -178,7 +178,7 @@ class CurriculumStage:
             raise ValueError("stage.name must be non-empty")
         if not self.map_file:
             raise ValueError(f"stage '{self.name}': map_file must be set")
-        if self.opponent is None:
+        if not self.opponent:
             raise ValueError(f"stage '{self.name}': opponent must be set")
         if self.opponent not in _CURRICULUM_OPPONENTS:
             raise ValueError(
