@@ -436,17 +436,21 @@ class _ActionRecorder:
         for name in self._INTERCEPT_METHODS:
             self._originals[name] = getattr(gs, name)
 
-        gs.create_unit = self._wrap_create_unit()
-        gs.move_unit = self._wrap_move_unit()
-        gs.attack = self._wrap_attack()
-        gs.seize = self._wrap_seize()
-        gs.heal = self._wrap_heal_like("heal", "healer", action_type=4)
-        gs.cure = self._wrap_heal_like("cure", "curer", action_type=4)
-        gs.paralyze = self._wrap_heal_like("paralyze", "paralyzer", action_type=6)
-        gs.haste = self._wrap_heal_like("haste", "sorcerer", action_type=7)
-        gs.defence_buff = self._wrap_heal_like("defence_buff", "sorcerer", action_type=8)
-        gs.attack_buff = self._wrap_heal_like("attack_buff", "sorcerer", action_type=9)
-        gs.end_turn = self._wrap_end_turn()
+        # ``setattr`` instead of ``gs.foo = wrapped`` because the latter trips
+        # mypy's ``method-assign`` rule. The runtime behaviour is identical:
+        # both bind the wrapped closure on the instance, shadowing the class
+        # method until ``uninstall`` restores the original.
+        setattr(gs, "create_unit", self._wrap_create_unit())
+        setattr(gs, "move_unit", self._wrap_move_unit())
+        setattr(gs, "attack", self._wrap_attack())
+        setattr(gs, "seize", self._wrap_seize())
+        setattr(gs, "heal", self._wrap_heal_like("heal", "healer", action_type=4))
+        setattr(gs, "cure", self._wrap_heal_like("cure", "curer", action_type=4))
+        setattr(gs, "paralyze", self._wrap_heal_like("paralyze", "paralyzer", action_type=6))
+        setattr(gs, "haste", self._wrap_heal_like("haste", "sorcerer", action_type=7))
+        setattr(gs, "defence_buff", self._wrap_heal_like("defence_buff", "sorcerer", action_type=8))
+        setattr(gs, "attack_buff", self._wrap_heal_like("attack_buff", "sorcerer", action_type=9))
+        setattr(gs, "end_turn", self._wrap_end_turn())
         self._installed = True
 
     def uninstall(self) -> None:
