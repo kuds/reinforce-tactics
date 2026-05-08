@@ -10,6 +10,8 @@ discovers the failure at hour 6.
 
 from __future__ import annotations
 
+from typing import Any, Dict, List
+
 import matplotlib
 
 # Force a non-interactive backend so the tests work in headless CI.
@@ -20,14 +22,17 @@ import matplotlib.pyplot as plt  # noqa: E402
 from reinforcetactics.rl.viz import plot_individual_game_stats  # noqa: E402
 
 
-def _synthetic_step_stats(n: int = 30) -> list[dict]:
+def _synthetic_step_stats(n: int = 30) -> List[Dict[str, Any]]:
     """Build a step_stats list shaped like ``record_evaluation_to_video``.
 
     First entry is the pre-action initial snapshot (``action_type=None``);
     subsequent entries cycle through action types so the action-mix bar
     has every category to draw.
     """
-    steps = [
+    # The dict literals mix int/str/float/None/dict values, so type the
+    # list explicitly to keep mypy from inferring a too-narrow value type
+    # from the first entry.
+    steps: List[Dict[str, Any]] = [
         {
             "turn": 0,
             "current_player": 1,
