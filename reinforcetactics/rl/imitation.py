@@ -586,6 +586,261 @@ def collect_demonstrations(
 
 
 # ---------------------------------------------------------------------------
+# Multi-scenario collection
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DemonstrationScenario:
+    """One scenario in a curated mix of demonstration sources.
+
+    A scenario bundles a (map, unit roster, demonstrator, opponent) so that
+    each entry produces demonstrations targeted at a specific behaviour. For
+    example, a scenario that enables only ``["W", "S"]`` (Warrior + Sorcerer)
+    forces the demonstrator down decision branches that exercise the
+    Sorcerer's buff abilities — yielding far more attack_buff / haste demos
+    per episode than running ``MediumBot`` on a random map with all 8 units.
+
+    Attributes:
+        map_file: Path to map CSV (``None`` -> generated random map matching
+            ``StrategyGameEnv``'s default).
+        enabled_units: Subset of unit codes to enable for this scenario. The
+            scripted bots only spawn / consider units in this list.
+        demonstrator: Bot name to record (``simple|medium|advanced``).
+        opponent: Bot name on the other side (``simple|medium|advanced|random|
+            balanced_random|noop``).
+        n_episodes: Episodes to play for this scenario.
+        max_turns: Per-episode turn cap.
+        fog_of_war: Whether to enable FOW for this scenario.
+        demonstrator_player: 1 or 2 — which side the recorder follows.
+        weight: Optional sampling weight applied at concat time. Values >1
+            duplicate demos from this scenario; <1 subsamples. Use sparingly
+            — duplication grows memory linearly.
+    """
+
+    map_file: Optional[str] = None
+    enabled_units: Optional[List[str]] = None
+    demonstrator: str = "medium"
+    opponent: str = "medium"
+    n_episodes: int = 10
+    max_turns: int = 200
+    fog_of_war: bool = False
+    demonstrator_player: int = 1
+    weight: float = 1.0
+    name: Optional[str] = None  # Free-form label used in logs only
+
+
+def _grid_dims_from_map(map_file: Optional[str]) -> Tuple[int, int]:
+    """Return (width, height) for a map source matching the env's logic."""
+    if map_file:
+        map_data = FileIO.load_map(map_file)
+    else:
+        map_data = FileIO.generate_random_map(20, 20, num_players=2)
+    # GameState wraps map_data into a TileGrid; the env exposes
+    # game_state.grid.{width,height} as the source of truth. Build a
+    # disposable game_state to match exactly.
+    gs = GameState(map_data, num_players=2)
+    return gs.grid.width, gs.grid.height
+
+
+def _resample_dataset(
+    dataset: DemonstrationDataset,
+    weight: float,
+    rng: np.random.Generator,
+) -> DemonstrationDataset:
+    """Up- or down-sample a dataset to ``round(weight * len(dataset))`` rows."""
+    n = len(dataset)
+    target = max(1, int(round(weight * n)))
+    if target == n:
+        return dataset
+    if target < n:
+        idx = rng.choice(n, size=target, replace=False)
+    else:
+        # Keep all originals, then upsample the remainder with replacement.
+        extra = rng.choice(n, size=target - n, replace=True)
+        idx = np.concatenate([np.arange(n), extra])
+    obs = {k: v[idx] for k, v in dataset.obs.items()}
+    return DemonstrationDataset(
+        obs=obs,
+        actions=dataset.actions[idx],
+        masks_concat=dataset.masks_concat[idx],
+        dim_sizes=dataset.dim_sizes,
+    )
+
+
+def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
+    """Concatenate datasets that share the same dim_sizes and obs key set."""
+    if not parts:
+        raise ValueError("No datasets to concatenate")
+    if len(parts) == 1:
+        return parts[0]
+
+    ref = parts[0]
+    for i, p in enumerate(parts[1:], start=1):
+        if p.dim_sizes != ref.dim_sizes:
+            raise ValueError(
+                f"Scenario {i} has incompatible mask dim_sizes {p.dim_sizes} "
+                f"vs {ref.dim_sizes}. All scenarios must share grid size and "
+                f"action-space layout."
+            )
+        if set(p.obs.keys()) != set(ref.obs.keys()):
+            raise ValueError(
+                f"Scenario {i} obs keys {sorted(p.obs.keys())} disagree with "
+                f"{sorted(ref.obs.keys())} (likely a fog_of_war mismatch)."
+            )
+        for k in ref.obs:
+            if p.obs[k].shape[1:] != ref.obs[k].shape[1:]:
+                raise ValueError(f"Scenario {i} obs[{k!r}] shape {p.obs[k].shape} incompatible with {ref.obs[k].shape}.")
+
+    obs = {k: np.concatenate([p.obs[k] for p in parts], axis=0) for k in ref.obs}
+    actions = np.concatenate([p.actions for p in parts], axis=0)
+    masks_concat = np.concatenate([p.masks_concat for p in parts], axis=0)
+    return DemonstrationDataset(
+        obs=obs,
+        actions=actions,
+        masks_concat=masks_concat,
+        dim_sizes=ref.dim_sizes,
+    )
+
+
+def collect_demonstrations_multi(
+    scenarios: List[DemonstrationScenario],
+    seed: int = 0,
+    progress: bool = False,
+    shuffle: bool = True,
+) -> DemonstrationDataset:
+    """Round-robin collect demonstrations across multiple scenarios.
+
+    Each scenario contributes ``n_episodes`` games; recorded demos are
+    concatenated into a single dataset. All scenarios must share the same
+    grid size and fog-of-war setting (otherwise mask shapes / obs shapes
+    don't stack cleanly).
+
+    Args:
+        scenarios: Ordered list of scenarios. Order does not affect the
+            final dataset when ``shuffle=True``.
+        seed: Global RNG seed; per-scenario seeds derive from this.
+        progress: If True, log per-scenario yields.
+        shuffle: Shuffle the concatenated dataset so mini-batches mix
+            scenarios (matters for BC — without shuffling, the optimizer
+            sees all of scenario 1, then all of scenario 2, etc.).
+
+    Returns:
+        A single ``DemonstrationDataset`` ready to pass to ``behavior_clone``.
+
+    Raises:
+        ValueError: If any two scenarios disagree on grid size or
+            fog_of_war (the obs/mask shapes would not stack).
+    """
+    if not scenarios:
+        raise ValueError("scenarios must contain at least one entry")
+
+    # Pre-validate grid dimensions so users see the failure before any
+    # episodes are simulated (collecting demos is the slow part).
+    ref_dims = _grid_dims_from_map(scenarios[0].map_file)
+    for i, sc in enumerate(scenarios[1:], start=1):
+        dims = _grid_dims_from_map(sc.map_file)
+        if dims != ref_dims:
+            raise ValueError(
+                f"Scenario {i} ({sc.name or sc.map_file or '<random>'}) has "
+                f"grid {dims} but scenario 0 has {ref_dims}. All scenarios "
+                f"must share the same map dimensions."
+            )
+
+    rng = np.random.default_rng(seed)
+    parts: List[DemonstrationDataset] = []
+    for i, sc in enumerate(scenarios):
+        scenario_seed = seed + 10_000 * (i + 1)
+        if progress:
+            logger.info(
+                "scenario %d/%d %s: %s vs %s, %d episodes, units=%s",
+                i + 1,
+                len(scenarios),
+                sc.name or sc.map_file or "<random map>",
+                sc.demonstrator,
+                sc.opponent,
+                sc.n_episodes,
+                sc.enabled_units or "all",
+            )
+        ds = collect_demonstrations(
+            n_episodes=sc.n_episodes,
+            demonstrator=sc.demonstrator,
+            opponent=sc.opponent,
+            map_file=sc.map_file,
+            enabled_units=sc.enabled_units,
+            max_turns=sc.max_turns,
+            fog_of_war=sc.fog_of_war,
+            seed=scenario_seed,
+            demonstrator_player=sc.demonstrator_player,
+            progress=False,
+        )
+        if sc.weight != 1.0:
+            ds = _resample_dataset(ds, sc.weight, rng)
+        if progress:
+            logger.info(
+                "  -> %d demos (action_type histogram: %s)",
+                len(ds),
+                np.bincount(ds.actions[:, 0], minlength=NUM_ACTION_TYPES).tolist(),
+            )
+        parts.append(ds)
+
+    combined = _concat_datasets(parts)
+
+    if shuffle:
+        order = rng.permutation(len(combined))
+        combined = DemonstrationDataset(
+            obs={k: v[order] for k, v in combined.obs.items()},
+            actions=combined.actions[order],
+            masks_concat=combined.masks_concat[order],
+            dim_sizes=combined.dim_sizes,
+        )
+
+    return combined
+
+
+def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
+    """Parse a YAML file into a list of ``DemonstrationScenario``.
+
+    Schema:
+        scenarios:
+          - name: <str>
+            map_file: <path|null>
+            enabled_units: [<unit codes>]
+            demonstrator: <bot name>
+            opponent: <bot name>
+            n_episodes: <int>
+            max_turns: <int>
+            fog_of_war: <bool>
+            demonstrator_player: <1|2>
+            weight: <float>
+
+    Unknown keys raise ``ValueError`` so typos surface immediately.
+    """
+    try:
+        import yaml  # type: ignore
+    except ImportError as exc:
+        raise ImportError("PyYAML is required to load scenario configs") from exc
+
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+
+    raw_list = cfg.get("scenarios", [])
+    if not isinstance(raw_list, list) or not raw_list:
+        raise ValueError(f"{path}: top-level 'scenarios' must be a non-empty list")
+
+    valid_keys = {f for f in DemonstrationScenario.__dataclass_fields__}
+    scenarios: List[DemonstrationScenario] = []
+    for i, entry in enumerate(raw_list):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path}: scenarios[{i}] must be a mapping")
+        unknown = set(entry) - valid_keys
+        if unknown:
+            raise ValueError(f"{path}: scenarios[{i}] has unknown keys: {sorted(unknown)}")
+        scenarios.append(DemonstrationScenario(**entry))
+    return scenarios
+
+
+# ---------------------------------------------------------------------------
 # Behavior cloning
 # ---------------------------------------------------------------------------
 
@@ -739,6 +994,7 @@ def make_warm_started_model(
     learning_rate: float = 3e-4,
     seed: int = 0,
     ppo_kwargs: Optional[Dict[str, Any]] = None,
+    scenarios: Optional[List[DemonstrationScenario]] = None,
 ) -> Tuple[Any, DemonstrationDataset, List[BCStats]]:
     """Build a MaskablePPO model and warm-start it via behavior cloning.
 
@@ -749,6 +1005,12 @@ def make_warm_started_model(
     have the same shape and semantics as what the policy will see during
     PPO fine-tuning.
 
+    When ``scenarios`` is provided, the single-source ``demonstrator`` /
+    ``opponent`` / ``map_file`` / ``enabled_units`` / ``max_turns`` /
+    ``fog_of_war`` arguments are ignored and demonstrations are collected
+    via :func:`collect_demonstrations_multi` instead — useful for ability
+    curricula where each scenario targets a specific behaviour.
+
     Returns:
         Tuple of (model, dataset, bc_stats). Call ``model.learn(...)`` next.
     """
@@ -757,18 +1019,22 @@ def make_warm_started_model(
     except ImportError as exc:
         raise ImportError("sb3-contrib is required for imitation warm-start. Install with: pip install sb3-contrib") from exc
 
-    dataset = collect_demonstrations(
-        n_episodes=n_episodes,
-        demonstrator=demonstrator,
-        opponent=opponent,
-        map_file=map_file,
-        enabled_units=enabled_units,
-        max_turns=max_turns,
-        fog_of_war=fog_of_war,
-        seed=seed,
-        progress=True,
-    )
-    logger.info("Collected %d demonstrations across %d episodes", len(dataset), n_episodes)
+    if scenarios:
+        dataset = collect_demonstrations_multi(scenarios, seed=seed, progress=True)
+        logger.info("Collected %d demonstrations across %d scenarios", len(dataset), len(scenarios))
+    else:
+        dataset = collect_demonstrations(
+            n_episodes=n_episodes,
+            demonstrator=demonstrator,
+            opponent=opponent,
+            map_file=map_file,
+            enabled_units=enabled_units,
+            max_turns=max_turns,
+            fog_of_war=fog_of_war,
+            seed=seed,
+            progress=True,
+        )
+        logger.info("Collected %d demonstrations across %d episodes", len(dataset), n_episodes)
 
     default_ppo: Dict[str, Any] = {
         "learning_rate": 3e-4,

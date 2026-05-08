@@ -17,8 +17,11 @@ from reinforcetactics.rl.imitation import (
     BCStats,
     Demonstration,
     DemonstrationDataset,
+    DemonstrationScenario,
     behavior_clone,
     collect_demonstrations,
+    collect_demonstrations_multi,
+    load_scenarios_from_yaml,
     make_warm_started_model,
     record_episode,
 )
@@ -64,8 +67,11 @@ __all__ = [
     "BCStats",
     "Demonstration",
     "DemonstrationDataset",
+    "DemonstrationScenario",
     "behavior_clone",
     "collect_demonstrations",
+    "collect_demonstrations_multi",
+    "load_scenarios_from_yaml",
     "make_warm_started_model",
     "record_episode",
 ]

@@ -36,6 +36,7 @@ except ImportError:
     sys.exit(1)
 
 from reinforcetactics.rl import (
+    load_scenarios_from_yaml,
     make_maskable_env,
     make_maskable_vec_env,
     make_warm_started_model,
@@ -54,6 +55,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timesteps", type=int, default=200_000, help="PPO fine-tune timesteps")
     parser.add_argument("--n-envs", type=int, default=4, help="Parallel envs for PPO fine-tune")
     parser.add_argument("--map-file", default=None, help="Optional map CSV; default = random map")
+    parser.add_argument(
+        "--scenarios",
+        default=None,
+        help=(
+            "Optional YAML file describing a curated mix of demonstration scenarios "
+            "(see configs/bc_scenarios.yaml). When provided, --demonstrator / "
+            "--opponent / --map-file / --n-episodes are ignored for the BC phase; "
+            "the env used for PPO fine-tuning still respects --opponent / --map-file."
+        ),
+    )
     parser.add_argument("--save-path", default="models/bc_warmstart_ppo.zip")
     parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
@@ -69,8 +80,20 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("Phase 1/2: Behavior cloning warm-start")
     print("=" * 60)
-    print(f"  demonstrator={args.demonstrator}  opponent={args.opponent}")
-    print(f"  episodes={args.n_episodes}  bc_epochs={args.bc_epochs}  batch={args.bc_batch_size}")
+
+    scenarios = load_scenarios_from_yaml(args.scenarios) if args.scenarios else None
+    if scenarios:
+        print(f"  scenarios from {args.scenarios}: {len(scenarios)} entries")
+        for sc in scenarios:
+            print(
+                f"    - {sc.name or sc.map_file or '<random>'}: "
+                f"{sc.demonstrator} vs {sc.opponent}, "
+                f"units={sc.enabled_units or 'all'}, "
+                f"episodes={sc.n_episodes}, weight={sc.weight}"
+            )
+    else:
+        print(f"  demonstrator={args.demonstrator}  opponent={args.opponent}")
+        print(f"  episodes={args.n_episodes}  bc_epochs={args.bc_epochs}  batch={args.bc_batch_size}")
 
     model, dataset, bc_stats = make_warm_started_model(
         env=template_env,
@@ -84,6 +107,7 @@ def main() -> None:
         learning_rate=args.bc_lr,
         seed=args.seed,
         ppo_kwargs={"verbose": 1},
+        scenarios=scenarios,
     )
 
     print("\n--- BC summary ---")
