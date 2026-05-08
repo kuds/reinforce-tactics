@@ -194,11 +194,26 @@ stages:
     max_turns: 60
     # Cooled now that the policy has adapted to the bigger map.
     ent_coef: 0.07
+    # Add per-action combat signal on top of the structure-capture
+    # rewards. The shipped env defaults set ``kill: 0`` and
+    # ``damage_scale: 0``, which combined with ``capture: 2000`` and
+    # ``draw: -5000`` (per-step penalty diluted across ~900 steps)
+    # trains the policy to "capture structures, retreat, time out".
+    # That worked against ``random_10`` (W/L/D = 30/0/0) because the
+    # bot was slow enough to let the agent capture freely; against
+    # ``random_20`` the bot's 2x action throughput forces engagement,
+    # but with zero combat gradient the agent stalls -- earlier runs
+    # plateaued at ~13% WR with literally zero losses across 120
+    # eval games (refusing combat, not losing it). Sized to be
+    # comparable to one ``seize_progress`` step (+50) per kill so the
+    # policy stops treating combat as gradient-free.
     reward_config:
       win_by_hq_capture: 3000.0
       win_by_elimination: 3000.0
       seize_progress: 50.0
       capture: 2000.0
+      kill: 50.0
+      damage_scale: 0.5
 
   - name: beginner_simple
     map_file: maps/1v1/beginner.csv

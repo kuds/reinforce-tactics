@@ -635,3 +635,18 @@ class TestRunCurriculum:
         # We never advance to stage 'b'.
         model = get_model()
         assert [c["stage"] for c in model.learn_calls] == ["a"]
+
+        # The exception carries a partial result so notebook
+        # diagnostics / replay-video helpers can run after a stall
+        # instead of discarding everything. ``history`` should
+        # contain one entry (the stalled stage 'a'), and the saved
+        # ``final_model.zip`` should exist on disk so callers can
+        # ``MaskablePPO.load(...)`` it for replay generation.
+        partial = excinfo.value.partial_result()
+        assert partial["stalled"] is True
+        assert partial["stalled_stage"] == "a"
+        assert len(partial["history"]) == 1
+        assert partial["history"][0]["stage"] == "a"
+        assert partial["history"][0]["promoted"] is False
+        assert partial["final_model_path"] is not None
+        assert (tmp_path / "final_model.zip").exists()
