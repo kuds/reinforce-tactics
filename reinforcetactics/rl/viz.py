@@ -23,12 +23,16 @@ Kept deliberately minimal — three plot families that together cover the
   damage dealt vs taken / attack-seize activity per eval. The damage
   delta panel surfaces whether the agent is actually winning trades
   beyond what the win-rate scalar captures.
+- ``plot_individual_game_stats``: 2x3 panel summarising a single
+  recorded game (consumes ``record_evaluation_to_video``'s return
+  dict). Independent of the per-eval aggregates above; surfaces
+  what the policy *actually does* in one playthrough.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -505,3 +509,214 @@ def plot_combat_summary(
 
     fig.tight_layout()
     return _save_and_return(fig, charts_dir, "combat_summary.png")
+
+
+def plot_individual_game_stats(
+    result: Mapping[str, Any],
+    *,
+    charts_dir: Optional[Any] = None,
+    title_suffix: str = "",
+    filename: Optional[str] = None,
+) -> Optional[plt.Figure]:
+    """Render a 2x3 panel summarising one recorded game.
+
+    Reads the dict returned by
+    :func:`reinforcetactics.utils.video.record_evaluation_to_video`
+    (specifically ``step_stats`` for the per-step traces, plus
+    ``winner`` / ``end_reason`` / ``steps`` / ``total_reward`` for the
+    outcome summary) and produces:
+
+    - **Top row (per player over time):** unit count, gold, structures
+      owned (towers + buildings + HQ).
+    - **Bottom-left:** action mix used in this game, with
+      ``create_unit`` split by spawned unit type (``create_W``,
+      ``create_M``, …) so build order is visible at a glance. Blue
+      bars = creates, green = other actions.
+    - **Bottom-middle:** cumulative reward by component (``action``,
+      ``shaping_delta``, ``invalid_penalty``, ``terminal``) using the
+      same colour palette as :func:`plot_reward_decomposition`.
+    - **Bottom-right:** outcome summary text panel — winner, end
+      reason, final unit/gold/structure counts, per-type creation
+      counts.
+
+    Args:
+        result: Dict from ``record_evaluation_to_video``. Must contain
+            ``step_stats``; missing terminal-summary fields just leave
+            their slot as "n/a".
+        charts_dir: Optional directory; the figure is saved as
+            ``{filename}`` (default: ``individual_game_stats[_{title_suffix}].png``).
+        title_suffix: Appended to the figure's suptitle, e.g. ``"best"``
+            in self-play to distinguish best-by-WR from final
+            checkpoint, or the stage name in the bootstrap notebook.
+        filename: Override the saved filename (without leading
+            directories). Defaults to the ``title_suffix``-aware name
+            above so callers normally don't need this.
+
+    Returns:
+        The matplotlib ``Figure``, or ``None`` when ``step_stats`` is
+        empty (caller should treat this as "no data, skip").
+    """
+    step_stats = list(result.get("step_stats") or [])
+    if not step_stats:
+        print(
+            f"[{title_suffix or 'game'}] no step_stats — skipping "
+            "(re-run the recording cell with the updated record_evaluation_to_video)."
+        )
+        return None
+
+    steps = np.arange(len(step_stats))
+    agent_units = [s["agent_units"] for s in step_stats]
+    opp_units = [s["opponent_units"] for s in step_stats]
+    agent_gold = [s["agent_gold"] for s in step_stats]
+    opp_gold = [s["opponent_gold"] for s in step_stats]
+    agent_struct = [s.get("agent_structures", 0) for s in step_stats]
+    opp_struct = [s.get("opponent_structures", 0) for s in step_stats]
+
+    # Action counts: skip the initial snapshot (action_type=None) so
+    # only the agent's actual decisions land in the bar. ``create_unit``
+    # is broken out per spawned unit type, so the bar shows e.g.
+    # create_W / create_M / create_A separately. Other action types
+    # stay aggregated at the ACTION_TYPE_NAMES granularity.
+    action_counts: dict[str, int] = {}
+    for s in step_stats:
+        at = s.get("action_type")
+        if at is None:
+            continue
+        at_int = int(at)
+        if at_int == 0:
+            ut = s.get("unit_type")
+            label = f"create_{ut}" if ut else "create_unit"
+        elif 0 <= at_int < len(ACTION_TYPE_NAMES):
+            label = ACTION_TYPE_NAMES[at_int]
+        else:
+            label = str(at_int)
+        action_counts[label] = action_counts.get(label, 0) + 1
+
+    # Cumulative reward per component. Components match the breakdown
+    # built in env._calculate_reward and the constants in evaluation.py.
+    cum = {c: np.zeros(len(step_stats)) for c in REWARD_COMPONENTS}
+    running = {c: 0.0 for c in REWARD_COMPONENTS}
+    for i, s in enumerate(step_stats):
+        rb = s.get("reward_breakdown") or {}
+        for c in REWARD_COMPONENTS:
+            running[c] += float(rb.get(c, 0.0) or 0.0)
+            cum[c][i] = running[c]
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 8))
+    suffix = f" — {title_suffix}" if title_suffix else ""
+    fig.suptitle(f"Individual game statistics{suffix}", fontsize=13, fontweight="bold")
+
+    # Use distinct blue / red for agent vs opponent across all three
+    # top-row series; same hues as the plot_combat_summary palette so
+    # cross-figure comparison stays coherent.
+    AGENT_COLOR = "#1f77b4"
+    OPP_COLOR = "#d62728"
+
+    ax = axes[0, 0]
+    ax.plot(steps, agent_units, label="agent", color=AGENT_COLOR)
+    ax.plot(steps, opp_units, label="opponent", color=OPP_COLOR)
+    ax.set_title("Unit count")
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Units")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    ax = axes[0, 1]
+    ax.plot(steps, agent_gold, label="agent", color=AGENT_COLOR)
+    ax.plot(steps, opp_gold, label="opponent", color=OPP_COLOR)
+    ax.set_title("Gold")
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Gold")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    ax = axes[0, 2]
+    ax.plot(steps, agent_struct, label="agent", color=AGENT_COLOR)
+    ax.plot(steps, opp_struct, label="opponent", color=OPP_COLOR)
+    ax.set_title("Structures owned (towers + buildings + HQ)")
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Structures")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    ax = axes[1, 0]
+    if action_counts:
+        names = list(action_counts.keys())
+        counts = [action_counts[n] for n in names]
+        order = np.argsort(counts)[::-1]
+        names = [names[i] for i in order]
+        counts = [counts[i] for i in order]
+        # Color creates differently from non-create actions so the
+        # unit-type mix pops out of the bar.
+        bar_colors = [
+            _ACTION_COLORS["create_unit"] if n.startswith("create_") else _ACTION_COLORS.get(n, "#888")
+            for n in names
+        ]
+        ax.bar(names, counts, color=bar_colors)
+        ax.set_title(f"Action mix (n={sum(counts)}, blue=creates)")
+        ax.set_ylabel("Count")
+        ax.tick_params(axis="x", rotation=45)
+    else:
+        ax.text(0.5, 0.5, "No actions recorded", ha="center", va="center")
+        ax.set_axis_off()
+    ax.grid(alpha=0.3, axis="y")
+
+    ax = axes[1, 1]
+    for c in REWARD_COMPONENTS:
+        ax.plot(steps, cum[c], label=c, color=_REWARD_COMPONENT_COLORS[c])
+    total = float(result.get("total_reward", 0) or 0)
+    ax.set_title(f"Cumulative reward by component (total={total:.0f})")
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Cumulative reward")
+    ax.legend(loc="best", fontsize=8)
+    ax.grid(alpha=0.3)
+    ax.axhline(0, color="k", lw=0.5)
+
+    # Outcome summary panel — pulls from the result dict so the chart
+    # tells you immediately whether the recorded game was an HQ
+    # capture, an elimination, or a timeout, without scrolling back to
+    # the recording cell's print. Also lists per-unit-type creation
+    # counts so you can see e.g. "agent only ever spawned Warriors" at
+    # a glance.
+    ax = axes[1, 2]
+    ax.set_axis_off()
+    winner_str = {1: "Agent wins", 2: "Opponent wins", None: "Draw"}.get(
+        result.get("winner"), "Unknown"
+    )
+    end_reason = result.get("end_reason") or "n/a"
+    final_step = step_stats[-1]
+    create_lines = [
+        f"  {n}: {c}" for n, c in sorted(action_counts.items()) if n.startswith("create_")
+    ]
+    summary_lines = [
+        f"Result:        {winner_str}",
+        f"End reason:    {end_reason}",
+        f"Steps:         {result.get('steps', 0)}",
+        f"Final turn:    {final_step.get('turn', 'n/a')}",
+        f"Total reward:  {total:.0f}",
+        "",
+        f"Final units:   {final_step.get('agent_units', 0)} vs {final_step.get('opponent_units', 0)}",
+        f"Final gold:    {final_step.get('agent_gold', 0)} vs {final_step.get('opponent_gold', 0)}",
+        f"Final struct:  {final_step.get('agent_structures', 0)} vs {final_step.get('opponent_structures', 0)}",
+        "",
+        "Units created (agent):",
+        *(create_lines or ["  (none)"]),
+    ]
+    ax.text(
+        0.0,
+        0.95,
+        "\n".join(summary_lines),
+        ha="left",
+        va="top",
+        family="monospace",
+        fontsize=9,
+        transform=ax.transAxes,
+    )
+    ax.set_title("Outcome summary")
+
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+
+    if filename is None:
+        suffix_part = f"_{title_suffix}" if title_suffix else ""
+        filename = f"individual_game_stats{suffix_part}.png"
+    return _save_and_return(fig, charts_dir, filename)
