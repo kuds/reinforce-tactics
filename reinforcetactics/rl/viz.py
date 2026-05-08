@@ -10,7 +10,9 @@ Kept deliberately minimal — three plot families that together cover the
 "why isn't PPO learning?" debugging surface:
 
 - ``plot_eval_curves``: win rate / reward / episode length curves +
-  PPO update health (approx_kl, explained_variance) on shared axes.
+  PPO update health (approx_kl, explained_variance, value_loss) on
+  shared axes. Supports ``stage_boundaries`` for the bootstrap-curriculum
+  view where a single metrics timeline spans multiple stages.
 - ``plot_reward_decomposition``: stacked area of action / shaping /
   invalid-penalty / terminal contributions per eval. Distinguishes
   "shaping-reward stalemate" from "actually winning".
@@ -106,19 +108,51 @@ def plot_eval_curves(
     *,
     opponent_label: str = "",
     charts_dir: Optional[Any] = None,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> plt.Figure:
-    """Win rate / avg reward / episode length / approx_kl / explained_variance.
+    """Win rate / avg reward / episode length / approx_kl / explained_variance / value_loss.
 
-    First three panels read from ``results`` (per-eval). Last two read
-    from ``train_records`` (per-rollout, finer grid) and are skipped if
-    that argument is None or empty.
+    Layout depends on whether ``train_records`` is provided:
+
+    - ``train_records=None`` → 1x3 row of eval-only panels (win rate,
+      avg reward, episode length).
+    - ``train_records=[...]`` → 2x3 grid. Top row is the eval panels;
+      bottom row is the PPO update health panels (approx_kl,
+      explained_variance, value_loss). Read the bottom row for
+      *whether the policy is updating at all* (approx_kl) and *whether
+      the value head is fitting the returns* (explained_variance,
+      value_loss). Both health panels matter when reward magnitudes
+      are large (terminal bonuses in the thousands): explained_variance
+      should climb toward 1.0; value_loss should plateau or decline.
+      A value_loss curve that grows without bound while
+      explained_variance stays near zero is the signature of a value
+      head that can't keep up with the target distribution.
+
+    Args:
+        results: Per-eval dicts from ``PeriodicEvalCallback.results``.
+        train_records: Per-rollout dicts from
+            ``TrainingMetricsCallback.records``. Optional.
+        opponent_label: Suffix for the figure suptitle (e.g. ``"random"``).
+        charts_dir: Optional save directory; PNG named ``eval_curves.png``.
+        stage_boundaries: Optional list of cumulative timesteps at which
+            to draw vertical stage-transition lines on every panel.
+            Useful for the bootstrap-curriculum view where one
+            ``metrics_callback`` spans multiple stages.
     """
-    n_panels = 5 if train_records else 3
-    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4))
-    if n_panels == 1:
-        axes = [axes]
+    if train_records:
+        fig, axes_grid = plt.subplots(2, 3, figsize=(15, 8))
+        axes = list(axes_grid.flatten())
+    else:
+        fig, axes_row = plt.subplots(1, 3, figsize=(15, 4))
+        axes = list(axes_row)
 
     eval_ts = [r["timesteps"] for r in results]
+
+    def _draw_stage_lines(ax: Any) -> None:
+        if not stage_boundaries:
+            return
+        for ts in stage_boundaries:
+            ax.axvline(ts, color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
 
     # Panel 1: win rate
     ax = axes[0]
@@ -132,6 +166,7 @@ def plot_eval_curves(
     # made the panel hard to compare with the rest of the dashboard.
     ax.set_ylim(-5, 105)
     ax.axhline(y=70, color="green", linestyle="--", alpha=0.5, label="70% target")
+    _draw_stage_lines(ax)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -150,6 +185,7 @@ def plot_eval_curves(
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Average Reward")
     ax.set_title("Average Episode Reward")
+    _draw_stage_lines(ax)
     ax.grid(True, alpha=0.3)
 
     # Panel 3: episode length
@@ -167,6 +203,7 @@ def plot_eval_curves(
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Average Length (steps)")
     ax.set_title("Average Episode Length")
+    _draw_stage_lines(ax)
     ax.grid(True, alpha=0.3)
 
     if train_records:
@@ -182,6 +219,7 @@ def plot_eval_curves(
             ax.legend(fontsize=7)
         ax.set_xlabel("Timesteps")
         ax.set_title("approx_kl (PPO update size)")
+        _draw_stage_lines(ax)
         ax.grid(True, alpha=0.3)
 
         # Panel 5: explained_variance — near zero means value head isn't fitting.
@@ -194,7 +232,31 @@ def plot_eval_curves(
             ax.legend(fontsize=7)
         ax.set_xlabel("Timesteps")
         ax.set_title("explained_variance (value fit)")
+        _draw_stage_lines(ax)
         ax.grid(True, alpha=0.3)
+
+        # Panel 6: value_loss — should plateau / decline once the value
+        # head catches up to the return scale. A monotonically growing
+        # curve while explained_variance stays near zero means the
+        # value targets are too large for the head's capacity / lr;
+        # consider scaling rewards down or adding clip_range_vf.
+        # Plot on log scale because value_loss can span 4-5 orders of
+        # magnitude across a run (huge at init, small once converged).
+        ax = axes[5]
+        vl = [r.get("train/value_loss") for r in train_records]
+        if any(v is not None for v in vl):
+            # Drop points with non-positive values so log scale doesn't
+            # silently clip them; SB3's value_loss is non-negative
+            # (MSE), but defensive against future loss formulations.
+            vl_pairs = [(t, v) for t, v in zip(train_ts, vl) if v is not None and v > 0]
+            if vl_pairs:
+                xs, ys = zip(*vl_pairs)
+                ax.plot(list(xs), list(ys), color="#e91e63", linewidth=1.5)
+                ax.set_yscale("log")
+        ax.set_xlabel("Timesteps")
+        ax.set_title("value_loss (log scale)")
+        _draw_stage_lines(ax)
+        ax.grid(True, alpha=0.3, which="both")
 
     title = "PPO benchmarks" + (f"  |  vs {opponent_label}" if opponent_label else "")
     fig.suptitle(title, fontsize=13, fontweight="bold", y=1.02)
