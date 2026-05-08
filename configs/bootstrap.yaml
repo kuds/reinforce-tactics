@@ -96,11 +96,25 @@ ppo:
 #                       baseline; the original `random` opponent).
 #
 # Per-stage overrides handle the starter -> beginner transition:
-#   - max_steps / max_turns:  bigger map needs ~3x the turn budget
-#                             (units take longer to traverse).
-#   - ent_coef:               bumped on the FIRST beginner stage as a
-#                             one-shot exploration shock for the map
-#                             change, then cooled on subsequent stages.
+#   - max_steps / max_turns:  beginner map needs much longer episodes
+#                             than starter. Bumped to 1500 / 100 (was
+#                             1000 / 60) after a 2M-step run on
+#                             beginner_random_20 plateaued at ~13% WR
+#                             with ZERO losses across 41 evals -- the
+#                             smoking gun for a time-budget stall.
+#                             Episode length saturated near 950 of
+#                             1000 max_steps for the entire run; the
+#                             agent's strategy needed ~80 turns and
+#                             only had 60.
+#   - ent_coef:               held at 0.10 across ALL THREE
+#                             random-opponent stages (balanced_random,
+#                             random_10, random_20) -- each step in
+#                             opponent action throughput is its own
+#                             chaos-scaling transition that benefits
+#                             from elevated exploration. Cooled to 0.05
+#                             on `beginner_simple`/`beginner_medium`,
+#                             where opponents are deterministic and we
+#                             want commitment.
 #   - reward_config:          beginner-map geometry makes HQ capture
 #                             much harder than elimination, so we
 #                             equalize the two terminal rewards
@@ -148,11 +162,15 @@ stages:
     patience: 2
     max_timesteps: 1_500_000
     n_eval_episodes: 30
-    max_steps: 1000
-    max_turns: 60
-    # First stage on the new map -> entropy bump so the policy can
-    # adapt navigation to the bigger map without immediately
-    # over-committing to starter heuristics that no longer reach the HQ.
+    max_steps: 1500
+    max_turns: 100
+    # Entropy bump on the FIRST beginner stage (map-shift transition
+    # shock) and held at 0.10 across all three random-opponent stages
+    # below -- each step in opponent action throughput
+    # (balanced_random -> random_10 -> random_20) is its own
+    # chaos-scaling transition that benefits from elevated exploration.
+    # Cooled to 0.05 on `beginner_simple`/`beginner_medium`, where the
+    # opponent is settled and we want commitment, not exploration.
     ent_coef: 0.10
     reward_config:
       win_by_hq_capture: 3000.0
@@ -172,9 +190,9 @@ stages:
     patience: 2
     max_timesteps: 1_500_000
     n_eval_episodes: 30
-    max_steps: 1000
-    max_turns: 60
-    ent_coef: 0.07
+    max_steps: 1500
+    max_turns: 100
+    ent_coef: 0.10
     reward_config:
       win_by_hq_capture: 3000.0
       win_by_elimination: 3000.0
@@ -186,14 +204,23 @@ stages:
     opponent: random
     opponent_kwargs:
       max_actions: 20
+    # Threshold held at 0.75. The previous 2M-step run plateaued at
+    # ~13% WR with zero losses ever (a time-budget stall: episodes
+    # saturating at max_steps and ending as draws). The fix is the
+    # bumped `max_turns: 100` / `max_steps: 1500` plus held-high
+    # entropy on the chaos-scaling transition -- 100 turns is ~1.67x
+    # the previous 60, which should give the agent's elimination/seize
+    # sequence enough room to finish against 20-action random pressure.
+    # If this stage stalls again with the new budget, that's the right
+    # signal to relax the threshold rather than baking in the relaxation
+    # before we know the time-budget fix is sufficient.
     promotion_win_rate: 0.75
     patience: 2
     max_timesteps: 2_000_000
     n_eval_episodes: 30
-    max_steps: 1000
-    max_turns: 60
-    # Cooled now that the policy has adapted to the bigger map.
-    ent_coef: 0.07
+    max_steps: 1500
+    max_turns: 100
+    ent_coef: 0.10
     # Add per-action combat signal on top of the structure-capture
     # rewards. The shipped env defaults set ``kill: 0`` and
     # ``damage_scale: 0``, which combined with ``capture: 2000`` and
@@ -222,8 +249,8 @@ stages:
     patience: 2
     max_timesteps: 2_500_000
     n_eval_episodes: 30
-    max_steps: 1000
-    max_turns: 60
+    max_steps: 1500
+    max_turns: 100
     ent_coef: 0.05
     reward_config:
       win_by_hq_capture: 3000.0
@@ -238,8 +265,8 @@ stages:
     patience: 2
     max_timesteps: 4_000_000
     n_eval_episodes: 30
-    max_steps: 1000
-    max_turns: 60
+    max_steps: 1500
+    max_turns: 100
     ent_coef: 0.05
     reward_config:
       win_by_hq_capture: 3000.0
