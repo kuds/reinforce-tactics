@@ -13,6 +13,15 @@ from reinforcetactics.rl.alphazero_net import AlphaZeroNet
 from reinforcetactics.rl.alphazero_trainer import AlphaZeroTrainer, ReplayBuffer
 from reinforcetactics.rl.evaluation import evaluate_model
 from reinforcetactics.rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.imitation import (
+    BCStats,
+    Demonstration,
+    DemonstrationDataset,
+    behavior_clone,
+    collect_demonstrations,
+    make_warm_started_model,
+    record_episode,
+)
 from reinforcetactics.rl.masking import (
     ActionMaskedEnv,
     make_curriculum_env,
@@ -51,4 +60,12 @@ __all__ = [
     "MCTS",
     "AlphaZeroTrainer",
     "ReplayBuffer",
+    # Imitation / BC warm-start
+    "BCStats",
+    "Demonstration",
+    "DemonstrationDataset",
+    "behavior_clone",
+    "collect_demonstrations",
+    "make_warm_started_model",
+    "record_episode",
 ]
