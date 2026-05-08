@@ -441,6 +441,63 @@ def _default_model_factory(vec_env, cfg: BootstrapConfig, output_dir: Path):
     )
 
 
+def _write_stage_config(
+    *,
+    stage: CurriculumStage,
+    cfg: BootstrapConfig,
+    stage_dir: Path,
+    output_dir: Path,
+    promoted: bool,
+    best_win_rate: float,
+) -> None:
+    """Write ``stage_dir / config.json`` describing the stage's resolved settings.
+
+    Imported lazily so the bootstrap module stays importable even if the
+    optional ``utils.run_config`` dependencies aren't on the path during
+    a partial install (e.g. type-checking environments without torch).
+    """
+    from reinforcetactics.utils.run_config import build_run_config, write_run_config
+
+    ppo_resolved = asdict(cfg.ppo)
+    ppo_resolved["ent_coef"] = stage.resolve_ent_coef(cfg.ppo)
+    ent_schedule = stage.resolve_ent_coef_schedule()
+    if ent_schedule is not None:
+        ppo_resolved["ent_coef_schedule"] = ent_schedule
+
+    env_resolved: Dict[str, Any] = {
+        "map_file": stage.map_file,
+        "max_steps": stage.resolve_max_steps(cfg.env),
+        "max_turns": stage.resolve_max_turns(cfg.env),
+        "enabled_units": list(cfg.env.enabled_units) if cfg.env.enabled_units else None,
+        "action_space_type": cfg.env.action_space_type,
+        "max_flat_actions": cfg.env.max_flat_actions,
+        "reward_config": stage.resolve_reward_config(cfg.env),
+        "opponent_kwargs": dict(stage.opponent_kwargs) if stage.opponent_kwargs else None,
+    }
+
+    run_config = build_run_config(
+        run_type="ppo_bootstrap",
+        map_file=stage.map_file,
+        opponent=stage.opponent,
+        hyperparams=ppo_resolved,
+        env_config=env_resolved,
+        seed=cfg.seed,
+        extra={
+            "stage_name": stage.name,
+            "promotion_win_rate": stage.promotion_win_rate,
+            "patience": stage.patience,
+            "max_timesteps": stage.max_timesteps,
+            "n_eval_episodes": stage.n_eval_episodes,
+            "n_envs": cfg.n_envs,
+            "eval_freq": cfg.eval_freq,
+            "promoted": promoted,
+            "best_win_rate": best_win_rate,
+            "output_dir": str(output_dir),
+        },
+    )
+    write_run_config(run_config, stage_dir / "config.json")
+
+
 def run_curriculum(
     cfg: BootstrapConfig,
     output_dir: ConfigPath,
@@ -566,6 +623,30 @@ def run_curriculum(
 
         stage_final = stage_dir / "stage_final.zip"
         model.save(str(stage_final))
+
+        # Per-stage run config -- written next to ``best_model.zip`` and
+        # ``stage_final.zip`` immediately after the save, so that even if
+        # the runtime dies (Colab disconnect, OOM kill, raised
+        # CurriculumStalled on a subsequent stage) the completed stages
+        # already have a self-describing config.json on disk. Captures
+        # the *resolved* env + reward (after per-stage override merge),
+        # the PPO hyperparams used for this stage (with the resolved
+        # ent_coef / schedule), the seed, and run metadata (git commit
+        # + dirty flag, key library versions, hardware) -- enough to
+        # reproduce the stage even if configs/bootstrap.yaml drifts.
+        try:
+            _write_stage_config(
+                stage=stage,
+                cfg=cfg,
+                stage_dir=stage_dir,
+                output_dir=output_dir,
+                promoted=promote_cb.promoted,
+                best_win_rate=eval_cb.best_win_rate,
+            )
+        except Exception:  # noqa: BLE001
+            # A metadata write failure must not mask the training
+            # outcome; the checkpoint is the load-bearing artifact.
+            pass
 
         history.append(
             {
