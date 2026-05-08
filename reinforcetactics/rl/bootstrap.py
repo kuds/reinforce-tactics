@@ -50,6 +50,18 @@ class CurriculumStalled(RuntimeError):
         achieved_win_rate: Best win rate observed during the stage.
         threshold: Promotion threshold the stage was required to clear.
         timesteps: Stage timestep budget that was exhausted.
+        history: Per-stage results gathered up to (and including) the
+            stalled stage. Same shape as ``run_curriculum``'s
+            ``result["history"]`` so callers can recover diagnostics
+            from a partial run by reading
+            ``CurriculumStalled.partial_result()``.
+        final_model_path: Path to ``final_model.zip`` saved at the
+            point of stall (the in-progress policy at the moment the
+            stalled stage gave up). ``None`` for older callers that
+            didn't pass it.
+        metrics_callback: ``TrainingMetricsCallback`` accumulated over
+            the partial run, exposed for the same reason as
+            ``history``.
     """
 
     def __init__(
@@ -58,16 +70,41 @@ class CurriculumStalled(RuntimeError):
         achieved_win_rate: float,
         threshold: float,
         timesteps: int,
+        history: Optional[List[Dict[str, Any]]] = None,
+        final_model_path: Optional[str] = None,
+        metrics_callback: Any = None,
     ) -> None:
         self.stage_name = stage_name
         self.achieved_win_rate = achieved_win_rate
         self.threshold = threshold
         self.timesteps = timesteps
+        self.history = history or []
+        self.final_model_path = final_model_path
+        self.metrics_callback = metrics_callback
         super().__init__(
             f"Stage '{stage_name}' stalled at {timesteps:,} timesteps: "
             f"best win_rate {achieved_win_rate:.1%} did not reach "
             f"threshold {threshold:.1%}"
         )
+
+    def partial_result(self) -> Dict[str, Any]:
+        """Return the same dict shape ``run_curriculum`` returns on success.
+
+        Notebook diagnostics / video helpers consume that shape, so
+        wrapping the partial state in a ``partial_result()`` lets the
+        same plotting and replay code paths run after a stall.
+        ``model`` is omitted (re-load from ``final_model_path`` if
+        needed -- it isn't safe to keep a live SB3 model object alive
+        on an exception path because env handles may be torn down).
+        """
+        return {
+            "model": None,
+            "history": list(self.history),
+            "final_model_path": self.final_model_path,
+            "metrics_callback": self.metrics_callback,
+            "stalled": True,
+            "stalled_stage": self.stage_name,
+        }
 
 
 @dataclass
@@ -476,11 +513,27 @@ def run_curriculum(
                     pass
 
         if not promote_cb.promoted:
+            # Save the in-progress policy at the moment of stall so
+            # callers can still load it for replay videos / sanity
+            # eval / hand-off, the same way they'd load a finished
+            # ``final_model.zip``. Best-effort: a save failure here
+            # shouldn't mask the underlying stall reason.
+            stalled_final_path: Optional[str] = None
+            try:
+                final_path = output_dir / "final_model.zip"
+                assert model is not None
+                model.save(str(final_path))
+                stalled_final_path = str(final_path)
+            except Exception:  # noqa: BLE001
+                stalled_final_path = None
             raise CurriculumStalled(
                 stage_name=stage.name,
                 achieved_win_rate=eval_cb.best_win_rate,
                 threshold=stage.promotion_win_rate,
                 timesteps=stage.max_timesteps,
+                history=list(history),
+                final_model_path=stalled_final_path,
+                metrics_callback=metrics_callback,
             )
 
     final_path = output_dir / "final_model.zip"
