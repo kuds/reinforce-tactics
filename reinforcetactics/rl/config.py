@@ -6,7 +6,7 @@ reproducible without editing source. Supports:
 
 - Loading from ``.yaml``, ``.yml``, or ``.json`` files
 - Hierarchical sections: ``env``, ``ppo``, ``feudal``, ``self_play``,
-  ``alphazero``, ``eval``, ``logging``
+  ``alphazero``, ``curriculum``, ``eval``, ``logging``
 - CLI overrides: values passed via ``--key value`` beat file values
 - Dotted override keys (``ppo.learning_rate=1e-4``) for nested updates
 - Dataclass validation with typed sections
@@ -43,6 +43,7 @@ class EnvConfig:
     map_file: Optional[str] = None
     opponent: str = "bot"
     max_steps: int = 200
+    max_turns: Optional[int] = None
     fog_of_war: bool = False
     enabled_units: Optional[List[str]] = None
     action_space_type: str = "multi_discrete"
@@ -127,6 +128,175 @@ class AlphaZeroConfig:
     weight_decay: float = 1e-4
 
 
+_CURRICULUM_OPPONENTS = (
+    "random",
+    "balanced_random",
+    "simple",
+    "bot",
+    "medium",
+    "advanced",
+    "noop",
+)
+
+
+@dataclass
+class CurriculumStage:
+    """One curriculum step: a (map, opponent) pair with a promotion criterion.
+
+    The ``max_steps``, ``max_turns``, ``ent_coef``, ``reward_config``, and
+    ``opponent_kwargs`` fields are optional per-stage overrides; when ``None``
+    the runner falls back to ``cfg.env`` / ``cfg.ppo``. Typical use cases:
+
+    - Bump ``max_turns`` and ``max_steps`` on a larger map (units take more
+      turns to traverse).
+    - Raise ``ent_coef`` on the first stage of a new map to crack the
+      previous stage's policy out of a deterministic groove. Either a
+      constant float or a ``{start, end, schedule}`` mapping describing
+      a per-stage anneal driven by ``EntropyScheduleCallback``.
+    - Override ``reward_config`` keys (merged into the env defaults) when
+      a new map's geometry changes which win condition is achievable.
+    - Forward extra constructor kwargs to the opponent bot via
+      ``opponent_kwargs`` (e.g. ``{max_actions: 10}`` for ``RandomBot``).
+    """
+
+    name: str = ""
+    map_file: str = ""
+    opponent: str = ""
+    promotion_win_rate: float = 0.9
+    patience: int = 2
+    max_timesteps: int = 1_000_000
+    n_eval_episodes: int = 30
+    # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
+    max_steps: Optional[int] = None
+    max_turns: Optional[int] = None
+    ent_coef: Optional[Union[float, Dict[str, Any]]] = None
+    reward_config: Optional[Dict[str, float]] = None
+    opponent_kwargs: Optional[Dict[str, Any]] = None
+
+    def validate(self) -> None:
+        if not self.name:
+            raise ValueError("stage.name must be non-empty")
+        if not self.map_file:
+            raise ValueError(f"stage '{self.name}': map_file must be set")
+        if not self.opponent:
+            raise ValueError(f"stage '{self.name}': opponent must be set")
+        if self.opponent not in _CURRICULUM_OPPONENTS:
+            raise ValueError(
+                f"stage '{self.name}': unknown opponent '{self.opponent}'. Expected one of: {', '.join(_CURRICULUM_OPPONENTS)}"
+            )
+        if not 0.0 <= self.promotion_win_rate <= 1.0:
+            raise ValueError(f"stage '{self.name}': promotion_win_rate must be in [0, 1]")
+        if self.patience < 1:
+            raise ValueError(f"stage '{self.name}': patience must be >= 1")
+        if self.max_timesteps <= 0:
+            raise ValueError(f"stage '{self.name}': max_timesteps must be > 0")
+        if self.n_eval_episodes <= 0:
+            raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
+        if self.max_steps is not None and self.max_steps <= 0:
+            raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
+        if self.max_turns is not None and self.max_turns <= 0:
+            raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
+        if self.ent_coef is not None:
+            if isinstance(self.ent_coef, Mapping):
+                unknown = set(self.ent_coef.keys()) - {"start", "end", "schedule"}
+                if unknown:
+                    raise ValueError(
+                        f"stage '{self.name}': ent_coef schedule has unknown keys {sorted(unknown)}. "
+                        "Valid keys: start, end, schedule"
+                    )
+                for required in ("start", "end"):
+                    if required not in self.ent_coef:
+                        raise ValueError(f"stage '{self.name}': ent_coef schedule missing required key '{required}'")
+                    val = self.ent_coef[required]
+                    if not isinstance(val, (int, float)) or val < 0:
+                        raise ValueError(
+                            f"stage '{self.name}': ent_coef.{required} must be a non-negative number, got {val!r}"
+                        )
+                schedule_kind = self.ent_coef.get("schedule", "linear")
+                if schedule_kind not in ("linear", "cosine"):
+                    raise ValueError(
+                        f"stage '{self.name}': ent_coef.schedule must be 'linear' or 'cosine', got {schedule_kind!r}"
+                    )
+            elif isinstance(self.ent_coef, (int, float)):
+                if self.ent_coef < 0:
+                    raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+            else:
+                raise TypeError(
+                    f"stage '{self.name}': ent_coef must be a number or a "
+                    f"{{start, end, schedule}} mapping, got {type(self.ent_coef).__name__}"
+                )
+        if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
+            raise TypeError(
+                f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
+            )
+        if self.opponent_kwargs is not None and not isinstance(self.opponent_kwargs, Mapping):
+            raise TypeError(
+                f"stage '{self.name}': opponent_kwargs override must be a mapping, got {type(self.opponent_kwargs).__name__}"
+            )
+
+    def resolve_max_steps(self, env: "EnvConfig") -> int:
+        return self.max_steps if self.max_steps is not None else env.max_steps
+
+    def resolve_max_turns(self, env: "EnvConfig") -> Optional[int]:
+        return self.max_turns if self.max_turns is not None else env.max_turns
+
+    def resolve_ent_coef(self, ppo: "PPOConfig") -> float:
+        """Return the *initial* entropy coefficient for the stage.
+
+        For a constant override this is the value itself; for a schedule
+        mapping it's ``schedule['start']`` so ``model.ent_coef`` is
+        seeded correctly before the schedule callback takes over.
+        """
+        if self.ent_coef is None:
+            return ppo.ent_coef
+        if isinstance(self.ent_coef, Mapping):
+            return float(self.ent_coef["start"])
+        return float(self.ent_coef)
+
+    def resolve_ent_coef_schedule(self) -> Optional[Dict[str, Any]]:
+        """Return ``{start, end, schedule}`` if ``ent_coef`` is a mapping, else ``None``.
+
+        ``None`` means a constant coefficient (no callback installed); a
+        dict means the runner should attach :class:`EntropyScheduleCallback`
+        for this stage with ``total_timesteps=stage.max_timesteps``.
+        """
+        if isinstance(self.ent_coef, Mapping):
+            return {
+                "start": float(self.ent_coef["start"]),
+                "end": float(self.ent_coef["end"]),
+                "schedule": str(self.ent_coef.get("schedule", "linear")),
+            }
+        return None
+
+    def resolve_reward_config(self, env: "EnvConfig") -> Optional[Dict[str, float]]:
+        """Return the reward config to use for this stage.
+
+        Per-stage overrides are merged on top of ``env.reward_config``,
+        so a stage only needs to spell out the keys it changes. Returns
+        ``None`` when neither side has anything (env will fall back to its
+        own built-in defaults).
+        """
+        base = dict(env.reward_config) if env.reward_config else {}
+        if self.reward_config:
+            base.update(self.reward_config)
+        return base if base else None
+
+
+@dataclass
+class CurriculumConfig:
+    """Curriculum-bootstrap configuration: an ordered list of stages."""
+
+    stages: List[CurriculumStage] = field(default_factory=list)
+
+    def validate(self) -> None:
+        seen: set = set()
+        for stage in self.stages:
+            stage.validate()
+            if stage.name in seen:
+                raise ValueError(f"duplicate stage name: '{stage.name}'")
+            seen.add(stage.name)
+
+
 @dataclass
 class EvalConfig:
     """Evaluation / checkpointing cadence."""
@@ -159,6 +329,7 @@ class TrainingConfig:
     feudal: FeudalConfig = field(default_factory=FeudalConfig)
     self_play: SelfPlayConfig = field(default_factory=SelfPlayConfig)
     alphazero: AlphaZeroConfig = field(default_factory=AlphaZeroConfig)
+    curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -190,6 +361,7 @@ class TrainingConfig:
             raise ValueError("self_play.pool_strategy must be 'uniform', 'recent', or 'prioritized'")
         if not 0.0 <= self.self_play.min_win_rate_for_pool <= 1.0:
             raise ValueError("self_play.min_win_rate_for_pool must be in [0, 1]")
+        self.curriculum.validate()
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dict (suitable for JSON/YAML dumping)."""
@@ -202,13 +374,43 @@ _SECTION_TYPES = {
     "feudal": FeudalConfig,
     "self_play": SelfPlayConfig,
     "alphazero": AlphaZeroConfig,
+    "curriculum": CurriculumConfig,
     "eval": EvalConfig,
     "logging": LoggingConfig,
 }
 
 
+def _build_curriculum(raw: Any) -> CurriculumConfig:
+    """Build CurriculumConfig from a raw mapping, deserializing nested stages."""
+    if raw is None:
+        return CurriculumConfig()
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"Section 'curriculum' must be a mapping, got {type(raw).__name__}")
+    valid_fields = {f.name for f in fields(CurriculumConfig)}
+    unknown = set(raw.keys()) - valid_fields
+    if unknown:
+        raise ValueError(f"Unknown keys in section 'curriculum': {sorted(unknown)}. Valid keys: {sorted(valid_fields)}")
+    raw_stages = raw.get("stages") or []
+    if not isinstance(raw_stages, list):
+        raise TypeError(f"'curriculum.stages' must be a list, got {type(raw_stages).__name__}")
+    stage_fields = {f.name for f in fields(CurriculumStage)}
+    stages: List[CurriculumStage] = []
+    for i, s in enumerate(raw_stages):
+        if not isinstance(s, Mapping):
+            raise TypeError(f"curriculum.stages[{i}] must be a mapping, got {type(s).__name__}")
+        unknown_stage = set(s.keys()) - stage_fields
+        if unknown_stage:
+            raise ValueError(
+                f"Unknown keys for CurriculumStage at index {i}: {sorted(unknown_stage)}. Valid keys: {sorted(stage_fields)}"
+            )
+        stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
+    return CurriculumConfig(stages=stages)
+
+
 def _build_section(section_name: str, raw: Any):
     """Instantiate a typed section from raw data, validating unknown fields."""
+    if section_name == "curriculum":
+        return _build_curriculum(raw)
     if raw is None:
         return _SECTION_TYPES[section_name]()
     if not isinstance(raw, Mapping):

@@ -1,19 +1,14 @@
 # PPO bootstrap curriculum.
 #
-# Trains a single MaskablePPO policy through a sequence of stages, advancing
-# only when the eval win-rate stays at or above `promotion_win_rate` for
-# `patience` consecutive evaluations. The final checkpoint is intended as a
-# warm-start for self-play (notebooks/ppo_training.ipynb).
-#
-# Hard cutoff between stages (no opponent mixing). If a stage exhausts its
-# `max_timesteps` budget without promoting, the runner raises
-# CurriculumStalled — investigate (reward shaping, hyperparams) before
-# raising the budget blindly.
+# Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
+# Stages live under curriculum.stages; if a stage exhausts its
+# `max_timesteps` without promoting, the runner raises CurriculumStalled.
+algorithm: maskable_ppo
 seed: 42
-n_envs: 4
-eval_freq: 50_000
+total_timesteps: 14_000_000  # informational; per-stage budgets drive run length
 
 env:
+  n_envs: 4
   max_steps: 400
   max_turns: 20
   enabled_units: [W, M, A]
@@ -53,239 +48,131 @@ ppo:
   ent_coef: 0.05
   vf_coef: 0.5
   max_grad_norm: 0.5
-  # SB3 defaults `net_arch` to [64, 64], which is undersized for this env:
-  # ~734 input dims (grid + units + global + action_mask) feeding a 64-dim
-  # bottleneck before a flat-discrete head with up to 512 logits. The
-  # policy literally has fewer hidden dims than action choices. Bump to
-  # [256, 256] (~150K params total) so the value head can actually
-  # distinguish board states across map transitions -- previous runs
-  # showed catastrophic value dislocation on starter -> beginner that's
-  # plausibly capacity-limited as well as transfer-limited.
   policy_kwargs:
     net_arch:
       pi: [256, 256]
       vf: [256, 256]
 
-# Curriculum:
-#   starter map:  random -> simple -> medium
-#   beginner map: balanced_random -> random(max=10) -> random(max=20) -> simple -> medium
-#
-# Earlier iterations included `noop` stages on each map as a stage-0
-# sanity check. They didn't work as intended: a NoopBot opponent
-# produces zero state variance, so PPO rollouts produce constant
-# returns, the value function fits a constant baseline, advantages
-# collapse to ~0, and the policy stops updating. The "easier"
-# environment is actually the hardest for PPO. The original 6-stage
-# curriculum (no noop) converged on starter_random / simple / medium
-# in ~250k steps each because RandomBot's actions inject the variance
-# PPO needs to learn from. We trust opponent randomness for
-# exploration rather than trying to remove it.
-#
-# Opponent intensity on the beginner ramp:
-#   - balanced_random:  one build attempt + one random action per owned
-#                       unit per turn (BalancedRandomBot). Lighter than
-#                       full `random` and resilient -- action throughput
-#                       scales with the bot's army size, so killing its
-#                       units doesn't stall the game.
-#   - random (max=10):  RandomBot with opponent_kwargs.max_actions=10.
-#                       Halfway between balanced_random and the full
-#                       20-action stress-test, so the policy gets a
-#                       gentler intensity ramp before facing peak
-#                       random pressure.
-#   - random (max=20):  up to 20 random actions per turn (the stress-test
-#                       baseline; the original `random` opponent).
-#
-# Per-stage overrides handle the starter -> beginner transition:
-#   - max_steps / max_turns:  beginner map needs much longer episodes
-#                             than starter. Bumped to 1500 / 100 (was
-#                             1000 / 60) after a 2M-step run on
-#                             beginner_random_20 plateaued at ~13% WR
-#                             with ZERO losses across 41 evals -- the
-#                             smoking gun for a time-budget stall.
-#                             Episode length saturated near 950 of
-#                             1000 max_steps for the entire run; the
-#                             agent's strategy needed ~80 turns and
-#                             only had 60.
-#   - ent_coef:               linear schedule 0.10 -> 0.03 across ALL
-#                             THREE random-opponent stages (balanced_random,
-#                             random_10, random_20). Each step in opponent
-#                             action throughput is its own chaos-scaling
-#                             transition that benefits from elevated *early*
-#                             exploration, but a flat 0.10 sustained for the
-#                             whole stage prevents the policy from committing
-#                             as it approaches the threshold (a previous
-#                             beginner_random_20 run oscillated 43-70% WR in
-#                             adjacent evals because action sampling stayed
-#                             noisy throughout). Cooling to 0.03 by stage
-#                             end gives early exploration plus late
-#                             convergence. Held at 0.05 (constant) on
-#                             `beginner_simple`/`beginner_medium`, where
-#                             opponents are deterministic and we want
-#                             commitment, not exploration.
-#   - reward_config:          beginner-map geometry makes HQ capture
-#                             much harder than elimination, so we
-#                             equalize the two terminal rewards
-#                             (was 5000/1000) and drop `seize_progress`
-#                             so the agent stops being paid to start
-#                             seizes it can't finish in contested space.
-#
-# Starter stages use `patience: 1` so we promote at the first hit of the
-# threshold rather than letting the policy keep training on a saturated
-# reward signal -- earlier runs that promoted at patience=2 produced
-# std=0.0 fully deterministic policies that didn't transfer.
-stages:
-  - name: starter_random
-    map_file: maps/1v1/starter.csv
-    opponent: random
-    promotion_win_rate: 0.90
-    patience: 1
-    max_timesteps: 1_000_000
-    n_eval_episodes: 60
+eval:
+  eval_freq: 50_000
 
-  - name: starter_simple
-    map_file: maps/1v1/starter.csv
-    opponent: simple
-    promotion_win_rate: 0.90
-    patience: 1
-    max_timesteps: 2_000_000
-    n_eval_episodes: 60
+curriculum:
+  stages:
+    - name: starter_random
+      map_file: maps/1v1/starter.csv
+      opponent: random
+      promotion_win_rate: 0.90
+      patience: 1
+      max_timesteps: 1_000_000
+      n_eval_episodes: 60
 
-  - name: starter_medium
-    map_file: maps/1v1/starter.csv
-    opponent: medium
-    promotion_win_rate: 0.75
-    patience: 1
-    max_timesteps: 3_000_000
-    n_eval_episodes: 60
+    - name: starter_simple
+      map_file: maps/1v1/starter.csv
+      opponent: simple
+      promotion_win_rate: 0.90
+      patience: 1
+      max_timesteps: 2_000_000
+      n_eval_episodes: 60
 
-  - name: beginner_balanced_random
-    map_file: maps/1v1/beginner.csv
-    # BalancedRandomBot: one build + one random action per owned unit per
-    # turn. Lighter than full `random` (20 actions/turn) but resilient --
-    # action throughput scales with army size, so killing the bot's units
-    # doesn't stall the game.
-    opponent: balanced_random
-    promotion_win_rate: 0.85
-    patience: 2
-    max_timesteps: 1_500_000
-    n_eval_episodes: 60
-    max_steps: 1500
-    max_turns: 100
-    # Entropy schedule on the FIRST beginner stage (map-shift transition
-    # shock): start at 0.10 to crack the starter-map deterministic
-    # groove and re-explore, cool to 0.03 by stage end so the policy
-    # commits as it approaches the 0.85 threshold. Same shape on the
-    # other two random-opponent stages below; deterministic-opponent
-    # stages (`beginner_simple`/`beginner_medium`) hold a constant
-    # 0.05 because exploration there is wasted entropy.
-    ent_coef:
-      start: 0.10
-      end: 0.03
-      schedule: linear
-    reward_config:
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
+    - name: starter_medium
+      map_file: maps/1v1/starter.csv
+      opponent: medium
+      promotion_win_rate: 0.75
+      patience: 1
+      max_timesteps: 3_000_000
+      n_eval_episodes: 60
 
-  - name: beginner_random_10
-    map_file: maps/1v1/beginner.csv
-    opponent: random
-    # Halfway between balanced_random and the full 20-action random bot:
-    # cap RandomBot at 10 actions per turn so the agent gets a gentler
-    # intensity ramp before facing peak random pressure.
-    opponent_kwargs:
-      max_actions: 10
-    promotion_win_rate: 0.75
-    patience: 2
-    max_timesteps: 1_500_000
-    n_eval_episodes: 60
-    max_steps: 1500
-    max_turns: 100
-    ent_coef:
-      start: 0.10
-      end: 0.03
-      schedule: linear
-    reward_config:
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
+    - name: beginner_balanced_random
+      map_file: maps/1v1/beginner.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 60
+      max_steps: 1500
+      max_turns: 100
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
 
-  - name: beginner_random_20
-    map_file: maps/1v1/beginner.csv
-    opponent: random
-    opponent_kwargs:
-      max_actions: 20
-    # Threshold held at 0.75. The previous 2M-step run plateaued at
-    # ~13% WR with zero losses ever (a time-budget stall: episodes
-    # saturating at max_steps and ending as draws). The fix is the
-    # bumped `max_turns: 100` / `max_steps: 1500` plus held-high
-    # entropy on the chaos-scaling transition -- 100 turns is ~1.67x
-    # the previous 60, which should give the agent's elimination/seize
-    # sequence enough room to finish against 20-action random pressure.
-    # If this stage stalls again with the new budget, that's the right
-    # signal to relax the threshold rather than baking in the relaxation
-    # before we know the time-budget fix is sufficient.
-    promotion_win_rate: 0.75
-    patience: 2
-    max_timesteps: 2_000_000
-    n_eval_episodes: 60
-    max_steps: 1500
-    max_turns: 100
-    ent_coef:
-      start: 0.10
-      end: 0.03
-      schedule: linear
-    # Add per-action combat signal on top of the structure-capture
-    # rewards. The shipped env defaults set ``kill: 0`` and
-    # ``damage_scale: 0``, which combined with ``capture: 2000`` and
-    # ``draw: -5000`` (per-step penalty diluted across ~900 steps)
-    # trains the policy to "capture structures, retreat, time out".
-    # That worked against ``random_10`` (W/L/D = 30/0/0) because the
-    # bot was slow enough to let the agent capture freely; against
-    # ``random_20`` the bot's 2x action throughput forces engagement,
-    # but with zero combat gradient the agent stalls -- earlier runs
-    # plateaued at ~13% WR with literally zero losses across 120
-    # eval games (refusing combat, not losing it). Sized to be
-    # comparable to one ``seize_progress`` step (+50) per kill so the
-    # policy stops treating combat as gradient-free.
-    reward_config:
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
-      kill: 50.0
-      damage_scale: 0.5
+    - name: beginner_random_10
+      map_file: maps/1v1/beginner.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 60
+      max_steps: 1500
+      max_turns: 100
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
 
-  - name: beginner_simple
-    map_file: maps/1v1/beginner.csv
-    opponent: simple
-    promotion_win_rate: 0.85
-    patience: 2
-    max_timesteps: 2_500_000
-    n_eval_episodes: 60
-    max_steps: 1500
-    max_turns: 100
-    ent_coef: 0.05
-    reward_config:
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
+    - name: beginner_random_20
+      map_file: maps/1v1/beginner.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 2_000_000
+      n_eval_episodes: 60
+      max_steps: 1500
+      max_turns: 100
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
+        kill: 50.0
+        damage_scale: 0.5
 
-  - name: beginner_medium
-    map_file: maps/1v1/beginner.csv
-    opponent: medium
-    promotion_win_rate: 0.65
-    patience: 2
-    max_timesteps: 4_000_000
-    n_eval_episodes: 60
-    max_steps: 1500
-    max_turns: 100
-    ent_coef: 0.05
-    reward_config:
-      win_by_hq_capture: 3000.0
-      win_by_elimination: 3000.0
-      seize_progress: 50.0
-      capture: 2000.0
+    - name: beginner_simple
+      map_file: maps/1v1/beginner.csv
+      opponent: simple
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 2_500_000
+      n_eval_episodes: 60
+      max_steps: 1500
+      max_turns: 100
+      ent_coef: 0.05
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
+
+    - name: beginner_medium
+      map_file: maps/1v1/beginner.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 4_000_000
+      n_eval_episodes: 60
+      max_steps: 1500
+      max_turns: 100
+      ent_coef: 0.05
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
