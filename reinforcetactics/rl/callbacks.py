@@ -329,12 +329,14 @@ class EntropyScheduleCallback(BaseCallback):
             self._stage_start_step = int(self.num_timesteps)
         elapsed = int(self.num_timesteps) - self._stage_start_step
         progress = elapsed / self.total_timesteps if self.total_timesteps > 0 else 1.0
-        new_value = self._value_at(progress)
-        # Setting an attribute on the model is cheap; SB3 picks it up
-        # on the next train() iteration.
-        self.model.ent_coef = float(new_value)
+        new_value = float(self._value_at(progress))
+        # Setting the attribute is cheap; SB3 picks it up on the next
+        # train() iteration. Use setattr so mypy doesn't complain about
+        # ``ent_coef`` not being declared on ``BaseAlgorithm`` -- it's
+        # a PPO/MaskablePPO-specific field, not part of the base class.
+        setattr(self.model, "ent_coef", new_value)
         # Tensorboard: emit the live coefficient so the schedule shows
         # up alongside other train/* curves. ``record`` is buffered
         # until the next logger.dump(), which SB3 calls after train().
-        self.logger.record("train/ent_coef", float(new_value))
+        self.logger.record("train/ent_coef", new_value)
         return True
