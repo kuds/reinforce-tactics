@@ -18,7 +18,11 @@ from reinforcetactics.rl.bootstrap import (
     load_bootstrap_config,
     run_curriculum,
 )
-from reinforcetactics.rl.callbacks import PeriodicEvalCallback, PromotionCallback
+from reinforcetactics.rl.callbacks import (
+    EntropyScheduleCallback,
+    PeriodicEvalCallback,
+    PromotionCallback,
+)
 from reinforcetactics.rl.config import PPOConfig
 
 # ---------------------------------------------------------------------------
@@ -275,9 +279,20 @@ class TestBootstrapConfig:
         assert first_beginner.max_turns is not None
         assert first_beginner.max_turns >= 30
         # Entropy bump on the FIRST beginner stage (map-shift exploration
-        # shock). Cooled on later stages.
+        # shock). Cooled on later stages. The shipped config now drives
+        # the random-opponent stages with a {start, end, schedule}
+        # mapping so the coefficient anneals down as the policy
+        # approaches the threshold; resolving against the PPO default
+        # gives the *initial* value (= schedule['start']) which still
+        # has to clear the global default to count as a bump.
         assert first_beginner.ent_coef is not None
-        assert first_beginner.ent_coef > cfg.ppo.ent_coef
+        assert first_beginner.resolve_ent_coef(cfg.ppo) > cfg.ppo.ent_coef
+        # And: the schedule must actually anneal (start > end), otherwise
+        # we paid for the schedule machinery without getting the
+        # commitment-phase cooling that justified introducing it.
+        sched = first_beginner.resolve_ent_coef_schedule()
+        assert sched is not None, "first beginner stage should drive an entropy schedule"
+        assert sched["start"] > sched["end"]
         # Reward-shape override on beginner stages: HQ capture is much
         # harder than elimination on the bigger map, so the two terminal
         # rewards must be equalized (or capture <= elimination).
@@ -365,6 +380,73 @@ class TestCurriculumStageResolution:
             CurriculumStage(**common, ent_coef=-0.01).validate()
 
 
+class TestCurriculumStageEntropySchedule:
+    """``ent_coef`` accepts either a constant or a ``{start, end, schedule}``
+    mapping. The mapping form drives :class:`EntropyScheduleCallback` so
+    exploration noise can be cooled across a stage."""
+
+    common = dict(name="s", map_file="m.csv", opponent="random")
+
+    def test_resolve_initial_value_uses_schedule_start(self):
+        ppo = PPOConfig(ent_coef=0.05)
+        stage = CurriculumStage(
+            **self.common,
+            ent_coef={"start": 0.10, "end": 0.03, "schedule": "linear"},
+        )
+        # Initial seed before the callback takes over: the schedule's
+        # start, not the ppo default.
+        assert stage.resolve_ent_coef(ppo) == pytest.approx(0.10)
+
+    def test_resolve_schedule_returns_descriptor(self):
+        stage = CurriculumStage(
+            **self.common,
+            ent_coef={"start": 0.10, "end": 0.03, "schedule": "linear"},
+        )
+        sched = stage.resolve_ent_coef_schedule()
+        assert sched == {"start": 0.10, "end": 0.03, "schedule": "linear"}
+
+    def test_resolve_schedule_defaults_to_linear(self):
+        stage = CurriculumStage(**self.common, ent_coef={"start": 0.10, "end": 0.03})
+        sched = stage.resolve_ent_coef_schedule()
+        assert sched is not None
+        assert sched["schedule"] == "linear"
+
+    def test_resolve_schedule_is_none_for_constant(self):
+        stage = CurriculumStage(**self.common, ent_coef=0.10)
+        assert stage.resolve_ent_coef_schedule() is None
+
+    def test_resolve_schedule_is_none_when_unset(self):
+        stage = CurriculumStage(**self.common)
+        assert stage.resolve_ent_coef_schedule() is None
+
+    def test_validate_rejects_unknown_schedule_keys(self):
+        with pytest.raises(ValueError, match="unknown keys"):
+            CurriculumStage(
+                **self.common,
+                ent_coef={"start": 0.1, "end": 0.0, "extra": 1},
+            ).validate()
+
+    def test_validate_rejects_missing_required_key(self):
+        with pytest.raises(ValueError, match="missing required key 'end'"):
+            CurriculumStage(**self.common, ent_coef={"start": 0.1}).validate()
+        with pytest.raises(ValueError, match="missing required key 'start'"):
+            CurriculumStage(**self.common, ent_coef={"end": 0.03}).validate()
+
+    def test_validate_rejects_negative_endpoint(self):
+        with pytest.raises(ValueError, match="ent_coef.end"):
+            CurriculumStage(
+                **self.common,
+                ent_coef={"start": 0.1, "end": -0.01},
+            ).validate()
+
+    def test_validate_rejects_unknown_schedule_kind(self):
+        with pytest.raises(ValueError, match="schedule must be 'linear' or 'cosine'"):
+            CurriculumStage(
+                **self.common,
+                ent_coef={"start": 0.1, "end": 0.03, "schedule": "exponential"},
+            ).validate()
+
+
 # ---------------------------------------------------------------------------
 # run_curriculum integration with fakes (no SB3, no real env)
 # ---------------------------------------------------------------------------
@@ -401,6 +483,11 @@ class _FakeModel:
     # before each ``learn()`` call, parallel to ``learn_calls``.
     ent_coef: float = 0.0
     ent_coef_at_learn: List[float] = field(default_factory=list)
+    # The full callback list passed to each ``learn()`` invocation,
+    # so tests can assert which callbacks the runner installed for a
+    # given stage (notably whether ``EntropyScheduleCallback`` was
+    # added when the stage's ``ent_coef`` is a schedule mapping).
+    callbacks_at_learn: List[List[Any]] = field(default_factory=list)
     _current_stage_idx: int = 0
     _stage_names: List[str] = field(default_factory=list)
 
@@ -420,6 +507,7 @@ class _FakeModel:
         # Snapshot whatever ``ent_coef`` the runner mutated us to prior
         # to this learn() call.
         self.ent_coef_at_learn.append(float(self.ent_coef))
+        self.callbacks_at_learn.append(list(callback))
 
         # SB3 wires up callbacks before _on_step; mimic the parts we use.
         # Don't set ``cb.logger`` directly: BaseCallback.logger is a
@@ -650,3 +738,161 @@ class TestRunCurriculum:
         assert partial["history"][0]["promoted"] is False
         assert partial["final_model_path"] is not None
         assert (tmp_path / "final_model.zip").exists()
+
+    def test_installs_entropy_schedule_callback_for_dict_ent_coef(self, tmp_path):
+        """When ``stage.ent_coef`` is a ``{start, end, schedule}`` mapping,
+        the runner should attach :class:`EntropyScheduleCallback` configured
+        against the stage's budget so the coefficient anneals across the
+        stage. A constant ``ent_coef`` must NOT install one (we want the
+        commitment-phase stages to keep a fixed coefficient).
+        """
+        stages = [
+            # Constant: no schedule callback expected.
+            CurriculumStage(
+                name="constant",
+                map_file="maps/1v1/starter.csv",
+                opponent="random",
+                promotion_win_rate=0.9,
+                patience=2,
+                max_timesteps=10_000,
+                n_eval_episodes=2,
+                ent_coef=0.05,
+            ),
+            # Schedule mapping: schedule callback expected.
+            CurriculumStage(
+                name="annealed",
+                map_file="maps/1v1/beginner.csv",
+                opponent="simple",
+                promotion_win_rate=0.9,
+                patience=2,
+                max_timesteps=20_000,
+                n_eval_episodes=2,
+                ent_coef={"start": 0.10, "end": 0.03, "schedule": "linear"},
+            ),
+        ]
+        program = {"constant": [0.95, 0.95], "annealed": [0.95, 0.95]}
+        cfg, mf, tef, eef, _, _, get_model = _setup_run(stages, program, tmp_path)
+
+        run_curriculum(
+            cfg,
+            output_dir=tmp_path,
+            train_env_factory=tef,
+            eval_env_factory=eef,
+            model_factory=mf,
+        )
+
+        model = get_model()
+        # First stage: constant ent_coef -> no schedule callback.
+        constant_cbs = model.callbacks_at_learn[0]
+        assert not any(isinstance(c, EntropyScheduleCallback) for c in constant_cbs)
+        # Second stage: schedule callback installed and configured to span
+        # the stage's own budget (not the cumulative timestep counter).
+        annealed_cbs = model.callbacks_at_learn[1]
+        sched_cb = next((c for c in annealed_cbs if isinstance(c, EntropyScheduleCallback)), None)
+        assert sched_cb is not None, "expected EntropyScheduleCallback for dict ent_coef"
+        assert sched_cb.start == pytest.approx(0.10)
+        assert sched_cb.end == pytest.approx(0.03)
+        assert sched_cb.schedule == "linear"
+        assert sched_cb.total_timesteps == 20_000
+        # The model's ent_coef seeded before learn() should be the
+        # schedule's *start* value, so the callback has a sensible
+        # initial position to anneal from.
+        assert model.ent_coef_at_learn[1] == pytest.approx(0.10)
+
+
+# ---------------------------------------------------------------------------
+# EntropyScheduleCallback unit tests
+# ---------------------------------------------------------------------------
+
+
+class _EntropyScheduleHarness:
+    """Minimal SB3-compatible model stub for driving EntropyScheduleCallback.
+
+    The real SB3 training loop pokes ``cb.num_timesteps`` directly on the
+    callback (``BaseCallback`` keeps it as a plain attribute, not a
+    property), and the callback writes ``model.ent_coef`` back. Tests
+    set ``cb.num_timesteps`` to drive progress and read
+    ``harness.ent_coef`` to verify the schedule.
+    """
+
+    def __init__(self) -> None:
+        self.ent_coef = 0.0
+        self.logger = _StubLogger()
+
+
+class TestEntropyScheduleCallback:
+    def test_validates_inputs(self):
+        with pytest.raises(ValueError):
+            EntropyScheduleCallback(start=-0.1, end=0.0, total_timesteps=100)
+        with pytest.raises(ValueError):
+            EntropyScheduleCallback(start=0.1, end=-0.1, total_timesteps=100)
+        with pytest.raises(ValueError):
+            EntropyScheduleCallback(start=0.1, end=0.0, total_timesteps=0)
+        with pytest.raises(ValueError):
+            EntropyScheduleCallback(start=0.1, end=0.0, total_timesteps=100, schedule="unknown")
+
+    def test_linear_schedule_endpoints_and_midpoint(self):
+        cb = EntropyScheduleCallback(start=0.10, end=0.02, total_timesteps=1000)
+        harness = _EntropyScheduleHarness()
+        cb.model = harness
+        # _on_training_start anchors the stage start step against the
+        # cumulative ``num_timesteps`` so progress is per-stage. SB3
+        # writes this attribute on the callback during real training;
+        # in tests we mutate it directly.
+        cb.num_timesteps = 5000  # already non-zero from prior stages
+        cb._on_training_start()
+        # Step 0 of this stage -> start.
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.10)
+        # Halfway through the stage -> linear midpoint.
+        cb.num_timesteps = 5000 + 500
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.06)
+        # End of stage -> end value.
+        cb.num_timesteps = 5000 + 1000
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.02)
+
+    def test_clamps_progress_beyond_budget(self):
+        cb = EntropyScheduleCallback(start=0.10, end=0.02, total_timesteps=1000)
+        harness = _EntropyScheduleHarness()
+        cb.model = harness
+        cb.num_timesteps = 0
+        cb._on_training_start()
+        # Overshoot the budget (can happen if the stage's actual
+        # ``learn()`` runs slightly past the announced budget): the
+        # coefficient should clamp at ``end``, not extrapolate.
+        cb.num_timesteps = 10_000
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.02)
+
+    def test_cosine_schedule_starts_high_ends_low(self):
+        cb = EntropyScheduleCallback(start=0.10, end=0.02, total_timesteps=1000, schedule="cosine")
+        harness = _EntropyScheduleHarness()
+        cb.model = harness
+        cb.num_timesteps = 0
+        cb._on_training_start()
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.10)
+        # Cosine half-cycle midpoint = (start + end) / 2.
+        cb.num_timesteps = 500
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.06)
+        cb.num_timesteps = 1000
+        cb._on_step()
+        assert harness.ent_coef == pytest.approx(0.02)
+
+    def test_records_value_to_logger(self):
+        cb = EntropyScheduleCallback(start=0.10, end=0.02, total_timesteps=1000)
+        harness = _EntropyScheduleHarness()
+        cb.model = harness
+        cb.num_timesteps = 0
+        cb._on_training_start()
+        cb.num_timesteps = 250
+        cb._on_step()
+        # Tensorboard plumbing: the live coefficient lands under
+        # ``train/ent_coef`` so it shows up alongside SB3's own
+        # train/* curves. Lets us see the schedule actually firing
+        # in TB without parsing logs.
+        assert "train/ent_coef" in harness.logger.records
+        assert harness.logger.records["train/ent_coef"] == pytest.approx(harness.ent_coef)

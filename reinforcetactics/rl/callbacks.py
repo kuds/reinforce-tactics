@@ -12,6 +12,10 @@ Reusable SB3 callbacks for RL training.
   exits ``model.learn()`` early once a configurable win-rate threshold
   is sustained for ``patience`` consecutive evaluations. Used by the
   bootstrap-curriculum runner to advance between stages.
+- ``EntropyScheduleCallback`` mutates ``model.ent_coef`` over the
+  course of a stage so exploration noise can be cooled as the policy
+  approaches its win-rate threshold. SB3 reads ``ent_coef`` fresh in
+  every ``train()`` step so live mutation works without rebuilding.
 
 Both callbacks are designed to work with ``MaskablePPO`` from sb3-contrib
 as well as plain ``PPO`` from stable-baselines3 — they don't import
@@ -20,6 +24,7 @@ sb3-contrib, so the module remains usable in non-masked training too.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -246,4 +251,90 @@ class PromotionCallback(BaseCallback):
                         f"{self.num_timesteps:,} steps — advancing"
                     )
                 return False
+        return True
+
+
+class EntropyScheduleCallback(BaseCallback):
+    """Anneal ``model.ent_coef`` from ``start`` to ``end`` over a stage.
+
+    Use case: PPO benefits from elevated exploration on map-shift /
+    opponent-shift transitions, but holding a high entropy coefficient
+    for the entire stage prevents the policy from committing as it
+    approaches the promotion threshold (eval WR oscillates ±15%
+    between adjacent evals because sampled actions remain noisy). A
+    schedule that starts high and cools to a small commitment-phase
+    value gives both: early exploration plus late convergence.
+
+    SB3 reads ``self.ent_coef`` fresh inside every ``train()`` step
+    (see ``stable_baselines3.ppo.ppo.PPO.train``), so writing the
+    attribute in ``_on_step`` is the documented way to drive a
+    schedule without subclassing PPO. The bootstrap runner installs
+    this callback per stage and removes it on stage exit.
+
+    Progress is computed against ``total_timesteps`` (the stage's
+    own budget), starting from whatever ``num_timesteps`` was when
+    the stage's ``learn()`` call began. That matters because the
+    bootstrap runner uses ``reset_num_timesteps=False``, so
+    ``num_timesteps`` is cumulative across stages.
+
+    Args:
+        start: Initial entropy coefficient.
+        end: Final entropy coefficient at the end of the stage.
+        total_timesteps: Stage budget (matches ``learn(total_timesteps=...)``).
+        schedule: ``"linear"`` (default) or ``"cosine"`` (smooth half-cosine
+            from ``start`` to ``end``).
+    """
+
+    _SCHEDULES = ("linear", "cosine")
+
+    def __init__(
+        self,
+        start: float,
+        end: float,
+        total_timesteps: int,
+        schedule: str = "linear",
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose=verbose)
+        if start < 0 or end < 0:
+            raise ValueError(f"start/end must be >= 0, got start={start}, end={end}")
+        if total_timesteps <= 0:
+            raise ValueError(f"total_timesteps must be > 0, got {total_timesteps}")
+        if schedule not in self._SCHEDULES:
+            raise ValueError(f"schedule must be one of {self._SCHEDULES}, got '{schedule}'")
+        self.start = float(start)
+        self.end = float(end)
+        self.total_timesteps = int(total_timesteps)
+        self.schedule = schedule
+        self._stage_start_step: Optional[int] = None
+
+    def _on_training_start(self) -> None:
+        # ``num_timesteps`` is cumulative across stages because the
+        # bootstrap runner passes ``reset_num_timesteps=False``; capture
+        # the stage's starting offset here so progress is computed per
+        # stage rather than per run.
+        self._stage_start_step = int(self.num_timesteps)
+
+    def _value_at(self, progress: float) -> float:
+        progress = max(0.0, min(1.0, progress))
+        if self.schedule == "linear":
+            return self.start + (self.end - self.start) * progress
+        # cosine: smooth ease from start -> end across [0, 1].
+        return self.end + 0.5 * (self.start - self.end) * (1.0 + math.cos(math.pi * progress))
+
+    def _on_step(self) -> bool:
+        if self._stage_start_step is None:
+            # _on_training_start should always run first, but be defensive
+            # in case a caller invokes _on_step directly (e.g. unit tests).
+            self._stage_start_step = int(self.num_timesteps)
+        elapsed = int(self.num_timesteps) - self._stage_start_step
+        progress = elapsed / self.total_timesteps if self.total_timesteps > 0 else 1.0
+        new_value = self._value_at(progress)
+        # Setting an attribute on the model is cheap; SB3 picks it up
+        # on the next train() iteration.
+        self.model.ent_coef = float(new_value)
+        # Tensorboard: emit the live coefficient so the schedule shows
+        # up alongside other train/* curves. ``record`` is buffered
+        # until the next logger.dump(), which SB3 calls after train().
+        self.logger.record("train/ent_coef", float(new_value))
         return True
