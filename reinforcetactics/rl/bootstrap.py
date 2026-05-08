@@ -103,6 +103,9 @@ class CurriculumStage:
     # Reward-config override is *merged* over the env default (not replaced)
     # so per-stage entries only need to spell out the keys that change.
     reward_config: Optional[Dict[str, float]] = None
+    # Extra kwargs forwarded to the opponent constructor (e.g.
+    # ``{max_actions: 10}`` for ``RandomBot``). None / empty = use bot defaults.
+    opponent_kwargs: Optional[Dict[str, Any]] = None
 
     def validate(self) -> None:
         if not self.name:
@@ -139,6 +142,10 @@ class CurriculumStage:
         if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
             raise TypeError(
                 f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
+            )
+        if self.opponent_kwargs is not None and not isinstance(self.opponent_kwargs, Mapping):
+            raise TypeError(
+                f"stage '{self.name}': opponent_kwargs override must be a mapping, got {type(self.opponent_kwargs).__name__}"
             )
 
     def resolve_max_steps(self, defaults: "BootstrapEnvDefaults") -> int:
@@ -301,6 +308,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
         max_flat_actions=cfg.env.max_flat_actions,
         seed=cfg.seed,
         use_subprocess=False,
+        opponent_kwargs=stage.opponent_kwargs,
     )
 
 
@@ -317,6 +325,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: BootstrapConfig):
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
         seed=cfg.seed,
+        opponent_kwargs=stage.opponent_kwargs,
     )
 
 

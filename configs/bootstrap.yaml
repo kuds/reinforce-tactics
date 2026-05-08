@@ -68,7 +68,7 @@ ppo:
 
 # Curriculum:
 #   starter map:  random -> simple -> medium
-#   beginner map: balanced_random -> random -> simple -> medium
+#   beginner map: balanced_random -> random(max=10) -> random(max=20) -> simple -> medium
 #
 # Earlier iterations included `noop` stages on each map as a stage-0
 # sanity check. They didn't work as intended: a NoopBot opponent
@@ -87,7 +87,12 @@ ppo:
 #                       full `random` and resilient -- action throughput
 #                       scales with the bot's army size, so killing its
 #                       units doesn't stall the game.
-#   - random:           up to 20 random actions per turn (the stress-test
+#   - random (max=10):  RandomBot with opponent_kwargs.max_actions=10.
+#                       Halfway between balanced_random and the full
+#                       20-action stress-test, so the policy gets a
+#                       gentler intensity ramp before facing peak
+#                       random pressure.
+#   - random (max=20):  up to 20 random actions per turn (the stress-test
 #                       baseline; the original `random` opponent).
 #
 # Per-stage overrides handle the starter -> beginner transition:
@@ -143,7 +148,7 @@ stages:
     patience: 2
     max_timesteps: 1_500_000
     n_eval_episodes: 30
-    max_steps: 800
+    max_steps: 1000
     max_turns: 60
     # First stage on the new map -> entropy bump so the policy can
     # adapt navigation to the bigger map without immediately
@@ -155,14 +160,37 @@ stages:
       seize_progress: 50.0
       capture: 2000.0
 
-  - name: beginner_random
+  - name: beginner_random_10
     map_file: maps/1v1/beginner.csv
     opponent: random
+    # Halfway between balanced_random and the full 20-action random bot:
+    # cap RandomBot at 10 actions per turn so the agent gets a gentler
+    # intensity ramp before facing peak random pressure.
+    opponent_kwargs:
+      max_actions: 10
+    promotion_win_rate: 0.75
+    patience: 2
+    max_timesteps: 1_500_000
+    n_eval_episodes: 30
+    max_steps: 1000
+    max_turns: 60
+    ent_coef: 0.07
+    reward_config:
+      win_by_hq_capture: 3000.0
+      win_by_elimination: 3000.0
+      seize_progress: 50.0
+      capture: 2000.0
+
+  - name: beginner_random_20
+    map_file: maps/1v1/beginner.csv
+    opponent: random
+    opponent_kwargs:
+      max_actions: 20
     promotion_win_rate: 0.75
     patience: 2
     max_timesteps: 2_000_000
     n_eval_episodes: 30
-    max_steps: 800
+    max_steps: 1000
     max_turns: 60
     # Cooled now that the policy has adapted to the bigger map.
     ent_coef: 0.07
@@ -179,7 +207,7 @@ stages:
     patience: 2
     max_timesteps: 2_500_000
     n_eval_episodes: 30
-    max_steps: 800
+    max_steps: 1000
     max_turns: 60
     ent_coef: 0.05
     reward_config:
@@ -195,7 +223,7 @@ stages:
     patience: 2
     max_timesteps: 4_000_000
     n_eval_episodes: 30
-    max_steps: 800
+    max_steps: 1000
     max_turns: 60
     ent_coef: 0.05
     reward_config:

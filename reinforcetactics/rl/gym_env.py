@@ -102,6 +102,7 @@ class StrategyGameEnv(gym.Env):
         fog_of_war: bool = False,  # Enable fog of war
         action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
+        opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
     ):
         """
         Initialize environment.
@@ -152,6 +153,7 @@ class StrategyGameEnv(gym.Env):
         if fog_of_war:
             self.game_state.update_visibility()
         self.opponent_type = opponent
+        self.opponent_kwargs: Dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
         self.opponent: Optional[Any] = None
         self.max_steps = max_steps
         self.current_step = 0
@@ -1050,6 +1052,7 @@ class StrategyGameEnv(gym.Env):
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
+                **self.opponent_kwargs,
             )
         elif self.opponent_type == "balanced_random":
             # One build attempt + one random action per owned unit per turn,
@@ -1061,6 +1064,7 @@ class StrategyGameEnv(gym.Env):
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
+                **self.opponent_kwargs,
             )
         else:
             self.opponent = None
