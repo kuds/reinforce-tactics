@@ -282,11 +282,14 @@ class TestBootstrapConfig:
         # and the agent spent 650k+ steps spamming end_turn because the
         # seize signal was suppressed.
         #
-        # Noop stages MAY override `create_unit` -- a small per-action
-        # bonus that breaks the "dead policy" trap a freshly-initialised
-        # PPO falls into against a deterministic opponent (without it,
-        # every rollout produces the same draw, advantages collapse to
-        # ~0, gradients can't shift the mode).
+        # Noop stages DO override `turn_penalty` (zeroed -- removes the
+        # structural bias toward `end_turn` on a fixed-length episode
+        # against a non-pressuring opponent), `create_unit` (small
+        # positive that strictly beats `end_turn`), and `move` (tiny
+        # positive that keeps unit-related actions > `end_turn`). All
+        # other keys must inherit the defaults so the HQ-capture signal
+        # stays intact.
+        ALLOWED_NOOP_OVERRIDES = {"turn_penalty", "create_unit", "move"}
         for noop_name in ("starter_noop", "beginner_noop"):
             stage = by_name[noop_name]
             resolved = stage.resolve_reward_config(cfg.env)
@@ -299,13 +302,21 @@ class TestBootstrapConfig:
             # nothing can be eliminated, so equalising the two would be
             # misleading shaping.
             assert resolved["win_by_elimination"] <= 1000.0, noop_name
-            # The only override we expect is `create_unit` (the dead-policy
-            # trap mitigation). If a stage adds more, fail loud so a future
-            # editor has to acknowledge the change here.
+            # turn_penalty must be zeroed on noop. With NoopBot there is
+            # no time pressure -- a -20/turn penalty just creates a
+            # constant negative baseline that biases PPO toward
+            # `end_turn` regardless of the positive create/move signals.
+            assert resolved["turn_penalty"] == 0.0, f"{noop_name} must zero turn_penalty (got {resolved['turn_penalty']})"
+            # Overrides must stay within the documented set so future
+            # editors have to acknowledge any new shaping changes here.
             override = stage.reward_config or {}
-            assert set(override.keys()) <= {"create_unit"}, (
+            assert set(override.keys()) <= ALLOWED_NOOP_OVERRIDES, (
                 f"{noop_name} reward_config has unexpected overrides: {override}"
             )
+            # Strict positive ordering over actions on noop stages so the
+            # policy has a clear gradient out of "spam end_turn".
+            assert resolved["create_unit"] > resolved["move"] > 0.0, noop_name
+            assert resolved["seize_progress"] > resolved["create_unit"], noop_name
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
