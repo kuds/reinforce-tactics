@@ -140,17 +140,11 @@ class BotUnitMixin:
         if unit.type != "M" or not unit.can_attack or not unit.can_use_paralyze():
             return False
 
-        enemies = [
-            e for e in self.game_state.units
-            if e.player != self.bot_player and e.health > 0 and not e.is_paralyzed()
-        ]
+        enemies = [e for e in self.game_state.units if e.player != self.bot_player and e.health > 0 and not e.is_paralyzed()]
         if not enemies:
             return False
 
-        in_range = [
-            e for e in enemies
-            if 1 <= self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 2
-        ]
+        in_range = [e for e in enemies if 1 <= self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 2]
         if not in_range:
             return False
 
@@ -836,9 +830,7 @@ class MediumBot(BotUnitMixin):
                     move_distance = self.manhattan_distance(unit.x, unit.y, pos[0], pos[1])
                     old_x, old_y = unit.x, unit.y
                     unit.x, unit.y = pos[0], pos[1]
-                    attackable_from_pos = self.game_state.mechanics.get_attackable_enemies(
-                        unit, [enemy], self.game_state.grid
-                    )
+                    attackable_from_pos = self.game_state.mechanics.get_attackable_enemies(unit, [enemy], self.game_state.grid)
                     if enemy in attackable_from_pos:
                         from_tile = self.game_state.grid.get_tile(pos[0], pos[1])
                         d = unit.get_attack_damage(enemy.x, enemy.y, from_tile.type == "m")
@@ -1447,8 +1439,7 @@ class AdvancedBot(MediumBot):
             enemy_close = any(self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 4 for e in enemy_units)
             if enemy_close and enemy_units:
                 reachable_mountains = [
-                    pos for pos in self.get_reachable(unit)
-                    if self.game_state.grid.get_tile(pos[0], pos[1]).type == "m"
+                    pos for pos in self.get_reachable(unit) if self.game_state.grid.get_tile(pos[0], pos[1]).type == "m"
                 ]
                 # Find a mountain that puts an enemy in attack range without
                 # committing the move first.
@@ -1457,9 +1448,7 @@ class AdvancedBot(MediumBot):
                 try:
                     for pos in reachable_mountains:
                         unit.x, unit.y = pos[0], pos[1]
-                        if self.game_state.mechanics.get_attackable_enemies(
-                            unit, enemy_units, self.game_state.grid
-                        ):
+                        if self.game_state.mechanics.get_attackable_enemies(unit, enemy_units, self.game_state.grid):
                             chosen_mountain = pos
                             break
                 finally:
@@ -1512,9 +1501,7 @@ class AdvancedBot(MediumBot):
             target_pos = self.find_best_move_position(unit, nearest_enemy.x, nearest_enemy.y)
             if target_pos:
                 self.game_state.move_unit(unit, target_pos[0], target_pos[1])
-                attackable_after = self.game_state.mechanics.get_attackable_enemies(
-                    unit, enemy_units, self.game_state.grid
-                )
+                attackable_after = self.game_state.mechanics.get_attackable_enemies(unit, enemy_units, self.game_state.grid)
                 if attackable_after:
                     best_after_move = max(attackable_after, key=lambda e: self.calculate_attack_value(unit, e))
                     self.game_state.attack(unit, best_after_move)
@@ -1746,9 +1733,7 @@ class AdvancedBot(MediumBot):
 
         # Priority 1: Haste a Knight that can charge (if Knight is enabled)
         if can_haste and self.has_charge_units():
-            knights_in_range = [
-                a for a in allies_in_range if a.type == "K" and a.can_attack and not a.is_hasted
-            ]
+            knights_in_range = [a for a in allies_in_range if a.type == "K" and a.can_attack and not a.is_hasted]
             for knight in knights_in_range:
                 # Check if knight has a potential charge target
                 for enemy in enemies:
@@ -1759,9 +1744,7 @@ class AdvancedBot(MediumBot):
 
         # Priority 2: Haste a Rogue for flank opportunity (if Rogue is enabled)
         if can_haste and self.has_flank_units():
-            rogues_in_range = [
-                a for a in allies_in_range if a.type == "R" and a.can_attack and not a.is_hasted
-            ]
+            rogues_in_range = [a for a in allies_in_range if a.type == "R" and a.can_attack and not a.is_hasted]
             for rogue in rogues_in_range:
                 if self._find_flank_targets(rogue):
                     self.game_state.haste(unit, rogue)
@@ -1770,9 +1753,7 @@ class AdvancedBot(MediumBot):
         # Priority 3: Attack buff on frontline unit about to engage
         if can_attack_buff and enemies:
             frontline_in_range = [
-                a
-                for a in allies_in_range
-                if a.type in ("W", "K", "B", "R") and a.can_attack and not a.has_attack_buff()
+                a for a in allies_in_range if a.type in ("W", "K", "B", "R") and a.can_attack and not a.has_attack_buff()
             ]
             if frontline_in_range:
                 best_frontline = min(
@@ -1794,9 +1775,7 @@ class AdvancedBot(MediumBot):
             low_health_frontline = [
                 a
                 for a in allies_in_range
-                if a.type in ("W", "K", "B")
-                and a.health < a.max_health * 0.5
-                and not a.has_defence_buff()
+                if a.type in ("W", "K", "B") and a.health < a.max_health * 0.5 and not a.has_defence_buff()
             ]
             if low_health_frontline:
                 target = min(low_health_frontline, key=lambda a: a.health)
