@@ -224,3 +224,99 @@ class TestFeudalAgentMaskedRollout:
         assert np.isfinite(metrics["worker_policy_loss"])
         assert np.isfinite(metrics["worker_value_loss"])
         assert np.isfinite(metrics["worker_entropy"])
+
+
+# --------------------------------------------------------------------------- #
+# AR inference: select_action with structured_masks must produce legal actions
+# --------------------------------------------------------------------------- #
+
+
+class TestSelectActionWithStructuredMasks:
+    def test_select_action_respects_structured_masks(self, env):
+        agent = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=True,
+        )
+        obs = env.reset(seed=4)[0]
+        sm = env.structured_action_masks()
+        # Repeat to catch any stage where unmasked sampling could slip through.
+        for _ in range(30):
+            agent.reset_goal()
+            action, _goal = agent.select_action(obs, deterministic=False, structured_masks=sm)
+            atype, _ut, sx, sy, tx, ty = (int(x) for x in action)
+            assert sm.atype[atype], f"select_action sampled illegal atype {atype}"
+            assert sm.source[atype, sy, sx], f"select_action sampled illegal src ({sx},{sy}) for atype {atype}"
+            target = sm.target.get((atype, sx, sy))
+            if target is not None:
+                assert target[ty, tx], f"select_action sampled illegal tgt ({tx},{ty})"
+
+    def test_select_action_deterministic_is_legal(self, env):
+        agent = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=True,
+        )
+        obs = env.reset(seed=5)[0]
+        sm = env.structured_action_masks()
+        agent.reset_goal()
+        action, _goal = agent.select_action(obs, deterministic=True, structured_masks=sm)
+        atype, _ut, sx, sy, _tx, _ty = (int(x) for x in action)
+        assert sm.atype[atype]
+        assert sm.source[atype, sy, sx]
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint persists autoregressive_worker flag and refuses head mismatch
+# --------------------------------------------------------------------------- #
+
+
+class TestCheckpointFlagPersistence:
+    def test_load_into_matching_flag_succeeds(self, env, tmp_path):
+        agent = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=True,
+        )
+        agent.setup_training(learning_rate=1e-3)
+        path = tmp_path / "ar.pt"
+        agent.save_checkpoint(str(path))
+
+        agent2 = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=True,
+        )
+        agent2.load_checkpoint(str(path))
+        for p1, p2 in zip(agent.worker.parameters(), agent2.worker.parameters()):
+            torch.testing.assert_close(p1, p2)
+
+    def test_load_into_mismatched_flag_raises(self, env, tmp_path):
+        agent = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=True,
+        )
+        agent.setup_training(learning_rate=1e-3)
+        path = tmp_path / "ar.pt"
+        agent.save_checkpoint(str(path))
+
+        legacy = FeudalRLAgent(
+            env.observation_space,
+            grid_width=env.grid_width,
+            grid_height=env.grid_height,
+            device="cpu",
+            autoregressive_worker=False,
+        )
+        with pytest.raises(ValueError, match="autoregressive_worker"):
+            legacy.load_checkpoint(str(path))

@@ -1052,6 +1052,7 @@ class FeudalRLAgent:
         observation: Dict[str, np.ndarray],
         deterministic: bool = False,
         action_masks: Optional[Tuple[np.ndarray, ...]] = None,
+        structured_masks: Optional[StructuredActionMasks] = None,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Select action using manager-worker hierarchy.
@@ -1059,9 +1060,16 @@ class FeudalRLAgent:
         Args:
             action_masks: Optional 6-tuple of per-dimension bool numpy arrays
                 from ``env.action_masks()`` (multi_discrete mode). Applied to
-                the worker's logits so illegal actions cannot be sampled or
+                the worker's logits when the worker is the legacy 6-head
+                ``WorkerNetwork`` so illegal actions cannot be sampled or
                 argmax'd. Manager goals are not masked (goal space is
                 unconstrained by env legality).
+            structured_masks: Optional ``StructuredActionMasks`` from
+                ``env.structured_action_masks()``. Required for exact masking
+                when the worker is the autoregressive variant — the per-stage
+                provider uses these to mask each stage of the AR factorization
+                at sample time. Without it the AR worker falls back to
+                unmasked sampling (legal only by chance).
 
         Returns:
             action: Primitive action array
@@ -1091,10 +1099,18 @@ class FeudalRLAgent:
             # Worker selects action conditioned on goal
             assert self.current_goal is not None
             if self.autoregressive_worker:
-                # AR worker has no env-mask plumbing at inference time; the
-                # legacy per-dim ``worker_masks`` would not match its head
-                # API, so they are dropped here.
-                action, _, _ = self.worker.sample_action(features, self.current_goal, deterministic=deterministic)
+                if structured_masks is not None:
+                    provider = StructuredMaskProvider(
+                        structured_masks,
+                        grid_height=self.grid_height,
+                        grid_width=self.grid_width,
+                        device=self.device,
+                    )
+                    action, _, _, _ = self.worker.sample_action_with_provider(
+                        features, self.current_goal, provider, deterministic=deterministic
+                    )
+                else:
+                    action, _, _ = self.worker.sample_action(features, self.current_goal, deterministic=deterministic)
             elif deterministic:
                 action_logits, _ = self.worker(features, self.current_goal, action_masks=worker_masks)
                 action = torch.stack([logits.argmax(dim=1) for logits in action_logits], dim=1)
@@ -1482,13 +1498,28 @@ class FeudalRLAgent:
                 "worker": self.worker.state_dict(),
                 "worker_optimizer": self.worker_optimizer.state_dict() if hasattr(self, "worker_optimizer") else None,
                 "manager_optimizer": self.manager_optimizer.state_dict() if hasattr(self, "manager_optimizer") else None,
+                "autoregressive_worker": self.autoregressive_worker,
             },
             path,
         )
 
     def load_checkpoint(self, path):
-        """Load network weights and optionally optimizer state."""
+        """Load network weights and optionally optimizer state.
+
+        Refuses to load if the checkpoint was trained with the opposite worker
+        head (autoregressive vs legacy 6-head). The two have incompatible
+        state_dict shapes, but the more important reason is that callers who
+        forget to set ``autoregressive_worker`` would silently get a
+        misconfigured agent.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        ckpt_ar = checkpoint.get("autoregressive_worker")
+        if ckpt_ar is not None and ckpt_ar != self.autoregressive_worker:
+            raise ValueError(
+                f"Checkpoint has autoregressive_worker={ckpt_ar} but agent was constructed "
+                f"with autoregressive_worker={self.autoregressive_worker}. Reconstruct the "
+                f"agent with the matching flag before loading."
+            )
         self.feature_extractor.load_state_dict(checkpoint["feature_extractor"])
         self.manager.load_state_dict(checkpoint["manager"])
         self.worker.load_state_dict(checkpoint["worker"])
@@ -1522,7 +1553,11 @@ class FeudalRLAgent:
             done = False
 
             while not done:
-                action, _ = self.select_action(obs, deterministic=True)
+                if self.autoregressive_worker and hasattr(env, "structured_action_masks"):
+                    action, _ = self.select_action(obs, deterministic=True, structured_masks=env.structured_action_masks())
+                else:
+                    masks = env.action_masks() if hasattr(env, "action_masks") else None
+                    action, _ = self.select_action(obs, deterministic=True, action_masks=masks)
                 obs, reward, terminated, truncated, info = env.step(action)
                 ep_reward += reward
                 done = terminated or truncated
