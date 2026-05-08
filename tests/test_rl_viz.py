@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from reinforcetactics.rl.viz import plot_individual_game_stats  # noqa: E402
+from reinforcetactics.rl.viz import plot_eval_curves, plot_individual_game_stats  # noqa: E402
 
 
 def _synthetic_step_stats(n: int = 30) -> List[Dict[str, Any]]:
@@ -163,4 +163,130 @@ class TestPlotIndividualGameStats:
         result = _make_result(_synthetic_step_stats())
         fig = plot_individual_game_stats(result, charts_dir=None)
         assert fig is not None
+        plt.close(fig)
+
+
+def _synthetic_eval_results(n: int = 6, base_ts: int = 50_000) -> List[Dict[str, Any]]:
+    """Build per-eval result dicts shaped like ``PeriodicEvalCallback.results``."""
+    out = []
+    for i in range(n):
+        out.append(
+            {
+                "timesteps": base_ts * (i + 1),
+                "win_rate": min(1.0, 0.2 + 0.1 * i),
+                "avg_reward": 1000.0 * i,
+                "std_reward": 500.0,
+                "avg_length": 200.0 + 20.0 * i,
+                "std_length": 50.0,
+                "wins": 6 * i,
+                "losses": max(0, 30 - 6 * i),
+                "draws": 0,
+            }
+        )
+    return out
+
+
+def _synthetic_train_records(n: int = 30, base_ts: int = 10_000) -> List[Dict[str, Any]]:
+    """Build per-rollout train_records shaped like ``TrainingMetricsCallback.records``."""
+    out = []
+    for i in range(n):
+        # ``value_loss`` decays exponentially so the log-scale panel
+        # has both the high-init and the converged regime to draw.
+        out.append(
+            {
+                "timesteps": base_ts * (i + 1),
+                "rollout/ep_rew_mean": 100.0 * i,
+                "rollout/ep_len_mean": 200.0,
+                "train/approx_kl": 0.01 + 0.001 * i,
+                "train/clip_fraction": 0.1,
+                "train/entropy_loss": -0.5 - 0.01 * i,
+                "train/explained_variance": min(0.95, 0.0 + 0.03 * i),
+                "train/learning_rate": 3e-4,
+                "train/loss": 100.0,
+                "train/policy_gradient_loss": -0.05,
+                "train/value_loss": 1e6 * (0.9**i),
+            }
+        )
+    return out
+
+
+class TestPlotEvalCurves:
+    def test_eval_only_layout_is_1x3(self, tmp_path):
+        # Without train_records the figure should be a 1x3 row of eval
+        # panels (win rate / avg reward / episode length). Height-of-1
+        # keeps notebook output compact when the PPO internals aren't
+        # being captured (e.g. older runs).
+        results = _synthetic_eval_results()
+        fig = plot_eval_curves(results, charts_dir=tmp_path)
+        assert fig is not None
+        # Match the documented 1x3 row layout.
+        assert len(fig.axes) == 3
+        assert (tmp_path / "eval_curves.png").is_file()
+        plt.close(fig)
+
+    def test_with_train_records_layout_is_2x3(self, tmp_path):
+        # When PPO internals are present, switch to 2x3: top row eval,
+        # bottom row update health (approx_kl, EV, value_loss). Six
+        # axes total.
+        results = _synthetic_eval_results()
+        train_records = _synthetic_train_records()
+        fig = plot_eval_curves(results, train_records=train_records, charts_dir=tmp_path, opponent_label="random")
+        assert fig is not None
+        assert len(fig.axes) == 6
+        # value_loss panel renders log-scale because magnitudes can
+        # span 4-5 orders. Confirm the helper actually flips the axis
+        # rather than letting matplotlib auto-pick a linear one and
+        # silently squashing the curve.
+        value_loss_ax = fig.axes[5]
+        assert value_loss_ax.get_yscale() == "log"
+        plt.close(fig)
+
+    def test_stage_boundaries_draw_vertical_lines(self, tmp_path):
+        # Bootstrap-curriculum view passes stage transition timesteps;
+        # the helper should draw a dashed vline on each panel so the
+        # reader can see whether a metric jumps at a transition.
+        results = _synthetic_eval_results()
+        train_records = _synthetic_train_records()
+        boundaries = [100_000, 200_000]
+        fig = plot_eval_curves(
+            results,
+            train_records=train_records,
+            charts_dir=None,
+            stage_boundaries=boundaries,
+        )
+        assert fig is not None
+        # Each axis should have at least len(boundaries) vertical lines
+        # in addition to whatever target/threshold hlines the panel
+        # itself draws. axvline returns a Line2D in ax.lines; count by
+        # vertical-line predicate (xdata is a 2-element array of equal
+        # values).
+        for ax in fig.axes:
+            verticals = [
+                line for line in ax.lines if len(line.get_xdata()) == 2 and line.get_xdata()[0] == line.get_xdata()[1]
+            ]
+            # >= because some panels also render approx_kl / EV
+            # threshold hlines, which are horizontal not vertical, so
+            # they shouldn't count -- the inequality just guards against
+            # off-by-one.
+            assert len(verticals) >= len(boundaries)
+        plt.close(fig)
+
+    def test_handles_missing_value_loss_gracefully(self, tmp_path):
+        # Older callbacks may not capture value_loss; the panel should
+        # still render (empty plot) without raising.
+        results = _synthetic_eval_results()
+        train_records = _synthetic_train_records()
+        for r in train_records:
+            r.pop("train/value_loss", None)
+        fig = plot_eval_curves(results, train_records=train_records, charts_dir=None)
+        assert fig is not None
+        plt.close(fig)
+
+    def test_charts_dir_none_returns_figure_without_saving(self, tmp_path):
+        results = _synthetic_eval_results()
+        fig = plot_eval_curves(results, charts_dir=None)
+        assert fig is not None
+        # Helper should NOT have written to tmp_path even though we
+        # passed it for the fixture (we only passed charts_dir=None).
+        assert not list(tmp_path.iterdir())
         plt.close(fig)
