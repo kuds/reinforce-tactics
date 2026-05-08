@@ -306,9 +306,7 @@ class TestBootstrapConfig:
             # no time pressure -- a -20/turn penalty just creates a
             # constant negative baseline that biases PPO toward
             # `end_turn` regardless of the positive create/move signals.
-            assert resolved["turn_penalty"] == 0.0, (
-                f"{noop_name} must zero turn_penalty (got {resolved['turn_penalty']})"
-            )
+            assert resolved["turn_penalty"] == 0.0, f"{noop_name} must zero turn_penalty (got {resolved['turn_penalty']})"
             # Overrides must stay within the documented set so future
             # editors have to acknowledge any new shaping changes here.
             override = stage.reward_config or {}
