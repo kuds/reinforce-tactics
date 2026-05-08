@@ -236,87 +236,53 @@ class TestBootstrapConfig:
         repo_root = Path(__file__).resolve().parents[1]
         cfg = load_bootstrap_config(repo_root / "configs" / "bootstrap.yaml")
         names = [s.name for s in cfg.stages]
-        # Ensure the expected curriculum is intact. The `beginner_noop`
-        # bridge stage between `starter_medium` and `beginner_random` is
-        # what gives the policy a chance to learn navigation on the new map
-        # before facing an opponent -- catch accidental removal.
+        # Earlier iterations included `noop` stages on each map as a
+        # stage-0 sanity check; they actively prevented PPO from
+        # learning (no opponent variance -> constant returns ->
+        # advantages collapse to ~0 -> policy never updates). Running
+        # logs showed 250k+ steps with std=0.0 every eval. Reverting
+        # to the original 6-stage layout (now 7, with the
+        # `beginner_balanced_random` bridge for the map shift) lets
+        # opponent randomness drive exploration the way PPO needs.
+        # Regression: catch any future re-introduction of noop stages
+        # without acknowledgement.
         assert names == [
-            "starter_noop",
             "starter_random",
             "starter_simple",
             "starter_medium",
-            "beginner_noop",
             "beginner_balanced_random",
             "beginner_random",
             "beginner_simple",
             "beginner_medium",
         ]
+        assert "starter_noop" not in names, "noop stages broke PPO learning in earlier runs -- removing them was deliberate"
+        assert "beginner_noop" not in names
         # Regression: PyYAML 1.1 parses ``3e-4`` (no decimal) as a string,
         # which then fails deep inside SB3's lr-schedule check. Every
         # numeric PPO field must round-trip as a number.
         assert isinstance(cfg.ppo.learning_rate, (int, float))
         assert isinstance(cfg.ppo.ent_coef, (int, float))
         assert isinstance(cfg.ppo.clip_range, (int, float))
-        # Beginner stages bump max_turns / max_steps for the bigger map and
-        # raise ent_coef on `beginner_noop` to break out of the previous
-        # map's policy. Catch accidental removal of these overrides.
         by_name = {s.name: s for s in cfg.stages}
+        # Starter stages inherit env defaults (no per-stage overrides --
+        # the original starter map config worked with the global env
+        # defaults; we don't need to special-case it).
         assert by_name["starter_random"].max_turns is None
-        assert by_name["beginner_noop"].max_turns is not None
-        assert by_name["beginner_noop"].max_turns >= 30
-        assert by_name["beginner_noop"].ent_coef is not None
-        assert by_name["beginner_noop"].ent_coef > cfg.ppo.ent_coef
-        # Reward-shape override on beginner stages WITH opponents: HQ
-        # capture is much harder than elimination on the bigger map, so
-        # the two terminal rewards must be equalized (or capture <=
-        # elimination).
+        assert by_name["starter_random"].ent_coef is None
+        # Beginner stages bump max_turns / max_steps for the bigger map.
+        first_beginner = by_name["beginner_balanced_random"]
+        assert first_beginner.max_turns is not None
+        assert first_beginner.max_turns >= 30
+        # Entropy bump on the FIRST beginner stage (map-shift exploration
+        # shock). Cooled on later stages.
+        assert first_beginner.ent_coef is not None
+        assert first_beginner.ent_coef > cfg.ppo.ent_coef
+        # Reward-shape override on beginner stages: HQ capture is much
+        # harder than elimination on the bigger map, so the two terminal
+        # rewards must be equalized (or capture <= elimination).
         beginner_random = by_name["beginner_random"]
         assert beginner_random.reward_config is not None
         assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
-        # Noop stages must NOT carry the elimination-friendly bundle
-        # (win_by_hq_capture=3000, win_by_elimination=3000, seize_progress=50,
-        # capture=2000) -- on noop NoopBot never builds units so HQ capture
-        # is the ONLY win path, and the env's default heavy HQ-capture
-        # signal (5000 + 300/turn seize) is exactly what we want to teach.
-        # Regression: an earlier config applied that bundle to beginner_noop
-        # and the agent spent 650k+ steps spamming end_turn because the
-        # seize signal was suppressed.
-        #
-        # Noop stages DO override `turn_penalty` (zeroed -- removes the
-        # structural bias toward `end_turn` on a fixed-length episode
-        # against a non-pressuring opponent), `create_unit` (small
-        # positive that strictly beats `end_turn`), and `move` (tiny
-        # positive that keeps unit-related actions > `end_turn`). All
-        # other keys must inherit the defaults so the HQ-capture signal
-        # stays intact.
-        ALLOWED_NOOP_OVERRIDES = {"turn_penalty", "create_unit", "move"}
-        for noop_name in ("starter_noop", "beginner_noop"):
-            stage = by_name[noop_name]
-            resolved = stage.resolve_reward_config(cfg.env)
-            assert resolved is not None, f"{noop_name} should resolve a reward config"
-            # Default HQ-capture / seize signals must survive intact.
-            assert resolved["win_by_hq_capture"] >= 5000.0, noop_name
-            assert resolved["seize_progress"] >= 300.0, noop_name
-            assert resolved["capture"] >= 1000.0, noop_name
-            # Elimination should not have been boosted into parity: on noop
-            # nothing can be eliminated, so equalising the two would be
-            # misleading shaping.
-            assert resolved["win_by_elimination"] <= 1000.0, noop_name
-            # turn_penalty must be zeroed on noop. With NoopBot there is
-            # no time pressure -- a -20/turn penalty just creates a
-            # constant negative baseline that biases PPO toward
-            # `end_turn` regardless of the positive create/move signals.
-            assert resolved["turn_penalty"] == 0.0, f"{noop_name} must zero turn_penalty (got {resolved['turn_penalty']})"
-            # Overrides must stay within the documented set so future
-            # editors have to acknowledge any new shaping changes here.
-            override = stage.reward_config or {}
-            assert set(override.keys()) <= ALLOWED_NOOP_OVERRIDES, (
-                f"{noop_name} reward_config has unexpected overrides: {override}"
-            )
-            # Strict positive ordering over actions on noop stages so the
-            # policy has a clear gradient out of "spam end_turn".
-            assert resolved["create_unit"] > resolved["move"] > 0.0, noop_name
-            assert resolved["seize_progress"] > resolved["create_unit"], noop_name
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
