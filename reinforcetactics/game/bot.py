@@ -101,6 +101,80 @@ class BotUnitMixin:
 
         return best_pos
 
+    def _is_capturing_us(self, enemy) -> bool:
+        """True if ``enemy`` stands on a capturable tile we want back."""
+        tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
+        return tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health
+
+    def try_cleric_abilities(self, unit) -> bool:
+        """Cure paralyzed allies, then heal damaged ones.
+
+        Returns True if an ability was used (the caller is responsible for
+        any haste re-entry). Heal priority: most-damaged frontline (W/B/K)
+        first, falling back to the lowest-HP healable ally.
+        """
+        if unit.type != "C" or not unit.can_attack:
+            return False
+
+        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
+        if curable:
+            self.game_state.cure(unit, curable[0])
+            return True
+
+        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
+        if not healable:
+            return False
+
+        frontline = [a for a in healable if a.type in ("W", "B", "K")]
+        target = min(frontline or healable, key=lambda a: a.health)
+        self.game_state.heal(unit, target)
+        return True
+
+    def try_mage_paralyze(self, unit) -> bool:
+        """Paralyze a worthwhile in-range enemy.
+
+        Returns True if paralyze was used. Priorities:
+          1. Enemy currently capturing one of our structures (lock it).
+          2. Highest-cost enemy that we can't one-shot from current position.
+        """
+        if unit.type != "M" or not unit.can_attack or not unit.can_use_paralyze():
+            return False
+
+        enemies = [
+            e for e in self.game_state.units
+            if e.player != self.bot_player and e.health > 0 and not e.is_paralyzed()
+        ]
+        if not enemies:
+            return False
+
+        in_range = [
+            e for e in enemies
+            if 1 <= self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 2
+        ]
+        if not in_range:
+            return False
+
+        capturing = [e for e in in_range if self._is_capturing_us(e)]
+        if capturing:
+            target = max(capturing, key=lambda e: UNIT_DATA[e.type]["cost"])
+            self.game_state.paralyze(unit, target)
+            return True
+
+        # Skip paralyze if a normal attack would already kill the best target.
+        tile = self.game_state.grid.get_tile(unit.x, unit.y)
+        on_mountain = tile.type == "m"
+
+        def survives_attack(enemy):
+            return unit.get_attack_damage(enemy.x, enemy.y, on_mountain) < enemy.health
+
+        worth_paralyzing = [e for e in in_range if survives_attack(e)]
+        if not worth_paralyzing:
+            return False
+
+        target = max(worth_paralyzing, key=lambda e: UNIT_DATA[e.type]["cost"])
+        self.game_state.paralyze(unit, target)
+        return True
+
 
 class NoopBot(BotUnitMixin):
     """Opponent that takes no actions and immediately ends its turn.
@@ -392,12 +466,16 @@ class SimpleBot(BotUnitMixin):
 
         # Cleric: try to heal damaged allies or cure paralyzed allies
         if unit.type == "C" and unit.can_attack:
-            if self._try_cleric_abilities(unit, _depth):
+            if self.try_cleric_abilities(unit):
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit(unit, _depth + 1)
                 return
 
         # Mage: try to paralyze high-value enemies before normal attack
         if unit.type == "M" and unit.can_attack:
-            if self._try_mage_paralyze(unit, _depth):
+            if self.try_mage_paralyze(unit):
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit(unit, _depth + 1)
                 return
 
         # Find best target
@@ -415,65 +493,8 @@ class SimpleBot(BotUnitMixin):
             if can_still_act:
                 self.act_with_unit(unit, _depth + 1)
 
-    def _try_cleric_abilities(self, unit, _depth=0):
-        """Try Cleric heal or cure on nearby allies. Returns True if ability used."""
-        # Priority 1: Cure paralyzed allies
-        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
-        if curable:
-            target = curable[0]
-            self.game_state.cure(unit, target)
-            if unit.can_move or unit.can_attack:
-                self.act_with_unit(unit, _depth + 1)
-            return True
-
-        # Priority 2: Heal damaged allies
-        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
-        if healable:
-            # Heal the most damaged ally
-            target = min(healable, key=lambda a: a.health)
-            self.game_state.heal(unit, target)
-            if unit.can_move or unit.can_attack:
-                self.act_with_unit(unit, _depth + 1)
-            return True
-
-        return False
-
-    def _try_mage_paralyze(self, unit, _depth=0):
-        """Try Mage paralyze on a high-value target. Returns True if used."""
-        if not unit.can_use_paralyze():
-            return False
-
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0 and not u.is_paralyzed()]
-        if not enemies:
-            return False
-
-        # Find enemies in range (Mage range 1-2)
-        in_range = []
-        for enemy in enemies:
-            dist = self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y)
-            if 1 <= dist <= 2:
-                in_range.append(enemy)
-
-        if not in_range:
-            return False
-
-        # Paralyze the most expensive enemy in range
-        target = max(in_range, key=lambda e: UNIT_DATA[e.type]["cost"])
-        self.game_state.paralyze(unit, target)
-        if unit.can_move or unit.can_attack:
-            self.act_with_unit(unit, _depth + 1)
-        return True
-
     def find_best_target(self, unit):
         """Find the best target for a unit (enemy unit or structure)."""
-        opponent_has_bases = any(
-            tile.player and tile.player != self.bot_player and tile.type in ["b", "t"]
-            for row in self.game_state.grid.tiles
-            for tile in row
-        )
-
-        opponent_has_units = any(u.player != self.bot_player for u in self.game_state.units)
-
         # Find enemy units
         enemy_units = [
             (u, self.manhattan_distance(unit.x, unit.y, u.x, u.y))
@@ -481,7 +502,9 @@ class SimpleBot(BotUnitMixin):
             if u.player != self.bot_player
         ]
 
-        # Find capturable structures (enemy-owned and neutral)
+        # Find capturable structures (enemy-owned and neutral). The enemy HQ is
+        # always a valid target -- seizing it wins the game, so we don't gate
+        # it on the opponent having no other bases/units.
         enemy_structures = []
         for row in self.game_state.grid.tiles:
             for tile in row:
@@ -491,7 +514,7 @@ class SimpleBot(BotUnitMixin):
                         enemy_structures.append(("enemy_tower", tile, dist))
                     elif tile.type == "b":
                         enemy_structures.append(("enemy_building", tile, dist))
-                    elif tile.type == "h" and tile.player is not None and (not opponent_has_bases or not opponent_has_units):
+                    elif tile.type == "h" and tile.player is not None:
                         enemy_structures.append(("enemy_hq", tile, dist))
 
         # Combine targets
@@ -669,6 +692,10 @@ class MediumBot(BotUnitMixin):
 
     def take_turn(self):
         """Execute the bot's turn with improved strategy."""
+        # Per-turn set of contested-structure enemy ids already being handled,
+        # so multiple units don't all converge on the same interrupt target.
+        self._interrupt_assigned = set()
+
         # Phase 1: Purchase units - maximize unit production
         self.purchase_units()
 
@@ -785,60 +812,63 @@ class MediumBot(BotUnitMixin):
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
 
         for enemy in enemy_units:
-            # Find all units that can attack this enemy
-            potential_attackers = []
+            # Find all units that can attack this enemy and the damage they
+            # would deal (so we can pick the minimum set of biggest hitters).
+            # Apply Knight charge bonus when the move covers the threshold so
+            # we don't underestimate Knights moving in.
+            potential = []  # list of (attacker, damage)
             for unit in available_units:
                 if not (unit.can_move or unit.can_attack):
                     continue
 
-                # Check if unit can reach and attack enemy
+                # Direct attack: zero move distance, no charge bonus.
                 attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy], self.game_state.grid)
                 if enemy in attackable:
-                    # Direct attack possible
-                    potential_attackers.append(unit)
-                else:
-                    # Check if can move and attack
-                    reachable = self.get_reachable(unit)
+                    tile = self.game_state.grid.get_tile(unit.x, unit.y)
+                    damage = unit.get_attack_damage(enemy.x, enemy.y, tile.type == "m")
+                    potential.append((unit, damage))
+                    continue
 
-                    for pos in reachable:
-                        # Temporarily check if attacking from this position is possible
-                        old_x, old_y = unit.x, unit.y
-                        unit.x, unit.y = pos[0], pos[1]
+                # Move-then-attack: pick the position with highest projected damage.
+                best_damage = 0
+                reachable = self.get_reachable(unit)
+                for pos in reachable:
+                    move_distance = self.manhattan_distance(unit.x, unit.y, pos[0], pos[1])
+                    old_x, old_y = unit.x, unit.y
+                    unit.x, unit.y = pos[0], pos[1]
+                    attackable_from_pos = self.game_state.mechanics.get_attackable_enemies(
+                        unit, [enemy], self.game_state.grid
+                    )
+                    if enemy in attackable_from_pos:
+                        from_tile = self.game_state.grid.get_tile(pos[0], pos[1])
+                        d = unit.get_attack_damage(enemy.x, enemy.y, from_tile.type == "m")
+                        if unit.type == "K" and self.has_charge_units() and move_distance >= CHARGE_MIN_DISTANCE:
+                            d = int(d * (1 + CHARGE_BONUS))
+                        if d > best_damage:
+                            best_damage = d
+                    unit.x, unit.y = old_x, old_y
 
-                        attackable_from_pos = self.game_state.mechanics.get_attackable_enemies(
-                            unit, [enemy], self.game_state.grid
-                        )
+                if best_damage > 0:
+                    potential.append((unit, best_damage))
 
-                        unit.x, unit.y = old_x, old_y
+            if not potential:
+                continue
 
-                        if enemy in attackable_from_pos:
-                            potential_attackers.append(unit)
-                            break
+            # Pick minimal kill set: biggest hitters first.
+            potential.sort(key=lambda ad: ad[1], reverse=True)
+            total_damage = sum(d for _, d in potential)
+            if total_damage < enemy.health:
+                continue
 
-            if potential_attackers:
-                # Calculate total damage
-                total_damage = 0
-                for attacker in potential_attackers:
-                    tile = self.game_state.grid.get_tile(attacker.x, attacker.y)
-                    on_mountain = tile.type == "m"
-                    damage = attacker.get_attack_damage(enemy.x, enemy.y, on_mountain)
-                    total_damage += damage
+            attackers_needed = []
+            damage_so_far = 0
+            for attacker, damage in potential:
+                attackers_needed.append(attacker)
+                damage_so_far += damage
+                if damage_so_far >= enemy.health:
+                    break
 
-                # Check if we can kill the enemy
-                if total_damage >= enemy.health:
-                    # Find minimal set of attackers needed
-                    attackers_needed = []
-                    damage_so_far = 0
-                    for attacker in potential_attackers:
-                        tile = self.game_state.grid.get_tile(attacker.x, attacker.y)
-                        on_mountain = tile.type == "m"
-                        damage = attacker.get_attack_damage(enemy.x, enemy.y, on_mountain)
-                        attackers_needed.append(attacker)
-                        damage_so_far += damage
-                        if damage_so_far >= enemy.health:
-                            break
-
-                    killable.append((enemy, attackers_needed))
+            killable.append((enemy, attackers_needed))
 
         return killable
 
@@ -885,12 +915,13 @@ class MediumBot(BotUnitMixin):
                 if enemy in attackable and enemy.health > 0:
                     self.game_state.attack(attacker, enemy)
                 else:
-                    # Move towards enemy and attack if possible
+                    # Move towards enemy and attack if possible. The engine
+                    # applies the Knight charge bonus automatically based on
+                    # distance_moved set by move_unit.
                     target_pos = self.find_best_move_position(attacker, enemy.x, enemy.y)
                     if target_pos:
                         self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
 
-                        # Try to attack after moving
                         attackable_after_move = self.game_state.mechanics.get_attackable_enemies(
                             attacker, [enemy], self.game_state.grid
                         )
@@ -925,18 +956,24 @@ class MediumBot(BotUnitMixin):
 
         return contested
 
-    def calculate_attack_value(self, attacker, target, move_distance: int = 0):
+    def calculate_attack_value(self, attacker, target, move_distance: Optional[int] = None):
         """
         Evaluate attack efficiency considering damage dealt, received, and abilities.
 
         Args:
             attacker: Unit that would attack
             target: Enemy unit to attack
-            move_distance: Distance moved before attacking (for Knight charge)
+            move_distance: Distance moved this turn before attacking (for Knight
+                charge). If None, falls back to ``attacker.distance_moved``,
+                which the engine maintains across moves -- so callers that
+                already moved the unit get charge accounting for free.
 
         Returns:
             Value score (higher is better)
         """
+        if move_distance is None:
+            move_distance = getattr(attacker, "distance_moved", 0)
+
         # Calculate damage attacker would deal
         attacker_tile = self.game_state.grid.get_tile(attacker.x, attacker.y)
         on_mountain = attacker_tile.type == "m"
@@ -1030,34 +1067,63 @@ class MediumBot(BotUnitMixin):
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
         if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
             self.game_state.seize(unit)
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit, _depth + 1)
             return
 
-        # Priority 1: Interrupt enemy captures
+        # Cleric heal/cure and Mage paralyze before regular attacks.
+        if unit.type == "C" and unit.can_attack and self.try_cleric_abilities(unit):
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit, _depth + 1)
+            return
+        if unit.type == "M" and unit.can_attack and self.try_mage_paralyze(unit):
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit(unit, _depth + 1)
+            return
+
+        if not hasattr(self, "_interrupt_assigned"):
+            self._interrupt_assigned = set()
+        interrupt_assigned = self._interrupt_assigned
+
+        # Priority 1: Interrupt enemy captures (skip enemies another unit
+        # already committed to interrupt this turn).
         contested = self.find_contested_structures()
         if contested:
             # Sort by capture progress (higher progress = higher priority)
             contested.sort(key=lambda x: x[2], reverse=True)
 
             for _, enemy_unit, __ in contested:
+                if id(enemy_unit) in interrupt_assigned:
+                    continue
                 # Check if we can attack this enemy
                 attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy_unit], self.game_state.grid)
 
                 if enemy_unit in attackable:
-                    # Attack to interrupt capture
+                    interrupt_assigned.add(id(enemy_unit))
                     self.game_state.attack(unit, enemy_unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit(unit, _depth + 1)
                     return
 
                 # Try to move towards enemy and attack
                 target_pos = self.find_best_move_position(unit, enemy_unit.x, enemy_unit.y)
                 if target_pos:
+                    move_distance = self.manhattan_distance(unit.x, unit.y, target_pos[0], target_pos[1])
                     self.game_state.move_unit(unit, target_pos[0], target_pos[1])
                     # Check if can attack after moving
                     attackable_after = self.game_state.mechanics.get_attackable_enemies(
                         unit, [enemy_unit], self.game_state.grid
                     )
                     if enemy_unit in attackable_after:
+                        interrupt_assigned.add(id(enemy_unit))
                         self.game_state.attack(unit, enemy_unit)
+                        if unit.can_move or unit.can_attack:
+                            self.act_with_unit(unit, _depth + 1)
                         return
+                    # Move was committed but we can't reach: don't unwind, fall
+                    # through. (move_distance computed for the curious; bonus
+                    # accounting belongs in the value calc, not here.)
+                    del move_distance
 
         # Priority 2: Attack enemies with good value trades
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
@@ -1078,6 +1144,8 @@ class MediumBot(BotUnitMixin):
             # Attack if value is positive
             if best_target and best_value > 0:
                 self.game_state.attack(unit, best_target)
+                if unit.can_move or unit.can_attack:
+                    self.act_with_unit(unit, _depth + 1)
                 return
 
         # Priority 3: Capture structures (prioritize by proximity to HQ)
@@ -1155,6 +1223,9 @@ class AdvancedBot(MediumBot):
     def take_turn(self):
         """Execute the bot's turn with enhanced strategy."""
         self.turn_count += 1
+
+        # Per-turn dedup set for contested-structure interrupts.
+        self._interrupt_assigned = set()
 
         # Phase 1: Analyze map on first turn
         if not self.map_analyzed:
@@ -1284,10 +1355,19 @@ class AdvancedBot(MediumBot):
             if u.player == self.bot_player and (u.can_move or u.can_attack) and not u.is_paralyzed()
         ]
 
-        # First, coordinate attacks to kill targets (from MediumBot)
-        self.coordinate_attacks(bot_units)
+        # Step 1: Knights charge first so the bonus isn't burned on a chip-kill
+        # in coordinated focus fire.
+        if self.has_charge_units():
+            for unit in bot_units:
+                if unit.type != "K" or not (unit.can_move or unit.can_attack):
+                    continue
+                self._try_knight_charge(unit)
 
-        # Then, act with remaining units (enhanced)
+        # Step 2: Coordinated focus fire on remaining killable enemies.
+        remaining = [u for u in bot_units if (u.can_move or u.can_attack)]
+        self.coordinate_attacks(remaining)
+
+        # Step 3: Per-unit enhanced acting for the rest.
         for unit in bot_units:
             if unit.can_move or unit.can_attack:
                 self.act_with_unit_enhanced(unit)
@@ -1328,36 +1408,77 @@ class AdvancedBot(MediumBot):
             if self._try_rogue_forest_position(unit):
                 return
 
-        # PRIORITY 4: Position on mountains for attack bonus (Archers get range bonus)
-        if unit.type in ["W", "B", "A", "M", "K", "S"] and tile.type != "m":
-            nearby_mountains = [
-                pos
-                for pos in self.defensive_positions
-                if self.manhattan_distance(unit.x, unit.y, pos[0], pos[1]) <= unit.movement_range
-            ]
-            if nearby_mountains:
-                # Check if an enemy is nearby
-                enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
-                for enemy in enemy_units:
-                    if self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y) <= 4:
-                        # Move to mountain to get attack bonus
-                        for mountain_pos in nearby_mountains:
-                            target_pos = self.find_best_move_position(unit, mountain_pos[0], mountain_pos[1])
-                            if target_pos and target_pos == mountain_pos:
-                                self.game_state.move_unit(unit, target_pos[0], target_pos[1])
-                                # Try to attack after positioning
-                                if self.try_ranged_attack(unit):
-                                    # Check if unit can act again (haste)
-                                    if unit.can_move or unit.can_attack:
-                                        self.act_with_unit_enhanced(unit, _depth + 1)
-                                    return
-                                break
+        # PRIORITY 4: Interrupt enemy captures (don't double-up; coordinate
+        # across units like MediumBot does).
+        if not hasattr(self, "_interrupt_assigned"):
+            self._interrupt_assigned = set()
+        interrupt_assigned = self._interrupt_assigned
+        contested = self.find_contested_structures()
+        if contested:
+            contested.sort(key=lambda x: x[2], reverse=True)
+            for _, enemy_unit, __ in contested:
+                if id(enemy_unit) in interrupt_assigned:
+                    continue
+                # Direct attack first
+                attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy_unit], self.game_state.grid)
+                if enemy_unit in attackable:
+                    interrupt_assigned.add(id(enemy_unit))
+                    self.game_state.attack(unit, enemy_unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
+                # Move-then-attack
+                target_pos = self.find_best_move_position(unit, enemy_unit.x, enemy_unit.y)
+                if target_pos:
+                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                    attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy_unit], self.game_state.grid)
+                    if enemy_unit in attackable:
+                        interrupt_assigned.add(id(enemy_unit))
+                        self.game_state.attack(unit, enemy_unit)
+                        if unit.can_move or unit.can_attack:
+                            self.act_with_unit_enhanced(unit, _depth + 1)
+                        return
 
-        # PRIORITY 5: Ranged attacks (Archers/Mages/Sorcerers should attack from range)
+        # PRIORITY 5: Position on mountains for attack bonus. Pre-evaluate
+        # every reachable mountain (without committing the move) and pick
+        # the one that yields an in-range enemy; otherwise skip entirely.
+        if unit.type in ["W", "B", "A", "M", "K", "S"] and tile.type != "m":
+            enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+            enemy_close = any(self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 4 for e in enemy_units)
+            if enemy_close and enemy_units:
+                reachable_mountains = [
+                    pos for pos in self.get_reachable(unit)
+                    if self.game_state.grid.get_tile(pos[0], pos[1]).type == "m"
+                ]
+                # Find a mountain that puts an enemy in attack range without
+                # committing the move first.
+                chosen_mountain = None
+                old_x, old_y = unit.x, unit.y
+                try:
+                    for pos in reachable_mountains:
+                        unit.x, unit.y = pos[0], pos[1]
+                        if self.game_state.mechanics.get_attackable_enemies(
+                            unit, enemy_units, self.game_state.grid
+                        ):
+                            chosen_mountain = pos
+                            break
+                finally:
+                    unit.x, unit.y = old_x, old_y
+
+                if chosen_mountain is not None:
+                    self.game_state.move_unit(unit, chosen_mountain[0], chosen_mountain[1])
+                    if self.try_ranged_attack(unit):
+                        if unit.can_move or unit.can_attack:
+                            self.act_with_unit_enhanced(unit, _depth + 1)
+                        return
+
+        # PRIORITY 6: Ranged attacks (Archers/Mages/Sorcerers should attack from range)
         if unit.type in self.get_enabled_ranged_units() and self.try_ranged_attack(unit):
+            if unit.can_move or unit.can_attack:
+                self.act_with_unit_enhanced(unit, _depth + 1)
             return
 
-        # PRIORITY 6: Move to attack range and attack
+        # PRIORITY 7: Move to attack range and attack
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
 
         if enemy_units:
@@ -1366,14 +1487,12 @@ class AdvancedBot(MediumBot):
             best_score = -float("inf")
 
             for enemy in enemy_units:
-                # Calculate if we can attack or move to attack
                 attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy], self.game_state.grid)
 
                 if enemy in attackable:
-                    # Can attack now
                     value = self.calculate_attack_value(unit, enemy)
                     # Bonus for killing
-                    on_mountain = tile.type == "m"
+                    on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
                     damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
                     if damage >= enemy.health:
                         value += 500
@@ -1384,46 +1503,26 @@ class AdvancedBot(MediumBot):
 
             if best_target and best_score > -500:  # More aggressive threshold
                 self.game_state.attack(unit, best_target)
-                # Check if unit can act again (haste)
                 if unit.can_move or unit.can_attack:
                     self.act_with_unit_enhanced(unit, _depth + 1)
                 return
 
             # Try to move towards nearest enemy
-            if enemy_units:
-                nearest_enemy = min(enemy_units, key=lambda e: self.manhattan_distance(unit.x, unit.y, e.x, e.y))
-                target_pos = self.find_best_move_position(unit, nearest_enemy.x, nearest_enemy.y)
-                if target_pos:
-                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
-                    # Try to attack after moving
-                    attackable_after = self.game_state.mechanics.get_attackable_enemies(
-                        unit, enemy_units, self.game_state.grid
-                    )
-                    if attackable_after:
-                        best_after_move = max(attackable_after, key=lambda e: self.calculate_attack_value(unit, e))
-                        self.game_state.attack(unit, best_after_move)
-                        # Check if unit can act again (haste)
-                        if unit.can_move or unit.can_attack:
-                            self.act_with_unit_enhanced(unit, _depth + 1)
-                        return
+            nearest_enemy = min(enemy_units, key=lambda e: self.manhattan_distance(unit.x, unit.y, e.x, e.y))
+            target_pos = self.find_best_move_position(unit, nearest_enemy.x, nearest_enemy.y)
+            if target_pos:
+                self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                attackable_after = self.game_state.mechanics.get_attackable_enemies(
+                    unit, enemy_units, self.game_state.grid
+                )
+                if attackable_after:
+                    best_after_move = max(attackable_after, key=lambda e: self.calculate_attack_value(unit, e))
+                    self.game_state.attack(unit, best_after_move)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
 
-        # PRIORITY 7: Interrupt enemy captures (from MediumBot)
-        contested = self.find_contested_structures()
-        if contested:
-            contested.sort(key=lambda x: x[2], reverse=True)
-            for _, enemy_unit, __ in contested:
-                target_pos = self.find_best_move_position(unit, enemy_unit.x, enemy_unit.y)
-                if target_pos:
-                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
-                    attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy_unit], self.game_state.grid)
-                    if enemy_unit in attackable:
-                        self.game_state.attack(unit, enemy_unit)
-                        # Check if unit can act again (haste)
-                        if unit.can_move or unit.can_attack:
-                            self.act_with_unit_enhanced(unit, _depth + 1)
-                        return
-
-        # PRIORITY 5: Capture structures (fallback)
+        # PRIORITY 8: Capture structures (fallback)
         capturable_structures = []
         for row in self.game_state.grid.tiles:
             for structure in row:
@@ -1593,41 +1692,26 @@ class AdvancedBot(MediumBot):
 
     def try_use_special_ability(self, unit):
         """Try to use unit special abilities effectively."""
-        # Mage Paralyze on high-value targets (only if Mages enabled)
-        if unit.type == "M" and self.has_paralyze_units() and unit.can_attack:
-            enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
-
-            for enemy in enemies:
-                # Check if enemy is capturing a structure
-                enemy_tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
-                if (
-                    enemy_tile.is_capturable()
-                    and enemy_tile.player != self.bot_player
-                    and enemy_tile.health < enemy_tile.max_health
-                ):
-                    # Check if in range
-                    attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy], self.game_state.grid)
-                    if enemy in attackable:
-                        self.game_state.attack(unit, enemy)
-                        return True
-
-        # Cleric Heal (only if Clerics enabled)
-        if unit.type == "C" and self.has_heal_units():
-            adjacent_allies = self.game_state.mechanics.get_adjacent_allies(unit, self.game_state.units)
-
-            if adjacent_allies:
-                # Only heal if ally is damaged
-                damaged_allies = [a for a in adjacent_allies if a.health < a.max_health]
-                if damaged_allies:
-                    # Prioritize frontline units (Warriors, Barbarians, Knights)
-                    frontline_allies = [a for a in damaged_allies if a.type in ["W", "B", "K"]]
-                    if frontline_allies:
-                        target = min(frontline_allies, key=lambda a: a.health)
-                    else:
-                        target = min(damaged_allies, key=lambda a: a.health)
-
-                    self.game_state.heal(unit, target)
+        # Mage Paralyze: prefer locking down a unit currently capturing one of
+        # our structures; fall back to the shared mage paralyze heuristic.
+        if unit.type == "M" and self.has_paralyze_units() and unit.can_attack and unit.can_use_paralyze():
+            for enemy in self.game_state.units:
+                if enemy.player == self.bot_player or enemy.health <= 0 or enemy.is_paralyzed():
+                    continue
+                if not self._is_capturing_us(enemy):
+                    continue
+                dist = self.manhattan_distance(unit.x, unit.y, enemy.x, enemy.y)
+                if 1 <= dist <= 2:
+                    self.game_state.paralyze(unit, enemy)
                     return True
+            if self.try_mage_paralyze(unit):
+                return True
+
+        # Cleric Heal (only if Clerics enabled). Use the shared helper which
+        # also cures paralysis and prefers frontline targets.
+        if unit.type == "C" and self.has_heal_units():
+            if self.try_cleric_abilities(unit):
+                return True
 
         # Sorcerer abilities (only if Sorcerers enabled)
         if unit.type == "S" and self.has_buff_units():
@@ -1656,72 +1740,66 @@ class AdvancedBot(MediumBot):
         if not allies_in_range:
             return False
 
+        can_haste = unit.can_use_haste()
+        can_attack_buff = unit.can_use_attack_buff()
+        can_defence_buff = unit.can_use_defence_buff()
+
         # Priority 1: Haste a Knight that can charge (if Knight is enabled)
-        if self.has_charge_units():
+        if can_haste and self.has_charge_units():
             knights_in_range = [
-                a for a in allies_in_range if a.type == "K" and a.can_attack and not getattr(a, "hasted", False)
+                a for a in allies_in_range if a.type == "K" and a.can_attack and not a.is_hasted
             ]
             for knight in knights_in_range:
                 # Check if knight has a potential charge target
                 for enemy in enemies:
                     dist = self.manhattan_distance(knight.x, knight.y, enemy.x, enemy.y)
-                    if dist >= CHARGE_MIN_DISTANCE and dist <= knight.movement_range + 1:
-                        # Good haste target
-                        if hasattr(self.game_state, "haste"):
-                            self.game_state.haste(unit, knight)
-                            return True
-
-        # Priority 2: Haste a Rogue for flank opportunity (if Rogue is enabled)
-        if self.has_flank_units():
-            rogues_in_range = [
-                a for a in allies_in_range if a.type == "R" and a.can_attack and not getattr(a, "hasted", False)
-            ]
-            for rogue in rogues_in_range:
-                flankable = self._find_flank_targets(rogue)
-                if flankable:
-                    if hasattr(self.game_state, "haste"):
-                        self.game_state.haste(unit, rogue)
+                    if CHARGE_MIN_DISTANCE <= dist <= knight.movement_range + 1:
+                        self.game_state.haste(unit, knight)
                         return True
 
+        # Priority 2: Haste a Rogue for flank opportunity (if Rogue is enabled)
+        if can_haste and self.has_flank_units():
+            rogues_in_range = [
+                a for a in allies_in_range if a.type == "R" and a.can_attack and not a.is_hasted
+            ]
+            for rogue in rogues_in_range:
+                if self._find_flank_targets(rogue):
+                    self.game_state.haste(unit, rogue)
+                    return True
+
         # Priority 3: Attack buff on frontline unit about to engage
-        frontline_in_range = [
-            a
-            for a in allies_in_range
-            if a.type in ["W", "K", "B", "R"] and a.can_attack and not getattr(a, "has_attack_buff", lambda: False)()
-        ]
-        if frontline_in_range:
-            # Find unit closest to enemy
-            best_frontline = min(
-                frontline_in_range,
-                key=lambda a: min(self.manhattan_distance(a.x, a.y, e.x, e.y) for e in enemies) if enemies else float("inf"),
-            )
-            if hasattr(self.game_state, "attack_buff"):
+        if can_attack_buff and enemies:
+            frontline_in_range = [
+                a
+                for a in allies_in_range
+                if a.type in ("W", "K", "B", "R") and a.can_attack and not a.has_attack_buff()
+            ]
+            if frontline_in_range:
+                best_frontline = min(
+                    frontline_in_range,
+                    key=lambda a: min(self.manhattan_distance(a.x, a.y, e.x, e.y) for e in enemies),
+                )
                 self.game_state.attack_buff(unit, best_frontline)
                 return True
 
         # Priority 4: Defence buff on unit capturing contested structure
-        for ally in allies_in_range:
-            tile = self.game_state.grid.get_tile(ally.x, ally.y)
-            if (
-                tile.is_capturable()
-                and tile.health < tile.max_health
-                and not getattr(ally, "has_defence_buff", lambda: False)()
-            ):
-                if hasattr(self.game_state, "defence_buff"):
+        if can_defence_buff:
+            for ally in allies_in_range:
+                tile = self.game_state.grid.get_tile(ally.x, ally.y)
+                if tile.is_capturable() and tile.health < tile.max_health and not ally.has_defence_buff():
                     self.game_state.defence_buff(unit, ally)
                     return True
 
-        # Priority 5: Defence buff on low-health frontline unit
-        low_health_frontline = [
-            a
-            for a in allies_in_range
-            if a.type in ["W", "K", "B"]
-            and a.health < a.max_health * 0.5
-            and not getattr(a, "has_defence_buff", lambda: False)()
-        ]
-        if low_health_frontline:
-            target = min(low_health_frontline, key=lambda a: a.health)
-            if hasattr(self.game_state, "defence_buff"):
+            # Priority 5: Defence buff on low-health frontline unit
+            low_health_frontline = [
+                a
+                for a in allies_in_range
+                if a.type in ("W", "K", "B")
+                and a.health < a.max_health * 0.5
+                and not a.has_defence_buff()
+            ]
+            if low_health_frontline:
+                target = min(low_health_frontline, key=lambda a: a.health)
                 self.game_state.defence_buff(unit, target)
                 return True
 
