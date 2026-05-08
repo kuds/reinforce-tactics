@@ -1,0 +1,60 @@
+# Behavior-cloning warm-start: ability-focused scenario mix.
+#
+# Each scenario contributes demonstrations from a curated (map, unit roster)
+# pair so the BC dataset over-samples ability use (buffs, paralyze, heal)
+# rather than just move / attack which dominate random-roster games.
+#
+# All scenarios MUST share the same map dimensions — DemonstrationDataset
+# stacks observations into a single tensor. Mixing maps of different sizes
+# raises ValueError before any episodes are run.
+#
+# Usage:
+#   python examples/train_with_bc_warmstart.py \
+#     --scenarios configs/bc_scenarios.yaml \
+#     --bc-epochs 10 --timesteps 500000
+
+scenarios:
+  # Baseline: full unit roster — covers the action distribution PPO will
+  # actually see at evaluation time.
+  - name: all_units
+    map_file: maps/1v1/crossroads.csv
+    enabled_units: null
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 20
+    max_turns: 200
+    weight: 1.0
+
+  # Sorcerer scenario — only Warrior + Sorcerer enabled. The bot's choice
+  # set narrows so haste / attack_buff / defence_buff become the dominant
+  # interesting decisions per turn.
+  - name: sorcerer_buffs
+    map_file: maps/1v1/crossroads.csv
+    enabled_units: ["W", "S"]
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 30
+    max_turns: 200
+    weight: 1.5  # upsample — buffs are the rarest action class
+
+  # Cleric scenario — Warrior + Archer + Cleric. Forces the demonstrator
+  # to use heal / cure as units take damage from the Archer back-line.
+  - name: cleric_heals
+    map_file: maps/1v1/crossroads.csv
+    enabled_units: ["W", "A", "C"]
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 30
+    max_turns: 200
+    weight: 1.5
+
+  # Mage scenario — Warrior + Mage. Forces paralyze use against incoming
+  # melee threats; Mage's ranged attack is also exercised.
+  - name: mage_paralyze
+    map_file: maps/1v1/crossroads.csv
+    enabled_units: ["W", "M"]
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 30
+    max_turns: 200
+    weight: 1.5
