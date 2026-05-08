@@ -136,7 +136,14 @@ class CurriculumStage:
     # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
     max_steps: Optional[int] = None
     max_turns: Optional[int] = None
-    ent_coef: Optional[float] = None
+    # Either a constant float (held throughout the stage) or a mapping
+    # ``{start, end, schedule}`` describing a per-stage anneal. Mapping
+    # form drives :class:`EntropyScheduleCallback` so exploration can be
+    # cooled as the policy approaches its promotion threshold; sustained
+    # high entropy was producing ±15% WR oscillation in adjacent evals
+    # on the random-opponent stages and preventing convergence past
+    # ~60% WR even though the threshold was 75%.
+    ent_coef: Optional[Union[float, Dict[str, Any]]] = None
     # Reward-config override is *merged* over the env default (not replaced)
     # so per-stage entries only need to spell out the keys that change.
     reward_config: Optional[Dict[str, float]] = None
@@ -174,8 +181,35 @@ class CurriculumStage:
             raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
         if self.max_turns is not None and self.max_turns <= 0:
             raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
-        if self.ent_coef is not None and self.ent_coef < 0:
-            raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+        if self.ent_coef is not None:
+            if isinstance(self.ent_coef, Mapping):
+                unknown = set(self.ent_coef.keys()) - {"start", "end", "schedule"}
+                if unknown:
+                    raise ValueError(
+                        f"stage '{self.name}': ent_coef schedule has unknown keys {sorted(unknown)}. "
+                        "Valid keys: start, end, schedule"
+                    )
+                for required in ("start", "end"):
+                    if required not in self.ent_coef:
+                        raise ValueError(f"stage '{self.name}': ent_coef schedule missing required key '{required}'")
+                    val = self.ent_coef[required]
+                    if not isinstance(val, (int, float)) or val < 0:
+                        raise ValueError(
+                            f"stage '{self.name}': ent_coef.{required} must be a non-negative number, got {val!r}"
+                        )
+                schedule_kind = self.ent_coef.get("schedule", "linear")
+                if schedule_kind not in ("linear", "cosine"):
+                    raise ValueError(
+                        f"stage '{self.name}': ent_coef.schedule must be 'linear' or 'cosine', got {schedule_kind!r}"
+                    )
+            elif isinstance(self.ent_coef, (int, float)):
+                if self.ent_coef < 0:
+                    raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+            else:
+                raise TypeError(
+                    f"stage '{self.name}': ent_coef must be a number or a "
+                    f"{{start, end, schedule}} mapping, got {type(self.ent_coef).__name__}"
+                )
         if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
             raise TypeError(
                 f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
@@ -192,7 +226,32 @@ class CurriculumStage:
         return self.max_turns if self.max_turns is not None else defaults.max_turns
 
     def resolve_ent_coef(self, ppo: PPOConfig) -> float:
-        return self.ent_coef if self.ent_coef is not None else ppo.ent_coef
+        """Return the *initial* entropy coefficient for the stage.
+
+        For a constant override this is the value itself; for a schedule
+        mapping it's ``schedule['start']`` so ``model.ent_coef`` is
+        seeded correctly before the schedule callback takes over.
+        """
+        if self.ent_coef is None:
+            return ppo.ent_coef
+        if isinstance(self.ent_coef, Mapping):
+            return float(self.ent_coef["start"])
+        return float(self.ent_coef)
+
+    def resolve_ent_coef_schedule(self) -> Optional[Dict[str, Any]]:
+        """Return ``{start, end, schedule}`` if ``ent_coef`` is a mapping, else ``None``.
+
+        ``None`` means a constant coefficient (no callback installed); a
+        dict means the runner should attach :class:`EntropyScheduleCallback`
+        for this stage with ``total_timesteps=stage.max_timesteps``.
+        """
+        if isinstance(self.ent_coef, Mapping):
+            return {
+                "start": float(self.ent_coef["start"]),
+                "end": float(self.ent_coef["end"]),
+                "schedule": str(self.ent_coef.get("schedule", "linear")),
+            }
+        return None
 
     def resolve_reward_config(self, defaults: "BootstrapEnvDefaults") -> Optional[Dict[str, float]]:
         """Return the reward config to use for this stage.
@@ -415,6 +474,7 @@ def run_curriculum(
             the promotion criterion.
     """
     from reinforcetactics.rl.callbacks import (
+        EntropyScheduleCallback,
         PeriodicEvalCallback,
         PromotionCallback,
         TrainingMetricsCallback,
@@ -452,6 +512,7 @@ def run_curriculum(
         ent_coef = stage.resolve_ent_coef(cfg.ppo)
         if hasattr(model, "ent_coef"):
             model.ent_coef = ent_coef
+        ent_schedule = stage.resolve_ent_coef_schedule()
 
         eval_cb = PeriodicEvalCallback(
             eval_env=eval_env,
@@ -464,19 +525,36 @@ def run_curriculum(
             threshold=stage.promotion_win_rate,
             patience=stage.patience,
         )
-        callbacks = [metrics_callback, eval_cb, promote_cb]
+        callbacks: List[Any] = [metrics_callback, eval_cb, promote_cb]
+        if ent_schedule is not None:
+            # Schedule annealing covers the full stage budget; if the
+            # stage promotes early ``learn()`` returns before the
+            # callback hits ``end``, which is fine -- we wanted the
+            # cooling to have *been available* during the run-up.
+            callbacks.append(
+                EntropyScheduleCallback(
+                    start=ent_schedule["start"],
+                    end=ent_schedule["end"],
+                    total_timesteps=stage.max_timesteps,
+                    schedule=ent_schedule["schedule"],
+                )
+            )
 
         max_steps = stage.resolve_max_steps(cfg.env)
         max_turns = stage.resolve_max_turns(cfg.env)
         reward_overrides = stage.reward_config or {}
         reward_note = f", reward overrides={sorted(reward_overrides.keys())}" if reward_overrides else ""
+        if ent_schedule is not None:
+            ent_note = f"ent_coef={ent_schedule['start']:.3f}->{ent_schedule['end']:.3f} ({ent_schedule['schedule']})"
+        else:
+            ent_note = f"ent_coef={ent_coef:.3f}"
         print(
             f"\n=== Stage '{stage.name}' :: map={stage.map_file}, "
             f"opp={stage.opponent}, target WR >= "
             f"{stage.promotion_win_rate:.0%} (patience={stage.patience}), "
             f"budget={stage.max_timesteps:,} steps, "
             f"max_steps={max_steps}, max_turns={max_turns}, "
-            f"ent_coef={ent_coef:.3f}{reward_note} ==="
+            f"{ent_note}{reward_note} ==="
         )
 
         model.learn(
