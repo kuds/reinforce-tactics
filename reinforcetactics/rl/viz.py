@@ -16,6 +16,13 @@ Kept deliberately minimal — three plot families that together cover the
   "shaping-reward stalemate" from "actually winning".
 - ``plot_action_distribution``: stacked area of action-type usage % per
   eval. Surfaces failure modes like "agent collapsed to spamming end_turn".
+- ``plot_unit_build_distribution``: stacked area of unit-type build mix
+  per eval. Distinguishes a diversified build order from one-trick army
+  collapse.
+- ``plot_combat_summary``: per-game averages of captures / kills /
+  damage dealt vs taken / attack-seize activity per eval. The damage
+  delta panel surfaces whether the agent is actually winning trades
+  beyond what the win-rate scalar captures.
 """
 
 from __future__ import annotations
@@ -26,7 +33,13 @@ from typing import Any, Iterable, Optional, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
-from reinforcetactics.rl.evaluation import ACTION_TYPE_NAMES, END_REASONS, REWARD_COMPONENTS
+from reinforcetactics.rl.evaluation import (
+    ACTION_TYPE_NAMES,
+    COMBAT_STAT_KEYS,
+    END_REASONS,
+    REWARD_COMPONENTS,
+    UNIT_TYPE_LETTERS,
+)
 
 # Stable colour assignments so cross-figure comparisons stay coherent.
 _REWARD_COMPONENT_COLORS = {
@@ -47,6 +60,30 @@ _ACTION_COLORS = {
     "haste": "#00bcd4",
     "defence_buff": "#795548",
     "attack_buff": "#ff5722",
+}
+
+# Unit-type colours for the build-mix stack. Distinct hues per role
+# (warrior=red, mage=purple, archer=orange, etc.) so the chart doubles
+# as a quick "is the agent diversifying its army?" read.
+_UNIT_TYPE_COLORS = {
+    "W": "#d32f2f",  # Warrior
+    "M": "#7b1fa2",  # Mage
+    "C": "#388e3c",  # Cleric
+    "A": "#f57c00",  # Archer
+    "K": "#5d4037",  # Knight
+    "R": "#1976d2",  # Rogue
+    "S": "#00838f",  # Sorcerer
+    "B": "#455a64",  # Berserker
+}
+
+# Combat-stat colours for the combat summary panel.
+_COMBAT_STAT_COLORS = {
+    "captures": "#ff9800",
+    "kills": "#f44336",
+    "damage_dealt": "#4caf50",
+    "damage_taken": "#9e9e9e",
+    "attacks": "#2196f3",
+    "seize_attempts": "#ffb74d",
 }
 
 
@@ -356,3 +393,115 @@ def plot_outcome_breakdown(
     ax.grid(True, alpha=0.3, axis="y")
     fig.tight_layout()
     return _save_and_return(fig, charts_dir, "outcome_breakdown.png")
+
+
+def plot_unit_build_distribution(
+    results: Sequence[dict],
+    *,
+    charts_dir: Optional[Any] = None,
+    drop_unused: bool = True,
+) -> Optional[plt.Figure]:
+    """Stacked area of unit-build mix per eval (% of units built per type).
+
+    Reads ``r["units_built"]`` populated by ``evaluate_model`` from the
+    env's per-episode ``episode_stats``. Helpful for spotting when the
+    policy collapses to a one-trick army (e.g. 100% warriors) versus
+    diversifying its build order.
+    """
+    timesteps, series = _stack_inputs(results, "units_built", UNIT_TYPE_LETTERS)
+    if not timesteps:
+        print("No units_built recorded — re-run training with the updated env to populate per-episode build stats.")
+        return None
+
+    arr = np.array([series[ut] for ut in UNIT_TYPE_LETTERS], dtype=float)
+    totals = arr.sum(axis=0)
+    if not np.any(totals > 0):
+        print("All evals report zero units built — nothing to plot.")
+        return None
+    safe_totals = np.where(totals == 0, 1.0, totals)
+    pct = 100.0 * arr / safe_totals
+
+    if drop_unused:
+        keep = [i for i, ut in enumerate(UNIT_TYPE_LETTERS) if pct[i].max() > 0.5]
+        if not keep:
+            keep = list(range(len(UNIT_TYPE_LETTERS)))
+        names = [UNIT_TYPE_LETTERS[i] for i in keep]
+        pct = pct[keep]
+    else:
+        names = list(UNIT_TYPE_LETTERS)
+
+    colors = [_UNIT_TYPE_COLORS.get(n, "#888") for n in names]
+
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    ax.stackplot(timesteps, pct, colors=colors, alpha=0.85, labels=names)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Build share (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("Unit-build distribution per eval")
+    ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=9)
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "unit_build_distribution.png")
+
+
+def plot_combat_summary(
+    results: Sequence[dict],
+    *,
+    charts_dir: Optional[Any] = None,
+) -> Optional[plt.Figure]:
+    """Per-eval combat counters normalized to a per-game average.
+
+    Reads ``r["combat_stats"]`` (totals over the eval episodes) and
+    divides by ``r["episodes"]`` to give per-game averages: captures,
+    kills, damage dealt vs damage taken, and attack/seize attempt
+    counts. The damage delta panel is the most useful diagnostic — a
+    consistently positive gap means the agent is winning trades.
+    """
+    timesteps, series = _stack_inputs(results, "combat_stats", COMBAT_STAT_KEYS)
+    if not timesteps:
+        print("No combat_stats recorded — re-run training with the updated env.")
+        return None
+
+    n_episodes = []
+    for r in results:
+        if not r.get("combat_stats"):
+            continue
+        n_episodes.append(max(1, int(r.get("episodes", 1))))
+
+    per_game = {k: np.array(series[k], dtype=float) / np.array(n_episodes, dtype=float) for k in COMBAT_STAT_KEYS}
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
+
+    ax = axes[0]
+    ax.plot(timesteps, per_game["captures"], "o-", color=_COMBAT_STAT_COLORS["captures"], label="captures")
+    ax.plot(timesteps, per_game["kills"], "s-", color=_COMBAT_STAT_COLORS["kills"], label="kills")
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Per game (avg)")
+    ax.set_title("Captures and kills per game")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1]
+    ax.plot(timesteps, per_game["damage_dealt"], "o-", color=_COMBAT_STAT_COLORS["damage_dealt"], label="dealt")
+    ax.plot(timesteps, per_game["damage_taken"], "s-", color=_COMBAT_STAT_COLORS["damage_taken"], label="taken")
+    delta = per_game["damage_dealt"] - per_game["damage_taken"]
+    ax.fill_between(timesteps, delta, 0, where=delta >= 0, color="#4caf50", alpha=0.15, label="net dealt")
+    ax.fill_between(timesteps, delta, 0, where=delta < 0, color="#f44336", alpha=0.15, label="net taken")
+    ax.axhline(0, color="black", linewidth=0.6, alpha=0.5)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("HP per game (avg)")
+    ax.set_title("Damage dealt vs taken")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[2]
+    ax.plot(timesteps, per_game["attacks"], "o-", color=_COMBAT_STAT_COLORS["attacks"], label="attacks")
+    ax.plot(timesteps, per_game["seize_attempts"], "s-", color=_COMBAT_STAT_COLORS["seize_attempts"], label="seize attempts")
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Per game (avg)")
+    ax.set_title("Attack / seize activity")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "combat_summary.png")

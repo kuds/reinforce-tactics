@@ -42,6 +42,16 @@ REWARD_COMPONENTS = ("action", "shaping_delta", "invalid_penalty", "terminal")
 # See gym_env.py for the classification rules.
 END_REASONS = ("hq_capture", "elimination", "max_turns_draw", "max_steps_truncate")
 
+# Unit types tracked by ``info["episode_stats"]["units_built"]``. Mirrors
+# ``reinforcetactics.constants.ALL_UNIT_TYPES`` so this module stays
+# importable without pulling the constants module.
+UNIT_TYPE_LETTERS = ("W", "M", "C", "A", "K", "R", "S", "B")
+
+# Combat / progression scalars surfaced via ``info["episode_stats"]``.
+# Aggregated by summing across eval episodes so per-stage diagnostics
+# can plot e.g. "captures per game" or "damage delta" curves.
+COMBAT_STAT_KEYS = ("captures", "kills", "attacks", "seize_attempts", "damage_dealt", "damage_taken")
+
 
 def evaluate_model(
     model: Any,
@@ -94,6 +104,13 @@ def evaluate_model(
     # final info dict per episode).
     outcome_reasons = {f"{outcome}_by_{reason}": 0 for outcome in ("wins", "losses", "draws") for reason in END_REASONS}
     end_reasons = {reason: 0 for reason in END_REASONS}
+
+    # Combat / build counters summed across eval episodes. Always
+    # populated -- they're aggregated from ``info["episode_stats"]`` once
+    # per episode (cheap) and the per-stage diagnostics in viz.py rely
+    # on them.
+    units_built = {ut: 0 for ut in UNIT_TYPE_LETTERS}
+    combat_stats = {k: 0.0 for k in COMBAT_STAT_KEYS}
 
     if track_breakdown:
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
@@ -156,6 +173,18 @@ def evaluate_model(
             end_reasons[reason] += 1
             outcome_reasons[f"{outcome}_by_{reason}"] += 1
 
+        # Aggregate combat / build counters from the env's per-episode
+        # stats dict. Older envs that don't populate these keys just
+        # contribute zeros, so this is safe with stale checkpoints.
+        ep_units_built = episode_stats.get("units_built") or {}
+        for ut, count in ep_units_built.items():
+            if ut in units_built:
+                units_built[ut] += int(count)
+        for key in COMBAT_STAT_KEYS:
+            val = episode_stats.get(key)
+            if val is not None:
+                combat_stats[key] += float(val)
+
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
 
@@ -173,6 +202,8 @@ def evaluate_model(
         "lengths": [int(length) for length in lengths],
         "end_reasons": end_reasons,
         "outcome_reasons": outcome_reasons,
+        "units_built": units_built,
+        "combat_stats": combat_stats,
     }
     if track_breakdown:
         result["action_counts"] = action_counts

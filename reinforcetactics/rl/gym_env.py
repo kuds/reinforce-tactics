@@ -102,6 +102,7 @@ class StrategyGameEnv(gym.Env):
         fog_of_war: bool = False,  # Enable fog of war
         action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
+        opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
     ):
         """
         Initialize environment.
@@ -152,6 +153,7 @@ class StrategyGameEnv(gym.Env):
         if fog_of_war:
             self.game_state.update_visibility()
         self.opponent_type = opponent
+        self.opponent_kwargs: Dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
         self.opponent: Optional[Any] = None
         self.max_steps = max_steps
         self.current_step = 0
@@ -271,7 +273,24 @@ class StrategyGameEnv(gym.Env):
             self.renderer = Renderer(self.game_state)
 
         # Episode statistics
-        self.episode_stats: dict[str, Any] = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
+        self.episode_stats: dict[str, Any] = self._new_episode_stats()
+
+    def _new_episode_stats(self) -> Dict[str, Any]:
+        return {
+            "reward": 0.0,
+            "length": 0,
+            "winner": None,
+            "invalid_actions": 0,
+            # Combat / progression counters surfaced for diagnostics. Keys
+            # match what evaluation.evaluate_model aggregates per stage.
+            "units_built": {ut: 0 for ut in self.ALL_UNIT_TYPES},
+            "captures": 0,
+            "kills": 0,
+            "attacks": 0,
+            "seize_attempts": 0,
+            "damage_dealt": 0.0,
+            "damage_taken": 0.0,
+        }
 
     def _get_action_space_size(self) -> int:
         """Calculate total action space size for masking."""
@@ -758,16 +777,25 @@ class StrategyGameEnv(gym.Env):
         if is_valid:
             if action_type == 0:
                 reward += rc.get("create_unit", 2.0)
+                ut_letter = action_dict.get("unit_type")
+                if ut_letter in self.episode_stats["units_built"]:
+                    self.episode_stats["units_built"][ut_letter] += 1
             elif action_type == 1:
                 reward += rc.get("move", 0.1)
             elif action_type == 2:
-                reward += result_info.get("damage", 0) * rc.get("damage_scale", 0.2)
+                damage = result_info.get("damage", 0) or 0
+                reward += damage * rc.get("damage_scale", 0.2)
+                self.episode_stats["attacks"] += 1
+                self.episode_stats["damage_dealt"] += float(damage)
                 if not result_info.get("target_alive", True):
                     reward += rc.get("kill", 10.0)
+                    self.episode_stats["kills"] += 1
             elif action_type == 3:
                 reward += rc.get("seize_progress", 1.0)
+                self.episode_stats["seize_attempts"] += 1
                 if result_info.get("captured", False):
                     reward += rc.get("capture", 20.0)
+                    self.episode_stats["captures"] += 1
             elif action_type == 4:
                 if result_info.get("cured"):
                     reward += rc.get("cure", 5.0)
@@ -778,12 +806,20 @@ class StrategyGameEnv(gym.Env):
                 # Opponent plays (dispatch on opponent_type, not opponent object)
                 if self.opponent_type and self.opponent_type != "self":
                     if not self.game_state.game_over:
+                        # Snapshot agent unit HP by id() so we can attribute
+                        # the opponent turn's damage to the agent. Tracks
+                        # both wounded survivors (HP delta) and units that
+                        # died entirely (full remaining HP counted as taken).
+                        pre_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
                         self._opponent_turn()
                         # Safety net: if the opponent's take_turn() did not end its
                         # turn for some reason, end it here so play returns to the agent.
                         if not self.game_state.game_over:
                             if self.game_state.current_player != self.agent_player:
                                 self.game_state.end_turn()
+                        post_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
+                        damage_taken = sum(max(0, hp - post_hp.get(uid, 0)) for uid, hp in pre_hp.items())
+                        self.episode_stats["damage_taken"] += float(damage_taken)
             elif action_type == 6:
                 reward += rc.get("paralyze", 8.0)
             elif action_type == 7:
@@ -1050,6 +1086,7 @@ class StrategyGameEnv(gym.Env):
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
+                **self.opponent_kwargs,
             )
         elif self.opponent_type == "balanced_random":
             # One build attempt + one random action per owned unit per turn,
@@ -1061,6 +1098,7 @@ class StrategyGameEnv(gym.Env):
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
+                **self.opponent_kwargs,
             )
         else:
             self.opponent = None
@@ -1072,7 +1110,7 @@ class StrategyGameEnv(gym.Env):
             self.renderer = Renderer(self.game_state)
 
         # Reset episode stats
-        self.episode_stats = {"reward": 0.0, "length": 0, "winner": None, "invalid_actions": 0}
+        self.episode_stats = self._new_episode_stats()
 
         obs = self._get_obs()
         info: dict[str, Any] = {}

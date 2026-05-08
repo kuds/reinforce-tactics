@@ -251,7 +251,8 @@ class TestBootstrapConfig:
             "starter_simple",
             "starter_medium",
             "beginner_balanced_random",
-            "beginner_random",
+            "beginner_random_10",
+            "beginner_random_20",
             "beginner_simple",
             "beginner_medium",
         ]
@@ -280,7 +281,7 @@ class TestBootstrapConfig:
         # Reward-shape override on beginner stages: HQ capture is much
         # harder than elimination on the bigger map, so the two terminal
         # rewards must be equalized (or capture <= elimination).
-        beginner_random = by_name["beginner_random"]
+        beginner_random = by_name["beginner_random_20"]
         assert beginner_random.reward_config is not None
         assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
