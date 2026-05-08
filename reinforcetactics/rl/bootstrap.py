@@ -191,9 +191,7 @@ class CurriculumStage:
                     )
                 for required in ("start", "end"):
                     if required not in self.ent_coef:
-                        raise ValueError(
-                            f"stage '{self.name}': ent_coef schedule missing required key '{required}'"
-                        )
+                        raise ValueError(f"stage '{self.name}': ent_coef schedule missing required key '{required}'")
                     val = self.ent_coef[required]
                     if not isinstance(val, (int, float)) or val < 0:
                         raise ValueError(
@@ -547,10 +545,7 @@ def run_curriculum(
         reward_overrides = stage.reward_config or {}
         reward_note = f", reward overrides={sorted(reward_overrides.keys())}" if reward_overrides else ""
         if ent_schedule is not None:
-            ent_note = (
-                f"ent_coef={ent_schedule['start']:.3f}->{ent_schedule['end']:.3f} "
-                f"({ent_schedule['schedule']})"
-            )
+            ent_note = f"ent_coef={ent_schedule['start']:.3f}->{ent_schedule['end']:.3f} ({ent_schedule['schedule']})"
         else:
             ent_note = f"ent_coef={ent_coef:.3f}"
         print(

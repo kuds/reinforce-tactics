@@ -649,8 +649,7 @@ def plot_individual_game_stats(
         # Color creates differently from non-create actions so the
         # unit-type mix pops out of the bar.
         bar_colors = [
-            _ACTION_COLORS["create_unit"] if n.startswith("create_") else _ACTION_COLORS.get(n, "#888")
-            for n in names
+            _ACTION_COLORS["create_unit"] if n.startswith("create_") else _ACTION_COLORS.get(n, "#888") for n in names
         ]
         ax.bar(names, counts, color=bar_colors)
         ax.set_title(f"Action mix (n={sum(counts)}, blue=creates)")
@@ -680,14 +679,10 @@ def plot_individual_game_stats(
     # a glance.
     ax = axes[1, 2]
     ax.set_axis_off()
-    winner_str = {1: "Agent wins", 2: "Opponent wins", None: "Draw"}.get(
-        result.get("winner"), "Unknown"
-    )
+    winner_str = {1: "Agent wins", 2: "Opponent wins", None: "Draw"}.get(result.get("winner"), "Unknown")
     end_reason = result.get("end_reason") or "n/a"
     final_step = step_stats[-1]
-    create_lines = [
-        f"  {n}: {c}" for n, c in sorted(action_counts.items()) if n.startswith("create_")
-    ]
+    create_lines = [f"  {n}: {c}" for n, c in sorted(action_counts.items()) if n.startswith("create_")]
     summary_lines = [
         f"Result:        {winner_str}",
         f"End reason:    {end_reason}",
