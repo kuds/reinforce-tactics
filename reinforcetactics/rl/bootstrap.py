@@ -32,10 +32,11 @@ Usage:
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
 
@@ -225,6 +226,57 @@ def _write_stage_config(
     write_run_config(run_config, stage_dir / "config.json")
 
 
+# Columns emitted to ``bootstrap_results.csv`` -- the run-level analogue of
+# ppo_training.ipynb's ``benchmark_results.csv``. The first three identify the
+# stage / map / bot the row was eval'd against (so a glob across runs is
+# self-describing); the rest are the canonical eval-result fields documented
+# in ``evaluate_model``'s return shape. Per-eval breakdown dicts
+# (``outcome_reasons``, ``action_counts``, ``reward_components``,
+# ``units_built``, ``combat_stats``) intentionally stay in the JSON sibling
+# -- they don't flatten cleanly into a CSV row, and the diagnostics charts
+# read them straight from the JSON.
+_RESULTS_CSV_COLUMNS = (
+    "stage",
+    "map_file",
+    "opponent",
+    "timesteps",
+    "win_rate",
+    "avg_reward",
+    "std_reward",
+    "avg_length",
+    "std_length",
+    "wins",
+    "losses",
+    "draws",
+    "episodes",
+)
+
+
+def _write_results_csv(history: Sequence[Dict[str, Any]], csv_path: Path) -> None:
+    """Flatten ``history`` into ``bootstrap_results.csv``.
+
+    One row per (stage, eval): the stage's ``map_file`` and ``opponent`` are
+    repeated on every row so the CSV is self-describing without joining
+    against ``config.json``. Missing fields are written as empty cells (rather
+    than raising) so an older eval-result schema or a synthetic test entry
+    still produces a parseable CSV.
+    """
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(_RESULTS_CSV_COLUMNS))
+        writer.writeheader()
+        for stage_entry in history:
+            stage_name = stage_entry.get("stage", "")
+            map_file = stage_entry.get("map_file", "")
+            opponent = stage_entry.get("opponent", "")
+            for r in stage_entry.get("results", []) or []:
+                row = {col: r.get(col, "") for col in _RESULTS_CSV_COLUMNS}
+                row["stage"] = stage_name
+                row["map_file"] = map_file
+                row["opponent"] = opponent
+                writer.writerow(row)
+
+
 def run_curriculum(
     cfg: TrainingConfig,
     output_dir: ConfigPath,
@@ -405,6 +457,17 @@ def run_curriculum(
                 "stage_final_path": str(stage_final),
             }
         )
+
+        # Refresh the run-level ``bootstrap_results.csv`` after every stage
+        # so the CSV always reflects the latest completed stage even if the
+        # run dies mid-curriculum (Colab disconnect, OOM kill, or a stall on
+        # a later stage). Mirrors ``benchmark_results.csv`` from
+        # ppo_training.ipynb but adds ``stage`` / ``map_file`` / ``opponent``
+        # columns so a single CSV across the whole curriculum is grokkable.
+        try:
+            _write_results_csv(history, output_dir / "bootstrap_results.csv")
+        except Exception:  # noqa: BLE001
+            pass
 
         # Best-effort cleanup; vec envs hold subprocess handles when
         # use_subprocess=True. Don't let close-time errors mask training
