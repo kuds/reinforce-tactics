@@ -903,9 +903,7 @@ def plot_stage_diagnostics(
     iterate the returned figures to call ``plt.show()`` inline.
     """
     return {
-        "episode_length": plot_episode_length(
-            results, charts_dir=charts_dir, title_suffix=title_suffix
-        ),
+        "episode_length": plot_episode_length(results, charts_dir=charts_dir, title_suffix=title_suffix),
         "outcome_breakdown": plot_outcome_breakdown(results, charts_dir=charts_dir),
         "reward_decomposition": plot_reward_decomposition(results, charts_dir=charts_dir),
         "action_distribution": plot_action_distribution(results, charts_dir=charts_dir),
