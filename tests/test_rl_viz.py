@@ -19,7 +19,13 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from reinforcetactics.rl.viz import plot_eval_curves, plot_individual_game_stats  # noqa: E402
+from reinforcetactics.rl.viz import (  # noqa: E402
+    plot_curriculum_summary,
+    plot_episode_length,
+    plot_eval_curves,
+    plot_individual_game_stats,
+    plot_stage_diagnostics,
+)
 
 
 def _synthetic_step_stats(n: int = 30) -> List[Dict[str, Any]]:
@@ -290,3 +296,132 @@ class TestPlotEvalCurves:
         # passed it for the fixture (we only passed charts_dir=None).
         assert not list(tmp_path.iterdir())
         plt.close(fig)
+
+
+class TestPlotEpisodeLength:
+    def test_writes_canonical_filename(self, tmp_path):
+        results = _synthetic_eval_results()
+        fig = plot_episode_length(results, charts_dir=tmp_path, title_suffix="stage_a")
+        assert fig is not None
+        # Same filename across notebooks so artefacts line up; the
+        # title_suffix only affects the in-figure title, not the path.
+        assert (tmp_path / "episode_length.png").is_file()
+        plt.close(fig)
+
+    def test_returns_none_for_empty_results(self, tmp_path):
+        # An eval list can be empty if a stage stalls before its first
+        # snapshot; helper should skip silently rather than raising and
+        # taking out the diagnostics loop.
+        fig = plot_episode_length([], charts_dir=tmp_path)
+        assert fig is None
+        assert not list(tmp_path.iterdir())
+
+
+class _FakeStage:
+    """Stand-in for ``StageConfig`` exposing only what the helper reads."""
+
+    def __init__(self, name: str, promotion_win_rate: float):
+        self.name = name
+        self.promotion_win_rate = promotion_win_rate
+
+
+class TestPlotCurriculumSummary:
+    def test_writes_canonical_filename_with_thresholds(self, tmp_path):
+        history = [
+            {"stage": "a", "results": _synthetic_eval_results(n=4)},
+            {"stage": "b", "results": _synthetic_eval_results(n=4, base_ts=300_000)},
+        ]
+        stages = [_FakeStage("a", 0.7), _FakeStage("b", 0.8)]
+        fig = plot_curriculum_summary(history, stages, charts_dir=tmp_path)
+        assert fig is not None
+        assert (tmp_path / "curriculum_winrate.png").is_file()
+        # One line per stage with eval results; matches what the
+        # bootstrap notebook expects when surfacing per-stage progress
+        # against a shared timestep axis.
+        ax = fig.axes[0]
+        labelled_lines = [line for line in ax.lines if line.get_label() in {"a", "b"}]
+        assert len(labelled_lines) == 2
+        plt.close(fig)
+
+    def test_returns_none_when_history_has_no_results(self, tmp_path):
+        history = [{"stage": "a", "results": []}, {"stage": "b", "results": []}]
+        fig = plot_curriculum_summary(history, [_FakeStage("a", 0.7)], charts_dir=tmp_path)
+        assert fig is None
+        assert not list(tmp_path.iterdir())
+
+    def test_skips_threshold_for_unknown_stage(self, tmp_path):
+        # A stage missing from ``stages`` (e.g. the user trimmed the
+        # config between resume runs) should still draw the line; the
+        # promotion threshold is just dropped instead of crashing.
+        history = [{"stage": "ghost", "results": _synthetic_eval_results(n=3)}]
+        fig = plot_curriculum_summary(history, [], charts_dir=None)
+        assert fig is not None
+        plt.close(fig)
+
+
+class TestPlotStageDiagnostics:
+    def test_returns_dict_with_canonical_keys(self, tmp_path):
+        # The dict shape lets callers iterate figures for plt.show()
+        # while still introspecting which charts had data; both
+        # notebooks rely on this contract.
+        results = _synthetic_eval_results()
+        figures = plot_stage_diagnostics(results, charts_dir=tmp_path, title_suffix="stage_a")
+        expected_keys = {
+            "episode_length",
+            "outcome_breakdown",
+            "reward_decomposition",
+            "action_distribution",
+            "unit_build_distribution",
+            "combat_summary",
+        }
+        assert set(figures.keys()) == expected_keys
+        # episode_length always has data when results is non-empty.
+        assert figures["episode_length"] is not None
+        assert (tmp_path / "episode_length.png").is_file()
+        # The breakdown-dependent charts should be None on synthetic
+        # results without ``outcome_reasons`` / ``action_counts`` /
+        # etc.; the helper must not raise on those, just skip.
+        assert figures["outcome_breakdown"] is None
+        for fig in figures.values():
+            if fig is not None:
+                plt.close(fig)
+
+    def test_writes_breakdown_charts_when_data_present(self, tmp_path):
+        # Augment the synthetic eval results with the same breakdown
+        # dicts ``evaluate_model(track_breakdown=True)`` would populate,
+        # so the suite exercises the data-present path end-to-end.
+        results = _synthetic_eval_results()
+        for r in results:
+            r["episodes"] = r["wins"] + r["losses"] + r["draws"]
+            r["outcome_reasons"] = {"wins_by_hq_capture": r["wins"], "losses_by_elimination": r["losses"]}
+            r["action_counts"] = {"create_unit": 10, "move": 20, "end_turn": 5}
+            r["reward_components"] = {
+                "action": 100.0,
+                "shaping_delta": 5.0,
+                "invalid_penalty": -2.0,
+                "terminal": 1000.0 * (r["wins"] / max(1, r["episodes"])),
+            }
+            r["units_built"] = {"W": 8, "M": 1, "A": 1}
+            r["combat_stats"] = {
+                "captures": 2,
+                "kills": 4,
+                "damage_dealt": 120,
+                "damage_taken": 80,
+                "attacks": 10,
+                "seize_attempts": 3,
+            }
+        figures = plot_stage_diagnostics(results, charts_dir=tmp_path)
+        # Every chart should now produce output and write its canonical
+        # filename so downstream tooling globbing ``charts/<name>.png``
+        # finds the same names across both notebooks.
+        for name in (
+            "episode_length",
+            "outcome_breakdown",
+            "reward_decomposition",
+            "action_distribution",
+            "unit_build_distribution",
+            "combat_summary",
+        ):
+            assert figures[name] is not None
+            assert (tmp_path / f"{name}.png").is_file(), name
+            plt.close(figures[name])

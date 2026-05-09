@@ -29,6 +29,15 @@ Kept deliberately minimal — three plot families that together cover the
   recorded game (consumes ``record_evaluation_to_video``'s return
   dict). Independent of the per-eval aggregates above; surfaces
   what the policy *actually does* in one playthrough.
+- ``plot_episode_length``: standalone mean-episode-length-per-eval
+  chart. Small enough to be its own panel; useful for spotting the
+  saturate-at-cap pattern that broader dashboards can hide.
+- ``plot_curriculum_summary``: multi-stage win-rate timeline used by
+  the bootstrap notebook to show stage progression on a single axis.
+- ``plot_stage_diagnostics``: convenience wrapper that runs the full
+  per-stage diagnostic suite (length / outcome / reward / action /
+  unit build / combat) into one ``charts_dir``. Used by both
+  notebooks so the produced filenames stay identical.
 """
 
 from __future__ import annotations
@@ -777,3 +786,129 @@ def plot_individual_game_stats(
         suffix_part = f"_{title_suffix}" if title_suffix else ""
         filename = f"individual_game_stats{suffix_part}.png"
     return _save_and_return(fig, charts_dir, filename)
+
+
+def plot_episode_length(
+    results: Sequence[dict],
+    *,
+    charts_dir: Optional[Any] = None,
+    title_suffix: str = "",
+) -> Optional[plt.Figure]:
+    """Mean episode length per eval — small standalone chart.
+
+    A single-panel plot of ``avg_length`` vs ``timesteps``. The value
+    also appears on ``plot_eval_curves`` panel 3, but breaking it out
+    on its own makes the saturating-at-cap pattern (agent always
+    timing out into a draw) unmistakable when scanning a stage's
+    diagnostics directory.
+
+    Args:
+        results: Per-eval dicts from ``PeriodicEvalCallback.results``.
+        charts_dir: Optional save directory; PNG named
+            ``episode_length.png``.
+        title_suffix: Prepended in brackets to the title — used by the
+            bootstrap notebook to tag each stage's chart.
+    """
+    if not results:
+        return None
+    timesteps = [r["timesteps"] for r in results]
+    lengths = [r["avg_length"] for r in results]
+    fig, ax = plt.subplots(figsize=(10, 3.2))
+    ax.plot(timesteps, lengths, marker="o", color="#4caf50")
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Mean episode length")
+    title = "Episode length per eval"
+    if title_suffix:
+        title = f"[{title_suffix}] {title}"
+    ax.set_title(title)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "episode_length.png")
+
+
+def plot_curriculum_summary(
+    history: Sequence[Mapping[str, Any]],
+    stages: Sequence[Any],
+    *,
+    charts_dir: Optional[Any] = None,
+) -> Optional[plt.Figure]:
+    """Concatenated per-stage win-rate timeline with promotion thresholds.
+
+    Each stage from ``history`` is drawn as its own line on a shared
+    cumulative-timestep axis, with a dotted horizontal segment at the
+    stage's ``promotion_win_rate`` and a dashed vertical line at the
+    stage's last eval timestep marking the transition to the next
+    stage. Returns ``None`` if no stage has any eval results.
+
+    Args:
+        history: ``run_curriculum`` result's ``"history"`` list — each
+            entry has ``"stage"`` (name) and ``"results"`` (list of
+            eval dicts with ``timesteps`` and ``win_rate``).
+        stages: ``cfg.curriculum.stages`` — used to look up each
+            stage's ``promotion_win_rate`` for the threshold line.
+        charts_dir: Optional save directory; PNG named
+            ``curriculum_winrate.png``.
+    """
+    if not any(h.get("results") for h in history):
+        return None
+    fig, ax = plt.subplots(figsize=(12, 5))
+    cmap = plt.get_cmap("tab10")
+    stage_lookup = {s.name: s for s in stages}
+    for i, h in enumerate(history):
+        if not h["results"]:
+            continue
+        xs = [r["timesteps"] for r in h["results"]]
+        ys = [r["win_rate"] for r in h["results"]]
+        color = cmap(i % 10)
+        ax.plot(xs, ys, marker="o", label=h["stage"], color=color)
+        stage_cfg = stage_lookup.get(h["stage"])
+        if stage_cfg is not None:
+            ax.hlines(
+                stage_cfg.promotion_win_rate,
+                xmin=xs[0],
+                xmax=xs[-1],
+                colors=[color],
+                linestyles=":",
+                alpha=0.5,
+            )
+        ax.axvline(xs[-1], color="gray", linestyle="--", alpha=0.3)
+    ax.set_xlabel("Cumulative env timesteps")
+    ax.set_ylabel("Eval win rate")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_title("Curriculum win rate (dotted = stage threshold, dashed = transition)")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="best", fontsize=9)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "curriculum_winrate.png")
+
+
+def plot_stage_diagnostics(
+    results: Sequence[dict],
+    *,
+    charts_dir: Optional[Any] = None,
+    title_suffix: str = "",
+) -> dict[str, Optional[plt.Figure]]:
+    """Render the full per-stage diagnostic suite into ``charts_dir``.
+
+    Calls, in order: ``plot_episode_length``, ``plot_outcome_breakdown``,
+    ``plot_reward_decomposition``, ``plot_action_distribution``,
+    ``plot_unit_build_distribution``, ``plot_combat_summary`` — each
+    saving its canonical filename under ``charts_dir``. Used by both
+    the bootstrap notebook (per-stage subdirectory) and the self-play
+    training notebook (single run-level call) so the produced
+    filenames stay identical.
+
+    Returns a dict keyed by chart name with the matplotlib ``Figure``
+    (or ``None`` when the underlying data was missing). Callers can
+    iterate the returned figures to call ``plt.show()`` inline.
+    """
+    return {
+        "episode_length": plot_episode_length(
+            results, charts_dir=charts_dir, title_suffix=title_suffix
+        ),
+        "outcome_breakdown": plot_outcome_breakdown(results, charts_dir=charts_dir),
+        "reward_decomposition": plot_reward_decomposition(results, charts_dir=charts_dir),
+        "action_distribution": plot_action_distribution(results, charts_dir=charts_dir),
+        "unit_build_distribution": plot_unit_build_distribution(results, charts_dir=charts_dir),
+        "combat_summary": plot_combat_summary(results, charts_dir=charts_dir),
+    }
