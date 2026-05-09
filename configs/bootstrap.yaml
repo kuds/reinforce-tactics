@@ -137,13 +137,23 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
+      # Match the random_10 reward shape exactly (no kill / damage_scale).
+      # A previous run added ``kill: 50`` and ``damage_scale: 0.5`` to
+      # break a perceived "refuses combat" stall, and instead created a
+      # kill-farm attractor: the policy converged to ~80-100 kills per
+      # game vs ~1-2 captures, peaked at 76.7% WR around 700k, then
+      # collapsed as entropy cooled (49 losses_by_elimination at 1.7M as
+      # the policy committed to a razor-thin attrition trade -- ~1700 HP
+      # dealt vs ~1500 taken per game). Wins were essentially all
+      # ``wins_by_elimination``; almost no HQ captures. Reverting to the
+      # structure-only shape that hit 100% WR (60/0/0) on random_10. If
+      # this stalls, raise ent_coef.end (0.03 -> 0.05) before adding
+      # per-action combat reward back.
       reward_config:
         win_by_hq_capture: 3000.0
         win_by_elimination: 3000.0
         seize_progress: 50.0
         capture: 2000.0
-        kill: 50.0
-        damage_scale: 0.5
 
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv

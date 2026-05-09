@@ -32,6 +32,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -374,6 +375,21 @@ def run_curriculum(
         except Exception:  # noqa: BLE001
             # A metadata write failure must not mask the training
             # outcome; the checkpoint is the load-bearing artifact.
+            pass
+
+        # Per-eval timeseries (win_rate, reward, length, W/L/D, end_reasons,
+        # action_counts, reward_components) lives only in
+        # ``PeriodicEvalCallback.results`` while the process is up. Persist
+        # it next to ``config.json`` so the post-hoc charts in viz.py can
+        # be regenerated from disk after a run finishes (or after a Colab
+        # disconnect drops the in-memory ``history``).
+        try:
+            results_path = stage_dir / "eval_results.json"
+            results_path.write_text(
+                json.dumps(list(eval_cb.results), indent=2, default=float),
+                encoding="utf-8",
+            )
+        except Exception:  # noqa: BLE001
             pass
 
         history.append(
