@@ -827,7 +827,6 @@ class StrategyGameEnv(gym.Env):
                 reward += rc.get("seize_progress", 1.0)
                 self.episode_stats["seize_attempts"] += 1
                 if result_info.get("captured", False):
-                    reward += rc.get("capture", 20.0)
                     self.episode_stats["captures"] += 1
                     # Bucket the capture by structure type. Tile codes:
                     # "t" = tower, "b" = building, "h" = headquarters.
@@ -839,6 +838,14 @@ class StrategyGameEnv(gym.Env):
                     )
                     if type_key is not None:
                         self.episode_stats["captures_by_type"][type_key] += 1
+                    # Per-type capture reward overrides the global ``capture``
+                    # weight when present. Falls back to ``capture`` so existing
+                    # configs that only set the global key keep current behavior.
+                    type_reward_key = f"{type_key}_capture" if type_key else None
+                    if type_reward_key and type_reward_key in rc:
+                        reward += rc[type_reward_key]
+                    else:
+                        reward += rc.get("capture", 20.0)
             elif action_type == 4:
                 if result_info.get("cured"):
                     reward += rc.get("cure", 5.0)

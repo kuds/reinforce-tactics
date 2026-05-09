@@ -1441,6 +1441,185 @@ class TestRewardWeightDefaults:
         env.close()
 
 
+class TestPerStructureCaptureReward:
+    """Per-type capture rewards (``tower_capture`` / ``building_capture`` /
+    ``hq_capture``) override the global ``capture`` weight when set in
+    ``reward_config``. Falls back to the global ``capture`` when a per-type
+    key is absent so existing configs that only set the global key keep
+    their current behavior.
+
+    The lookup happens inside ``_execute_action`` for action_type=3 (seize)
+    when ``result_info["captured"]`` is True. We mock ``execute_game_action``
+    to return a controlled capture result, since constructing a real
+    low-HP capture requires bespoke map setup.
+    """
+
+    @staticmethod
+    def _capture_action_reward(env, structure_type):
+        """Run one seize action where the underlying game call reports a
+        successful capture of the given structure_type, and return the
+        action reward (the per-action component, before shaping).
+        """
+        env.reset()
+        # Mock execute_game_action so action_type=3 sees ``captured: True``
+        # with the requested structure_type, without requiring a real
+        # low-HP structure tile next to a unit.
+        env.execute_game_action = lambda action_dict, player: (
+            {
+                "seize_damage": 30,
+                "captured": True,
+                "structure_type": structure_type,
+            },
+            True,
+        )
+        action_dict = {
+            "action_type": 3,
+            "from_x": 0,
+            "from_y": 0,
+            "to_x": 0,
+            "to_y": 0,
+            "unit_type": None,
+        }
+        reward, is_valid = env._execute_action(action_dict)
+        assert is_valid is True
+        return reward
+
+    def test_building_specific_reward_overrides_global(self):
+        """When ``building_capture`` is set, building captures use it
+        instead of the global ``capture`` weight.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 100.0,
+                "building_capture": 4000.0,
+                # Zero seize_progress so only the capture reward shows up
+                "seize_progress": 0.0,
+            },
+        )
+        reward = self._capture_action_reward(env, "b")
+        assert reward == pytest.approx(4000.0)
+        env.close()
+
+    def test_tower_and_hq_specific_keys_independent(self):
+        """Each type's per-key reward fires only for its own structure_type."""
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 100.0,
+                "tower_capture": 1500.0,
+                "building_capture": 4000.0,
+                "hq_capture": 2500.0,
+                "seize_progress": 0.0,
+            },
+        )
+        assert self._capture_action_reward(env, "t") == pytest.approx(1500.0)
+        env.close()
+
+        env2 = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 100.0,
+                "tower_capture": 1500.0,
+                "building_capture": 4000.0,
+                "hq_capture": 2500.0,
+                "seize_progress": 0.0,
+            },
+        )
+        assert self._capture_action_reward(env2, "h") == pytest.approx(2500.0)
+        env2.close()
+
+    def test_falls_back_to_global_capture_when_type_key_absent(self):
+        """Configs that only set ``capture`` (no per-type keys) get the
+        same capture reward for all structure types — back-compat.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 250.0,
+                "seize_progress": 0.0,
+            },
+        )
+        # All three structure types should use the global capture weight
+        assert self._capture_action_reward(env, "t") == pytest.approx(250.0)
+        env.close()
+        env2 = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"capture": 250.0, "seize_progress": 0.0},
+        )
+        assert self._capture_action_reward(env2, "b") == pytest.approx(250.0)
+        env2.close()
+        env3 = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"capture": 250.0, "seize_progress": 0.0},
+        )
+        assert self._capture_action_reward(env3, "h") == pytest.approx(250.0)
+        env3.close()
+
+    def test_partial_per_type_override_uses_global_for_unconfigured_types(self):
+        """If only ``building_capture`` is set, towers and HQs still use
+        the global ``capture``. Catches a regression where the lookup
+        accidentally overrides for all types once any per-type key is set.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 200.0,
+                "building_capture": 4000.0,
+                "seize_progress": 0.0,
+            },
+        )
+        # Building uses building_capture
+        assert self._capture_action_reward(env, "b") == pytest.approx(4000.0)
+        env.close()
+        # Tower falls back to capture
+        env2 = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 200.0,
+                "building_capture": 4000.0,
+                "seize_progress": 0.0,
+            },
+        )
+        assert self._capture_action_reward(env2, "t") == pytest.approx(200.0)
+        env2.close()
+
+    def test_none_or_unmapped_structure_type_uses_global_capture(self):
+        """Defensive: if ``structure_type`` is None or an unrecognized
+        code, the reward path falls back to ``capture`` rather than
+        crashing or silently zeroing the reward.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={
+                "capture": 175.0,
+                "building_capture": 4000.0,
+                "seize_progress": 0.0,
+            },
+        )
+        # structure_type=None should NOT activate any per-type key
+        assert self._capture_action_reward(env, None) == pytest.approx(175.0)
+        env.close()
+
+
 class TestStepInfoDiagnostics:
     """Tests for the per-step diagnostic fields added to info:
     ``reward_breakdown`` and ``n_legal_actions``. These are how the
