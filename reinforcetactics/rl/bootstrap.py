@@ -169,6 +169,53 @@ def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
     )
 
 
+def _print_policy_summary(model: Any) -> None:
+    """One-time diagnostic: report what the SB3 ``MultiInputPolicy`` actually
+    built so we can verify the post-#268 (6, 6, 12) observation isn't being
+    flattened past its spatial structure.
+
+    Specifically, surfaces:
+      - The features-extractor class for each Dict obs key (does ``grid``
+        and ``units`` go through a CNN, or just a flatten?). This determines
+        whether the policy gets any spatial inductive bias.
+      - Total trainable parameter count, broken down by extractor / pi / vf,
+        so we can compare against the bootstrap.yaml comment's ~150K target
+        and notice if the head is the bottleneck vs the extractor.
+
+    Best-effort: a print failure must not block training, since the
+    checkpoint is the load-bearing artifact and this is purely diagnostic.
+    """
+    try:
+        policy = model.policy
+        extractor = getattr(policy, "features_extractor", None)
+        print("\n=== Policy network summary ===")
+        if extractor is not None:
+            extractors = getattr(extractor, "extractors", None)
+            if extractors is not None:
+                for key, sub in extractors.items():
+                    print(f"  obs[{key!r}] -> {type(sub).__name__}")
+            else:
+                print(f"  features_extractor: {type(extractor).__name__}")
+            ext_params = sum(p.numel() for p in extractor.parameters() if p.requires_grad)
+            print(f"  features_extractor params: {ext_params:,}")
+
+        def _count(module_attr: str) -> Optional[int]:
+            module = getattr(policy, module_attr, None)
+            if module is None:
+                return None
+            return sum(p.numel() for p in module.parameters() if p.requires_grad)
+
+        for name in ("mlp_extractor", "action_net", "value_net"):
+            n = _count(name)
+            if n is not None:
+                print(f"  {name} params: {n:,}")
+        total = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+        print(f"  total trainable params: {total:,}")
+        print("===============================\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _write_stage_config(
     *,
     stage: CurriculumStage,
@@ -341,6 +388,7 @@ def run_curriculum(
 
         if model is None:
             model = model_factory(vec_env, cfg, output_dir)
+            _print_policy_summary(model)
         else:
             model.set_env(vec_env)
 
