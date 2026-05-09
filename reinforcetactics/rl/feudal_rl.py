@@ -1144,19 +1144,28 @@ class FeudalRLAgent:
     # ------------------------------------------------------------------
 
     def setup_training(self, learning_rate: float = 3e-4, manager_lr_scale: float = 1.0, worker_lr_scale: float = 1.0):
-        """Initialize separate optimizers for worker and manager to prevent
-        feature extractor drift from interleaved updates."""
-        # Worker optimizer: updates feature extractor + worker
+        """Initialize optimizers for worker and manager.
+
+        The feature extractor is owned by the worker optimizer only. Putting
+        it in both optimizers gives each Adam its own ``(m, v)`` moments for
+        the same parameters, so two stale moment estimates fight each other
+        every epoch and gradient clipping is computed on disjoint param sets.
+        Instead, the worker drives the encoder and the manager update detaches
+        features (see :meth:`update`) so manager gradients don't reach the
+        encoder at all -- the encoder is updated by exactly one optimizer per
+        step, and ``zero_grad`` clears every parameter that has a live grad.
+        """
+        # Worker optimizer: updates feature extractor + worker.
         self.worker_optimizer = torch.optim.Adam(
             [
                 {"params": self.feature_extractor.parameters(), "lr": learning_rate},
                 {"params": self.worker.parameters(), "lr": learning_rate * worker_lr_scale},
             ]
         )
-        # Manager optimizer: updates feature extractor + manager
+        # Manager optimizer: updates ONLY the manager. Manager loss is
+        # backpropped through detached features so the encoder is untouched.
         self.manager_optimizer = torch.optim.Adam(
             [
-                {"params": self.feature_extractor.parameters(), "lr": learning_rate},
                 {"params": self.manager.parameters(), "lr": learning_rate * manager_lr_scale},
             ]
         )
@@ -1355,7 +1364,9 @@ class FeudalRLAgent:
         import torch.nn.functional as F  # pylint: disable=import-outside-toplevel
 
         worker_params = list(self.feature_extractor.parameters()) + list(self.worker.parameters())
-        manager_params = list(self.feature_extractor.parameters()) + list(self.manager.parameters())
+        # Manager grads stop at the detach() in the manager loop, so the
+        # encoder is intentionally absent from the clip set.
+        manager_params = list(self.manager.parameters())
 
         n_worker = len(buf.w_rewards)
         n_manager = len(buf.m_rewards)
@@ -1457,7 +1468,10 @@ class FeudalRLAgent:
                     b_adv = m_adv[idx]
                     b_ret = m_ret[idx]
 
-                    features = self.feature_extractor(b_obs)
+                    # Detach features so the manager update does not touch
+                    # the shared encoder. The encoder is owned by the worker
+                    # optimizer; see ``setup_training`` for the rationale.
+                    features = self.feature_extractor(b_obs).detach()
                     new_lp, entropy, values = self.manager.evaluate_goal(features, b_goals)
 
                     ratio = torch.exp(new_lp - b_old_lp)

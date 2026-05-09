@@ -11,12 +11,32 @@ Usage:
     print(f"Win rate: {results['win_rate']:.1%}")
 """
 
+import inspect
 import logging
 from typing import Any, Dict
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _model_accepts_action_masks(model: Any) -> bool:
+    """Return True iff ``model.predict`` accepts an ``action_masks`` kwarg.
+
+    ``MaskablePPO.predict`` declares ``action_masks`` explicitly; plain
+    ``stable_baselines3.PPO.predict`` does not and raises ``TypeError`` if
+    one is passed. This signature probe distinguishes the two without
+    importing sb3-contrib (which is an optional dep) and also handles
+    duck-typed test stubs whose ``predict`` accepts ``**kwargs``.
+    """
+    try:
+        sig = inspect.signature(model.predict)
+    except (TypeError, ValueError):
+        return False
+    params = sig.parameters
+    if "action_masks" in params:
+        return True
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 # Action types are emitted as integers in info["action_type"]; this list maps
@@ -102,7 +122,12 @@ def evaluate_model(
     wins, losses, draws = 0, 0, 0
     rewards = []
     lengths = []
-    has_action_masks = hasattr(env, "action_masks")
+    # Only forward action masks to ``model.predict`` when the model itself
+    # accepts them. Plain ``stable_baselines3.PPO.predict`` will raise
+    # ``TypeError`` on an unexpected ``action_masks`` kwarg, which would
+    # break eval for the ``ppo_baseline.yaml`` path (vanilla PPO behind a
+    # mask-exposing env wrapper).
+    has_action_masks = hasattr(env, "action_masks") and _model_accepts_action_masks(model)
 
     # Outcome × end-reason matrix accumulated per episode. Keys are
     # f"{outcome}_by_{reason}" e.g. "wins_by_hq_capture",
