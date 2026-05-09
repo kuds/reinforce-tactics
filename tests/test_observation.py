@@ -3,14 +3,22 @@ Tests for reinforcetactics.rl.observation.build_observation.
 
 These tests pin down the observation contract that gym_env, MCTS, and
 ModelBot all share: global_features is always agent-relative (perspective
-player's gold/units go first), and fog of war correctly hides enemy info.
+player's gold/units go first), ownership channels are agent-relative
+one-hots, and fog of war correctly hides enemy info.
 """
 
 import numpy as np
 import pytest
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.rl.observation import build_observation
+from reinforcetactics.rl.observation import (
+    GLOBAL_FEATURES_DIM,
+    GRID_CHANNELS,
+    NUM_TILE_TYPES,
+    NUM_UNIT_TYPES,
+    UNIT_CHANNELS,
+    build_observation,
+)
 from reinforcetactics.utils.file_io import FileIO
 
 
@@ -36,26 +44,30 @@ def game_fow(map_data):
 
 @pytest.fixture
 def zero_mask():
-    # Action mask is owned by the caller; builder doesn't inspect it.
+    """A zero mask, kept for the action-mask passthrough test only."""
     return np.zeros(10 * 10 * 10, dtype=np.float32)
 
 
-def test_keys_and_dtypes(game, zero_mask):
-    obs = build_observation(game, perspective_player=1, action_mask=zero_mask)
-    assert set(obs.keys()) == {"grid", "units", "global_features", "action_mask"}
+def test_keys_and_dtypes(game):
+    obs = build_observation(game, perspective_player=1)
+    # action_mask is no longer part of the policy observation; callers that
+    # need it pass it in explicitly (covered by test_action_mask_passthrough).
+    assert set(obs.keys()) == {"grid", "units", "global_features"}
     assert obs["grid"].dtype == np.float32
     assert obs["units"].dtype == np.float32
     assert obs["global_features"].dtype == np.float32
-    assert obs["global_features"].shape == (6,)
+    assert obs["global_features"].shape == (GLOBAL_FEATURES_DIM,)
+    assert obs["grid"].shape[-1] == GRID_CHANNELS
+    assert obs["units"].shape[-1] == UNIT_CHANNELS
 
 
-def test_perspective_p1_vs_p2_swaps_gold(game, zero_mask):
+def test_perspective_p1_vs_p2_swaps_gold(game):
     """global_features[0] must always be the perspective player's gold."""
     game.player_gold[1] = 42
     game.player_gold[2] = 99
 
-    obs1 = build_observation(game, perspective_player=1, action_mask=zero_mask)
-    obs2 = build_observation(game, perspective_player=2, action_mask=zero_mask)
+    obs1 = build_observation(game, perspective_player=1)
+    obs2 = build_observation(game, perspective_player=2)
 
     assert obs1["global_features"][0] == 42
     assert obs1["global_features"][1] == 99
@@ -63,7 +75,7 @@ def test_perspective_p1_vs_p2_swaps_gold(game, zero_mask):
     assert obs2["global_features"][1] == 42
 
 
-def test_perspective_swaps_unit_counts(game, zero_mask):
+def test_perspective_swaps_unit_counts(game):
     """own_units / opp_units follow the perspective player."""
     from reinforcetactics.core.unit import Unit
 
@@ -75,55 +87,124 @@ def test_perspective_swaps_unit_counts(game, zero_mask):
         Unit("W", 0, 5, 2),
     ]
 
-    obs1 = build_observation(game, perspective_player=1, action_mask=zero_mask)
-    obs2 = build_observation(game, perspective_player=2, action_mask=zero_mask)
+    obs1 = build_observation(game, perspective_player=1)
+    obs2 = build_observation(game, perspective_player=2)
 
-    # global_features: [own_gold, opp_gold, turn, own_units, opp_units, current_player]
+    # global_features: [own_gold, opp_gold, turn, own_units, opp_units]
     assert obs1["global_features"][3] == 3
     assert obs1["global_features"][4] == 1
     assert obs2["global_features"][3] == 1
     assert obs2["global_features"][4] == 3
 
 
-def test_current_player_is_absolute(game, zero_mask):
-    """global_features[5] is the *absolute* current_player, not perspective-rewritten."""
+def test_current_player_dropped_from_global_features(game):
+    """``current_player`` was removed: it's redundant under agent-relative obs."""
     game.current_player = 2
-    obs1 = build_observation(game, perspective_player=1, action_mask=zero_mask)
-    obs2 = build_observation(game, perspective_player=2, action_mask=zero_mask)
-    assert obs1["global_features"][5] == 2
-    assert obs2["global_features"][5] == 2
+    obs = build_observation(game, perspective_player=1)
+    assert obs["global_features"].shape == (GLOBAL_FEATURES_DIM,)
+    # No room left in the vector for an absolute current_player slot.
 
 
-def test_action_mask_passthrough(game):
+def test_action_mask_passthrough_when_provided(game):
+    """The mask is opt-in (for non-PPO callers like MCTS)."""
     mask = np.ones(10 * 10 * 10, dtype=np.float32)
     obs = build_observation(game, perspective_player=1, action_mask=mask)
     assert obs["action_mask"] is mask
 
 
-def test_fog_of_war_hides_enemy_gold(game_fow, zero_mask):
+def test_action_mask_absent_by_default(game):
+    """Default obs (used by gym_env / MaskablePPO) has no action_mask key."""
+    obs = build_observation(game, perspective_player=1)
+    assert "action_mask" not in obs
+
+
+def test_fog_of_war_hides_enemy_gold(game_fow):
     game_fow.player_gold[1] = 50
     game_fow.player_gold[2] = 200
-    obs = build_observation(game_fow, perspective_player=1, action_mask=zero_mask)
+    obs = build_observation(game_fow, perspective_player=1)
     assert obs["global_features"][0] == 50
     assert obs["global_features"][1] == 0  # enemy gold hidden
     # visibility layer is included under FOW
     assert "visibility" in obs
 
 
-def test_fog_of_war_off_by_default(game, zero_mask):
-    obs = build_observation(game, perspective_player=1, action_mask=zero_mask)
+def test_fog_of_war_off_by_default(game):
+    obs = build_observation(game, perspective_player=1)
     assert "visibility" not in obs
 
 
-def test_fog_of_war_override(game, zero_mask):
+def test_fog_of_war_override(game):
     """Explicit fog_of_war=False wins over game_state.fog_of_war=True."""
-    # Simulate a FOW-enabled state but force off via param
-    obs = build_observation(game, perspective_player=1, action_mask=zero_mask, fog_of_war=False)
+    obs = build_observation(game, perspective_player=1, fog_of_war=False)
     assert "visibility" not in obs
 
 
-def test_grid_shape_matches_map(game, zero_mask):
-    obs = build_observation(game, perspective_player=1, action_mask=zero_mask)
+def test_grid_shape_matches_map(game):
+    obs = build_observation(game, perspective_player=1)
     h, w = game.grid.height, game.grid.width
-    assert obs["grid"].shape == (h, w, 3)
-    assert obs["units"].shape == (h, w, 3)
+    assert obs["grid"].shape == (h, w, GRID_CHANNELS)
+    assert obs["units"].shape == (h, w, UNIT_CHANNELS)
+
+
+def test_units_one_hot_and_agent_relative_owner(game):
+    """Unit type is one-hot; owner channels flip with perspective."""
+    from reinforcetactics.constants import ALL_UNIT_TYPES
+    from reinforcetactics.core.unit import Unit
+
+    game.units = [Unit("M", 3, 4, player=1), Unit("K", 5, 6, player=2)]
+
+    p1 = build_observation(game, perspective_player=1)
+    p2 = build_observation(game, perspective_player=2)
+
+    # Unit-type one-hot uses ALL_UNIT_TYPES ordering.
+    m_idx = ALL_UNIT_TYPES.index("M")
+    k_idx = ALL_UNIT_TYPES.index("K")
+    assert p1["units"][4, 3, m_idx] == 1.0  # (y=4, x=3)
+    assert p1["units"][4, 3, :NUM_UNIT_TYPES].sum() == 1.0
+    assert p1["units"][6, 5, k_idx] == 1.0
+
+    # Player-1 unit at (3, 4): self-channel from P1 view, opp-channel from P2.
+    self_ch = NUM_UNIT_TYPES + 0
+    opp_ch = NUM_UNIT_TYPES + 1
+    assert p1["units"][4, 3, self_ch] == 1.0
+    assert p1["units"][4, 3, opp_ch] == 0.0
+    assert p2["units"][4, 3, self_ch] == 0.0
+    assert p2["units"][4, 3, opp_ch] == 1.0
+
+
+def test_grid_owner_channels_are_agent_relative(game):
+    """Tile owner is encoded as one-hot (self / opp / neutral) per-perspective."""
+    # Force a known ownership: pick the first capturable tile, make it P1's.
+    capturable = game.grid.get_capturable_tiles()
+    assert capturable, "fixture map must have at least one capturable tile"
+    tile = capturable[0]
+    tile.player = 1
+
+    p1 = build_observation(game, perspective_player=1)
+    p2 = build_observation(game, perspective_player=2)
+
+    self_ch = NUM_TILE_TYPES + 0
+    opp_ch = NUM_TILE_TYPES + 1
+    neutral_ch = NUM_TILE_TYPES + 2
+    y, x = tile.y, tile.x
+
+    # P1 view: self-owned. P2 view: opp-owned.
+    assert p1["grid"][y, x, self_ch] == 1.0
+    assert p1["grid"][y, x, opp_ch] == 0.0
+    assert p2["grid"][y, x, self_ch] == 0.0
+    assert p2["grid"][y, x, opp_ch] == 1.0
+    # Neutral channel is mutually exclusive with self/opp.
+    assert p1["grid"][y, x, neutral_ch] == 0.0
+
+
+def test_hp_channel_is_normalized(game):
+    """Structure / unit HP channel is a fraction in [0, 1], not 0..100."""
+    from reinforcetactics.core.unit import Unit
+
+    game.units = [Unit("W", 0, 0, player=1)]
+    obs = build_observation(game, perspective_player=1)
+    hp = obs["units"][0, 0, NUM_UNIT_TYPES + 3]
+    assert 0.0 <= hp <= 1.0
+    # A freshly created unit at full health should be at HP=1.0 modulo
+    # rounding from to_numpy's percentage encoding.
+    assert hp == pytest.approx(1.0, abs=1e-3)

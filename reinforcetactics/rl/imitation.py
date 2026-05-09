@@ -295,10 +295,13 @@ class _ActionRecorder:
     def _snapshot(self, action: np.ndarray) -> None:
         flat, at, ut, fx, fy, tx, ty = _compute_masks(self.game_state, self.width, self.height, self.enabled_units)
 
+        # Action mask is recorded on the Demonstration separately (per-dim
+        # masks for MaskablePPO); we deliberately do NOT include it in the
+        # obs dict — the policy's observation space no longer carries it.
         obs = build_observation(
             self.game_state,
             perspective_player=self.demonstrator_player,
-            action_mask=flat,
+            action_mask=None,
             fog_of_war=self.fog_of_war,
         )
 

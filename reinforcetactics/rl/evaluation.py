@@ -52,6 +52,12 @@ UNIT_TYPE_LETTERS = ("W", "M", "C", "A", "K", "R", "S", "B")
 # can plot e.g. "captures per game" or "damage delta" curves.
 COMBAT_STAT_KEYS = ("captures", "kills", "attacks", "seize_attempts", "damage_dealt", "damage_taken")
 
+# Structure types tracked under ``info["episode_stats"]["captures_by_type"]``.
+# Populated by ``StrategyGameEnv._execute_action`` whenever a seize action
+# captures a tile; aggregated here so eval_results.json shows per-structure
+# capture counts (towers vs buildings vs HQ) rather than only the total.
+CAPTURE_STRUCTURE_TYPES = ("tower", "building", "hq")
+
 
 def evaluate_model(
     model: Any,
@@ -111,6 +117,7 @@ def evaluate_model(
     # on them.
     units_built = {ut: 0 for ut in UNIT_TYPE_LETTERS}
     combat_stats = {k: 0.0 for k in COMBAT_STAT_KEYS}
+    captures_by_type = {k: 0 for k in CAPTURE_STRUCTURE_TYPES}
 
     if track_breakdown:
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
@@ -185,6 +192,14 @@ def evaluate_model(
             if val is not None:
                 combat_stats[key] += float(val)
 
+        # Per-structure capture breakdown. Older envs (pre-this change)
+        # don't populate the key; older checkpoints just contribute zeros.
+        ep_captures_by_type = episode_stats.get("captures_by_type") or {}
+        for key in CAPTURE_STRUCTURE_TYPES:
+            val = ep_captures_by_type.get(key)
+            if val is not None:
+                captures_by_type[key] += int(val)
+
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
 
@@ -204,6 +219,7 @@ def evaluate_model(
         "outcome_reasons": outcome_reasons,
         "units_built": units_built,
         "combat_stats": combat_stats,
+        "captures_by_type": captures_by_type,
     }
     if track_breakdown:
         result["action_counts"] = action_counts

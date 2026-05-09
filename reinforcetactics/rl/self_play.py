@@ -398,10 +398,10 @@ class SelfPlayEnv(gym.Wrapper):
         """Build a fresh observation from ``player``'s perspective.
 
         Delegates to the shared ``build_observation`` helper so FOW handling
-        matches gym_env and ModelBot. The action mask comes from the base
-        env (which derives it from ``game_state.current_player``) — that is
-        the right mask whenever this is called during ``player``'s turn,
-        which is the only time SelfPlayEnv consults it in production.
+        matches gym_env and ModelBot. The action mask is not embedded in
+        the obs dict (the policy consumes it via ``env.action_masks()``);
+        SelfPlayEnv's opponent-action sampler reads the mask from the base
+        env directly when needed.
         """
         from reinforcetactics.rl.observation import build_observation
 
@@ -409,7 +409,7 @@ class SelfPlayEnv(gym.Wrapper):
         return build_observation(
             base_env.game_state,
             perspective_player=player,
-            action_mask=base_env._get_action_mask(),
+            action_mask=None,
             fog_of_war=base_env.fog_of_war,
         )
 

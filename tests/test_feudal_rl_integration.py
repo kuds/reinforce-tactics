@@ -26,6 +26,13 @@ from reinforcetactics.rl.feudal_rl import (
     _compute_gae,
     compute_intrinsic_reward,
 )
+from reinforcetactics.rl.observation import (
+    GLOBAL_FEATURES_DIM,
+    GRID_CHANNELS,
+    NUM_TILE_TYPES,
+    NUM_UNIT_TYPES,
+    UNIT_CHANNELS,
+)
 
 GRID_H, GRID_W = 6, 6
 
@@ -38,41 +45,52 @@ GRID_H, GRID_W = 6, 6
 def _make_obs_space():
     return spaces.Dict(
         {
-            "grid": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-            "units": spaces.Box(low=0, high=255, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-            "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
-            "action_mask": spaces.Box(low=0, high=1, shape=(60,), dtype=np.float32),
+            "grid": spaces.Box(low=0.0, high=1.0, shape=(GRID_H, GRID_W, GRID_CHANNELS), dtype=np.float32),
+            "units": spaces.Box(low=0.0, high=1.0, shape=(GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32),
+            "global_features": spaces.Box(low=0.0, high=1e5, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
         }
     )
 
 
 def _make_obs():
     return {
-        "grid": np.random.rand(GRID_H, GRID_W, 3).astype(np.float32),
-        "units": np.zeros((GRID_H, GRID_W, 3), dtype=np.float32),
-        "global_features": np.random.rand(6).astype(np.float32),
-        "action_mask": np.ones(60, dtype=np.float32),
+        "grid": np.random.rand(GRID_H, GRID_W, GRID_CHANNELS).astype(np.float32),
+        "units": np.zeros((GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32),
+        "global_features": np.random.rand(GLOBAL_FEATURES_DIM).astype(np.float32),
     }
 
 
 def _make_state(player_positions=None, opponent_positions=None, grid_val=0):
-    units = np.zeros((GRID_H, GRID_W, 3), dtype=np.float32)
-    grid = np.zeros((GRID_H, GRID_W, 3), dtype=np.float32)
-    grid[:, :, 0] = grid_val
+    """Build a minimal agent-relative observation.
+
+    With the new encoding, ownership is one-hot: unit ``self`` lives on
+    channel ``NUM_UNIT_TYPES + 0`` and ``opp`` on ``NUM_UNIT_TYPES + 1``.
+    """
+    units = np.zeros((GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32)
+    grid = np.zeros((GRID_H, GRID_W, GRID_CHANNELS), dtype=np.float32)
+    # ``grid_val`` keeps tests that twiddled tile-type 0 working: set the
+    # one-hot bit on the chosen tile type for every cell.
+    if 0 <= int(grid_val) < NUM_TILE_TYPES:
+        grid[:, :, int(grid_val)] = 1.0
+
+    self_unit_ch = NUM_UNIT_TYPES + 0
+    opp_unit_ch = NUM_UNIT_TYPES + 1
+    hp_unit_ch = UNIT_CHANNELS - 1
+
     if player_positions:
         for y, x in player_positions:
-            units[y, x, 0] = 1  # unit type
-            units[y, x, 1] = 1  # player 1
-            units[y, x, 2] = 10  # HP
+            units[y, x, 0] = 1.0  # unit type "W"
+            units[y, x, self_unit_ch] = 1.0
+            units[y, x, hp_unit_ch] = 1.0
     if opponent_positions:
         for y, x in opponent_positions:
-            units[y, x, 0] = 1
-            units[y, x, 1] = 2
-            units[y, x, 2] = 10
+            units[y, x, 0] = 1.0
+            units[y, x, opp_unit_ch] = 1.0
+            units[y, x, hp_unit_ch] = 1.0
     return {
         "grid": grid,
         "units": units,
-        "global_features": np.zeros(6, dtype=np.float32),
+        "global_features": np.zeros(GLOBAL_FEATURES_DIM, dtype=np.float32),
     }
 
 
@@ -93,8 +111,10 @@ class MockEnv:
     def step(self, action):
         self.step_count += 1
         obs = _make_obs()
-        # Place a player unit so intrinsic reward doesn't return -10
-        obs["units"][0, 0, 1] = 1
+        # Place a player unit so intrinsic reward doesn't return -10. The
+        # "self-owned unit" channel is the first owner channel after the
+        # unit-type one-hot block.
+        obs["units"][0, 0, NUM_UNIT_TYPES + 0] = 1
         reward = np.random.uniform(-1, 1)
         terminated = self.step_count >= self.episode_length
         truncated = False
@@ -542,9 +562,9 @@ class TestGradientFlow:
         )
 
         obs = {
-            "grid": torch.rand(2, GRID_H, GRID_W, 3),
-            "units": torch.rand(2, GRID_H, GRID_W, 3),
-            "global_features": torch.rand(2, 6),
+            "grid": torch.rand(2, GRID_H, GRID_W, GRID_CHANNELS),
+            "units": torch.rand(2, GRID_H, GRID_W, UNIT_CHANNELS),
+            "global_features": torch.rand(2, GLOBAL_FEATURES_DIM),
         }
         features = fe(obs)
         goal = torch.rand(2, 3)
@@ -563,9 +583,9 @@ class TestGradientFlow:
         manager = ManagerNetwork(feature_dim=64, grid_width=GRID_W, grid_height=GRID_H)
 
         obs = {
-            "grid": torch.rand(2, GRID_H, GRID_W, 3),
-            "units": torch.rand(2, GRID_H, GRID_W, 3),
-            "global_features": torch.rand(2, 6),
+            "grid": torch.rand(2, GRID_H, GRID_W, GRID_CHANNELS),
+            "units": torch.rand(2, GRID_H, GRID_W, UNIT_CHANNELS),
+            "global_features": torch.rand(2, GLOBAL_FEATURES_DIM),
         }
         features = fe(obs)
         goal, log_prob, value = manager.sample_goal(features)
@@ -599,9 +619,9 @@ class TestObsToTensor:
         obs = _make_obs()
         tensor_obs = agent._obs_to_tensor(obs)
         # Should be batched (dim 0 = 1)
-        assert tensor_obs["grid"].shape == (1, GRID_H, GRID_W, 3)
-        assert tensor_obs["units"].shape == (1, GRID_H, GRID_W, 3)
-        assert tensor_obs["global_features"].shape == (1, 6)
+        assert tensor_obs["grid"].shape == (1, GRID_H, GRID_W, GRID_CHANNELS)
+        assert tensor_obs["units"].shape == (1, GRID_H, GRID_W, UNIT_CHANNELS)
+        assert tensor_obs["global_features"].shape == (1, GLOBAL_FEATURES_DIM)
 
 
 # ---------------------------------------------------------------------------

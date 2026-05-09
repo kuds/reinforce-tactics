@@ -13,6 +13,13 @@ from reinforcetactics.rl.feudal_rl import (
     _compute_gae,
     compute_intrinsic_reward,
 )
+from reinforcetactics.rl.observation import (
+    GLOBAL_FEATURES_DIM,
+    GRID_CHANNELS,
+    NUM_TILE_TYPES,
+    NUM_UNIT_TYPES,
+    UNIT_CHANNELS,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -26,9 +33,9 @@ def obs_space():
     """Minimal observation space matching the feature extractor expectations."""
     return spaces.Dict(
         {
-            "grid": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-            "units": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-            "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
+            "grid": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, GRID_CHANNELS), dtype=np.float32),
+            "units": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32),
+            "global_features": spaces.Box(low=0, high=10000, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
         }
     )
 
@@ -52,9 +59,9 @@ def worker():
 def sample_obs():
     """A single observation dict (unbatched numpy arrays)."""
     return {
-        "grid": np.random.rand(GRID_H, GRID_W, 3).astype(np.float32),
-        "units": np.random.rand(GRID_H, GRID_W, 3).astype(np.float32),
-        "global_features": np.random.rand(6).astype(np.float32),
+        "grid": np.random.rand(GRID_H, GRID_W, GRID_CHANNELS).astype(np.float32),
+        "units": np.random.rand(GRID_H, GRID_W, UNIT_CHANNELS).astype(np.float32),
+        "global_features": np.random.rand(GLOBAL_FEATURES_DIM).astype(np.float32),
     }
 
 
@@ -62,9 +69,9 @@ def sample_obs():
 def batched_obs():
     """Batched observation tensors (batch=2)."""
     return {
-        "grid": torch.rand(2, GRID_H, GRID_W, 3),
-        "units": torch.rand(2, GRID_H, GRID_W, 3),
-        "global_features": torch.rand(2, 6),
+        "grid": torch.rand(2, GRID_H, GRID_W, GRID_CHANNELS),
+        "units": torch.rand(2, GRID_H, GRID_W, UNIT_CHANNELS),
+        "global_features": torch.rand(2, GLOBAL_FEATURES_DIM),
     }
 
 
@@ -80,9 +87,9 @@ class TestSpatialFeatureExtractor:
 
     def test_single_sample(self, feature_extractor):
         obs = {
-            "grid": torch.rand(1, GRID_H, GRID_W, 3),
-            "units": torch.rand(1, GRID_H, GRID_W, 3),
-            "global_features": torch.rand(1, 6),
+            "grid": torch.rand(1, GRID_H, GRID_W, GRID_CHANNELS),
+            "units": torch.rand(1, GRID_H, GRID_W, UNIT_CHANNELS),
+            "global_features": torch.rand(1, GLOBAL_FEATURES_DIM),
         }
         out = feature_extractor(obs)
         assert out.shape == (1, 64)
@@ -91,15 +98,15 @@ class TestSpatialFeatureExtractor:
         """Extractor works when observation space has no global_features."""
         obs_space = spaces.Dict(
             {
-                "grid": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
-                "units": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, 3), dtype=np.float32),
+                "grid": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, GRID_CHANNELS), dtype=np.float32),
+                "units": spaces.Box(low=0, high=1, shape=(GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32),
             }
         )
         ext = SpatialFeatureExtractor(obs_space, features_dim=64)
         assert ext.n_global == 0
         obs = {
-            "grid": torch.rand(1, GRID_H, GRID_W, 3),
-            "units": torch.rand(1, GRID_H, GRID_W, 3),
+            "grid": torch.rand(1, GRID_H, GRID_W, GRID_CHANNELS),
+            "units": torch.rand(1, GRID_H, GRID_W, UNIT_CHANNELS),
         }
         out = ext(obs)
         assert out.shape == (1, 64)
@@ -268,9 +275,9 @@ class TestComputeGAE:
 class TestFeudalRolloutBuffer:
     def _make_obs(self):
         return {
-            "grid": np.random.rand(GRID_H, GRID_W, 3).astype(np.float32),
-            "units": np.random.rand(GRID_H, GRID_W, 3).astype(np.float32),
-            "global_features": np.random.rand(6).astype(np.float32),
+            "grid": np.random.rand(GRID_H, GRID_W, GRID_CHANNELS).astype(np.float32),
+            "units": np.random.rand(GRID_H, GRID_W, UNIT_CHANNELS).astype(np.float32),
+            "global_features": np.random.rand(GLOBAL_FEATURES_DIM).astype(np.float32),
         }
 
     def test_add_and_finalize_worker(self):
@@ -288,7 +295,7 @@ class TestFeudalRolloutBuffer:
                 worker_reward_alpha=0.5,
             )
         buf.finalize()
-        assert buf.w_obs_grid.shape == (5, GRID_H, GRID_W, 3)
+        assert buf.w_obs_grid.shape == (5, GRID_H, GRID_W, GRID_CHANNELS)
         assert buf.w_actions.shape == (5, 6)
         assert buf.w_rewards.shape == (5,)
         # reward = intrinsic + alpha * extrinsic = 0.5 + 0.5*1.0 = 1.0
@@ -359,23 +366,31 @@ class TestFeudalRolloutBuffer:
 
 class TestComputeIntrinsicReward:
     def _make_state(self, player_positions=None, opponent_positions=None, grid_val=0):
-        """Build a minimal state dict.
+        """Build a minimal agent-relative state dict.
 
-        Args:
-            player_positions: list of (y, x) tuples for agent_player=1
-            opponent_positions: list of (y, x) tuples for player 2
-            grid_val: scalar to fill grid[:,:,0] (terrain type)
+        Ownership is encoded as one-hot ``self`` / ``opp`` channels — the
+        absolute player number is not part of the observation any more, so
+        these helpers populate the perspective-relative channels directly.
         """
-        units = np.zeros((GRID_H, GRID_W, 3), dtype=np.float32)
-        grid = np.zeros((GRID_H, GRID_W, 3), dtype=np.float32)
-        grid[:, :, 0] = grid_val
+        units = np.zeros((GRID_H, GRID_W, UNIT_CHANNELS), dtype=np.float32)
+        grid = np.zeros((GRID_H, GRID_W, GRID_CHANNELS), dtype=np.float32)
+        # ``grid_val`` historically picked tile-type index 0; preserve that
+        # by setting the corresponding tile-type one-hot bit.
+        if 0 <= int(grid_val) < NUM_TILE_TYPES:
+            grid[:, :, int(grid_val)] = 1.0
+        self_unit_ch = NUM_UNIT_TYPES + 0
+        opp_unit_ch = NUM_UNIT_TYPES + 1
         if player_positions:
             for y, x in player_positions:
-                units[y, x, 1] = 1  # player 1
+                units[y, x, self_unit_ch] = 1.0
         if opponent_positions:
             for y, x in opponent_positions:
-                units[y, x, 1] = 2  # player 2
-        return {"grid": grid, "units": units, "global_features": np.zeros(6, dtype=np.float32)}
+                units[y, x, opp_unit_ch] = 1.0
+        return {
+            "grid": grid,
+            "units": units,
+            "global_features": np.zeros(GLOBAL_FEATURES_DIM, dtype=np.float32),
+        }
 
     def test_no_player_units(self):
         state = self._make_state()
@@ -407,18 +422,27 @@ class TestComputeIntrinsicReward:
 
     def test_defend_goal_own_structure(self):
         next_state = self._make_state(player_positions=[(2, 2)])
-        # Set grid owner at goal to player 1
-        next_state["grid"][2, 2, 1] = 1
+        # Mark goal tile as agent-owned via the agent-relative "self" tile
+        # channel (first owner channel after the tile-type one-hot block).
+        next_state["grid"][2, 2, NUM_TILE_TYPES + 0] = 1.0
         goal = np.array([2, 2, 1])  # defend goal_type=1
         reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
         # Unit at goal (+5.0) + defend bonus (+3.0) + own structure (+2.0)
         assert reward >= 10.0
 
     def test_capture_goal_structure(self):
-        next_state = self._make_state(player_positions=[(1, 1)], grid_val=2)
+        # Place a building (tile type 'b' = index 5 in TILE_TYPE_ORDER) at
+        # the goal cell — capture bonus only fires for capturable tiles.
+        from reinforcetactics.rl.observation import TILE_TYPE_ORDER
+
+        building_idx = TILE_TYPE_ORDER.index("b")
+        next_state = self._make_state(player_positions=[(1, 1)])
+        # Clear the default tile type and set the capturable one.
+        next_state["grid"][1, 1, :NUM_TILE_TYPES] = 0.0
+        next_state["grid"][1, 1, building_idx] = 1.0
         goal = np.array([1, 1, 2])  # capture goal_type=2
         reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
-        # Unit at goal (+5.0) + terrain > 0 (+4.0)
+        # Unit at goal (+5.0) + capturable structure (+4.0)
         assert reward >= 9.0
 
     def test_expand_goal_spread_bonus(self):
@@ -431,16 +455,14 @@ class TestComputeIntrinsicReward:
         assert reward > 0
 
     def test_agent_player_2(self):
-        """Intrinsic reward should respect agent_player parameter."""
-        # Player 2 units
-        units = np.zeros((GRID_H, GRID_W, 3), dtype=np.float32)
-        units[0, 0, 1] = 2
-        next_state = {
-            "grid": np.zeros((GRID_H, GRID_W, 3), dtype=np.float32),
-            "units": units,
-            "global_features": np.zeros(6, dtype=np.float32),
-        }
+        """Intrinsic reward respects the perspective baked into the obs.
+
+        With agent-relative channels, "player 2 from P2's perspective" ==
+        "self" — the helper just toggles the self channel. The
+        ``agent_player`` argument is no longer load-bearing for ownership
+        lookup (kept for back-compat / signature stability).
+        """
+        next_state = self._make_state(player_positions=[(0, 0)])
         goal = np.array([0, 0, 0])
         reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=2)
-        # Player 2 unit at goal -> should get bonus
         assert reward >= 5.0

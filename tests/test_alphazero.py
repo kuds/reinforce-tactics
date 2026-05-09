@@ -10,6 +10,7 @@ from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet, ResidualBlock
 from reinforcetactics.rl.alphazero_trainer import ReplayBuffer, self_play_game
 from reinforcetactics.rl.mcts import MCTS, MCTSNode, _obs_from_game_state
+from reinforcetactics.rl.observation import GLOBAL_FEATURES_DIM, GRID_CHANNELS, UNIT_CHANNELS
 from reinforcetactics.utils.file_io import FileIO
 
 # ---------------------------------------------------------------------------
@@ -68,9 +69,9 @@ class TestAlphaZeroNet:
         batch_size = 4
         action_space_size = 10 * w * h
 
-        grid = torch.randn(batch_size, h, w, 3)
-        units = torch.randn(batch_size, h, w, 3)
-        gf = torch.randn(batch_size, 6)
+        grid = torch.randn(batch_size, h, w, GRID_CHANNELS)
+        units = torch.randn(batch_size, h, w, UNIT_CHANNELS)
+        gf = torch.randn(batch_size, GLOBAL_FEATURES_DIM)
 
         policy_logits, value = small_network(grid, units, gf)
 
@@ -82,9 +83,9 @@ class TestAlphaZeroNet:
         h = game_state.grid.height
         w = game_state.grid.width
 
-        grid = torch.randn(2, h, w, 3)
-        units = torch.randn(2, h, w, 3)
-        gf = torch.randn(2, 6)
+        grid = torch.randn(2, h, w, GRID_CHANNELS)
+        units = torch.randn(2, h, w, UNIT_CHANNELS)
+        gf = torch.randn(2, GLOBAL_FEATURES_DIM)
 
         _, value = small_network(grid, units, gf)
 
@@ -97,9 +98,9 @@ class TestAlphaZeroNet:
         w = game_state.grid.width
         action_space = 10 * w * h
 
-        grid = torch.randn(1, h, w, 3)
-        units = torch.randn(1, h, w, 3)
-        gf = torch.randn(1, 6)
+        grid = torch.randn(1, h, w, GRID_CHANNELS)
+        units = torch.randn(1, h, w, UNIT_CHANNELS)
+        gf = torch.randn(1, GLOBAL_FEATURES_DIM)
 
         # Create a sparse mask
         mask = torch.zeros(1, action_space)
@@ -126,9 +127,9 @@ class TestAlphaZeroNet:
         h = game_state.grid.height
         w = game_state.grid.width
 
-        grid = torch.randn(2, h, w, 3)
-        units = torch.randn(2, h, w, 3)
-        gf = torch.randn(2, 6)
+        grid = torch.randn(2, h, w, GRID_CHANNELS)
+        units = torch.randn(2, h, w, UNIT_CHANNELS)
+        gf = torch.randn(2, GLOBAL_FEATURES_DIM)
 
         policy_logits, value = small_network(grid, units, gf)
 
@@ -154,9 +155,9 @@ class TestMCTS:
 
         grid, units, gf, mask = _obs_from_game_state(game_state, w, h)
 
-        assert grid.shape == (h, w, 3)
-        assert units.shape == (h, w, 3)
-        assert gf.shape == (6,)
+        assert grid.shape == (h, w, GRID_CHANNELS)
+        assert units.shape == (h, w, UNIT_CHANNELS)
+        assert gf.shape == (GLOBAL_FEATURES_DIM,)
         assert mask.shape == (10 * w * h,)
         assert grid.dtype == np.float32
 

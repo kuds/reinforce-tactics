@@ -208,3 +208,35 @@ class TestEvaluateModel:
         result = evaluate_model(_StubModel(), env, n_episodes=1)
         assert sum(result["end_reasons"].values()) == 0
         assert sum(result["outcome_reasons"].values()) == 0
+
+    def test_captures_by_type_aggregated_across_episodes(self):
+        """Per-structure capture counts must be summed into eval results."""
+
+        class _CaptureEnv(_StubEnv):
+            def __init__(self, captures_per_episode):
+                # Each episode is a single terminal step; captures_per_episode is
+                # a list of (towers, buildings, hqs) tuples.
+                episodes = [[(0.0, True, 1)] for _ in captures_per_episode]
+                super().__init__(episodes)
+                self._captures = list(captures_per_episode)
+
+            def step(self, action):
+                obs, r, term, trunc, info = super().step(action)
+                if term:
+                    towers, buildings, hqs = self._captures[self._idx]
+                    info["episode_stats"] = {
+                        "winner": 1,
+                        "captures_by_type": {"tower": towers, "building": buildings, "hq": hqs},
+                    }
+                return obs, r, term, trunc, info
+
+        env = _CaptureEnv([(2, 1, 0), (0, 3, 1)])
+        result = evaluate_model(_StubModel(), env, n_episodes=2)
+
+        assert result["captures_by_type"] == {"tower": 2, "building": 4, "hq": 1}
+
+    def test_captures_by_type_zero_when_env_silent(self):
+        """Older envs that don't emit the breakdown contribute zero."""
+        env = _StubEnv([[(0.0, True, 1)]])
+        result = evaluate_model(_StubModel(), env, n_episodes=1)
+        assert result["captures_by_type"] == {"tower": 0, "building": 0, "hq": 0}
