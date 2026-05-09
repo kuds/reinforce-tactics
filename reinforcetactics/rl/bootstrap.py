@@ -129,7 +129,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
         seed=cfg.seed,
-        use_subprocess=False,
+        use_subprocess=cfg.env.use_subprocess,
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
     )
@@ -418,6 +418,33 @@ def run_curriculum(
             model = model_factory(vec_env, cfg, output_dir)
             _print_policy_summary(model, output_dir)
         else:
+            # Reusing the model across stages requires matching spaces. SB3's
+            # ``set_env`` will accept the swap and only fail later at rollout
+            # time with an opaque shape error; check up front so a curriculum
+            # that mixes maps of different sizes / unit sets fails on the
+            # offending stage with an actionable message. The hasattr guards
+            # let test fakes without space attributes skip the check.
+            model_obs_space = getattr(model, "observation_space", None)
+            env_obs_space = getattr(vec_env, "observation_space", None)
+            if model_obs_space is not None and env_obs_space is not None and env_obs_space != model_obs_space:
+                raise ValueError(
+                    f"Stage '{stage.name}' observation space {env_obs_space} "
+                    f"does not match the model's {model_obs_space}. "
+                    "Curriculum stages must share observation shapes (same map size, "
+                    "same enabled_units, same action_space_type)."
+                )
+            model_action_space = getattr(model, "action_space", None)
+            env_action_space = getattr(vec_env, "action_space", None)
+            if (
+                model_action_space is not None
+                and env_action_space is not None
+                and env_action_space != model_action_space
+            ):
+                raise ValueError(
+                    f"Stage '{stage.name}' action space {env_action_space} "
+                    f"does not match the model's {model_action_space}. "
+                    "Curriculum stages must share action shapes."
+                )
             model.set_env(vec_env)
 
         # Apply per-stage entropy override. SB3 reads ``model.ent_coef`` fresh
