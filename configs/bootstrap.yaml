@@ -137,23 +137,34 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
-      # Match the random_10 reward shape exactly (no kill / damage_scale).
-      # A previous run added ``kill: 50`` and ``damage_scale: 0.5`` to
-      # break a perceived "refuses combat" stall, and instead created a
-      # kill-farm attractor: the policy converged to ~80-100 kills per
-      # game vs ~1-2 captures, peaked at 76.7% WR around 700k, then
-      # collapsed as entropy cooled (49 losses_by_elimination at 1.7M as
-      # the policy committed to a razor-thin attrition trade -- ~1700 HP
-      # dealt vs ~1500 taken per game). Wins were essentially all
-      # ``wins_by_elimination``; almost no HQ captures. Reverting to the
-      # structure-only shape that hit 100% WR (60/0/0) on random_10. If
-      # this stalls, raise ent_coef.end (0.03 -> 0.05) before adding
-      # per-action combat reward back.
+      # Per-structure capture differentiation. Post-#268 eval showed the
+      # policy converged to monoculture Warriors capturing only neutral
+      # central towers (0 building captures, 0 HQ captures across 2400
+      # eval games). With all captures paying the same +2000, towers were
+      # the safest local optimum and the bot's intact economy kept
+      # respawning units faster than the agent could grind them down --
+      # WR plateaued at ~72% with 25-30 games/eval ending in timeout
+      # draws. These overrides break that homogeneity so building seizes
+      # become the highest per-turn payoff (~2050/turn vs tower 800/turn),
+      # which starves bot spawn rate enough that the existing
+      # warrior-spam-elimination strategy actually finishes within the
+      # turn budget. HQ captures also become viable at ~1425/turn.
+      #   - tower_capture: 1500     downweight on the local optimum
+      #   - building_capture: 4000  enemy economy is the strategic move
+      #   - hq_capture: 2500        stacks with win_by_hq_capture (+3000)
+      # ``capture: 2000`` is kept as a back-compat fallback only; the new
+      # per-type keys override it when set. If building_captures stay at
+      # 0 in the next eval, the bottleneck is exploration / observation
+      # (agent doesn't recognize buildings as targets), not reward, and
+      # next move is BC warmstart rather than further reward tuning.
       reward_config:
         win_by_hq_capture: 3000.0
         win_by_elimination: 3000.0
         seize_progress: 50.0
         capture: 2000.0
+        tower_capture: 1500.0
+        building_capture: 4000.0
+        hq_capture: 2500.0
 
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv
