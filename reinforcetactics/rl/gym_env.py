@@ -832,7 +832,11 @@ class StrategyGameEnv(gym.Env):
                     # Bucket the capture by structure type. Tile codes:
                     # "t" = tower, "b" = building, "h" = headquarters.
                     structure_code = result_info.get("structure_type")
-                    type_key = {"t": "tower", "b": "building", "h": "hq"}.get(structure_code)
+                    type_key = (
+                        {"t": "tower", "b": "building", "h": "hq"}.get(structure_code)
+                        if isinstance(structure_code, str)
+                        else None
+                    )
                     if type_key is not None:
                         self.episode_stats["captures_by_type"][type_key] += 1
             elif action_type == 4:
