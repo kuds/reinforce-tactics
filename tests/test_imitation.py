@@ -78,8 +78,11 @@ class TestDemonstrationCollection:
                 assert ds.masks_concat[i, lo + int(val)], f"Sample {i} dim {dim} value {val} not in mask"
 
     def test_observation_keys(self, small_dataset):
-        for k in ("grid", "units", "global_features", "action_mask"):
+        # ``action_mask`` is stored separately on each Demonstration (per-dim
+        # masks for MaskablePPO) — it's no longer part of the obs dict.
+        for k in ("grid", "units", "global_features"):
             assert k in small_dataset.obs
+        assert "action_mask" not in small_dataset.obs
 
     def test_invalid_demonstrator_player_raises(self):
         with pytest.raises(ValueError):

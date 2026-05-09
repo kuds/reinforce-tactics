@@ -2,49 +2,83 @@
 Shared observation builder for RL agents.
 
 Single source of truth for turning a GameState into the observation dict
-consumed by the gym environment, MCTS, and ModelBot. Prior to consolidation,
-MCTS and ModelBot always placed player 1's gold and unit count first in
-``global_features``, violating the agent-relative contract whenever
-``current_player`` was 2 (MCTS) or the bot played as player 2 (ModelBot).
+consumed by the gym environment, MCTS, and ModelBot. The observation is
+*agent-relative*: ownership channels and global_features always treat
+``perspective_player`` as "self" so a policy trained as player 1 sees the
+same encoding when it later plays as player 2 (e.g. under self-play role
+swaps).
 
-Observation contract (2-player):
-    grid:            (H, W, 3) float32 - terrain, owner, structure HP
-    units:           (H, W, 3) float32 - unit type, owner, HP %
-    global_features: (6,) float32
-        [own_gold, opp_gold, turn, own_units, opp_units, current_player]
-    action_mask:     (N,) float32 - supplied by the caller
-    visibility:      (H, W) uint8 - present only when fog_of_war is True
+Observation contract (2-player, agent-relative):
+    grid:            (H, W, C_GRID=12) float32
+        channels 0-7  one-hot tile type in TILE_TYPE_ORDER
+        channel  8    owner == self
+        channel  9    owner == opp
+        channel  10   owner == neutral (no player owns the tile)
+        channel  11   structure HP fraction in [0, 1]
+    units:           (H, W, C_UNITS=12) float32
+        channels 0-7  one-hot unit type in ALL_UNIT_TYPES
+                      ("empty cell" = all-zero across these eight channels)
+        channel  8    owner == self
+        channel  9    owner == opp
+        channel  10   reserved (kept zero; preserved for symmetry with grid)
+        channel  11   unit HP fraction in [0, 1]
+    global_features: (5,) float32
+        [own_gold, opp_gold, turn, own_units, opp_units]
+        ``current_player`` is intentionally omitted: the agent only acts on
+        its own turn, so this slot is always equal to ``perspective_player``
+        and only adds spurious side information.
+    visibility:      (H, W) uint8, present only when fog_of_war is True.
 
-Masks are NOT built here: callers pass in a pre-computed mask. Phase 2 will
-consolidate action-mask building in a separate module.
+Action masks are not part of this dict — they're a constraint, not state,
+and MaskablePPO already pulls them via ``env.action_masks()``. The
+``action_mask`` argument is retained for back-compat with non-PPO consumers
+(MCTS / AlphaZero, which want a packaged tuple of (obs, mask)) and is
+included in the returned dict only when explicitly provided.
 """
 
 from typing import Any, Dict, Optional
 
 import numpy as np
 
+from reinforcetactics.constants import ALL_UNIT_TYPES
+
+# Canonical tile-type ordering for the one-hot encoding. Must match the
+# integer codes produced by ``TileGrid.to_numpy`` (see core/grid.py).
+TILE_TYPE_ORDER = ("p", "w", "m", "f", "r", "b", "h", "t")
+NUM_TILE_TYPES = len(TILE_TYPE_ORDER)
+NUM_UNIT_TYPES = len(ALL_UNIT_TYPES)
+
+# Channel layout constants — exposed so model factories / tests can size
+# input layers without duplicating the encoding logic.
+GRID_CHANNELS = NUM_TILE_TYPES + 3 + 1  # 12: 8 tile + 3 owner + 1 hp
+UNIT_CHANNELS = NUM_UNIT_TYPES + 3 + 1  # 12: 8 unit + 3 owner + 1 hp
+GLOBAL_FEATURES_DIM = 5
+
 
 def build_observation(
     game_state: Any,
     perspective_player: int,
-    action_mask: np.ndarray,
+    action_mask: Optional[np.ndarray] = None,
     fog_of_war: Optional[bool] = None,
 ) -> Dict[str, np.ndarray]:
     """Build an RL observation from ``perspective_player``'s viewpoint.
 
     Args:
         game_state: The GameState to observe.
-        perspective_player: Player whose gold/unit count go first in
-            ``global_features``. Under fog of war, only this player's
+        perspective_player: Player whose gold / unit count go first in
+            ``global_features`` and whose units / structures populate the
+            "self" owner channel. Under fog of war, only this player's
             visibility is applied to grid and units.
-        action_mask: Precomputed legal-action mask. Ownership stays with the
-            caller so this builder has no dependency on action-mask logic.
+        action_mask: Optional precomputed legal-action mask. When provided,
+            it is included verbatim under the ``"action_mask"`` key for
+            back-compat with MCTS / AlphaZero callers. The PPO observation
+            space does not include this key — gym_env passes ``None``.
         fog_of_war: Override for the FOW flag. When ``None``, falls back to
             ``game_state.fog_of_war``.
 
     Returns:
         Observation dict with keys ``grid``, ``units``, ``global_features``,
-        ``action_mask``, and (when FOW is enabled) ``visibility``.
+        optionally ``action_mask`` and (when FOW is enabled) ``visibility``.
     """
     if fog_of_war is None:
         fog_of_war = bool(getattr(game_state, "fog_of_war", False))
@@ -63,30 +97,67 @@ def build_observation(
         # Enemy gold is hidden; only visible enemy units are counted.
         opp_gold: float = 0
         opp_units = sum(
-            1 for u in game_state.units if u.player == opp and game_state.is_position_visible(u.x, u.y, perspective_player)
+            1
+            for u in game_state.units
+            if u.player == opp and game_state.is_position_visible(u.x, u.y, perspective_player)
         )
     else:
         opp_gold = game_state.player_gold.get(opp, 0)
         opp_units = sum(1 for u in game_state.units if u.player == opp)
 
     global_features = np.array(
-        [
-            own_gold,
-            opp_gold,
-            game_state.turn_number,
-            own_units,
-            opp_units,
-            game_state.current_player,
-        ],
+        [own_gold, opp_gold, game_state.turn_number, own_units, opp_units],
         dtype=np.float32,
     )
 
+    raw_grid = state_arrays["grid"]
+    raw_units = state_arrays["units"]
+    h, w = raw_grid.shape[:2]
+
+    # ---- Grid one-hot --------------------------------------------------
+    # Raw layout (from TileGrid.to_numpy):
+    #   [..., 0] = tile_type int in [0, NUM_TILE_TYPES)
+    #   [..., 1] = absolute owner (0 = neutral, otherwise player number)
+    #   [..., 2] = structure HP percentage in [0, 100]
+    grid = np.zeros((h, w, GRID_CHANNELS), dtype=np.float32)
+    tile_type_idx = raw_grid[..., 0].astype(np.int64)
+    np.clip(tile_type_idx, 0, NUM_TILE_TYPES - 1, out=tile_type_idx)
+    yy, xx = np.indices((h, w))
+    grid[yy, xx, tile_type_idx] = 1.0
+    raw_owner = raw_grid[..., 1]
+    grid[..., NUM_TILE_TYPES + 0] = (raw_owner == perspective_player).astype(np.float32)
+    grid[..., NUM_TILE_TYPES + 1] = (raw_owner == opp).astype(np.float32)
+    grid[..., NUM_TILE_TYPES + 2] = (raw_owner == 0).astype(np.float32)
+    grid[..., NUM_TILE_TYPES + 3] = raw_grid[..., 2].astype(np.float32) / 100.0
+
+    # ---- Units one-hot -------------------------------------------------
+    # Raw layout (from GameState.to_numpy):
+    #   [..., 0] = unit_type int (0 = empty, 1..8 = ALL_UNIT_TYPES)
+    #   [..., 1] = absolute owner (0 = empty cell, else player number)
+    #   [..., 2] = unit HP percentage in [0, 100]
+    units = np.zeros((h, w, UNIT_CHANNELS), dtype=np.float32)
+    unit_type_idx = raw_units[..., 0].astype(np.int64)
+    has_unit = unit_type_idx > 0
+    # Subtract 1 so the type index lines up with ALL_UNIT_TYPES; clipped
+    # below for safety against any out-of-range values.
+    one_hot_idx = np.clip(unit_type_idx - 1, 0, NUM_UNIT_TYPES - 1)
+    units[yy[has_unit], xx[has_unit], one_hot_idx[has_unit]] = 1.0
+    raw_unit_owner = raw_units[..., 1]
+    units[..., NUM_UNIT_TYPES + 0] = (raw_unit_owner == perspective_player).astype(np.float32)
+    units[..., NUM_UNIT_TYPES + 1] = (raw_unit_owner == opp).astype(np.float32)
+    # Channel NUM_UNIT_TYPES + 2 ("neutral / empty") is intentionally left
+    # zero: empty cells are already encoded by all-zero one-hot + zero
+    # owner, and unit ownership has no neutral case in the current rules.
+    units[..., NUM_UNIT_TYPES + 3] = raw_units[..., 2].astype(np.float32) / 100.0
+
     obs: Dict[str, np.ndarray] = {
-        "grid": state_arrays["grid"].astype(np.float32),
-        "units": state_arrays["units"].astype(np.float32),
+        "grid": grid,
+        "units": units,
         "global_features": global_features,
-        "action_mask": action_mask,
     }
+
+    if action_mask is not None:
+        obs["action_mask"] = action_mask
 
     if fog_of_war and "visibility" in state_arrays:
         obs["visibility"] = state_arrays["visibility"]

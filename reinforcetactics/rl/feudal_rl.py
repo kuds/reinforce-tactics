@@ -11,6 +11,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import nn
 
 from reinforcetactics.rl.gym_env import StructuredActionMasks
+from reinforcetactics.rl.observation import NUM_TILE_TYPES, NUM_UNIT_TYPES, TILE_TYPE_ORDER
 
 # Keys used from the observation dict for feature extraction.
 # Other keys (action_mask, visibility, etc.) are excluded.
@@ -113,9 +114,12 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim: int = 512):
         super().__init__(observation_space, features_dim)
 
-        # Assuming observation is dict with 'grid' and 'units'
-        # grid: (H, W, 3), units: (H, W, 3)
-        n_input_channels = 6  # 3 for grid + 3 for units
+        # Pull spatial channel counts from the observation space rather than
+        # hardcoding them, so this extractor follows the canonical encoding
+        # in ``rl.observation`` even if its channel layout changes.
+        grid_channels = observation_space["grid"].shape[-1]
+        unit_channels = observation_space["units"].shape[-1]
+        n_input_channels = grid_channels + unit_channels
 
         self.cnn = nn.Sequential(
             nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
@@ -153,21 +157,21 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         Returns:
             Feature tensor of shape (batch, features_dim)
         """
-        grid = observations["grid"]  # (B, H, W, 3)
-        units = observations["units"]  # (B, H, W, 3)
+        grid = observations["grid"]  # (B, H, W, C_grid)
+        units = observations["units"]  # (B, H, W, C_units)
 
         # Combine and permute to (B, C, H, W)
-        combined = torch.cat([grid, units], dim=-1)  # (B, H, W, 6)
-        combined = combined.permute(0, 3, 1, 2)  # (B, 6, H, W)
+        combined = torch.cat([grid, units], dim=-1)  # (B, H, W, C_grid + C_units)
+        combined = combined.permute(0, 3, 1, 2)  # (B, C, H, W)
 
         # CNN forward
         features = self.cnn(combined)  # (B, 64, H, W)
         features = features.flatten(1)  # (B, 64*H*W)
 
-        # Concatenate global features (gold, turn, unit counts, current player)
+        # Concatenate global features (gold, turn, own/opp unit counts).
         if self.n_global > 0 and "global_features" in observations:
-            global_feat = observations["global_features"]  # (B, 6)
-            features = torch.cat([features, global_feat], dim=1)  # (B, 64*H*W + 6)
+            global_feat = observations["global_features"]  # (B, GLOBAL_FEATURES_DIM)
+            features = torch.cat([features, global_feat], dim=1)
 
         # Linear projection
         features = self.linear(features)  # (B, features_dim)
@@ -1604,12 +1608,21 @@ def compute_intrinsic_reward(
     """
     goal_x, goal_y, goal_type = int(goal[0]), int(goal[1]), int(goal[2])
 
-    units = next_state["units"]  # (H, W, 3)
-    grid = next_state["grid"]  # (H, W, 3)
+    units = next_state["units"]  # (H, W, UNIT_CHANNELS), agent-relative
+    grid = next_state["grid"]  # (H, W, GRID_CHANNELS), agent-relative
 
-    # Find player's and opponent's units using agent_player
-    player_units = units[:, :, 1] == agent_player
-    opponent_units = units[:, :, 1] == (3 - agent_player)
+    # Channel layout from rl.observation: the first NUM_UNIT_TYPES channels
+    # are the type one-hot, then [self, opp, _reserved, hp]. Likewise grid:
+    # NUM_TILE_TYPES one-hot, then [self_owner, opp_owner, neutral, hp].
+    # ``agent_player`` no longer has to match the observation's perspective:
+    # we read the "self" / "opp" channels directly.
+    del agent_player
+    self_owner_unit_ch = NUM_UNIT_TYPES + 0
+    opp_owner_unit_ch = NUM_UNIT_TYPES + 1
+    self_owner_tile_ch = NUM_TILE_TYPES + 0
+
+    player_units = units[:, :, self_owner_unit_ch] > 0.5
+    opponent_units = units[:, :, opp_owner_unit_ch] > 0.5
 
     if not player_units.any():
         return -10.0
@@ -1626,6 +1639,8 @@ def compute_intrinsic_reward(
     if unit_at_goal:
         distance_reward += 5.0
 
+    in_bounds = 0 <= goal_y < grid.shape[0] and 0 <= goal_x < grid.shape[1]
+
     # Goal-type-specific bonus
     if goal_type == 0:
         # Attack: bonus for proximity to enemy units near the goal
@@ -1639,16 +1654,16 @@ def compute_intrinsic_reward(
         # Defend: bonus for having a unit at the goal location (hold position)
         if unit_at_goal:
             distance_reward += 3.0
-        # Extra bonus if goal is near a friendly structure
-        goal_owner = grid[goal_y, goal_x, 1] if goal_y < grid.shape[0] and goal_x < grid.shape[1] else 0
-        if goal_owner == agent_player:
+        # Extra bonus if goal sits on a friendly-owned tile.
+        if in_bounds and grid[goal_y, goal_x, self_owner_tile_ch] > 0.5:
             distance_reward += 2.0
     elif goal_type == 2:
-        # Capture: bonus for reaching a structure tile at the goal
-        if unit_at_goal:
-            goal_terrain = grid[goal_y, goal_x, 0] if goal_y < grid.shape[0] and goal_x < grid.shape[1] else 0
-            # Terrain types for capturable structures (building/tower/HQ typically > 0)
-            if goal_terrain > 0:
+        # Capture: bonus for reaching a structure tile at the goal.
+        if unit_at_goal and in_bounds:
+            # Capturable structures = building / HQ / tower in TILE_TYPE_ORDER.
+            capturable_idxs = [TILE_TYPE_ORDER.index(t) for t in ("b", "h", "t")]
+            tile_one_hot = grid[goal_y, goal_x, :NUM_TILE_TYPES]
+            if tile_one_hot[capturable_idxs].max() > 0.5:
                 distance_reward += 4.0
     elif goal_type == 3:
         # Expand: reward spread — count units in a radius around the goal

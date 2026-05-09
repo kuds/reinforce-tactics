@@ -186,61 +186,60 @@ class TestObservationSpace:
         env_default.close()
 
     def test_grid_shape_and_dtype(self, env_default):
-        """Verify 'grid' shape is (grid_height, grid_width, 3) with dtype float32."""
+        """Verify 'grid' shape matches the encoded one-hot channel layout."""
+        from reinforcetactics.rl.observation import GRID_CHANNELS
+
         grid_space = env_default.observation_space["grid"]
 
-        expected_shape = (env_default.grid_height, env_default.grid_width, 3)
+        expected_shape = (env_default.grid_height, env_default.grid_width, GRID_CHANNELS)
         assert grid_space.shape == expected_shape
         assert grid_space.dtype == np.float32
         env_default.close()
 
     def test_units_shape_and_dtype(self, env_default):
-        """Verify 'units' shape is (grid_height, grid_width, 3) with dtype float32."""
+        """Verify 'units' shape matches the encoded one-hot channel layout."""
+        from reinforcetactics.rl.observation import UNIT_CHANNELS
+
         units_space = env_default.observation_space["units"]
 
-        expected_shape = (env_default.grid_height, env_default.grid_width, 3)
+        expected_shape = (env_default.grid_height, env_default.grid_width, UNIT_CHANNELS)
         assert units_space.shape == expected_shape
         assert units_space.dtype == np.float32
         env_default.close()
 
     def test_global_features_shape_and_dtype(self, env_default):
-        """Verify 'global_features' shape is (6,) with dtype float32."""
+        """Verify 'global_features' shape matches the canonical dimension."""
+        from reinforcetactics.rl.observation import GLOBAL_FEATURES_DIM
+
         global_space = env_default.observation_space["global_features"]
 
-        assert global_space.shape == (6,)
+        assert global_space.shape == (GLOBAL_FEATURES_DIM,)
         assert global_space.dtype == np.float32
         env_default.close()
 
-    def test_action_mask_shape(self, env_default):
-        """Verify 'action_mask' shape matches _get_action_space_size()."""
-        action_mask_space = env_default.observation_space["action_mask"]
-
-        expected_size = env_default._get_action_space_size()
-        assert action_mask_space.shape == (expected_size,)
-        assert action_mask_space.dtype == np.float32
+    def test_action_mask_not_in_observation_space(self, env_default):
+        """The action mask is delivered via ``env.action_masks()``, not the obs."""
+        assert "action_mask" not in env_default.observation_space.spaces
+        # ``action_masks()`` must still work so MaskablePPO can pull masks.
+        assert callable(env_default.action_masks)
         env_default.close()
 
     def test_observations_from_reset_match_space(self, env_default):
         """Test that observations returned by reset() match the observation space."""
         obs, _ = env_default.reset()
 
-        # Check that observation is in the observation space
         assert "grid" in obs
         assert "units" in obs
         assert "global_features" in obs
-        assert "action_mask" in obs
+        assert "action_mask" not in obs
 
-        # Verify shapes
         assert obs["grid"].shape == env_default.observation_space["grid"].shape
         assert obs["units"].shape == env_default.observation_space["units"].shape
         assert obs["global_features"].shape == env_default.observation_space["global_features"].shape
-        assert obs["action_mask"].shape == env_default.observation_space["action_mask"].shape
 
-        # Verify dtypes
         assert obs["grid"].dtype == np.float32
         assert obs["units"].dtype == np.float32
         assert obs["global_features"].dtype == np.float32
-        assert obs["action_mask"].dtype == np.float32
 
         env_default.close()
 
@@ -248,21 +247,17 @@ class TestObservationSpace:
         """Test that observations returned by step() match the observation space."""
         env_default.reset()
 
-        # Take a step with end_turn action
         action = np.array([5, 0, 0, 0, 0, 0])  # end_turn
         obs, _, _, _, _ = env_default.step(action)
 
-        # Check that observation is in the observation space
         assert "grid" in obs
         assert "units" in obs
         assert "global_features" in obs
-        assert "action_mask" in obs
+        assert "action_mask" not in obs
 
-        # Verify shapes match
         assert obs["grid"].shape == env_default.observation_space["grid"].shape
         assert obs["units"].shape == env_default.observation_space["units"].shape
         assert obs["global_features"].shape == env_default.observation_space["global_features"].shape
-        assert obs["action_mask"].shape == env_default.observation_space["action_mask"].shape
 
         env_default.close()
 
@@ -965,13 +960,13 @@ class TestIntegration:
         """Test _get_action_space_size() returns consistent value."""
         size = env_default._get_action_space_size()
 
-        # Should be positive integer
         assert size > 0
         assert isinstance(size, int)
 
-        # Should match action_mask shape
-        obs, _ = env_default.reset()
-        assert obs["action_mask"].shape[0] == size
+        # The flat action mask is no longer part of the observation; pull it
+        # via ``get_action_mask_flat`` (the diagnostic accessor).
+        env_default.reset()
+        assert env_default.get_action_mask_flat().shape[0] == size
 
         env_default.close()
 

@@ -130,6 +130,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         seed=cfg.seed,
         use_subprocess=False,
         opponent_kwargs=stage.opponent_kwargs,
+        gamma=cfg.ppo.gamma,
     )
 
 
@@ -147,6 +148,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         max_flat_actions=cfg.env.max_flat_actions,
         seed=cfg.seed,
         opponent_kwargs=stage.opponent_kwargs,
+        gamma=cfg.ppo.gamma,
     )
 
 

@@ -144,10 +144,12 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         # during package init, so a top-level import would be circular.
         from reinforcetactics.rl.observation import build_observation
 
+        # ``action_mask`` is no longer part of the PPO observation space;
+        # the policy receives the mask via ``predict(action_masks=...)``.
         return build_observation(
             self.game_state,
             perspective_player=self.bot_player,
-            action_mask=self._compute_action_mask(),
+            action_mask=None,
         )
 
     def _compute_action_mask(self) -> np.ndarray:

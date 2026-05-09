@@ -6,15 +6,18 @@ Dual-head architecture:
 - Policy head: outputs log-probabilities over the flat action space (10 * W * H)
 - Value head: outputs a scalar in [-1, 1] estimating the expected outcome
 
-The network takes the same observation format as StrategyGameEnv:
-- grid: (H, W, 3) - terrain type, owner, structure HP
-- units: (H, W, 3) - unit type, owner, HP
-- global_features: (6,) - gold, turn, unit counts, current player
+The network consumes the same observation format as StrategyGameEnv (see
+``reinforcetactics.rl.observation``): one-hot, agent-relative ``grid`` and
+``units`` tensors plus a small global-features vector. The exact channel
+counts are pulled from ``rl.observation`` so the network sizes itself
+correctly if the encoding ever changes.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from reinforcetactics.rl.observation import GLOBAL_FEATURES_DIM, GRID_CHANNELS, UNIT_CHANNELS
 
 
 class ResidualBlock(nn.Module):
@@ -58,7 +61,9 @@ class AlphaZeroNet(nn.Module):
         num_action_types: int = 10,
         num_res_blocks: int = 6,
         channels: int = 128,
-        global_features_dim: int = 6,
+        global_features_dim: int = GLOBAL_FEATURES_DIM,
+        grid_channels: int = GRID_CHANNELS,
+        unit_channels: int = UNIT_CHANNELS,
     ):
         super().__init__()
         self.grid_height = grid_height
@@ -66,10 +71,12 @@ class AlphaZeroNet(nn.Module):
         self.num_action_types = num_action_types
         self.action_space_size = num_action_types * grid_width * grid_height
 
-        # Input: 6 spatial channels (grid=3 + units=3) + global features
-        # broadcast to spatial dims
-        n_input_channels = 6 + global_features_dim
+        # Spatial input = grid one-hot + unit one-hot + global features
+        # broadcast to spatial dims.
+        n_input_channels = grid_channels + unit_channels + global_features_dim
         self.global_features_dim = global_features_dim
+        self.grid_channels = grid_channels
+        self.unit_channels = unit_channels
 
         # Initial convolution
         self.input_conv = nn.Sequential(
@@ -107,9 +114,11 @@ class AlphaZeroNet(nn.Module):
         Forward pass.
 
         Args:
-            grid: (B, H, W, 3) terrain/owner/structure tensor
-            units: (B, H, W, 3) unit type/owner/HP tensor
-            global_features: (B, 6) scalar features
+            grid: (B, H, W, GRID_CHANNELS) one-hot terrain + agent-relative
+                owner + structure HP tensor.
+            units: (B, H, W, UNIT_CHANNELS) one-hot unit type + agent-relative
+                owner + HP tensor.
+            global_features: (B, GLOBAL_FEATURES_DIM) scalar features.
 
         Returns:
             policy_logits: (B, action_space_size) raw logits
@@ -117,14 +126,13 @@ class AlphaZeroNet(nn.Module):
         """
         batch_size = grid.shape[0]
 
-        # Combine spatial features: (B, H, W, 6) -> (B, 6, H, W)
+        # Combine spatial features: (B, H, W, C) -> (B, C, H, W)
         spatial = torch.cat([grid, units], dim=-1).permute(0, 3, 1, 2)
 
-        # Broadcast global features to spatial dims: (B, 6) -> (B, 6, H, W)
+        # Broadcast global features across spatial dims.
         global_expanded = global_features.unsqueeze(-1).unsqueeze(-1)
         global_expanded = global_expanded.expand(batch_size, self.global_features_dim, self.grid_height, self.grid_width)
 
-        # Concatenate: (B, 12, H, W)
         x = torch.cat([spatial, global_expanded], dim=1)
 
         # Shared backbone
@@ -148,9 +156,9 @@ class AlphaZeroNet(nn.Module):
         Predict policy probabilities and value, applying action mask.
 
         Args:
-            grid: (B, H, W, 3)
-            units: (B, H, W, 3)
-            global_features: (B, 6)
+            grid: (B, H, W, GRID_CHANNELS)
+            units: (B, H, W, UNIT_CHANNELS)
+            global_features: (B, GLOBAL_FEATURES_DIM)
             action_mask: (B, action_space_size) binary mask of legal actions
 
         Returns:

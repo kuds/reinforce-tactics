@@ -23,7 +23,12 @@ from reinforcetactics.game.bot import (
     RandomBot,
     SimpleBot,
 )
-from reinforcetactics.rl.observation import build_observation
+from reinforcetactics.rl.observation import (
+    GLOBAL_FEATURES_DIM,
+    GRID_CHANNELS,
+    UNIT_CHANNELS,
+    build_observation,
+)
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
@@ -66,12 +71,16 @@ class StrategyGameEnv(gym.Env):
     """
     Gymnasium environment for turn-based strategy game.
 
-    Observation Space:
+    Observation Space (agent-relative; see ``rl.observation`` for the full
+    contract):
         Dict with:
-        - 'grid': (H, W, 3) - terrain type, owner, structure HP
-        - 'units': (H, W, 3) - unit type, owner, HP
-        - 'global': (6,) - gold_p1, gold_p2, turn, num_units_p1, num_units_p2, current_player
-        - 'action_mask': (action_space_size,) - binary mask of valid actions
+        - 'grid':  (H, W, GRID_CHANNELS) - one-hot terrain + agent-relative
+                   owner one-hot (self/opp/neutral) + structure HP fraction.
+        - 'units': (H, W, UNIT_CHANNELS) - one-hot unit type + agent-relative
+                   owner one-hot + HP fraction.
+        - 'global_features': (5,) - own_gold, opp_gold, turn, own_units, opp_units.
+        Action masks are pulled separately via ``env.action_masks()`` for
+        MaskablePPO and are not part of the policy observation.
 
     Action Space:
         MultiDiscrete with 6 dimensions:
@@ -103,6 +112,7 @@ class StrategyGameEnv(gym.Env):
         action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
         opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
+        gamma: float = 0.99,  # Discount used by potential-based shaping; should match the trainer's gamma
     ):
         """
         Initialize environment.
@@ -198,8 +208,13 @@ class StrategyGameEnv(gym.Env):
             default_reward_config.update(reward_config)
         self.reward_config = default_reward_config
 
-        # Previous potential for potential-based reward shaping (Phi(s) tracking)
+        # Previous potential for potential-based reward shaping (Phi(s) tracking).
+        # ``gamma`` is the trainer's discount; the shaping delta uses
+        # gamma * Phi(s') - Phi(s) per Ng et al. (1999) so the shaping is
+        # policy-invariant for the chosen gamma. Mismatch with the trainer's
+        # gamma reintroduces bias.
         self._prev_potential = 0.0
+        self.gamma = float(gamma)
 
         # Action space configuration
         self.action_space_type = action_space_type
@@ -210,12 +225,22 @@ class StrategyGameEnv(gym.Env):
         self.grid_height = self.game_state.grid.height
         self.grid_width = self.game_state.grid.width
 
-        # Define observation space
+        # Define observation space.
+        # ``action_mask`` is intentionally NOT part of the policy observation
+        # — MaskablePPO consumes masks via ``action_masks()``, and including
+        # the (10*W*H,)-sized mask in the obs dict just bloats the features
+        # extractor input without adding any state information.
         obs_dict: dict[str, spaces.Space] = {
-            "grid": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
-            "units": spaces.Box(low=0, high=255, shape=(self.grid_height, self.grid_width, 3), dtype=np.float32),
-            "global_features": spaces.Box(low=0, high=10000, shape=(6,), dtype=np.float32),
-            "action_mask": spaces.Box(low=0, high=1, shape=(self._get_action_space_size(),), dtype=np.float32),
+            "grid": spaces.Box(
+                low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, GRID_CHANNELS), dtype=np.float32
+            ),
+            "units": spaces.Box(
+                low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, UNIT_CHANNELS), dtype=np.float32
+            ),
+            # Gold can grow into the thousands; turn and unit counts are
+            # bounded but small. A loose upper bound here is fine — values
+            # are not normalized by gymnasium's bounds, only sanity-checked.
+            "global_features": spaces.Box(low=0.0, high=1e5, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
         }
 
         # Add visibility layer when fog of war is enabled
@@ -285,6 +310,10 @@ class StrategyGameEnv(gym.Env):
             # match what evaluation.evaluate_model aggregates per stage.
             "units_built": {ut: 0 for ut in self.ALL_UNIT_TYPES},
             "captures": 0,
+            # Per-structure capture breakdown so eval_results.json can
+            # distinguish tower / building / HQ progression. Tile codes
+            # come from constants.TileType ("h"=HQ, "b"=Building, "t"=Tower).
+            "captures_by_type": {"tower": 0, "building": 0, "hq": 0},
             "kills": 0,
             "attacks": 0,
             "seize_attempts": 0,
@@ -299,11 +328,16 @@ class StrategyGameEnv(gym.Env):
         return 10 * self.grid_width * self.grid_height
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
-        """Get current observation from the agent's perspective."""
+        """Get current observation from the agent's perspective.
+
+        The action mask is intentionally not included in the returned dict;
+        callers needing it should use :meth:`action_masks` (MaskablePPO) or
+        :meth:`get_action_mask_flat` (for diagnostics).
+        """
         return build_observation(
             self.game_state,
             perspective_player=self.agent_player,
-            action_mask=self._get_action_mask(),
+            action_mask=None,
             fog_of_war=self.fog_of_war,
         )
 
@@ -682,6 +716,9 @@ class StrategyGameEnv(gym.Env):
                     result = self.game_state.seize(unit)
                     result_info["seize_damage"] = result.get("damage", 0)
                     result_info["captured"] = result.get("captured", False)
+                    # Forward structure_type so the reward path can break
+                    # captures down by tile type (tower / building / HQ).
+                    result_info["structure_type"] = result.get("structure_type")
                     if result.get("damage", 0) <= 0:
                         is_valid = False
                 else:
@@ -796,6 +833,12 @@ class StrategyGameEnv(gym.Env):
                 if result_info.get("captured", False):
                     reward += rc.get("capture", 20.0)
                     self.episode_stats["captures"] += 1
+                    # Bucket the capture by structure type. Tile codes:
+                    # "t" = tower, "b" = building, "h" = headquarters.
+                    structure_code = result_info.get("structure_type")
+                    type_key = {"t": "tower", "b": "building", "h": "hq"}.get(structure_code)
+                    if type_key is not None:
+                        self.episode_stats["captures_by_type"][type_key] += 1
             elif action_type == 4:
                 if result_info.get("cured"):
                     reward += rc.get("cure", 5.0)
@@ -842,8 +885,7 @@ class StrategyGameEnv(gym.Env):
         Compute potential function Phi(s) for potential-based reward shaping.
 
         Using potential-based shaping (Ng et al., 1999) preserves optimal policy:
-        shaping = gamma * Phi(s') - Phi(s)
-        Since gamma ~= 1.0 in practice, we use: shaping = Phi(s') - Phi(s)
+        shaping = gamma * Phi(s') - Phi(s).
         """
         potential = 0.0
         ap = self.agent_player
@@ -900,10 +942,13 @@ class StrategyGameEnv(gym.Env):
             self.episode_stats["invalid_actions"] += 1
 
         if not terminal:
-            # Potential-based reward shaping: reward += Phi(s') - Phi(s)
-            # This only rewards CHANGES in advantage, not maintaining a lead.
+            # Potential-based reward shaping: reward += gamma * Phi(s') - Phi(s).
+            # Using the trainer's discount preserves the policy-invariance
+            # guarantee from Ng et al. (1999); a gamma=1 approximation biases
+            # the policy toward states where Phi is sustained at a high value
+            # over long horizons.
             current_potential = self._compute_potential()
-            delta = current_potential - self._prev_potential
+            delta = self.gamma * current_potential - self._prev_potential
             reward += delta
             breakdown["shaping_delta"] = float(delta)
             self._prev_potential = current_potential

@@ -725,13 +725,16 @@ class GameMechanics:
             tile: The structure tile
 
         Returns:
-            dict with 'captured' boolean and 'game_over' boolean
+            dict with 'captured' boolean, 'game_over' boolean, and
+            'structure_type' (single-letter tile code) so callers can break
+            capture counts down by structure type without having to
+            re-look-up the tile.
         """
         if not tile.is_capturable():
-            return {"captured": False, "game_over": False}
+            return {"captured": False, "game_over": False, "structure_type": tile.type}
 
         if tile.player == unit.player:
-            return {"captured": False, "game_over": False}
+            return {"captured": False, "game_over": False, "structure_type": tile.type}
 
         if tile.regenerating:
             tile.regenerating = False
@@ -751,7 +754,13 @@ class GameMechanics:
             if tile.type == "h":
                 game_over = True
 
-        return {"captured": captured, "game_over": game_over, "damage": damage, "remaining_hp": tile.health}
+        return {
+            "captured": captured,
+            "game_over": game_over,
+            "damage": damage,
+            "remaining_hp": tile.health,
+            "structure_type": tile.type,
+        }
 
     @staticmethod
     def reset_structure_if_vacated(tile, units):
