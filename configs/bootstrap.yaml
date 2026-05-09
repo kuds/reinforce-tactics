@@ -27,7 +27,27 @@ env:
     damage_scale: 0.0
     kill: 0.0
     seize_progress: 300.0
-    capture: 1000.0
+    capture: 1000.0          # back-compat fallback (no longer reached
+                             # when the per-type keys below are set)
+    # Per-structure capture differentiation. Hoisted to the global env
+    # config (rather than scoped to a single late stage) so every stage
+    # in the curriculum sees the same gradient: building captures are
+    # the highest per-turn payoff, HQ captures are a viable finisher,
+    # and neutral towers are positive-but-not-dominant. Rationale:
+    # introducing a new strategy mid-curriculum (only at random_20)
+    # asks the policy to discover and integrate it after entropy has
+    # already cooled to 0.03 and the value function has locked in on
+    # the warrior-spam-elimination attractor from earlier stages. Far
+    # easier to bake in the correct inductive bias from stage 1, when
+    # entropy is high and the value function is plastic. Both starter
+    # and beginner maps have HQs, buildings, and towers in equivalent
+    # layouts, so the gradient is meaningful on every stage.
+    tower_capture: 1500.0    # neutral towers; modest downweight on the
+                             # local optimum the prior run converged to
+    building_capture: 4000.0 # enemy economy; ~2050/turn vs tower 800/turn
+                             # makes this the per-turn-best capture target
+    hq_capture: 2500.0       # stacks with win_by_hq_capture (+5000) so
+                             # HQ seize pays ~1875/turn including terminal
     cure: 0.0
     heal_scale: 0.0
     paralyze: 0.0
@@ -137,34 +157,18 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
-      # Per-structure capture differentiation. Post-#268 eval showed the
-      # policy converged to monoculture Warriors capturing only neutral
-      # central towers (0 building captures, 0 HQ captures across 2400
-      # eval games). With all captures paying the same +2000, towers were
-      # the safest local optimum and the bot's intact economy kept
-      # respawning units faster than the agent could grind them down --
-      # WR plateaued at ~72% with 25-30 games/eval ending in timeout
-      # draws. These overrides break that homogeneity so building seizes
-      # become the highest per-turn payoff (~2050/turn vs tower 800/turn),
-      # which starves bot spawn rate enough that the existing
-      # warrior-spam-elimination strategy actually finishes within the
-      # turn budget. HQ captures also become viable at ~1425/turn.
-      #   - tower_capture: 1500     downweight on the local optimum
-      #   - building_capture: 4000  enemy economy is the strategic move
-      #   - hq_capture: 2500        stacks with win_by_hq_capture (+3000)
-      # ``capture: 2000`` is kept as a back-compat fallback only; the new
-      # per-type keys override it when set. If building_captures stay at
-      # 0 in the next eval, the bottleneck is exploration / observation
-      # (agent doesn't recognize buildings as targets), not reward, and
-      # next move is BC warmstart rather than further reward tuning.
+      # Per-type capture weights (tower_capture / building_capture /
+      # hq_capture) are inherited from the global env.reward_config so
+      # the building-attack inductive bias is established in earlier
+      # stages (when entropy is high and the value function is plastic)
+      # rather than introduced here for the first time. The stage's own
+      # ``capture: 2000`` remains as a fallback for any structure type
+      # that isn't covered by a per-type key (none currently exist).
       reward_config:
         win_by_hq_capture: 3000.0
         win_by_elimination: 3000.0
         seize_progress: 50.0
         capture: 2000.0
-        tower_capture: 1500.0
-        building_capture: 4000.0
-        hq_capture: 2500.0
 
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv
