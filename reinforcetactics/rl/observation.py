@@ -97,9 +97,7 @@ def build_observation(
         # Enemy gold is hidden; only visible enemy units are counted.
         opp_gold: float = 0
         opp_units = sum(
-            1
-            for u in game_state.units
-            if u.player == opp and game_state.is_position_visible(u.x, u.y, perspective_player)
+            1 for u in game_state.units if u.player == opp and game_state.is_position_visible(u.x, u.y, perspective_player)
         )
     else:
         opp_gold = game_state.player_gold.get(opp, 0)

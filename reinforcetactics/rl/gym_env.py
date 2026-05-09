@@ -231,12 +231,8 @@ class StrategyGameEnv(gym.Env):
         # the (10*W*H,)-sized mask in the obs dict just bloats the features
         # extractor input without adding any state information.
         obs_dict: dict[str, spaces.Space] = {
-            "grid": spaces.Box(
-                low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, GRID_CHANNELS), dtype=np.float32
-            ),
-            "units": spaces.Box(
-                low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, UNIT_CHANNELS), dtype=np.float32
-            ),
+            "grid": spaces.Box(low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, GRID_CHANNELS), dtype=np.float32),
+            "units": spaces.Box(low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, UNIT_CHANNELS), dtype=np.float32),
             # Gold can grow into the thousands; turn and unit counts are
             # bounded but small. A loose upper bound here is fine — values
             # are not normalized by gymnasium's bounds, only sanity-checked.
