@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from reinforcetactics.rl.bootstrap import CurriculumStalled, run_curriculum
+from reinforcetactics.rl.bootstrap import CurriculumStalled, _write_results_csv, run_curriculum
 from reinforcetactics.rl.callbacks import (
     EntropyScheduleCallback,
     PeriodicEvalCallback,
@@ -883,3 +883,164 @@ class TestEntropyScheduleCallback:
         # in TB without parsing logs.
         assert "train/ent_coef" in harness.logger.records
         assert harness.logger.records["train/ent_coef"] == pytest.approx(harness.ent_coef)
+
+
+class TestWriteResultsCsv:
+    def _read_csv(self, path: Path) -> tuple[list[str], list[dict[str, str]]]:
+        import csv as _csv
+
+        with path.open(encoding="utf-8") as fh:
+            reader = _csv.DictReader(fh)
+            assert reader.fieldnames is not None
+            return list(reader.fieldnames), list(reader)
+
+    def test_writes_one_row_per_eval_with_stage_map_opponent(self, tmp_path):
+        # Build a synthetic history shaped like ``run_curriculum`` produces
+        # so the test doesn't need the real callbacks / SB3 in the loop.
+        history = [
+            {
+                "stage": "starter_random",
+                "map_file": "maps/1v1/starter.csv",
+                "opponent": "random",
+                "results": [
+                    {
+                        "timesteps": 50_000,
+                        "win_rate": 0.88,
+                        "avg_reward": 2276.5,
+                        "std_reward": 2716.3,
+                        "avg_length": 142.6,
+                        "std_length": 30.1,
+                        "wins": 53,
+                        "losses": 2,
+                        "draws": 5,
+                        "episodes": 60,
+                    },
+                    {
+                        "timesteps": 100_000,
+                        "win_rate": 0.93,
+                        "avg_reward": 2893.5,
+                        "std_reward": 2122.7,
+                        "avg_length": 150.8,
+                        "std_length": 32.0,
+                        "wins": 56,
+                        "losses": 0,
+                        "draws": 4,
+                        "episodes": 60,
+                    },
+                ],
+            },
+            {
+                "stage": "starter_simple",
+                "map_file": "maps/1v1/starter.csv",
+                "opponent": "simple",
+                "results": [
+                    {
+                        "timesteps": 100_004,
+                        "win_rate": 1.0,
+                        "avg_reward": 1464.1,
+                        "std_reward": 0.0,
+                        "avg_length": 60.0,
+                        "std_length": 0.0,
+                        "wins": 60,
+                        "losses": 0,
+                        "draws": 0,
+                        "episodes": 60,
+                    },
+                ],
+            },
+        ]
+        csv_path = tmp_path / "bootstrap_results.csv"
+        _write_results_csv(history, csv_path)
+        assert csv_path.is_file()
+
+        fieldnames, rows = self._read_csv(csv_path)
+        # Stage / map / opponent columns lead so a glob across runs is
+        # self-describing without joining against config.json.
+        assert fieldnames[:3] == ["stage", "map_file", "opponent"]
+        # One row per eval across both stages.
+        assert len(rows) == 3
+        assert [r["stage"] for r in rows] == ["starter_random", "starter_random", "starter_simple"]
+        assert [r["opponent"] for r in rows] == ["random", "random", "simple"]
+        assert all(r["map_file"] == "maps/1v1/starter.csv" for r in rows)
+        # Spot-check that the eval payload made it through.
+        assert rows[0]["timesteps"] == "50000"
+        assert rows[0]["wins"] == "53"
+        # Floats are written as Python's default repr (no rounding); the
+        # important property is round-trippable, not exact formatting.
+        assert float(rows[0]["win_rate"]) == pytest.approx(0.88)
+
+    def test_handles_missing_fields_with_empty_cells(self, tmp_path):
+        # Older eval-result schemas lack std / episodes; the writer
+        # should leave those cells empty rather than raising.
+        history = [
+            {
+                "stage": "a",
+                "map_file": "m.csv",
+                "opponent": "random",
+                "results": [{"win_rate": 0.5, "avg_reward": 100.0}],
+            }
+        ]
+        csv_path = tmp_path / "out.csv"
+        _write_results_csv(history, csv_path)
+        _, rows = self._read_csv(csv_path)
+        assert len(rows) == 1
+        assert rows[0]["std_reward"] == ""
+        assert rows[0]["episodes"] == ""
+
+    def test_handles_stage_with_no_results(self, tmp_path):
+        # A stage that stalled before its first eval produced no rows;
+        # the writer should still emit the header and skip silently.
+        history = [{"stage": "a", "map_file": "m.csv", "opponent": "random", "results": []}]
+        csv_path = tmp_path / "empty.csv"
+        _write_results_csv(history, csv_path)
+        fieldnames, rows = self._read_csv(csv_path)
+        assert fieldnames[:3] == ["stage", "map_file", "opponent"]
+        assert rows == []
+
+    def test_run_curriculum_writes_csv_after_each_stage(self, tmp_path):
+        # End-to-end: run_curriculum should drop bootstrap_results.csv at
+        # the run root and update it as stages finish.
+        stages = [_stage("a", patience=2), _stage("b", "simple", patience=2)]
+        program = {"a": [0.95, 0.95], "b": [0.92, 0.93]}
+        cfg, mf, tef, eef, _, _, _ = _setup_run(stages, program, tmp_path)
+        run_curriculum(
+            cfg,
+            output_dir=tmp_path,
+            train_env_factory=tef,
+            eval_env_factory=eef,
+            model_factory=mf,
+        )
+        csv_path = tmp_path / "bootstrap_results.csv"
+        assert csv_path.is_file()
+        fieldnames, rows = self._read_csv(csv_path)
+        assert fieldnames[:3] == ["stage", "map_file", "opponent"]
+        # The fake model feeds two evals per stage via the program; both
+        # stages promote so the CSV has all four rows.
+        assert [r["stage"] for r in rows] == ["a", "a", "b", "b"]
+        assert [r["opponent"] for r in rows] == ["random", "random", "simple", "simple"]
+
+    def test_run_curriculum_writes_csv_on_stall(self, tmp_path):
+        # If the curriculum stalls partway through, the CSV should still
+        # contain rows for every stage that did complete (the stalling
+        # stage's evals are appended too because ``history.append`` runs
+        # before the stall check).
+        stages = [_stage("a", patience=2), _stage("b", "simple", patience=2, threshold=0.99)]
+        program = {"a": [0.95, 0.95], "b": [0.5, 0.5]}
+        cfg, mf, tef, eef, _, _, _ = _setup_run(stages, program, tmp_path)
+        with pytest.raises(CurriculumStalled):
+            run_curriculum(
+                cfg,
+                output_dir=tmp_path,
+                train_env_factory=tef,
+                eval_env_factory=eef,
+                model_factory=mf,
+            )
+        csv_path = tmp_path / "bootstrap_results.csv"
+        assert csv_path.is_file()
+        _, rows = self._read_csv(csv_path)
+        # Stage 'a' promoted (2 evals); stage 'b' stalled (2 evals but
+        # never reached threshold). Both made it into history before the
+        # stall raise.
+        stages_seen = [r["stage"] for r in rows]
+        assert stages_seen.count("a") == 2
+        assert stages_seen.count("b") == 2
