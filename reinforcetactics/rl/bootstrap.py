@@ -435,11 +435,7 @@ def run_curriculum(
                 )
             model_action_space = getattr(model, "action_space", None)
             env_action_space = getattr(vec_env, "action_space", None)
-            if (
-                model_action_space is not None
-                and env_action_space is not None
-                and env_action_space != model_action_space
-            ):
+            if model_action_space is not None and env_action_space is not None and env_action_space != model_action_space:
                 raise ValueError(
                     f"Stage '{stage.name}' action space {env_action_space} "
                     f"does not match the model's {model_action_space}. "
