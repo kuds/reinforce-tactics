@@ -169,6 +169,81 @@ def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
     )
 
 
+def _print_policy_summary(model: Any, output_dir: Optional[Path] = None) -> None:
+    """One-time diagnostic: report what the SB3 ``MultiInputPolicy`` actually
+    built so we can verify the post-#268 (6, 6, 12) observation isn't being
+    flattened past its spatial structure.
+
+    Surfaces:
+      - The features-extractor class for each Dict obs key (does ``grid``
+        and ``units`` go through a CNN, or just a flatten?). This determines
+        whether the policy gets any spatial inductive bias.
+      - Trainable parameter count broken down by extractor / mlp / heads,
+        so we can compare against the bootstrap.yaml comment's ~150K target
+        and notice if the head is the bottleneck vs the extractor.
+
+    When ``output_dir`` is provided, also persists the summary to
+    ``output_dir/policy_summary.json`` next to ``final_model.zip`` and
+    ``bootstrap_results.csv``. Survives Colab disconnects and lets us
+    diff architectures across runs without re-instantiating the model.
+
+    Best-effort: a failure here must not block training, since the
+    checkpoint is the load-bearing artifact and this is purely diagnostic.
+    """
+    try:
+        policy = model.policy
+        summary: Dict[str, Any] = {
+            "policy_class": type(policy).__name__,
+            "extractors": {},
+            "param_counts": {},
+            "total_trainable_params": 0,
+            "policy_repr": str(policy),
+        }
+        extractor = getattr(policy, "features_extractor", None)
+
+        print("\n=== Policy network summary ===")
+        if extractor is not None:
+            summary["features_extractor_class"] = type(extractor).__name__
+            extractors = getattr(extractor, "extractors", None)
+            if extractors is not None:
+                for key, sub in extractors.items():
+                    cls_name = type(sub).__name__
+                    summary["extractors"][str(key)] = cls_name
+                    print(f"  obs[{key!r}] -> {cls_name}")
+            else:
+                print(f"  features_extractor: {type(extractor).__name__}")
+            ext_params = sum(p.numel() for p in extractor.parameters() if p.requires_grad)
+            summary["param_counts"]["features_extractor"] = ext_params
+            print(f"  features_extractor params: {ext_params:,}")
+
+        def _count(module_attr: str) -> Optional[int]:
+            module = getattr(policy, module_attr, None)
+            if module is None:
+                return None
+            return sum(p.numel() for p in module.parameters() if p.requires_grad)
+
+        for name in ("mlp_extractor", "action_net", "value_net"):
+            n = _count(name)
+            if n is not None:
+                summary["param_counts"][name] = n
+                print(f"  {name} params: {n:,}")
+        total = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+        summary["total_trainable_params"] = total
+        print(f"  total trainable params: {total:,}")
+        print("===============================\n")
+
+        if output_dir is not None:
+            try:
+                path = Path(output_dir) / "policy_summary.json"
+                path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                print(f"  policy summary written to {path}")
+            except Exception:  # noqa: BLE001
+                # File write failure shouldn't mask the printed summary.
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _write_stage_config(
     *,
     stage: CurriculumStage,
@@ -341,6 +416,7 @@ def run_curriculum(
 
         if model is None:
             model = model_factory(vec_env, cfg, output_dir)
+            _print_policy_summary(model, output_dir)
         else:
             model.set_env(vec_env)
 
