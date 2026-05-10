@@ -241,6 +241,25 @@ curriculum:
       max_turns: 100
       ent_coef: 0.05
 
+    - name: beginner_mixed_50
+      # Bridge stage between simple and medium. MixedBot samples
+      # SimpleBot or MediumBot per episode with p_medium=0.5, so half the
+      # episodes mirror beginner_simple (which the policy just cleared at
+      # 0.70 WR) and half preview beginner_medium. Mirrors the
+      # random_10 -> 15 -> 20 ladder: thresholds and budgets sit between
+      # the flanking stages (0.675 WR, 3.5M steps).
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs:
+        p_medium: 0.5
+      promotion_win_rate: 0.675
+      patience: 2
+      max_timesteps: 3_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 100
+      ent_coef: 0.05
+
     - name: beginner_medium
       map_file: maps/1v1/beginner.csv
       opponent: medium
