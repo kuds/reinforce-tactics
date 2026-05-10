@@ -272,6 +272,10 @@ def _write_stage_config(
     ent_schedule = stage.resolve_ent_coef_schedule()
     if ent_schedule is not None:
         ppo_resolved["ent_coef_schedule"] = ent_schedule
+    ppo_resolved["purchase_explore_eps"] = stage.resolve_purchase_explore_eps(cfg.ppo)
+    purchase_eps_schedule = stage.resolve_purchase_explore_eps_schedule()
+    if purchase_eps_schedule is not None:
+        ppo_resolved["purchase_explore_eps_schedule"] = purchase_eps_schedule
 
     env_resolved: Dict[str, Any] = {
         "map_file": stage.map_file,
@@ -399,6 +403,10 @@ def run_curriculum(
         PromotionCallback,
         TrainingMetricsCallback,
     )
+    from reinforcetactics.rl.purchase_exploration import (
+        PurchaseExploreScheduleCallback,
+        install_purchase_explore_hook,
+    )
 
     cfg.validate()
     if not cfg.curriculum.stages:
@@ -425,6 +433,16 @@ def run_curriculum(
         if model is None:
             model = model_factory(vec_env, cfg, output_dir)
             _print_policy_summary(model, output_dir)
+            # Install the purchase-exploration hook once on the freshly
+            # built policy. Wrapping is idempotent and the hook short-
+            # circuits when ``purchase_explore_eps <= 0``, so it's safe
+            # to install unconditionally; per-stage code below sets the
+            # live ε attribute (and, optionally, attaches a schedule).
+            install_purchase_explore_hook(
+                model,
+                eps=cfg.ppo.purchase_explore_eps,
+                seed=cfg.seed,
+            )
         else:
             # Reusing the model across stages requires matching spaces. SB3's
             # ``set_env`` will accept the swap and only fail later at rollout
@@ -461,6 +479,15 @@ def run_curriculum(
             model.ent_coef = ent_coef
         ent_schedule = stage.resolve_ent_coef_schedule()
 
+        # Per-stage purchase-exploration ε override. Same pattern as
+        # ent_coef: write the live attribute on the model now, and (if
+        # the override is a schedule mapping) attach the annealing
+        # callback below. Hook installation happened once on first
+        # stage, so this just updates the value the wrapper reads.
+        purchase_eps = stage.resolve_purchase_explore_eps(cfg.ppo)
+        setattr(model, "purchase_explore_eps", purchase_eps)
+        purchase_eps_schedule = stage.resolve_purchase_explore_eps_schedule()
+
         eval_cb = PeriodicEvalCallback(
             eval_env=eval_env,
             eval_freq=cfg.eval.eval_freq,
@@ -490,6 +517,15 @@ def run_curriculum(
                     schedule=ent_schedule["schedule"],
                 )
             )
+        if purchase_eps_schedule is not None:
+            callbacks.append(
+                PurchaseExploreScheduleCallback(
+                    start=purchase_eps_schedule["start"],
+                    end=purchase_eps_schedule["end"],
+                    total_timesteps=stage.max_timesteps,
+                    schedule=purchase_eps_schedule["schedule"],
+                )
+            )
 
         max_steps = stage.resolve_max_steps(cfg.env)
         max_turns = stage.resolve_max_turns(cfg.env)
@@ -499,13 +535,22 @@ def run_curriculum(
             ent_note = f"ent_coef={ent_schedule['start']:.3f}->{ent_schedule['end']:.3f} ({ent_schedule['schedule']})"
         else:
             ent_note = f"ent_coef={ent_coef:.3f}"
+        if purchase_eps_schedule is not None:
+            purchase_note = (
+                f", purchase_eps={purchase_eps_schedule['start']:.3f}->"
+                f"{purchase_eps_schedule['end']:.3f} ({purchase_eps_schedule['schedule']})"
+            )
+        elif purchase_eps > 0:
+            purchase_note = f", purchase_eps={purchase_eps:.3f}"
+        else:
+            purchase_note = ""
         print(
             f"\n=== Stage '{stage.name}' :: map={stage.map_file}, "
             f"opp={stage.opponent}, target WR >= "
             f"{stage.promotion_win_rate:.0%} (patience={stage.patience}), "
             f"budget={stage.max_timesteps:,} steps, "
             f"max_steps={max_steps}, max_turns={max_turns}, "
-            f"{ent_note}{reward_note} ==="
+            f"{ent_note}{purchase_note}{reward_note} ==="
         )
 
         model.learn(
