@@ -1757,6 +1757,27 @@ class AdvancedBot(MediumBot):
             if not can_finish and self.try_retreat_to_heal(unit):
                 return
 
+        # PRIORITY 4.6: Free capture. If a capture target is reachable this
+        # turn (already standing on it, or can move-and-seize without a
+        # multi-turn march), do it before combat. Captures compound -- each
+        # adds income next turn -- and the previous Priority 8-only policy
+        # let units sit trading attacks while free buildings sat next door,
+        # which is the dominant AdvancedBot stalemate failure mode.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            structure_pos = (target_structure.x, target_structure.y)
+            already_on = (unit.x, unit.y) == structure_pos
+            reachable_this_turn = already_on or structure_pos in set(self.get_reachable(unit))
+            if reachable_this_turn:
+                self._capture_assignments().add(structure_pos)
+                if not already_on:
+                    self.game_state.move_unit(unit, structure_pos[0], structure_pos[1])
+                if (unit.x, unit.y) == structure_pos:
+                    self.game_state.seize(unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
+
         # PRIORITY 5: Position on mountains for attack bonus. Pre-evaluate
         # every reachable mountain (without committing the move) and pick
         # the one that yields an in-range enemy; otherwise skip entirely.
