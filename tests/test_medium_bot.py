@@ -624,9 +624,18 @@ class TestAdvancedBotPhases:
         assert bot.compute_target_phase() == bot.PHASE_CONSOLIDATE
 
     def test_compute_target_phase_conquer_when_no_neutrals(self):
-        """skirmish has 0 neutrals -- everything is already owned by one
-        side or the other, so the only path to victory is conquest."""
-        map_data = FileIO.load_map("maps/1v1/skirmish.csv")
+        """A map with every capturable already owned should drive CONQUER."""
+        # Build the map in-process so the test doesn't depend on the
+        # contents of any shipped CSV file -- skirmish.csv has 0 neutrals
+        # today, but the assertion we care about is about the function's
+        # behaviour, not the file's contents.
+        map_data = np.array([["p" for _ in range(8)] for _ in range(8)], dtype=object)
+        map_data[1][1] = "h_1"
+        map_data[1][2] = "t_1"
+        map_data[2][1] = "t_1"
+        map_data[6][6] = "h_2"
+        map_data[6][5] = "t_2"
+        map_data[5][6] = "t_2"
         game = GameState(map_data, num_players=2)
         bot = AdvancedBot(game, player=2)
         assert bot.compute_target_phase() == bot.PHASE_CONQUER
