@@ -285,12 +285,19 @@ class TestCurriculumLoading:
         sched = first_beginner.resolve_ent_coef_schedule()
         assert sched is not None, "first beginner stage should drive an entropy schedule"
         assert sched["start"] > sched["end"]
-        # Reward-shape override on beginner stages: HQ capture is much
+        # Reward-shape invariant on beginner stages: HQ capture is much
         # harder than elimination on the bigger map, so the two terminal
-        # rewards must be equalized (or capture <= elimination).
+        # rewards must be equalized (or capture <= elimination). The
+        # shipped config used to enforce this via a per-stage override
+        # on beginner_random_20; the global-config rewrite equalises
+        # win_by_hq_capture / win_by_elimination at the env level
+        # instead, which has the same effect for the resolved stage
+        # config. Test against the resolved dict so either design path
+        # satisfies the invariant.
         beginner_random = by_name["beginner_random_20"]
-        assert beginner_random.reward_config is not None
-        assert beginner_random.reward_config["win_by_hq_capture"] <= beginner_random.reward_config["win_by_elimination"]
+        resolved = beginner_random.resolve_reward_config(cfg.env)
+        assert resolved is not None
+        assert resolved["win_by_hq_capture"] <= resolved["win_by_elimination"]
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
