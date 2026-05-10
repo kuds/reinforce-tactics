@@ -197,9 +197,17 @@ def install_purchase_explore_hook(model: Any, eps: float, seed: Optional[int] = 
         # yet (shouldn't happen post-construction, but be defensive).
         nvec = getattr(model.action_space, "nvec", None)
         if nvec is None:
-            raise TypeError(
-                f"purchase exploration only supports MultiDiscrete action spaces; got {type(model.action_space).__name__}"
-            )
+            # Non-MultiDiscrete space (e.g. ``flat_discrete`` env mode
+            # gives a plain ``Discrete``). The substitution can't apply
+            # — sub-actions don't exist as a separate dim. If the user
+            # asked for purchase exploration on this space, raise; if
+            # eps == 0 the call is a no-op-by-default install from
+            # bootstrap, so skip silently.
+            if model.purchase_explore_eps > 0.0:
+                raise TypeError(
+                    f"purchase exploration only supports MultiDiscrete action spaces; got {type(model.action_space).__name__}"
+                )
+            return
         action_dims = list(int(x) for x in nvec)
     action_dims = list(int(x) for x in action_dims)
     if len(action_dims) <= UNIT_TYPE_DIM_INDEX:

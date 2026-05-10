@@ -432,3 +432,36 @@ def test_install_hook_idempotent(maskable_env):
     assert model.policy.forward is forward_once
     # But the eps attribute reflects the latest call.
     assert model.purchase_explore_eps == pytest.approx(0.7)
+
+
+def test_install_hook_discrete_action_space_noop_when_eps_zero():
+    """``flat_discrete`` envs give a plain ``Discrete`` action space, which
+    has no ``unit_type`` sub-action to substitute. With eps=0 the install
+    must be a silent no-op so bootstrap can call it unconditionally."""
+    from gymnasium import spaces
+
+    class FakeModel:
+        def __init__(self):
+            self.action_space = spaces.Discrete(16)
+            self.policy = type("P", (), {"forward": lambda self, *a, **k: None, "action_dist": None})()
+
+    model = FakeModel()
+    install_purchase_explore_hook(model, eps=0.0, seed=0)
+    assert model.purchase_explore_eps == 0.0
+    # No wrapper installed -> attribute absent on policy.
+    assert not getattr(model.policy, "_purchase_explore_installed", False)
+
+
+def test_install_hook_discrete_action_space_raises_when_eps_positive():
+    """If the user actually requests purchase exploration on an unsupported
+    space, fail loudly rather than silently doing nothing."""
+    from gymnasium import spaces
+
+    class FakeModel:
+        def __init__(self):
+            self.action_space = spaces.Discrete(16)
+            self.policy = type("P", (), {"forward": lambda self, *a, **k: None, "action_dist": None})()
+
+    model = FakeModel()
+    with pytest.raises(TypeError, match="MultiDiscrete"):
+        install_purchase_explore_hook(model, eps=0.1, seed=0)
