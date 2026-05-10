@@ -274,9 +274,14 @@ class TestCurriculumLoading:
         assert isinstance(cfg.ppo.ent_coef, (int, float))
         assert isinstance(cfg.ppo.clip_range, (int, float))
         by_name = {s.name: s for s in cfg.curriculum.stages}
-        # Starter stages inherit env defaults (no per-stage overrides).
+        # Starter stages inherit env max_turns (no per-stage override). They
+        # do bump ent_coef above the global ppo.ent_coef floor so the early
+        # random/simple curriculum sees enough exploration; assert the
+        # direction of the bump rather than that no override exists.
         assert by_name["starter_random"].max_turns is None
-        assert by_name["starter_random"].ent_coef is None
+        starter_random = by_name["starter_random"]
+        if starter_random.ent_coef is not None:
+            assert starter_random.resolve_ent_coef(cfg.ppo) >= cfg.ppo.ent_coef
         # Beginner stages bump max_turns / max_steps for the bigger map.
         first_beginner = by_name["beginner_balanced_random"]
         assert first_beginner.max_turns is not None
