@@ -623,12 +623,14 @@ class TestAdvancedBotPhases:
         bot = AdvancedBot(game, player=2)
         assert bot.compute_target_phase() == bot.PHASE_CONSOLIDATE
 
-    def test_compute_target_phase_conquer_when_no_neutrals(self):
-        """skirmish has 0 neutrals -- everything is already owned by one
-        side or the other, so the only path to victory is conquest."""
-        map_data = FileIO.load_map("maps/1v1/skirmish.csv")
-        game = GameState(map_data, num_players=2)
-        bot = AdvancedBot(game, player=2)
+    def test_compute_target_phase_conquer_when_no_neutrals(self, simple_game):
+        """A board with only player-owned structures has 0 neutrals --
+        the only path to victory is conquest. simple_game (10x10 with
+        just HQs + player buildings) provides that shape; previously
+        this used skirmish.csv, but skirmish picked up neutral towers
+        and buildings so it no longer satisfies the 0-neutral
+        precondition this test is checking."""
+        bot = AdvancedBot(simple_game, player=2)
         assert bot.compute_target_phase() == bot.PHASE_CONQUER
 
     def test_update_phase_cold_start_adopts_target(self, simple_game):
