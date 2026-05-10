@@ -38,7 +38,7 @@ UNIT TYPES:
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
-4. Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
+4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
@@ -139,7 +139,7 @@ UNIT TYPES:
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
-4. Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
+4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
@@ -444,7 +444,7 @@ UNIT_DESCRIPTIONS = {
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
     "C": """Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)""",
-    "A": """Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
+    "A": """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer

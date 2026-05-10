@@ -50,7 +50,7 @@ class TestUnitInitialization:
         assert archer.health == 15
         assert archer.max_health == 15
         assert archer.movement_range == 3
-        assert archer.attack_data == 6
+        assert archer.attack_data == 5
 
 
 class TestAttackDamage:
@@ -109,25 +109,25 @@ class TestAttackDamage:
         """Test archer deals damage at distance 2."""
         # Distance 2
         damage = archer.get_attack_damage(7, 5, False)
-        assert damage == 6
+        assert damage == 5
 
     def test_archer_no_damage_at_distance_3_no_mountain(self, archer):
         """Test archer deals damage at distance 3 without mountain."""
         # Distance 3, not on mountain - Archer CAN attack here
         damage = archer.get_attack_damage(8, 5, False)
-        assert damage == 6
+        assert damage == 5
 
     def test_archer_damage_at_distance_3_on_mountain(self, archer):
         """Test archer deals damage at distance 3 when on mountain."""
         # Distance 3, on mountain
         damage = archer.get_attack_damage(8, 5, True)
-        assert damage == 6
+        assert damage == 5
 
     def test_archer_damage_at_distance_4_on_mountain(self, archer):
         """Test archer deals damage at distance 4 when on mountain."""
         # Distance 4, on mountain - Archer CAN attack here with mountain bonus
         damage = archer.get_attack_damage(9, 5, True)
-        assert damage == 6
+        assert damage == 5
 
     def test_archer_no_damage_at_distance_4_no_mountain(self, archer):
         """Test archer deals no damage at distance 4 without mountain."""
