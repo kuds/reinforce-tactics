@@ -552,10 +552,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, simple_grid)
 
-        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
-        assert result["damage"] == 3
+        # Archer (6 attack) vs Warrior (6 defence) = 6 * 0.7 = 4.2 → 4 damage
+        assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert warrior.health == 12  # 15 - 3 damage
+        assert warrior.health == 11  # 15 - 4 damage
 
         # Warrior should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
@@ -568,7 +568,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, cleric, simple_grid)
 
-        # Archer (5 attack) vs Cleric (4 defence) = 5 * 0.8 = 4 damage
+        # Archer (6 attack) vs Cleric (4 defence) = 6 * 0.8 = 4.8 → 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert cleric.health == 6  # 10 - 4 damage
@@ -584,10 +584,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, barbarian, simple_grid)
 
-        # Archer (5 attack) vs Barbarian (2 defence) = 5 * 0.9 = 4.5 → 4 damage
-        assert result["damage"] == 4
+        # Archer (6 attack) vs Barbarian (2 defence) = 6 * 0.9 = 5.4 → 5 damage
+        assert result["damage"] == 5
         assert result["target_alive"] is True
-        assert barbarian.health == 16  # 20 - 4 damage
+        assert barbarian.health == 15  # 20 - 5 damage
 
         # Barbarian should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
@@ -600,12 +600,12 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer1, archer2, simple_grid)
 
-        # Archer1 (5 attack) vs Archer2 (1 defence) = 5 * 0.95 = 4.75 → 4 damage
-        assert result["damage"] == 4
+        # Archer1 (6 attack) vs Archer2 (1 defence) = 6 * 0.95 = 5.7 → 5 damage
+        assert result["damage"] == 5
         assert result["target_alive"] is True
-        assert archer2.health == 11  # 15 - 4 damage
+        assert archer2.health == 10  # 15 - 5 damage
 
-        # Archer2 counter-attack: 5 * 0.8 counter mult = 4, then 4 * 0.95 defence = 3.8 → 3
+        # Archer2 counter-attack: int(6 * 0.8) = 4, then int(4 * 0.95) = 3 (1 defence)
         assert result["counter_damage"] == 3
         assert archer1.health == 12  # 15 - 3 damage
 
@@ -616,7 +616,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
+        # Archer (6 attack) vs Mage (4 defence) = 6 * 0.8 = 4.8 → 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert mage.health == 6  # 10 - 4 damage
@@ -632,7 +632,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
+        # Archer (6 attack) vs Mage (4 defence) = 6 * 0.8 = 4.8 → 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert mage.health == 6  # 10 - 4 damage
@@ -653,10 +653,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, grid)
 
-        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
-        assert result["damage"] == 3
+        # Archer (6 attack) vs Warrior (6 defence) = 6 * 0.7 = 4.2 → 4 damage
+        assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert warrior.health == 12  # 15 - 3 damage
+        assert warrior.health == 11  # 15 - 4 damage
 
         # Warrior cannot counter from distance 3
         assert result["counter_damage"] == 0
@@ -828,7 +828,7 @@ class TestSorcererHasteAbility:
         assert ally.is_hasted is True
         assert ally.can_move is True
         assert ally.can_attack is True
-        assert sorcerer.haste_cooldown == 3
+        assert sorcerer.haste_cooldown == 2
 
     def test_sorcerer_cannot_haste_when_on_cooldown(self, simple_grid):
         """Test Sorcerer cannot use Haste when on cooldown."""
@@ -1030,7 +1030,7 @@ class TestSorcererDefenceBuff:
         assert result is True
         assert ally.has_defence_buff() is True
         assert ally.defence_buff_turns == 3
-        assert sorcerer.defence_buff_cooldown == 3
+        assert sorcerer.defence_buff_cooldown == 2
 
     def test_sorcerer_can_defence_buff_self(self, simple_grid):
         """Test Sorcerer can grant Defence Buff to itself."""
@@ -1095,7 +1095,7 @@ class TestSorcererAttackBuff:
         assert result is True
         assert ally.has_attack_buff() is True
         assert ally.attack_buff_turns == 3
-        assert sorcerer.attack_buff_cooldown == 3
+        assert sorcerer.attack_buff_cooldown == 2
 
     def test_sorcerer_can_attack_buff_self(self, simple_grid):
         """Test Sorcerer can grant Attack Buff to itself."""
@@ -1151,30 +1151,30 @@ class TestBuffDamageModifiers:
     """Test buff effects on damage calculations."""
 
     def test_attack_buff_increases_damage(self, simple_grid):
-        """Test Attack Buff increases damage by 35%."""
+        """Test Attack Buff increases damage by 50%."""
         attacker = Unit("W", 5, 5, 1)
         attacker.attack_buff_turns = 3  # Has attack buff
         target = Unit("A", 6, 5, 2)  # Archer: 1 defence
 
-        # Warrior (10 attack) with attack buff (+35%) = int(10 * 1.35) = 13 attack
-        # vs Archer (1 defence, 5% reduction) = int(13 * 0.95) = 12 damage
+        # Warrior (10 attack) with attack buff (+50%) = int(10 * 1.50) = 15 attack
+        # vs Archer (1 defence, 5% reduction) = int(15 * 0.95) = 14 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result["attack_buff"] is True
-        assert result["damage"] == 12
+        assert result["damage"] == 14
 
     def test_defence_buff_reduces_damage(self, simple_grid):
-        """Test Defence Buff reduces incoming damage by 35%."""
+        """Test Defence Buff reduces incoming damage by 50%."""
         attacker = Unit("W", 5, 5, 1)
         target = Unit("A", 6, 5, 2)  # Archer: 1 defence
         target.defence_buff_turns = 3  # Has defence buff
 
         # Warrior (10 attack) vs Archer (1 defence, 5% reduction) = int(10 * 0.95) = 9 damage
-        # Then reduced by defence buff (-35%) = max(1, int(9 * 0.65)) = 5 damage
+        # Then reduced by defence buff (-50%) = max(1, int(9 * 0.50)) = 4 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result["defence_buff"] is True
-        assert result["damage"] == 5
+        assert result["damage"] == 4
 
     def test_attack_buff_applies_to_counter_attack(self, simple_grid):
         """Test Attack Buff increases counter-attack damage."""
@@ -1182,12 +1182,12 @@ class TestBuffDamageModifiers:
         target = Unit("W", 6, 5, 2)  # Warrior: will counter-attack
         target.attack_buff_turns = 3  # Counter-attacker has attack buff
 
-        # Normal counter: 10 * 0.8 = 8 base, with attack buff: int(8 * 1.35) = 10
-        # vs Warrior (6 defence, 30% reduction) = int(10 * 0.7) = 7 counter damage
+        # Normal counter: 10 * 0.8 = 8 base, with attack buff: int(8 * 1.50) = 12
+        # vs Warrior (6 defence, 30% reduction) = int(12 * 0.7) = 8 counter damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         # Counter damage should be higher than normal (without buff it would be ~5)
-        assert result["counter_damage"] == 7
+        assert result["counter_damage"] == 8
 
     def test_defence_buff_applies_to_counter_attack_received(self, simple_grid):
         """Test Defence Buff reduces counter-attack damage received."""
@@ -1196,10 +1196,10 @@ class TestBuffDamageModifiers:
         target = Unit("W", 6, 5, 2)  # Warrior: will counter-attack
 
         # Counter: 10 * 0.8 = 8 base vs Warrior (6 defence, 30% reduction) = int(8 * 0.7) = 5
-        # Then reduced by defence buff (-35%) = max(1, int(5 * 0.65)) = 3 counter damage
+        # Then reduced by defence buff (-50%) = max(1, int(5 * 0.50)) = 2 counter damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
-        assert result["counter_damage"] == 3
+        assert result["counter_damage"] == 2
 
 
 class TestBuffCooldownDecrement:

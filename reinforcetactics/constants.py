@@ -224,7 +224,7 @@ UNIT_DATA = {
         "color": (34, 139, 34),
         "movement": 3,
         "health": 15,
-        "attack": 5,
+        "attack": 6,
         "defence": 1,
     },
     "K": {
@@ -253,10 +253,10 @@ UNIT_DATA = {
         "static_path": "sorcerer.png",
         "animation_path": "sorcerer",
         "name": "Sorcerer",
-        "cost": 400,
+        "cost": 350,
         "color": (0, 191, 255),
         "movement": 2,
-        "health": 10,
+        "health": 12,
         "attack": {"adjacent": 6, "range": 8},
         "defence": 3,
     },
@@ -293,16 +293,16 @@ PARALYZE_DURATION = 3
 PARALYZE_COOLDOWN = 2  # Turns before Mage can use Paralyze again
 HEAL_AMOUNT = 7
 CLERIC_HEAL_RANGE = 3  # Max Manhattan distance for Cleric heal and cure-paralyze abilities
-HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
+HASTE_COOLDOWN = 2  # Turns before Sorcerer can use Haste again
 
 # Rogue forest bonus
 ROGUE_FOREST_EVADE_BONUS = 0.15  # Additional 15% dodge chance when in forest (15% + 15% = 30%)
 
 # Sorcerer buff abilities
 SORCERER_BUFF_DURATION = 3  # Turns the buff lasts
-SORCERER_BUFF_COOLDOWN = 3  # Turns before Sorcerer can use buff again
-SORCERER_DEFENCE_BUFF_AMOUNT = 0.35  # 35% damage reduction
-SORCERER_ATTACK_BUFF_AMOUNT = 0.35  # 35% damage increase
+SORCERER_BUFF_COOLDOWN = 2  # Turns before Sorcerer can use buff again
+SORCERER_DEFENCE_BUFF_AMOUNT = 0.50  # 50% damage reduction
+SORCERER_ATTACK_BUFF_AMOUNT = 0.50  # 50% damage increase
 
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility
