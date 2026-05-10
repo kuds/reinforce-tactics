@@ -316,6 +316,90 @@ curriculum:
       max_turns: 100
       ent_coef: 0.05
 
+    - name: skirmish_balanced_random
+      map_file: maps/1v1/skirmish.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    - name: skirmish_random_10
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    - name: skirmish_random_15
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 15
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    - name: skirmish_random_20
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    - name: skirmish_simple
+      map_file: maps/1v1/skirmish.csv
+      opponent: simple
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef: 0.05
+
+    - name: skirmish_medium
+      map_file: maps/1v1/skirmish.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 4_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 120
+      ent_coef: 0.05
+
     - name: corner_points_balanced_random
       map_file: maps/1v1/corner_points.csv
       opponent: balanced_random

@@ -1,8 +1,8 @@
-h_1,b_1,p,p,p,p,p,p
+h_1,b_1,p,p,p,p,p,b
 b_1,p,f,p,p,p,p,p
 p,f,p,t,p,m,p,p
 p,p,p,p,b,p,p,p
 p,p,p,b,p,p,p,p
 p,p,m,p,t,p,f,p
 p,p,p,p,p,f,p,b_2
-p,p,p,p,p,p,b_2,h_2
+b,p,p,p,p,p,b_2,h_2
