@@ -241,7 +241,10 @@ curriculum:
       n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
-      ent_coef: 0.05
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
 
     - name: beginner_mixed_50
       # Bridge stage between simple and medium. MixedBot samples
