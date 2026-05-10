@@ -38,7 +38,7 @@ UNIT TYPES:
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
-4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
+4. Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
@@ -50,7 +50,7 @@ UNIT TYPES:
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)
-7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+7. Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
@@ -139,7 +139,7 @@ UNIT TYPES:
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
-4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
+4. Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
@@ -151,7 +151,7 @@ UNIT TYPES:
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)
-7. Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+7. Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
@@ -273,7 +273,7 @@ UNIT TYPES (for reference):
 - Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement
 - Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement
 - Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement
-- Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement
+- Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+50%) allies, 12 HP, 2 movement
 - Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
 BUILDING TYPES:
@@ -444,7 +444,7 @@ UNIT_DESCRIPTIONS = {
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
     "C": """Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)""",
-    "A": """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
+    "A": """Archer (A): Cost 250 gold, HP 15, Attack 6, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
    - Indirect unit: melee units cannot counter-attack when hit by Archer
@@ -456,7 +456,7 @@ UNIT_DESCRIPTIONS = {
    - Fast melee assassin
    - FLANK: +50% damage if target is adjacent to another friendly unit
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)""",
-    "S": """Sorcerer (S): Cost 400 gold, HP 10, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
+    "S": """Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
    - HASTE: Grant an ally an extra action (3-turn cooldown)
    - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
@@ -474,7 +474,7 @@ UNIT_DESCRIPTIONS_SHORT = {
     "A": "Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement",
     "K": "Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement",
     "R": "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement",
-    "S": "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+35%) allies, 10 HP, 2 movement",
+    "S": "Sorcerer (S): Support caster (1-2 range), HASTE/DEFENCE_BUFF/ATTACK_BUFF (+50%) allies, 12 HP, 2 movement",
     "B": "Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement",
 }
 
