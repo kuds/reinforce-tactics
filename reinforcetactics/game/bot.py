@@ -1179,6 +1179,39 @@ class MediumBot(BotUnitMixin):
             self.act_with_unit(unit, _depth + 1)
 
 
+class MixedBot(BotUnitMixin):
+    """Curriculum bridge between SimpleBot and MediumBot.
+
+    On construction, samples one of ``SimpleBot`` or ``MediumBot`` using
+    ``p_medium`` (probability of choosing MediumBot, in ``[0, 1]``) and
+    delegates ``take_turn()`` to that instance for the lifetime of this
+    MixedBot. The env reconstructs its opponent on every ``reset()``
+    (gym_env.py:reset), so the choice is effectively resampled per episode
+    -- one episode is fully Simple or fully Medium, never a mid-episode
+    switch -- which preserves MediumBot's multi-turn strategy adaptation
+    on the episodes where it plays.
+
+    Use as a curriculum stepping stone between ``simple`` and ``medium``
+    stages by stepping ``p_medium`` (e.g. 0.25 -> 0.50 -> 0.75 -> 1.0)
+    via ``opponent_kwargs`` in configs/bootstrap.yaml.
+    """
+
+    def __init__(self, game_state, player: int = 2, p_medium: float = 0.5, rng=None):
+        self.game_state = game_state
+        self.bot_player = player
+        self.p_medium = p_medium
+        # Both ``random`` and ``random.Random()`` instances expose ``.random``.
+        self._rng = rng if rng is not None else random
+        self.use_medium = self._rng.random() < p_medium
+        if self.use_medium:
+            self._inner = MediumBot(game_state, player=player)
+        else:
+            self._inner = SimpleBot(game_state, player=player)
+
+    def take_turn(self):
+        self._inner.take_turn()
+
+
 class AdvancedBot(MediumBot):
     """Advanced AI bot extending MediumBot with map analysis and enhanced tactics."""
 

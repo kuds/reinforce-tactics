@@ -41,6 +41,7 @@ from reinforcetactics.game.bot import (
     AdvancedBot,
     BalancedRandomBot,
     MediumBot,
+    MixedBot,
     NoopBot,
     RandomBot,
     SimpleBot,
@@ -76,6 +77,8 @@ def _make_bot(name: str, rng: Optional[random.Random] = None) -> BotFactory:
             return SimpleBot(game_state, player=player)
         if name == "medium":
             return MediumBot(game_state, player=player)
+        if name == "mixed":
+            return MixedBot(game_state, player=player, rng=rng)
         if name == "advanced":
             return AdvancedBot(game_state, player=player)
         if name == "noop":

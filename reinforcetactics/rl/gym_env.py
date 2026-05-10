@@ -19,6 +19,7 @@ from reinforcetactics.game.bot import (
     AdvancedBot,
     BalancedRandomBot,
     MediumBot,
+    MixedBot,
     NoopBot,
     RandomBot,
     SimpleBot,
@@ -64,7 +65,7 @@ class StructuredActionMasks:
 # build attempt + one random action per owned unit per turn) -- a lighter,
 # more resilient stepping stone between ``"noop"`` and ``"random"``;
 # see configs/bootstrap.yaml.
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "advanced", "random", "balanced_random", "noop"})
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced", "random", "balanced_random", "noop"})
 
 
 class StrategyGameEnv(gym.Env):
@@ -1126,6 +1127,18 @@ class StrategyGameEnv(gym.Env):
             self.opponent = SimpleBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "medium":
             self.opponent = MediumBot(self.game_state, player=opponent_player)
+        elif self.opponent_type == "mixed":
+            # Per-episode bridge between SimpleBot and MediumBot: MixedBot
+            # samples one of the two at construction (here, in reset()) so
+            # the whole episode plays a consistent opponent. Seed the choice
+            # from gymnasium's np_random for reproducibility under reset(seed=...).
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = MixedBot(
+                self.game_state,
+                player=opponent_player,
+                rng=random.Random(bot_seed),
+                **self.opponent_kwargs,
+            )
         elif self.opponent_type == "advanced":
             self.opponent = AdvancedBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "noop":
