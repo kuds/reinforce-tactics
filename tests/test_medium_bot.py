@@ -433,3 +433,75 @@ class TestAdvancedBotHealRetreat:
         # Both buildings heal=2; HQ also heal=2. The safer ones are (4,5)
         # and (5,5) -- (5,4) is in archer range from (5,2).
         assert target != (5, 4)
+
+
+@pytest.fixture
+def capture_game():
+    """10x10 map with multiple unowned towers spread across the middle so
+    capture targeting is forced to discriminate."""
+    map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+    map_data[0][0] = "h_1"
+    map_data[9][9] = "h_2"
+    # A line of unowned towers across the middle row.
+    for x in range(2, 8):
+        map_data[5][x] = "t"
+    return GameState(map_data, num_players=2)
+
+
+class TestCaptureUnitDistance:
+    """get_structure_priority(structure, unit) should put unit-distance ahead
+    of HQ-distance so each unit picks its own nearest target."""
+
+    def test_unit_picks_its_own_closest_tower(self, capture_game):
+        bot = MediumBot(capture_game, player=2)
+        capture_game.player_gold[2] = 10_000
+        far_unit = capture_game.create_unit("W", 0, 5, 2)  # near tower (5, 2)
+        near_unit = capture_game.create_unit("W", 9, 5, 2)  # near tower (5, 7)
+        assert far_unit is not None and near_unit is not None
+
+        far_target = bot.pick_capture_target(far_unit)
+        # First call claimed it -- reset for the second probe.
+        bot._capture_assigned = set()
+        near_target = bot.pick_capture_target(near_unit)
+
+        assert far_target is not None and near_target is not None
+        # Each unit picks the tower closest to it, not the same one.
+        assert far_target.x < near_target.x
+
+    def test_legacy_signature_still_works(self, capture_game):
+        """Calling get_structure_priority with no unit must not crash and
+        must preserve the original ordering -- closer-to-HQ wins."""
+        bot = MediumBot(capture_game, player=2)
+        far_tower = capture_game.grid.get_tile(2, 5)
+        near_tower = capture_game.grid.get_tile(7, 5)
+        assert bot.get_structure_priority(near_tower) < bot.get_structure_priority(far_tower)
+
+
+class TestCaptureAssignment:
+    """Per-turn capture-claim set so two units never march on the same tower."""
+
+    def test_two_units_pick_different_targets(self, capture_game):
+        bot = MediumBot(capture_game, player=2)
+        capture_game.player_gold[2] = 10_000
+        # Two units in the same general area -- without claim tracking they
+        # would pick the same closest tower.
+        a = capture_game.create_unit("W", 5, 8, 2)
+        b = capture_game.create_unit("W", 6, 8, 2)
+        assert a is not None and b is not None
+
+        target_a = bot.pick_capture_target(a)
+        bot._capture_assignments().add((target_a.x, target_a.y))
+        target_b = bot.pick_capture_target(b)
+
+        assert target_a is not None and target_b is not None
+        assert (target_a.x, target_a.y) != (target_b.x, target_b.y)
+
+    def test_claim_set_resets_each_turn(self, capture_game):
+        bot = MediumBot(capture_game, player=2)
+        bot._capture_assigned = {(5, 5)}
+        bot.take_turn()
+        # take_turn opens a fresh turn so the previous-turn claim is gone.
+        # (After take_turn the field is repopulated with whatever was claimed
+        # this turn, but our point is the set is rebuilt, not appended to.)
+        assert isinstance(bot._capture_assigned, set)
+        assert (5, 5) not in bot._capture_assigned or bot.bot_player == 1

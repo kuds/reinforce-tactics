@@ -712,6 +712,9 @@ class MediumBot(BotUnitMixin):
         # Per-turn set of contested-structure enemy ids already being handled,
         # so multiple units don't all converge on the same interrupt target.
         self._interrupt_assigned = set()
+        # Per-turn set of structure positions already claimed by another unit's
+        # capture priority. Reset every turn so abandoned targets are reusable.
+        self._capture_assigned = set()
 
         # Phase 1: Purchase units - maximize unit production
         self.purchase_units()
@@ -784,39 +787,69 @@ class MediumBot(BotUnitMixin):
         unit.end_unit_turn()
         return True
 
-    def get_structure_priority(self, structure):
+    def get_structure_priority(self, structure, unit=None):
         """
-        Score structures by proximity to HQ and income value.
+        Score structures for capture priority. Lower is better.
 
-        Args:
-            structure: Tile object representing a structure
-
-        Returns:
-            Priority score (lower is better)
+        When ``unit`` is supplied, the unit's Manhattan distance to the
+        structure dominates -- a Warrior next to a tower picks that tower,
+        not whatever happens to be closest to HQ. HQ distance, income, and
+        the neutral bias act as tiebreakers within the same unit-distance
+        bucket. When ``unit`` is None we fall back to the legacy HQ-only
+        formula so callers that don't yet thread a unit (e.g. ad-hoc
+        scoring in tests) still work.
         """
-        # Find our HQ
-        our_hq = self.find_our_hq()
-        if not our_hq:
-            # Fallback to simple distance
-            return self.manhattan_distance(0, 0, structure.x, structure.y)
-
-        # Distance from structure to our HQ
-        distance_to_hq = self.manhattan_distance(our_hq[0], our_hq[1], structure.x, structure.y)
-
-        # Income value (higher income = higher priority = lower score)
         income_weights = {"h": 150, "b": 100, "t": 50}
         income_bonus = income_weights.get(structure.type, 0)
-
-        # Neutral structures have no defender and seize in one step, so they're
-        # cheaper to take than enemy-owned ones at the same distance. Without
-        # this bias, distant enemy buildings outrank closer unclaimed towers
-        # because of the income-weight gap.
         neutral_bonus = 80 if structure.player is None else 0
 
-        # Lower score = higher priority
-        # Prioritize closer structures, higher income, and unclaimed targets
-        priority = distance_to_hq - (income_bonus / 10.0) - (neutral_bonus / 10.0)
-        return priority
+        our_hq = self.find_our_hq()
+        if our_hq is None:
+            distance_to_hq = self.manhattan_distance(0, 0, structure.x, structure.y)
+        else:
+            distance_to_hq = self.manhattan_distance(our_hq[0], our_hq[1], structure.x, structure.y)
+
+        # Tiebreaker score: HQ proximity, structure income, neutral-undefended
+        # bias. Same shape as the previous formula -- preserved so callers
+        # without a unit still see consistent ordering.
+        secondary = distance_to_hq - (income_bonus / 10.0) - (neutral_bonus / 10.0)
+
+        if unit is None:
+            return secondary
+
+        # With a unit, dominate by unit-distance so each unit picks its own
+        # closest target. We multiply secondary by 1/100 so a 100-tile gap
+        # in HQ-distance can't outweigh a single tile of unit-distance.
+        unit_distance = self.manhattan_distance(unit.x, unit.y, structure.x, structure.y)
+        return unit_distance + secondary / 100.0
+
+    def _capture_assignments(self):
+        """Per-turn set of structure positions already claimed by another
+        unit's capture priority. Lazily created in take_turn or on first
+        access."""
+        if not hasattr(self, "_capture_assigned"):
+            self._capture_assigned = set()
+        return self._capture_assigned
+
+    def pick_capture_target(self, unit):
+        """Return the best capturable structure for ``unit`` that isn't
+        already claimed by a sibling this turn, or None if none remain."""
+        claimed = self._capture_assignments()
+        candidates = []
+        for row in self.game_state.grid.tiles:
+            for structure in row:
+                if not structure.is_capturable():
+                    continue
+                if structure.player == self.bot_player:
+                    continue
+                if (structure.x, structure.y) in claimed:
+                    continue
+                candidates.append((structure, self.get_structure_priority(structure, unit)))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
 
     def purchase_units(self):
         """Purchase units based on priority from all enabled types."""
@@ -1232,18 +1265,12 @@ class MediumBot(BotUnitMixin):
                     self.act_with_unit(unit, _depth + 1)
                 return
 
-        # Priority 3: Capture structures (prioritize by proximity to HQ)
-        capturable_structures = []
-        for row in self.game_state.grid.tiles:
-            for structure in row:
-                if structure.is_capturable() and structure.player != self.bot_player:
-                    priority = self.get_structure_priority(structure)
-                    capturable_structures.append((structure, priority))
-
-        capturable_structures.sort(key=lambda x: x[1])
-
-        if capturable_structures:
-            target_structure = capturable_structures[0][0]
+        # Priority 3: Capture structures. Each unit picks its own closest
+        # unclaimed structure (see pick_capture_target); siblings can't
+        # double-up on the same target this turn.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            self._capture_assignments().add((target_structure.x, target_structure.y))
 
             # Check if already on structure
             if unit.x == target_structure.x and unit.y == target_structure.y:
@@ -1379,6 +1406,8 @@ class AdvancedBot(MediumBot):
 
         # Per-turn dedup set for contested-structure interrupts.
         self._interrupt_assigned = set()
+        # Per-turn capture-target dedup; see MediumBot.pick_capture_target.
+        self._capture_assigned = set()
 
         # Phase 1: Analyze map on first turn
         if not self.map_analyzed:
@@ -1724,18 +1753,12 @@ class AdvancedBot(MediumBot):
                         self.act_with_unit_enhanced(unit, _depth + 1)
                     return
 
-        # PRIORITY 8: Capture structures (fallback)
-        capturable_structures = []
-        for row in self.game_state.grid.tiles:
-            for structure in row:
-                if structure.is_capturable() and structure.player != self.bot_player:
-                    priority = self.get_structure_priority(structure)
-                    capturable_structures.append((structure, priority))
+        # PRIORITY 8: Capture structures (fallback). Per-unit assignment via
+        # pick_capture_target so each unit picks its closest unclaimed target.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            self._capture_assignments().add((target_structure.x, target_structure.y))
 
-        capturable_structures.sort(key=lambda x: x[1])
-
-        if capturable_structures:
-            target_structure = capturable_structures[0][0]
             if unit.x == target_structure.x and unit.y == target_structure.y:
                 self.game_state.seize(unit)
                 # Check if unit can act again (haste)
