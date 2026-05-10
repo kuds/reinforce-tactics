@@ -83,6 +83,35 @@ class BotUnitMixin:
             ),
         )
 
+    # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
+    # HQ/building=+2 at the start of the owner's next turn.
+    _STRUCTURE_HEAL_AMOUNTS = {"t": 1, "h": 2, "b": 2}
+
+    def heal_amount_at(self, x: int, y: int) -> int:
+        """Return the per-turn HP a bot-owned unit would heal on tile (x, y)."""
+        tile = self.game_state.grid.get_tile(x, y)
+        if tile is None or tile.player != self.bot_player:
+            return 0
+        return self._STRUCTURE_HEAL_AMOUNTS.get(tile.type, 0)
+
+    def is_on_heal_tile(self, unit) -> bool:
+        """True if the unit currently stands on one of our heal-providing tiles."""
+        return self.heal_amount_at(unit.x, unit.y) > 0
+
+    def count_enemy_units_by_type(self) -> Dict[str, int]:
+        """Tally living enemy units by type (e.g. ``{'W': 3, 'A': 2}``).
+
+        Used by counter-composition logic; SimpleBot does not call this so
+        purchasing remains static at that tier."""
+        counts: Dict[str, int] = {}
+        for u in self.game_state.units:
+            if u.player == self.bot_player or u.player is None:
+                continue
+            if u.health <= 0:
+                continue
+            counts[u.type] = counts.get(u.type, 0) + 1
+        return counts
+
     def find_best_move_position(self, unit, target_x, target_y):
         """Find the best position to move towards a target."""
         reachable = self.get_reachable(unit)
@@ -458,6 +487,14 @@ class SimpleBot(BotUnitMixin):
                 self.act_with_unit(unit, _depth + 1)
             return
 
+        # Stay put if wounded and already standing on one of our heal tiles --
+        # leaving would forfeit next turn's heal. This is the only retreat
+        # behaviour SimpleBot has; routing wounded units to heal tiles is a
+        # MediumBot+ feature.
+        if unit.health < unit.max_health * 0.5 and self.is_on_heal_tile(unit):
+            unit.end_unit_turn()
+            return
+
         # Cleric: try to heal damaged allies or cure paralyzed allies
         if unit.type == "C" and unit.can_attack:
             if self.try_cleric_abilities(unit):
@@ -689,6 +726,9 @@ class MediumBot(BotUnitMixin):
         # Per-turn set of contested-structure enemy ids already being handled,
         # so multiple units don't all converge on the same interrupt target.
         self._interrupt_assigned = set()
+        # Per-turn set of structure positions already claimed by another unit's
+        # capture priority. Reset every turn so abandoned targets are reusable.
+        self._capture_assigned = set()
 
         # Phase 1: Purchase units - maximize unit production
         self.purchase_units()
@@ -712,37 +752,153 @@ class MediumBot(BotUnitMixin):
                     return (tile.x, tile.y)
         return None
 
-    def get_structure_priority(self, structure):
+    # Retreat to a friendly structure when below half HP. Subclasses tune this.
+    RETREAT_HEALTH_THRESHOLD = 0.5
+
+    def should_retreat_to_heal(self, unit) -> bool:
+        """Whether this unit's current HP warrants a heal retreat."""
+        return unit.health < unit.max_health * self.RETREAT_HEALTH_THRESHOLD
+
+    def find_retreat_tile(self, unit):
+        """Pick a reachable owned heal tile, preferring the highest heal amount
+        and breaking ties by closeness to the unit."""
+        reachable = self.get_reachable(unit)
+        if not reachable:
+            return None
+
+        # Standing still counts as a candidate -- if we're already on a heal
+        # tile, ending the turn there is the best move.
+        candidates = [(unit.x, unit.y)] + list(reachable)
+
+        best = None
+        best_score = (0, float("inf"))  # (heal_amount, -distance) maximised
+        for x, y in candidates:
+            heal = self.heal_amount_at(x, y)
+            if heal == 0:
+                continue
+            distance = self.manhattan_distance(unit.x, unit.y, x, y)
+            score = (heal, -distance)
+            if score > best_score:
+                best_score = score
+                best = (x, y)
+        return best
+
+    def try_retreat_to_heal(self, unit) -> bool:
+        """Move a wounded unit onto our nearest heal tile and end its turn.
+
+        Returns True if a retreat was committed. Caller is expected to skip
+        this when an interrupt or a finishing blow is available.
         """
-        Score structures by proximity to HQ and income value.
+        if not self.should_retreat_to_heal(unit):
+            return False
 
-        Args:
-            structure: Tile object representing a structure
+        target = self.find_retreat_tile(unit)
+        if target is None:
+            return False
 
-        Returns:
-            Priority score (lower is better)
+        if (unit.x, unit.y) != target:
+            self.game_state.move_unit(unit, target[0], target[1])
+        unit.end_unit_turn()
+        return True
+
+    def get_structure_priority(self, structure, unit=None):
         """
-        # Find our HQ
-        our_hq = self.find_our_hq()
-        if not our_hq:
-            # Fallback to simple distance
-            return self.manhattan_distance(0, 0, structure.x, structure.y)
+        Score structures for capture priority. Lower is better.
 
-        # Distance from structure to our HQ
-        distance_to_hq = self.manhattan_distance(our_hq[0], our_hq[1], structure.x, structure.y)
-
-        # Income value (higher income = higher priority = lower score)
+        When ``unit`` is supplied, the unit's Manhattan distance to the
+        structure dominates -- a Warrior next to a tower picks that tower,
+        not whatever happens to be closest to HQ. HQ distance, income, and
+        the neutral bias act as tiebreakers within the same unit-distance
+        bucket. When ``unit`` is None we fall back to the legacy HQ-only
+        formula so callers that don't yet thread a unit (e.g. ad-hoc
+        scoring in tests) still work.
+        """
         income_weights = {"h": 150, "b": 100, "t": 50}
         income_bonus = income_weights.get(structure.type, 0)
+        neutral_bonus = 80 if structure.player is None else 0
 
-        # Lower score = higher priority
-        # Prioritize closer structures and higher income
-        priority = distance_to_hq - (income_bonus / 10.0)
-        return priority
+        our_hq = self.find_our_hq()
+        if our_hq is None:
+            distance_to_hq = self.manhattan_distance(0, 0, structure.x, structure.y)
+        else:
+            distance_to_hq = self.manhattan_distance(our_hq[0], our_hq[1], structure.x, structure.y)
+
+        # Tiebreaker score: HQ proximity, structure income, neutral-undefended
+        # bias. Same shape as the previous formula -- preserved so callers
+        # without a unit still see consistent ordering.
+        secondary = distance_to_hq - (income_bonus / 10.0) - (neutral_bonus / 10.0)
+
+        if unit is None:
+            return secondary
+
+        # With a unit, dominate by unit-distance so each unit picks its own
+        # closest target. We multiply secondary by 1/100 so a 100-tile gap
+        # in HQ-distance can't outweigh a single tile of unit-distance.
+        unit_distance = self.manhattan_distance(unit.x, unit.y, structure.x, structure.y)
+        return unit_distance + secondary / 100.0
+
+    def _capture_assignments(self):
+        """Per-turn set of structure positions already claimed by another
+        unit's capture priority. Lazily created in take_turn or on first
+        access."""
+        if not hasattr(self, "_capture_assigned"):
+            self._capture_assigned = set()
+        return self._capture_assigned
+
+    def pick_capture_target(self, unit):
+        """Return the best capturable structure for ``unit`` that isn't
+        already claimed by a sibling this turn, or None if none remain."""
+        claimed = self._capture_assignments()
+        candidates = []
+        for row in self.game_state.grid.tiles:
+            for structure in row:
+                if not structure.is_capturable():
+                    continue
+                if structure.player == self.bot_player:
+                    continue
+                if (structure.x, structure.y) in claimed:
+                    continue
+                candidates.append((structure, self.get_structure_priority(structure, unit)))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
+
+    # Single hard-counter rule: when the enemy has at least
+    # COUNTER_TRIGGER_THRESHOLD of one unit type, MediumBot rotates one slot
+    # of priority to the named counter. AdvancedBot uses a smoother weighted
+    # matrix instead (see FULL_COUNTER_MATRIX).
+    SINGLE_COUNTER_TARGETS = {
+        "W": "A",
+        "B": "A",
+        "K": "A",
+        "R": "A",  # melee → kite with Archer
+        "A": "K",  # Archers → close gap with Knight
+        "M": "K",
+        "S": "A",  # ranged casters → close or outrange
+        "C": "M",  # Cleric → paralyze
+    }
+    COUNTER_TRIGGER_THRESHOLD = 3
+
+    def get_counter_unit(self) -> Optional[str]:
+        """Return the unit type that should be prioritised based on the
+        single most common enemy unit, or None when nothing crosses the
+        trigger threshold."""
+        counts = self.count_enemy_units_by_type()
+        if not counts:
+            return None
+        # Pick the most common enemy type; tie-break by alphabetical so
+        # the choice is deterministic across calls.
+        dominant_type = max(counts, key=lambda k: (counts[k], -ord(k[0])))
+        if counts[dominant_type] < self.COUNTER_TRIGGER_THRESHOLD:
+            return None
+        return self.SINGLE_COUNTER_TARGETS.get(dominant_type)
 
     def purchase_units(self):
         """Purchase units based on priority from all enabled types."""
         # Keep buying units until we can't afford any more
+        counter_unit = self.get_counter_unit()
         while True:
             legal_actions = self.game_state.get_legal_actions(self.bot_player)
             create_actions = legal_actions["create_unit"]
@@ -762,11 +918,15 @@ class MediumBot(BotUnitMixin):
             if not affordable_actions:
                 break
 
-            # Sort by priority (uses UNIT_PRIORITIES), then by cost
+            # Sort by priority (uses UNIT_PRIORITIES), then by cost. When a
+            # counter unit applies, it leaps to the front of the queue;
+            # other types keep their relative ordering behind it.
             def unit_priority(action):
                 unit_type = action["unit_type"]
                 cost = UNIT_DATA[unit_type]["cost"]
                 priority = self.UNIT_PRIORITIES.get(unit_type, (99, "unknown"))[0]
+                if counter_unit is not None and unit_type == counter_unit:
+                    priority = -1
                 return (priority, cost)
 
             affordable_actions.sort(key=unit_priority)
@@ -1117,6 +1277,20 @@ class MediumBot(BotUnitMixin):
                     # accounting belongs in the value calc, not here.)
                     del move_distance
 
+        # Priority 1.5: Retreat to a heal tile when wounded, unless we can
+        # finish off an enemy in range right now (a killing blow is worth
+        # more than one turn of healing).
+        if self.should_retreat_to_heal(unit):
+            attackable_now = self.game_state.mechanics.get_attackable_enemies(
+                unit,
+                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                self.game_state.grid,
+            )
+            on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
+            can_finish = any(unit.get_attack_damage(e.x, e.y, on_mountain) >= e.health for e in attackable_now)
+            if not can_finish and self.try_retreat_to_heal(unit):
+                return
+
         # Priority 2: Attack enemies with good value trades
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
         if enemy_units:
@@ -1140,18 +1314,12 @@ class MediumBot(BotUnitMixin):
                     self.act_with_unit(unit, _depth + 1)
                 return
 
-        # Priority 3: Capture structures (prioritize by proximity to HQ)
-        capturable_structures = []
-        for row in self.game_state.grid.tiles:
-            for structure in row:
-                if structure.is_capturable() and structure.player != self.bot_player:
-                    priority = self.get_structure_priority(structure)
-                    capturable_structures.append((structure, priority))
-
-        capturable_structures.sort(key=lambda x: x[1])
-
-        if capturable_structures:
-            target_structure = capturable_structures[0][0]
+        # Priority 3: Capture structures. Each unit picks its own closest
+        # unclaimed structure (see pick_capture_target); siblings can't
+        # double-up on the same target this turn.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            self._capture_assignments().add((target_structure.x, target_structure.y))
 
             # Check if already on structure
             if unit.x == target_structure.x and unit.y == target_structure.y:
@@ -1253,6 +1421,75 @@ class AdvancedBot(MediumBot):
         "S": 0.05,  # Sorcerers - buff support
     }
 
+    # Per-archetype retreat thresholds. Frontliners take hits and benefit
+    # from staying engaged longer; ranged/support are squishier and worth
+    # pulling back earlier. Cleric is highest -- a dead Cleric loses the
+    # whole heal economy.
+    RETREAT_THRESHOLDS = {
+        "W": 0.45,
+        "K": 0.45,
+        "B": 0.45,  # frontline
+        "R": 0.40,  # flanker
+        "A": 0.55,
+        "M": 0.55,
+        "S": 0.55,  # ranged
+        "C": 0.65,  # support
+    }
+
+    # Per-enemy-unit weight bumps applied to FULL_COMPOSITION_TARGETS. For
+    # every observed enemy unit of type ``key``, each counter in the inner
+    # dict gets its target ratio bumped by that amount before
+    # renormalisation. Smoother than MediumBot's single-counter rule:
+    # mixed enemy comps produce mixed responses.
+    FULL_COUNTER_MATRIX = {
+        "W": {"A": 0.04, "M": 0.02},
+        "B": {"A": 0.04, "M": 0.02},
+        "K": {"A": 0.06, "M": 0.02},
+        "R": {"A": 0.04},
+        "A": {"K": 0.06, "B": 0.02},
+        "M": {"K": 0.04, "A": 0.02},
+        "C": {"M": 0.06, "R": 0.02},
+        "S": {"M": 0.04, "A": 0.02},
+    }
+
+    # Game phase identifiers. EXPAND prioritises tempo (Warrior spam, willing
+    # to march multi-turn for captures, refuse chip-trade combat). CONSOLIDATE
+    # restores the existing balanced behaviour. CONQUER kicks in once nearly
+    # all neutrals are claimed: only the enemy HQ/buildings remain to be taken,
+    # so the bot accepts even bad trades to push through to the win condition.
+    # Hysteresis (see take_turn) needs PHASE_TRANSITION_TURNS consecutive
+    # turns of agreement before flipping, so the bot doesn't oscillate when
+    # the ratio hovers around a threshold.
+    PHASE_EXPAND = "EXPAND"
+    PHASE_CONSOLIDATE = "CONSOLIDATE"
+    PHASE_CONQUER = "CONQUER"
+
+    # Phase thresholds on the fraction of capturable structures still neutral:
+    #   neutral_pct > EXPAND_NEUTRAL_THRESHOLD -> EXPAND
+    #   neutral_pct < CONQUER_NEUTRAL_THRESHOLD -> CONQUER
+    #   otherwise                              -> CONSOLIDATE
+    # 0.45 (vs the original 0.30) is calibrated against beginner.csv where
+    # 4 of 10 capturable tiles are neutral (40%): below 0.45 so beginner
+    # stays in CONSOLIDATE and the strict EXPAND attack threshold doesn't
+    # refuse the close-range fights that small map demands.
+    EXPAND_NEUTRAL_THRESHOLD = 0.45
+    CONQUER_NEUTRAL_THRESHOLD = 0.10
+    PHASE_TRANSITION_TURNS = 2
+
+    # Floor for the Warrior target ratio while in EXPAND. Stops the matrix
+    # from buying expensive ranged comp during the early-game tempo race
+    # which MediumBot dominates with cheap Warrior spam.
+    EXPAND_WARRIOR_FLOOR = 0.50
+
+    # Attack-value gates for Priority 7 (move-to-attack). EXPAND demands a
+    # genuinely good trade (we'd rather walk past and capture); CONSOLIDATE
+    # accepts moderately bad trades to break stalls; CONQUER accepts almost
+    # any trade because the alternative is the timeout-draw stalemate seen
+    # on crossroads / last_stand when neutrals dry up.
+    EXPAND_ATTACK_THRESHOLD = 200
+    CONSOLIDATE_ATTACK_THRESHOLD = -500
+    CONQUER_ATTACK_THRESHOLD = -1000
+
     def __init__(self, game_state, player=2):
         """
         Initialize the AdvancedBot.
@@ -1270,12 +1507,73 @@ class AdvancedBot(MediumBot):
         self.forest_positions = []  # Forests (for Rogue evade bonus)
         self.turn_count = 0
 
+        # Game-phase state. ``phase`` is None until take_turn runs the first
+        # time so direct callers (tests, REPL probing) see the unbiased
+        # composition; the live bot updates it every turn.
+        self.phase: Optional[str] = None
+        self._pending_phase: Optional[str] = None
+        self._pending_phase_streak = 0
+
+    def compute_target_phase(self) -> str:
+        """Phase the *current game state* suggests we should be in.
+
+        EXPAND when plenty of neutrals remain (early/mid economy race);
+        CONQUER once nearly all neutrals are claimed (push enemy HQ);
+        CONSOLIDATE in between. Hysteresis is applied by update_phase.
+        """
+        total_capturable = 0
+        neutral_capturable = 0
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if not tile.is_capturable():
+                    continue
+                total_capturable += 1
+                if tile.player is None:
+                    neutral_capturable += 1
+        if total_capturable == 0:
+            return self.PHASE_CONSOLIDATE
+        neutral_pct = neutral_capturable / total_capturable
+        if neutral_pct > self.EXPAND_NEUTRAL_THRESHOLD:
+            return self.PHASE_EXPAND
+        if neutral_pct < self.CONQUER_NEUTRAL_THRESHOLD:
+            return self.PHASE_CONQUER
+        return self.PHASE_CONSOLIDATE
+
+    def update_phase(self) -> None:
+        """Advance the phase state machine using ``compute_target_phase`` and
+        a hysteresis counter so a one-turn fluctuation can't flip phases."""
+        target = self.compute_target_phase()
+        if self.phase is None:
+            # Cold start: adopt the suggested phase immediately so the first
+            # turn's purchases see the right bias.
+            self.phase = target
+            self._pending_phase = None
+            self._pending_phase_streak = 0
+            return
+        if target == self.phase:
+            self._pending_phase = None
+            self._pending_phase_streak = 0
+            return
+        if target == self._pending_phase:
+            self._pending_phase_streak += 1
+            if self._pending_phase_streak >= self.PHASE_TRANSITION_TURNS:
+                self.phase = target
+                self._pending_phase = None
+                self._pending_phase_streak = 0
+        else:
+            self._pending_phase = target
+            self._pending_phase_streak = 1
+
     def take_turn(self):
         """Execute the bot's turn with enhanced strategy."""
         self.turn_count += 1
 
         # Per-turn dedup set for contested-structure interrupts.
         self._interrupt_assigned = set()
+        # Per-turn capture-target dedup; see MediumBot.pick_capture_target.
+        self._capture_assigned = set()
+        # Phase update before any purchase/movement decisions read self.phase.
+        self.update_phase()
 
         # Phase 1: Analyze map on first turn
         if not self.map_analyzed:
@@ -1314,19 +1612,88 @@ class AdvancedBot(MediumBot):
                     self.forest_positions.append((tile.x, tile.y))
 
     def get_dynamic_composition_targets(self) -> Dict[str, float]:
-        """Calculate target composition based on enabled units."""
+        """Calculate target composition based on enabled units, then bias
+        toward counters of the observed enemy composition."""
         # Filter to only enabled units
         enabled = self.get_enabled_units()
         enabled_targets = {k: v for k, v in self.FULL_COMPOSITION_TARGETS.items() if k in enabled}
 
-        # Redistribute disabled unit ratios proportionally
+        # Apply counter-composition bumps. For each enemy unit observed, walk
+        # FULL_COUNTER_MATRIX and add the per-counter bump to our target.
+        # Counters that aren't enabled (e.g. opponent locked us out of "K")
+        # are silently skipped -- the renormalisation below absorbs them.
+        enemy_counts = self.count_enemy_units_by_type()
+        if enemy_counts:
+            for enemy_type, count in enemy_counts.items():
+                bumps = self.FULL_COUNTER_MATRIX.get(enemy_type, {})
+                for counter_type, weight in bumps.items():
+                    if counter_type in enabled_targets:
+                        enabled_targets[counter_type] += weight * count
+
+        # Renormalise to 1.0 first so any phase bias below operates on
+        # comparable units.
         if enabled_targets:
             total_enabled = sum(enabled_targets.values())
             if total_enabled > 0:
-                # Normalize to 1.0
                 enabled_targets = {k: v / total_enabled for k, v in enabled_targets.items()}
 
+        # EXPAND phase: floor the Warrior ratio so we win the early tempo
+        # race. Other types are scaled proportionally to absorb the shift.
+        # Skipped when phase is None (e.g. tests poking the bot before any
+        # take_turn) or W is disabled.
+        if self.phase == self.PHASE_EXPAND and "W" in enabled_targets:
+            current_w = enabled_targets["W"]
+            if current_w < self.EXPAND_WARRIOR_FLOOR:
+                others_total = sum(v for k, v in enabled_targets.items() if k != "W")
+                if others_total > 0:
+                    scale = (1.0 - self.EXPAND_WARRIOR_FLOOR) / others_total
+                    enabled_targets = {
+                        k: (self.EXPAND_WARRIOR_FLOOR if k == "W" else v * scale) for k, v in enabled_targets.items()
+                    }
+                else:
+                    enabled_targets = {"W": 1.0}
+
         return enabled_targets
+
+    def should_retreat_to_heal(self, unit) -> bool:
+        """Per-archetype retreat thresholds (frontline holds longer than ranged)."""
+        threshold = self.RETREAT_THRESHOLDS.get(unit.type, self.RETREAT_HEALTH_THRESHOLD)
+        return unit.health < unit.max_health * threshold
+
+    def find_retreat_tile(self, unit):
+        """Pick a heal tile that maximises HP recovered while minimising the
+        number of enemies that can attack it next turn. Falls back to the
+        MediumBot policy (heal amount, then proximity) when no enemies are
+        within striking range of any candidate."""
+        reachable = self.get_reachable(unit)
+        if not reachable:
+            return None
+
+        candidates = [(unit.x, unit.y)] + list(reachable)
+        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+
+        best = None
+        # Maximise (heal_amount, -threats_in_range, -distance).
+        best_score = (0, 1, float("inf"))
+        for x, y in candidates:
+            heal = self.heal_amount_at(x, y)
+            if heal == 0:
+                continue
+            # Approximate threat: enemies whose Manhattan distance to the tile
+            # is within their max attack range. Cheap and avoids the cost of
+            # simulating each enemy's reachable set.
+            threats = 0
+            for e in enemies:
+                e_on_mountain = self.game_state.grid.get_tile(e.x, e.y).type == "m"
+                _, e_max_range = e.get_attack_range(on_mountain=e_on_mountain)
+                if self.manhattan_distance(x, y, e.x, e.y) <= e_max_range:
+                    threats += 1
+            distance = self.manhattan_distance(unit.x, unit.y, x, y)
+            score = (heal, -threats, -distance)
+            if score > best_score:
+                best_score = score
+                best = (x, y)
+        return best
 
     def purchase_units_enhanced(self):
         """Enhanced unit purchasing with dynamic composition for all enabled units."""
@@ -1489,6 +1856,59 @@ class AdvancedBot(MediumBot):
                             self.act_with_unit_enhanced(unit, _depth + 1)
                         return
 
+        # PRIORITY 4.5: Retreat to heal when wounded, unless a finishing blow
+        # is in range. Uses per-archetype thresholds and safety-aware tile
+        # scoring (see find_retreat_tile override).
+        if self.should_retreat_to_heal(unit):
+            attackable_now = self.game_state.mechanics.get_attackable_enemies(
+                unit,
+                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                self.game_state.grid,
+            )
+            on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
+            can_finish = any(unit.get_attack_damage(e.x, e.y, on_mountain) >= e.health for e in attackable_now)
+            if not can_finish and self.try_retreat_to_heal(unit):
+                return
+
+        # PRIORITY 4.6: Free capture. If a capture target is reachable this
+        # turn (already standing on it, or can move-and-seize without a
+        # multi-turn march), do it before combat. Captures compound -- each
+        # adds income next turn -- and the previous Priority 8-only policy
+        # let units sit trading attacks while free buildings sat next door,
+        # which is the dominant AdvancedBot stalemate failure mode.
+        #
+        # In EXPAND phase we additionally accept multi-turn marches: walking
+        # toward a distant capture beats parking next to one enemy and chip-
+        # trading attacks while the rest of the map gets snapped up.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            structure_pos = (target_structure.x, target_structure.y)
+            already_on = (unit.x, unit.y) == structure_pos
+            reachable_this_turn = already_on or structure_pos in set(self.get_reachable(unit))
+            if reachable_this_turn:
+                self._capture_assignments().add(structure_pos)
+                if not already_on:
+                    self.game_state.move_unit(unit, structure_pos[0], structure_pos[1])
+                if (unit.x, unit.y) == structure_pos:
+                    self.game_state.seize(unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
+            elif self.phase in (self.PHASE_EXPAND, self.PHASE_CONQUER):
+                # EXPAND: walk the map to grab distant neutrals before the
+                # enemy does. CONQUER: with neutrals exhausted, the only
+                # remaining capture target is the enemy HQ/buildings -- a
+                # multi-turn march toward them is exactly the push we want.
+                self._capture_assignments().add(structure_pos)
+                target_pos = self.find_best_move_position(unit, structure_pos[0], structure_pos[1])
+                if target_pos is not None:
+                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                    if (unit.x, unit.y) == structure_pos:
+                        self.game_state.seize(unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
+
         # PRIORITY 5: Position on mountains for attack bonus. Pre-evaluate
         # every reachable mountain (without committing the move) and pick
         # the one that yields an in-range enemy; otherwise skip entirely.
@@ -1548,7 +1968,13 @@ class AdvancedBot(MediumBot):
                         best_score = value
                         best_target = enemy
 
-            if best_target and best_score > -500:  # More aggressive threshold
+            if self.phase == self.PHASE_EXPAND:
+                attack_threshold = self.EXPAND_ATTACK_THRESHOLD
+            elif self.phase == self.PHASE_CONQUER:
+                attack_threshold = self.CONQUER_ATTACK_THRESHOLD
+            else:
+                attack_threshold = self.CONSOLIDATE_ATTACK_THRESHOLD
+            if best_target and best_score > attack_threshold:
                 self.game_state.attack(unit, best_target)
                 if unit.can_move or unit.can_attack:
                     self.act_with_unit_enhanced(unit, _depth + 1)
@@ -1567,18 +1993,12 @@ class AdvancedBot(MediumBot):
                         self.act_with_unit_enhanced(unit, _depth + 1)
                     return
 
-        # PRIORITY 8: Capture structures (fallback)
-        capturable_structures = []
-        for row in self.game_state.grid.tiles:
-            for structure in row:
-                if structure.is_capturable() and structure.player != self.bot_player:
-                    priority = self.get_structure_priority(structure)
-                    capturable_structures.append((structure, priority))
+        # PRIORITY 8: Capture structures (fallback). Per-unit assignment via
+        # pick_capture_target so each unit picks its closest unclaimed target.
+        target_structure = self.pick_capture_target(unit)
+        if target_structure is not None:
+            self._capture_assignments().add((target_structure.x, target_structure.y))
 
-        capturable_structures.sort(key=lambda x: x[1])
-
-        if capturable_structures:
-            target_structure = capturable_structures[0][0]
             if unit.x == target_structure.x and unit.y == target_structure.y:
                 self.game_state.seize(unit)
                 # Check if unit can act again (haste)
