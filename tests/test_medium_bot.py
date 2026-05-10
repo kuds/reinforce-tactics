@@ -112,6 +112,32 @@ class TestMediumBotStructurePriority:
         # Lower score = higher priority
         assert close_priority < far_priority
 
+    def test_structure_priority_prefers_neutral_over_far_enemy(self):
+        """Reproduces the beginner-map case: a neutral central tower should
+        outrank a distant enemy building. Without the neutral bias the bot
+        marches across the map for an owned target while ignoring the easy
+        unclaimed structure next to it."""
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
+        game = GameState(map_data, num_players=2)
+        bot = MediumBot(game, player=2)
+
+        # Central towers in beginner.csv are unowned (player is None).
+        neutral_tower = next(
+            tile
+            for row in game.grid.tiles
+            for tile in row
+            if tile.type == "t" and tile.player is None
+        )
+        # Enemy building far from blue's HQ.
+        enemy_building = next(
+            tile
+            for row in game.grid.tiles
+            for tile in row
+            if tile.type == "b" and tile.player == 1
+        )
+
+        assert bot.get_structure_priority(neutral_tower) < bot.get_structure_priority(enemy_building)
+
 
 class TestMediumBotCoordinatedAttacks:
     """Test MediumBot coordinated attack strategies."""

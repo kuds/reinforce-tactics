@@ -735,9 +735,15 @@ class MediumBot(BotUnitMixin):
         income_weights = {"h": 150, "b": 100, "t": 50}
         income_bonus = income_weights.get(structure.type, 0)
 
+        # Neutral structures have no defender and seize in one step, so they're
+        # cheaper to take than enemy-owned ones at the same distance. Without
+        # this bias, distant enemy buildings outrank closer unclaimed towers
+        # because of the income-weight gap.
+        neutral_bonus = 80 if structure.player is None else 0
+
         # Lower score = higher priority
-        # Prioritize closer structures and higher income
-        priority = distance_to_hq - (income_bonus / 10.0)
+        # Prioritize closer structures, higher income, and unclaimed targets
+        priority = distance_to_hq - (income_bonus / 10.0) - (neutral_bonus / 10.0)
         return priority
 
     def purchase_units(self):
