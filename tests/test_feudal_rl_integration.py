@@ -263,8 +263,10 @@ class TestFeudalRLAgentTraining:
         m_changed = not torch.allclose(m_before, agent.manager.goal_x_head.weight.data)
         assert w_changed or m_changed, "Neither worker nor manager weights changed after update"
 
-    def test_feature_extractor_gets_gradients_from_both(self, trained_setup):
-        """Feature extractor should receive gradients from both worker and manager updates."""
+    def test_feature_extractor_updated_by_worker(self, trained_setup):
+        """Feature extractor is owned by the worker optimizer; the manager
+        update detaches features so its grads never reach the encoder. The
+        encoder should still update because the worker drives it."""
         agent, env = trained_setup
         buf = agent.collect_rollout(env, n_steps=20, gamma=0.99, gae_lambda=0.95)
 
@@ -273,6 +275,32 @@ class TestFeudalRLAgentTraining:
         fe_after = agent.feature_extractor.cnn[0].weight.data.clone()
 
         assert not torch.allclose(fe_before, fe_after), "Feature extractor weights did not change"
+
+    def test_ar_worker_warns_without_structured_masks(self):
+        """AR sampling falls back to unmasked Categoricals when the env
+        doesn't expose ``structured_action_masks`` — warn loudly so the
+        misconfiguration isn't silent."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu", autoregressive_worker=True)
+        agent.manager_horizon = 5
+        agent.setup_training(learning_rate=1e-3)
+        env = MockEnv(episode_length=20)  # MockEnv has no structured_action_masks()
+        with pytest.warns(RuntimeWarning, match="structured_action_masks"):
+            agent.collect_rollout(env, n_steps=4, gamma=0.99, gae_lambda=0.95)
+
+    def test_collect_rollout_auto_initializes_last_obs(self):
+        """First collect_rollout should reset the env on its own when
+        ``_last_obs`` is None — callers shouldn't have to remember to prime it."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.manager_horizon = 5
+        agent.setup_training(learning_rate=1e-3)
+        env = MockEnv(episode_length=20)
+        # Deliberately do NOT set agent._last_obs here.
+        assert agent._last_obs is None
+        buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95)
+        assert len(buf.w_rewards) == 10
+        assert agent._last_obs is not None
 
     def test_multiple_episodes_in_rollout(self):
         """Rollout spanning multiple episodes should handle resets correctly."""
@@ -305,6 +333,40 @@ class TestFeudalRLAgentTraining:
         buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95, worker_reward_alpha=0.0)
         # All rewards should be intrinsic only (no extrinsic component)
         assert len(buf.w_rewards) == 10
+
+    def test_reward_scale_shrinks_extrinsic_signal(self):
+        """reward_scale=0 zeros out the extrinsic component end-to-end —
+        manager segment rewards should all be zero, and worker rewards
+        should equal the intrinsic-only path."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.manager_horizon = 5
+        agent.setup_training(learning_rate=1e-3)
+        env = MockEnv(episode_length=50)
+        env.reset()
+        agent.reset_goal()
+
+        buf = agent.collect_rollout(env, n_steps=10, gamma=0.99, gae_lambda=0.95, worker_reward_alpha=1.0, reward_scale=0.0)
+        # Extrinsic was multiplied by 0.0, so manager segments — which only
+        # accumulate extrinsic — should all be zero.
+        if buf.has_manager_data:
+            assert np.allclose(buf.m_rewards, 0.0)
+
+    def test_update_reports_gradient_norms(self):
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.manager_horizon = 5
+        agent.setup_training(learning_rate=1e-3)
+        env = MockEnv(episode_length=30)
+        env.reset()
+        agent.reset_goal()
+        buf = agent.collect_rollout(env, n_steps=20, gamma=0.99, gae_lambda=0.95)
+        metrics = agent.update(buf, n_epochs=2, batch_size=10, clip_range=0.2, ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5)
+        assert "worker_grad_norm" in metrics
+        assert "manager_grad_norm" in metrics
+        # Pre-clip norm is non-negative; with random init it should be > 0.
+        assert metrics["worker_grad_norm"] >= 0.0
+        assert metrics["manager_grad_norm"] >= 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +415,76 @@ class TestFeudalRLAgentCheckpoint:
             obs = _make_obs()
             action, goal = agent2.select_action(obs)
             assert action.shape == (6,)
+
+    def test_checkpoint_restores_manager_horizon(self):
+        """Saved hyperparams (manager_horizon) survive a save/load roundtrip
+        so callers don't have to re-set runtime config after loading."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training(learning_rate=1e-3)
+        agent.manager_horizon = 7
+        agent.agent_player = 2
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "ckpt.pt")
+            agent.save_checkpoint(path)
+
+            agent2 = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+            assert agent2.manager_horizon == 10  # default before load
+            agent2.load_checkpoint(path)
+            assert agent2.manager_horizon == 7
+            assert agent2.agent_player == 2
+
+    def test_checkpoint_training_state_roundtrip(self):
+        """Saved training_state survives save/load and is returned to the
+        caller — the training script uses this for resume."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training(learning_rate=1e-3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "ckpt.pt")
+            agent.save_checkpoint(
+                path,
+                training_state={"total_timesteps": 12345, "best_eval_reward": 7.5},
+            )
+
+            agent2 = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+            agent2.setup_training(learning_rate=1e-3)
+            state = agent2.load_checkpoint(path)
+            assert state is not None
+            assert state["total_timesteps"] == 12345
+            assert state["best_eval_reward"] == 7.5
+
+    def test_checkpoint_without_training_state_returns_none(self):
+        """Old/new checkpoints without training_state should return None
+        rather than crash the resume path."""
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training(learning_rate=1e-3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "ckpt.pt")
+            agent.save_checkpoint(path)  # no training_state
+
+            agent2 = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+            agent2.setup_training(learning_rate=1e-3)
+            assert agent2.load_checkpoint(path) is None
+
+    def test_checkpoint_rejects_grid_dim_mismatch(self):
+        obs_space = _make_obs_space()
+        agent = FeudalRLAgent(obs_space, grid_width=GRID_W, grid_height=GRID_H, device="cpu")
+        agent.setup_training(learning_rate=1e-3)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "ckpt.pt")
+            agent.save_checkpoint(path)
+
+            # Different grid width: refuse to load instead of producing a
+            # silent shape mismatch deeper in the linear projection.
+            agent_bad = FeudalRLAgent(obs_space, grid_width=GRID_W + 2, grid_height=GRID_H, device="cpu")
+            with pytest.raises(ValueError, match="grid_width"):
+                agent_bad.load_checkpoint(path)
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +641,7 @@ class TestIntrinsicRewardEdgeCases:
         """Goal coordinates at grid boundary should not crash."""
         next_state = _make_state(player_positions=[(0, 0)])
         goal = np.array([GRID_W - 1, GRID_H - 1, 0])
-        reward = compute_intrinsic_reward(_make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         assert np.isfinite(reward)
 
     def test_multiple_player_units(self):
@@ -517,7 +649,7 @@ class TestIntrinsicRewardEdgeCases:
         positions = [(0, 0), (2, 2), (5, 5)]
         next_state = _make_state(player_positions=positions)
         goal = np.array([2, 2, 0])  # goal at (2, 2) where a unit is
-        reward = compute_intrinsic_reward(_make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # Unit at goal -> +5.0 bonus
         assert reward >= 5.0
 
@@ -526,7 +658,7 @@ class TestIntrinsicRewardEdgeCases:
         next_state = _make_state(player_positions=[(1, 1)], opponent_positions=[(3, 3)])
         for goal_type in range(4):
             goal = np.array([1, 1, goal_type])
-            reward = compute_intrinsic_reward(_make_state(), goal, next_state, agent_player=1)
+            reward = compute_intrinsic_reward(next_state, goal)
             assert np.isfinite(reward), f"goal_type={goal_type} produced non-finite reward"
 
     def test_expand_with_many_units(self):
@@ -534,7 +666,7 @@ class TestIntrinsicRewardEdgeCases:
         positions = [(1, 1), (1, 2), (2, 1), (2, 2), (3, 3)]
         next_state = _make_state(player_positions=positions)
         goal = np.array([2, 2, 3])  # expand type
-        reward = compute_intrinsic_reward(_make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # All 5 units within radius 4 of (2,2) -> +2.5 spread bonus + distance
         assert reward > 2.0
 
@@ -542,7 +674,7 @@ class TestIntrinsicRewardEdgeCases:
         """Attack goal with no enemies should still return finite reward."""
         next_state = _make_state(player_positions=[(3, 3)])
         goal = np.array([3, 3, 0])
-        reward = compute_intrinsic_reward(_make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         assert np.isfinite(reward)
         # Unit at goal but no enemies -> +5.0 (at goal) only
         assert reward >= 5.0

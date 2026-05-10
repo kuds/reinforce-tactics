@@ -18,6 +18,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 import torch
 from stable_baselines3 import PPO
@@ -184,8 +185,35 @@ def train_flat_baseline(args):
     return log_dir
 
 
+def _make_training_state(
+    total_timesteps,
+    best_eval_reward,
+    best_eval_win_rate,
+    last_eval_step,
+    last_ckpt_step,
+    last_snapshot_step=0,
+):
+    """Pack the resumeable counters/best-metric state into a checkpoint dict.
+
+    Including ``last_snapshot_step`` lets self-play resume cleanly: the
+    snapshot cadence picks up where it left off rather than firing
+    immediately on the first post-resume update.
+    """
+    return {
+        "total_timesteps": int(total_timesteps),
+        "best_eval_reward": float(best_eval_reward),
+        "best_eval_win_rate": float(best_eval_win_rate),
+        "last_eval_step": int(last_eval_step),
+        "last_ckpt_step": int(last_ckpt_step),
+        "last_snapshot_step": int(last_snapshot_step),
+    }
+
+
 def train_feudal_rl(args):
     """Train Feudal RL agent with Manager-Worker hierarchy."""
+    import random
+
+    import numpy as np
     from torch.utils.tensorboard import SummaryWriter
 
     from reinforcetactics.rl.feudal_rl import FeudalRLAgent
@@ -193,6 +221,15 @@ def train_feudal_rl(args):
     print("\n" + "=" * 60)
     print("Training Feudal RL Agent (Manager-Worker Hierarchy)")
     print("=" * 60 + "\n")
+
+    # Seed everything that drives the feudal training path. SB3's
+    # set_random_seed isn't used by collect_rollout / update, so we have to
+    # seed torch, numpy, and python directly here.
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     # Create output directories
     log_dir = Path(args.log_dir) / f"feudal_rl_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -202,9 +239,20 @@ def train_feudal_rl(args):
     checkpoint_dir.mkdir(exist_ok=True)
     (log_dir / "best_model").mkdir(exist_ok=True)
 
-    # Create environments (single env for feudal — hierarchy is per-episode stateful)
-    env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=500)
-    eval_env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=500)
+    # Create environments. ``--n-envs > 1`` activates vectorized rollouts via
+    # ``FeudalRLAgent.collect_rollout_vec``; per-env state lives inside the
+    # agent so the envs themselves can be plain StrategyGameEnv instances.
+    env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
+    eval_env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
+    env.reset(seed=args.seed)
+    eval_env.reset(seed=args.seed + 10_000)
+    vec_envs: list = []
+    if args.n_envs > 1:
+        # Each env gets a distinct seed so rollouts aren't perfectly correlated.
+        for i in range(args.n_envs):
+            ev = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
+            ev.reset(seed=args.seed + i + 1)
+            vec_envs.append(ev)
 
     # Create agent
     agent = FeudalRLAgent(
@@ -213,6 +261,7 @@ def train_feudal_rl(args):
         grid_height=env.grid_height,
         agent_player=getattr(env, "agent_player", 1),
         device=args.device,
+        autoregressive_worker=args.autoregressive_worker,
     )
     agent.manager_horizon = args.manager_horizon
 
@@ -223,32 +272,166 @@ def train_feudal_rl(args):
         worker_lr_scale=args.worker_lr_scale,
     )
 
-    # Initialize
-    obs, _ = env.reset()
-    agent._last_obs = obs  # pylint: disable=protected-access
+    # collect_rollout auto-initializes _last_obs on first call, so no need
+    # to prime it here.
     agent.reset_goal()
 
+    # Resume from a prior checkpoint if requested. We restore weights +
+    # optimizer state via load_checkpoint, then pull timesteps and the best
+    # eval metric out of the returned training_state blob so the run picks
+    # up where it left off (eval cadence, best-model tracking, LR schedule).
+    resume_state: Dict = {}
+    if args.resume:
+        print(f"Resuming from {args.resume}")
+        resume_state = agent.load_checkpoint(args.resume) or {}
+        if not resume_state:
+            print("  (no training_state in checkpoint — starting counters from 0)")
+
+    # ----- Self-play setup -----
+    # When ``--opponent self``, the env's opponent is a snapshot of the agent
+    # under training, refreshed every ``--opponent-snapshot-freq`` env steps.
+    # A small rolling pool (``--opponent-pool-size`` snapshots) provides
+    # diversity — each fresh episode samples one from the pool. Bootstrapping
+    # uses RandomBot for the very first episode (no snapshot exists yet).
+    self_play_enabled = args.opponent == "self"
+    snapshot_dir = log_dir / "snapshots"
+    snapshot_pool: list = []  # list of Path, most-recent first
+    last_snapshot_step = int(resume_state.get("last_snapshot_step", 0))
+
+    def _add_snapshot(timestep: int) -> None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snap = snapshot_dir / f"opp_{timestep}.pt"
+        agent.save_checkpoint(str(snap))
+        snapshot_pool.insert(0, snap)
+        # Trim — drop the oldest beyond the pool budget. unlink failures are
+        # fine to swallow (e.g. file already removed by another process).
+        while len(snapshot_pool) > max(args.opponent_pool_size, 1):
+            old = snapshot_pool.pop()
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    def _build_self_play_opponent(game_state, opponent_player):
+        """Factory passed to env.set_self_play_opponent_factory.
+
+        Returns a fresh Bot bound to the given game_state. Picks uniformly
+        from the snapshot pool; if the pool is empty (first episode) falls
+        back to RandomBot so the first agent rollout still has activity.
+        """
+        from reinforcetactics.game.bot import RandomBot  # pylint: disable=import-outside-toplevel
+        from reinforcetactics.game.model_bot import ModelBot  # pylint: disable=import-outside-toplevel
+
+        if not snapshot_pool:
+            return RandomBot(game_state, player=opponent_player)
+        snap = random.choice(snapshot_pool)
+        try:
+            return ModelBot(game_state, player=opponent_player, model_path=str(snap))
+        except Exception as exc:  # pragma: no cover — defensive
+            print(f"Failed to load self-play snapshot {snap}: {exc}; using RandomBot")
+            return RandomBot(game_state, player=opponent_player)
+
+    if self_play_enabled:
+        env.set_self_play_opponent_factory(_build_self_play_opponent)
+        # Take an initial snapshot so episode #1 already has a real opponent
+        # (otherwise the first ``opponent_snapshot_freq`` steps would train
+        # against RandomBot only, which is the same trap the bootstrap notebook
+        # exists to escape).
+        _add_snapshot(0)
+        env.reset(seed=args.seed)
+        # Eval keeps using the originally-requested eval opponent (typically
+        # 'random' or 'bot') — we don't want eval scores to drift with the
+        # self-play opponent strength.
+        if args.eval_opponent != "self":
+            eval_env_opp = args.eval_opponent
+            # Recreate eval env so it tracks the requested fixed opponent.
+            eval_env_new = StrategyGameEnv(map_file=None, opponent=eval_env_opp, render_mode=None, max_steps=args.max_steps)
+            eval_env_new.reset(seed=args.seed + 10_000)
+            eval_env = eval_env_new  # noqa: F841 — overrides outer eval_env
+        print(f"Self-play enabled: snapshot every {args.opponent_snapshot_freq:,} steps, pool={args.opponent_pool_size}")
+
     writer = SummaryWriter(str(log_dir / "tensorboard"))
+    use_wandb = args.wandb
+    if use_wandb:
+        try:
+            import wandb  # pylint: disable=import-outside-toplevel
+        except ImportError:
+            print("wandb requested but not installed — continuing with TensorBoard only")
+            use_wandb = False
+            wandb = None
+
+    def _log(metrics: dict, step: int):
+        for k, v in metrics.items():
+            writer.add_scalar(k, v, step)
+        if use_wandb:
+            wandb.log(metrics, step=step)
+
+    def _set_lr(progress_remaining: float) -> float:
+        """Apply the chosen LR schedule across both optimizer's param groups.
+
+        progress_remaining ∈ [1.0, 0.0]. Returns the scheduled multiplier
+        (1.0 means full base LR) so it can be logged.
+        """
+        if args.lr_schedule == "linear":
+            mult = max(progress_remaining, 0.0)
+        else:  # constant
+            mult = 1.0
+        for opt in (agent.worker_optimizer, agent.manager_optimizer):
+            for i, group in enumerate(opt.param_groups):
+                group["lr"] = group.get("initial_lr", group["lr"]) * mult
+                # Stash initial_lr on first call so we can keep applying mult.
+                group.setdefault("initial_lr", group["lr"] / max(mult, 1e-8))
+        return mult
+
+    # Stash the initial LR on every param group so the schedule has a stable
+    # base to multiply against. (Order matters: must run before update 0.)
+    for opt in (agent.worker_optimizer, agent.manager_optimizer):
+        for group in opt.param_groups:
+            group["initial_lr"] = group["lr"]
 
     num_updates = args.total_timesteps // args.n_steps
-    total_timesteps = 0
-    best_eval_reward = float("-inf")
+    total_timesteps = int(resume_state.get("total_timesteps", 0))
+    best_eval_reward = float(resume_state.get("best_eval_reward", float("-inf")))
+    best_eval_win_rate = float(resume_state.get("best_eval_win_rate", -1.0))
+    last_eval_step = int(resume_state.get("last_eval_step", total_timesteps))
+    last_ckpt_step = int(resume_state.get("last_ckpt_step", total_timesteps))
+    start_update = total_timesteps // args.n_steps  # for progress display
 
-    print(f"Manager horizon: {args.manager_horizon}")
-    print(f"Worker reward alpha: {args.worker_reward_alpha}")
-    print(f"Updates to run: {num_updates}")
-    print(f"Steps per update: {args.n_steps}\n")
+    print(f"Manager horizon:        {args.manager_horizon}")
+    print(f"Worker reward alpha:    {args.worker_reward_alpha}")
+    print(f"Reward scale:           {args.reward_scale}")
+    print(f"Autoregressive worker:  {args.autoregressive_worker}")
+    print(f"LR schedule:            {args.lr_schedule}")
+    print(f"Updates to run:         {num_updates}  (resuming at update {start_update})")
+    print(f"Steps per update:       {args.n_steps}\n")
 
-    for update_idx in range(num_updates):
-        # Collect rollout
-        buf = agent.collect_rollout(
-            env,
-            n_steps=args.n_steps,
-            gamma=args.gamma,
-            gae_lambda=args.gae_lambda,
-            worker_reward_alpha=args.worker_reward_alpha,
-        )
-        total_timesteps += args.n_steps
+    for update_idx in range(start_update, num_updates):
+        # Apply LR schedule based on progress through total budget.
+        progress_remaining = 1.0 - (total_timesteps / max(args.total_timesteps, 1))
+        lr_mult = _set_lr(progress_remaining)
+
+        # Collect rollout. With n_envs > 1 use the vectorized path; the
+        # merged buffer holds n_envs * n_steps worker transitions.
+        if args.n_envs > 1:
+            buf = agent.collect_rollout_vec(
+                vec_envs,
+                n_steps=args.n_steps,
+                gamma=args.gamma,
+                gae_lambda=args.gae_lambda,
+                worker_reward_alpha=args.worker_reward_alpha,
+                reward_scale=args.reward_scale,
+            )
+            total_timesteps += args.n_steps * args.n_envs
+        else:
+            buf = agent.collect_rollout(
+                env,
+                n_steps=args.n_steps,
+                gamma=args.gamma,
+                gae_lambda=args.gae_lambda,
+                worker_reward_alpha=args.worker_reward_alpha,
+                reward_scale=args.reward_scale,
+            )
+            total_timesteps += args.n_steps
 
         # PPO update
         losses = agent.update(
@@ -261,40 +444,113 @@ def train_feudal_rl(args):
             max_grad_norm=args.max_grad_norm,
         )
 
-        # Log to TensorBoard
-        for key, val in losses.items():
-            writer.add_scalar(f"train/{key}", val, total_timesteps)
-        writer.add_scalar("train/manager_segments", len(buf.m_rewards), total_timesteps)
-        writer.add_scalar("train/worker_mean_reward", float(buf.w_rewards.mean()), total_timesteps)
+        # Self-play: take a fresh snapshot of the agent every
+        # ``opponent_snapshot_freq`` steps. Future episodes (after the next
+        # env reset) sample from the updated pool via the registered factory.
+        if self_play_enabled and total_timesteps - last_snapshot_step >= args.opponent_snapshot_freq:
+            _add_snapshot(total_timesteps)
+            last_snapshot_step = total_timesteps
+
+        # Train metrics: losses + per-rollout summary diagnostics. Surface
+        # the env-side reward_breakdown components so the same per-component
+        # diagnostics the PPO notebook shows are visible in TensorBoard / W&B.
+        metrics: dict = {f"train/{k}": v for k, v in losses.items()}
+        metrics["train/manager_segments"] = len(buf.m_rewards)
+        metrics["train/worker_mean_reward"] = float(buf.w_rewards.mean())
+        metrics["train/episode_dones"] = float(buf.w_dones.sum())
+        metrics["train/lr_mult"] = lr_mult
+        # Intrinsic / extrinsic reward split: tells us whether the worker is
+        # being driven mostly by the manager's goal shaping (high intrinsic)
+        # or the env's terminal/per-step reward (high extrinsic). Helps
+        # calibrate worker_reward_alpha.
+        if hasattr(buf, "w_intrinsic"):
+            metrics["train/worker_intrinsic_mean"] = float(buf.w_intrinsic.mean())
+            metrics["train/worker_extrinsic_mean"] = float(buf.w_extrinsic.mean())
+            # Goal-achievement rate: fraction of worker steps where the agent's
+            # nearest unit sat on the manager's goal cell (the +5.0 bonus signal
+            # in compute_intrinsic_reward). A low rate over time means goals
+            # aren't being achieved — either too hard, too far, or the worker
+            # isn't conditioning on them. Track to validate the hierarchy is
+            # actually doing useful work.
+            metrics["train/goal_reached_rate"] = float(buf.w_reached_goal.mean())
+        for k, v in getattr(buf, "reward_breakdown", {}).items():
+            metrics[f"train/reward_{k}"] = float(v)
+        # End-reason histogram per rollout (one counter per reason).
+        for reason in getattr(buf, "end_reasons", []):
+            key = f"train/end_reason_{reason}"
+            metrics[key] = metrics.get(key, 0.0) + 1.0
+        _log(metrics, total_timesteps)
 
         # Progress logging
         if (update_idx + 1) % 10 == 0:
+            reasons = getattr(buf, "end_reasons", [])
+            reason_str = ",".join(reasons) if reasons else "—"
             print(
                 f"[{total_timesteps:,}] w_policy={losses.get('worker_policy_loss', 0):.3f} "
                 f"m_policy={losses.get('manager_policy_loss', 0):.3f} "
-                f"w_entropy={losses.get('worker_entropy', 0):.3f}"
+                f"w_entropy={losses.get('worker_entropy', 0):.3f} "
+                f"w_grad={losses.get('worker_grad_norm', 0):.2f} "
+                f"end={reason_str}"
             )
 
-        # Periodic evaluation
-        if total_timesteps % args.eval_freq < args.n_steps:
+        # Periodic evaluation. Use a high-watermark (last_eval_step) instead
+        # of modular arithmetic so the trigger is robust when n_steps doesn't
+        # divide eval_freq cleanly (and won't repeat-fire if eval_freq < n_steps).
+        if total_timesteps - last_eval_step >= args.eval_freq or update_idx == num_updates - 1:
+            last_eval_step = total_timesteps
             eval_results = agent.evaluate(eval_env, n_episodes=args.n_eval_episodes)
-            writer.add_scalar("eval/mean_reward", eval_results["mean_reward"], total_timesteps)
-            writer.add_scalar("eval/win_rate", eval_results["win_rate"], total_timesteps)
+            _log(
+                {
+                    "eval/mean_reward": eval_results["mean_reward"],
+                    "eval/std_reward": eval_results["std_reward"],
+                    "eval/win_rate": eval_results["win_rate"],
+                },
+                total_timesteps,
+            )
             print(
                 f"  EVAL [{total_timesteps:,}] reward={eval_results['mean_reward']:.1f} "
                 f"win_rate={eval_results['win_rate']:.2f}"
             )
 
-            if eval_results["mean_reward"] > best_eval_reward:
-                best_eval_reward = eval_results["mean_reward"]
-                agent.save_checkpoint(str(log_dir / "best_model" / "best_feudal.pt"))
+            # Best-model selection: prefer higher win_rate, break ties on
+            # mean_reward. For win/loss-dominant envs win_rate is the more
+            # meaningful score; reward fluctuates with shaping noise.
+            wr = eval_results["win_rate"]
+            mr = eval_results["mean_reward"]
+            improved = (wr > best_eval_win_rate) or (wr == best_eval_win_rate and mr > best_eval_reward)
+            if improved:
+                best_eval_win_rate = wr
+                best_eval_reward = mr
+                agent.save_checkpoint(
+                    str(log_dir / "best_model" / "best_feudal.pt"),
+                    training_state=_make_training_state(
+                        total_timesteps,
+                        best_eval_reward,
+                        best_eval_win_rate,
+                        last_eval_step,
+                        last_ckpt_step,
+                        last_snapshot_step,
+                    ),
+                )
+                print(f"     [BEST] win_rate={best_eval_win_rate:.2f} reward={best_eval_reward:.1f}")
 
-        # Periodic checkpoint
-        if total_timesteps % args.checkpoint_freq < args.n_steps:
-            agent.save_checkpoint(str(checkpoint_dir / f"feudal_{total_timesteps}.pt"))
+        # Periodic checkpoint (also high-watermark gated).
+        if total_timesteps - last_ckpt_step >= args.checkpoint_freq:
+            last_ckpt_step = total_timesteps
+            agent.save_checkpoint(
+                str(checkpoint_dir / f"feudal_{total_timesteps}.pt"),
+                training_state=_make_training_state(
+                    total_timesteps, best_eval_reward, best_eval_win_rate, last_eval_step, last_ckpt_step, last_snapshot_step
+                ),
+            )
 
     # Save final model and config
-    agent.save_checkpoint(str(log_dir / "final_model.pt"))
+    agent.save_checkpoint(
+        str(log_dir / "final_model.pt"),
+        training_state=_make_training_state(
+            total_timesteps, best_eval_reward, best_eval_win_rate, last_eval_step, last_ckpt_step, last_snapshot_step
+        ),
+    )
     config = vars(args)
     config_path = log_dir / "config.json"
     with open(config_path, "w", encoding="utf-8") as f:
@@ -327,6 +583,14 @@ _ARG_TO_CONFIG_PATH = {
     "worker_reward_alpha": "feudal.worker_reward_alpha",
     "manager_lr_scale": "feudal.manager_lr_scale",
     "worker_lr_scale": "feudal.worker_lr_scale",
+    "autoregressive_worker": "feudal.autoregressive_worker",
+    "reward_scale": "feudal.reward_scale",
+    "lr_schedule": "ppo.lr_schedule",
+    "max_steps": "env.max_steps",
+    "resume": "resume",
+    "opponent_snapshot_freq": "self_play.snapshot_freq",
+    "opponent_pool_size": "self_play.pool_size",
+    "eval_opponent": "self_play.eval_opponent",
     "eval_freq": "eval.eval_freq",
     "n_eval_episodes": "eval.n_eval_episodes",
     "checkpoint_freq": "eval.checkpoint_freq",
@@ -394,6 +658,53 @@ def main():
     )
     parser.add_argument(
         "--worker-lr-scale", type=float, default=1.0, help="Worker learning rate multiplier relative to base LR"
+    )
+    parser.add_argument(
+        "--autoregressive-worker",
+        action="store_true",
+        help="Use AlphaStar-style autoregressive worker head with stage-conditional masks "
+        "(requires env.structured_action_masks(); falls back to unmasked otherwise)",
+    )
+    parser.add_argument(
+        "--reward-scale",
+        type=float,
+        default=1.0,
+        help="Multiplier applied to extrinsic rewards inside collect_rollout. "
+        "Set to e.g. 0.001 when terminal magnitudes (±5000) blow up value targets.",
+    )
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        default="constant",
+        choices=["constant", "linear"],
+        help="LR schedule: constant or linear-anneal-to-zero across the total budget.",
+    )
+    parser.add_argument("--max-steps", type=int, default=500, help="Max env steps per episode")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to a checkpoint to resume from (restores weights, optimizers, and total_timesteps / best-metric counters).",
+    )
+    parser.add_argument(
+        "--opponent-snapshot-freq",
+        type=int,
+        default=10000,
+        help="Self-play only: snapshot the agent every N env steps; subsequent "
+        "episodes sample opponents from the rolling pool.",
+    )
+    parser.add_argument(
+        "--opponent-pool-size",
+        type=int,
+        default=5,
+        help="Self-play only: max number of agent snapshots kept as opponents. Each episode samples one uniformly at reset.",
+    )
+    parser.add_argument(
+        "--eval-opponent",
+        type=str,
+        default="random",
+        help="Self-play only: opponent type to use for periodic evaluation. "
+        "Defaults to 'random' so eval scores don't drift with training opponent strength.",
     )
 
     # Evaluation args

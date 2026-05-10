@@ -29,24 +29,41 @@ class ModelBot:  # pylint: disable=too-few-public-methods
         Args:
             game_state: GameState instance
             player: Player number for this bot (default 2)
-            model_path: Path to the trained model .zip file
+            model_path: Path to the trained model. ``.zip`` -> SB3 (PPO,
+                MaskablePPO, A2C, DQN). ``.pt`` -> ``FeudalRLAgent`` checkpoint.
         """
         self.game_state = game_state
         self.bot_player = player
         self.model_path = model_path
-        self.model = None
-        self.env = None
+        self.model: Optional[Any] = None
+        self.env: Optional[Any] = None
+        # Set when loading a .pt feudal checkpoint. Take-turn flow branches on this.
+        # Typed as Any rather than ``Optional["FeudalRLAgent"]`` to avoid pulling
+        # the heavy reinforcetactics.rl.feudal_rl import at module load time.
+        self.feudal_agent: Optional[Any] = None
 
         if model_path:
             self._load_model(model_path)
 
-    def _load_model(self, model_path: str) -> None:
-        """
-        Load a Stable-Baselines3 model from file.
+    @property
+    def is_feudal(self) -> bool:
+        """True if this bot was loaded from a feudal ``.pt`` checkpoint."""
+        return self.feudal_agent is not None
 
-        Args:
-            model_path: Path to the model .zip file
+    def _load_model(self, model_path: str) -> None:
+        """Load either an SB3 ``.zip`` or a feudal ``.pt`` checkpoint.
+
+        File extension picks the loader: ``.pt`` goes through
+        :meth:`_load_feudal`, anything else falls back to the SB3 path.
         """
+        path = Path(model_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Model file not found: {path}")
+
+        if path.suffix == ".pt":
+            self._load_feudal(path)
+            return
+
         try:
             # Import here to avoid dependency issues if SB3 not installed
             from stable_baselines3 import A2C, DQN, PPO
@@ -62,14 +79,10 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             except ImportError:
                 pass
 
-            model_path_resolved = Path(model_path)
-            if not model_path_resolved.exists():
-                raise FileNotFoundError(f"Model file not found: {model_path_resolved}")
-
             # Try to load with different algorithms
             for algorithm_class in algorithm_classes:
                 try:
-                    self.model = algorithm_class.load(str(model_path_resolved))
+                    self.model = algorithm_class.load(str(path))
                     logger.info("Successfully loaded model as %s: %s", algorithm_class.__name__, model_path)
                     break
                 except Exception as e:
@@ -91,9 +104,86 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             logger.error("Error loading model: %s", e)
             raise
 
+    def _load_feudal(self, path: Path) -> None:
+        """Load a ``FeudalRLAgent`` ``.pt`` checkpoint and stash it for inference.
+
+        We construct the agent from the checkpoint's ``hyperparams`` blob so the
+        worker head, grid dims, and manager horizon match training. The
+        observation space is built directly from constants + the saved grid
+        dims (no dummy env round-trip) — the live ``self.game_state`` is what
+        observations and masks are built from at turn time.
+        """
+        try:
+            import torch  # pylint: disable=import-outside-toplevel
+            from gymnasium import spaces
+
+            from reinforcetactics.rl.feudal_rl import FeudalRLAgent
+            from reinforcetactics.rl.observation import (
+                GLOBAL_FEATURES_DIM,
+                GRID_CHANNELS,
+                UNIT_CHANNELS,
+            )
+        except ImportError as e:
+            raise ImportError("torch and reinforcetactics.rl.feudal_rl are required to load .pt checkpoints") from e
+
+        # Probe the checkpoint to recover the runtime config without running the
+        # network. The hyperparams dict was added in the recent feudal review;
+        # older checkpoints fall back to defaults that match the legacy agent.
+        ckpt = torch.load(str(path), map_location="cpu", weights_only=True)
+        hp = ckpt.get("hyperparams") or {}
+
+        # The feature extractor's linear projection bakes in grid_width *
+        # grid_height, so the agent must be constructed with the saved dims.
+        gw = int(hp.get("grid_width") or self.game_state.grid.width)
+        gh = int(hp.get("grid_height") or self.game_state.grid.height)
+        # If the saved dims don't match the live game's, fail loudly rather
+        # than risk a silent shape mismatch deeper in the encoder.
+        live_w = self.game_state.grid.width
+        live_h = self.game_state.grid.height
+        if (gw, gh) != (live_w, live_h):
+            raise ValueError(
+                f"Feudal checkpoint trained on {gw}x{gh} grid; this game is {live_w}x{live_h}. "
+                f"Pick a checkpoint whose grid matches the map."
+            )
+
+        # Build the observation space directly. The CNN trunk is shape-driven
+        # by the spatial dims; the linear projection by their product times
+        # the channel counts; both must match the saved state_dict exactly.
+        obs_space = spaces.Dict(
+            {
+                "grid": spaces.Box(low=0.0, high=1.0, shape=(gh, gw, GRID_CHANNELS), dtype=np.float32),
+                "units": spaces.Box(low=0.0, high=1.0, shape=(gh, gw, UNIT_CHANNELS), dtype=np.float32),
+                "global_features": spaces.Box(low=0.0, high=1e5, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
+            }
+        )
+        autoregressive = bool(hp.get("autoregressive_worker", ckpt.get("autoregressive_worker", False)))
+        self.feudal_agent = FeudalRLAgent(
+            observation_space=obs_space,
+            grid_width=gw,
+            grid_height=gh,
+            agent_player=self.bot_player,
+            device="cpu",
+            autoregressive_worker=autoregressive,
+        )
+        self.feudal_agent.load_checkpoint(str(path))
+        # Inference mode — no dropout / batchnorm twiddling.
+        self.feudal_agent.feature_extractor.eval()
+        self.feudal_agent.manager.eval()
+        self.feudal_agent.worker.eval()
+        # Reset goal so we don't carry over any stale goal_step_counter from
+        # training (load_checkpoint doesn't touch the in-memory goal).
+        self.feudal_agent.reset_goal()
+        logger.info("Loaded feudal agent from %s (AR=%s, grid=%dx%d)", path, autoregressive, gw, gh)
+
     def take_turn(self) -> None:
-        """Execute the bot's turn using the trained model."""
-        if self.model is None:
+        """Execute the bot's turn using the trained model.
+
+        Feudal agents share the SB3 take-turn loop (predict → execute →
+        check for end_turn) but route action selection through
+        ``FeudalRLAgent.select_action`` with stage-conditional or per-dim
+        masks built from the live ``self.game_state`` rather than an env's.
+        """
+        if self.model is None and self.feudal_agent is None:
             logger.warning("No model loaded, ending turn")
             self.game_state.end_turn()
             return
@@ -107,8 +197,13 @@ class ModelBot:  # pylint: disable=too-few-public-methods
                 # Get observation from current game state
                 obs = self._get_observation()
 
-                # Predict action using the model
-                action, _states = self.model.predict(obs, deterministic=True)
+                if self.feudal_agent is not None:
+                    action = self._predict_feudal(obs)
+                else:
+                    # Guarded above: take_turn returns early when both
+                    # ``self.model`` and ``self.feudal_agent`` are None.
+                    assert self.model is not None
+                    action, _states = self.model.predict(obs, deterministic=True)
 
                 # Execute the action
                 action_valid = self._execute_action(action)
@@ -128,6 +223,33 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             # Fallback: just end turn
             if self.game_state.current_player == self.bot_player:
                 self.game_state.end_turn()
+
+    def _predict_feudal(self, obs):
+        """Sample an action from the loaded ``FeudalRLAgent``.
+
+        Builds either stage-conditional (``StructuredActionMasks``) or
+        per-dimension masks against the live ``self.game_state`` — same
+        canonical layout the env uses, just bypassing the env wrapper so
+        the bot can play in the GUI / tournament without one.
+        """
+        from reinforcetactics.rl.gym_env import (  # pylint: disable=import-outside-toplevel
+            build_per_dim_masks,
+            build_structured_masks,
+        )
+
+        gw = self.game_state.grid.width
+        gh = self.game_state.grid.height
+        if self.feudal_agent.autoregressive_worker:
+            structured = build_structured_masks(self.game_state, gw, gh)
+            action, _goal = self.feudal_agent.select_action(obs, deterministic=True, structured_masks=structured)
+        else:
+            _, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask = build_per_dim_masks(self.game_state, gw, gh)
+            action, _goal = self.feudal_agent.select_action(
+                obs,
+                deterministic=True,
+                action_masks=(at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask),
+            )
+        return action
 
     def _get_observation(self) -> Any:
         """

@@ -1,131 +1,130 @@
 # Feudal RL Setup Review
 
 ## Overall Assessment
-The architecture is solid — clean separation between Manager and Worker networks,
-proper temporal hierarchy with configurable horizons, and separate GAE computation
-with segment-length-aware discounting. Below are potential bugs, functionality gaps,
-and quality-of-life improvements worth addressing.
+The architecture is in good shape: clean Manager/Worker split with a shared
+encoder driven by a single optimizer (manager grads detach from the encoder),
+segment-length-aware GAE, full mask plumbing for both the legacy 6-head and
+the AlphaStar-style autoregressive worker, and a YAML/CLI surface that exposes
+the full feature set of `FeudalRLAgent`.
+
+This pass closes the gaps the previous review flagged. What follows is the
+current state — what's fixed, what's still open, and the priority of the
+remaining work.
 
 ---
 
-## Potential Bugs
+## Fixed in this pass
 
-### 1. Shared feature extractor in two optimizers causes double updates
-**Location:** `reinforcetactics/rl/feudal_rl.py:555-567`
+| Issue | Where | Notes |
+|---|---|---|
+| Unused `state` arg in `compute_intrinsic_reward` | `feudal_rl.py:1599` | Signature now `(next_state, goal)`; `agent_player` removed (obs is agent-relative). |
+| `_last_obs` not safely initialized | `feudal_rl.py:1219` | `collect_rollout` auto-resets the env on first call when `_last_obs is None`. |
+| `evaluate` may reference unbound `info` | `feudal_rl.py:1605` | `info = {}` initialized before the `while not done` loop. |
+| Worker advantage normalization with `n_worker <= 1` | `feudal_rl.py:1418` | Now guarded the same way `m_adv` was. |
+| AR worker silent when env lacks `structured_action_masks` | `feudal_rl.py:1226` | One-shot `RuntimeWarning`; falls back to unmasked AR sampling explicitly. |
+| Wasted per-dim mask capture in AR mode | `feudal_rl.py:1248` | `env_supports_masks` is now AND-ed with `not use_ar_masks`. |
+| Checkpoints lost runtime config (`manager_horizon`, `agent_player`) | `feudal_rl.py:1525` | `save_checkpoint` writes a `hyperparams` dict; `load_checkpoint` restores `manager_horizon`/`agent_player` and refuses to load if grid dims mismatch. |
+| Stale backward-compat branch in `load_checkpoint` | `feudal_rl.py` | Dead `optimizer` fallback removed. |
+| `autoregressive_worker` unreachable from training script | `train_feudal_rl.py:401`, `configs/feudal_rl.yaml:30` | New `--autoregressive-worker` CLI flag and `feudal.autoregressive_worker` YAML key, plumbed into `FeudalRLAgent(...)`. |
+| Missing seeding in feudal training path | `train_feudal_rl.py:198-205` | Seeds python `random`, numpy, torch, CUDA, and both env resets. |
+| W&B logged-but-unused in feudal mode | `train_feudal_rl.py:255-265` | New `_log()` helper writes every metric to TensorBoard *and* W&B (when enabled). |
+| `reward_breakdown` / `end_reasons` not surfaced | `train_feudal_rl.py:282-291` | Per-component reward sums and per-rollout end-reason counters logged each update. |
+| `max_steps` hardcoded | `train_feudal_rl.py` | New `--max-steps` CLI flag, mirrored in YAML under `env.max_steps`. |
 
-Both `worker_optimizer` and `manager_optimizer` include
-`self.feature_extractor.parameters()`. During each PPO epoch the feature extractor
-receives gradient updates from *both* optimizers sequentially. The second optimizer's
-update is computed on stale feature representations since the first optimizer already
-changed the weights.
+Tests added in `tests/test_feudal_rl_integration.py`:
+- `test_checkpoint_restores_manager_horizon`
+- `test_checkpoint_rejects_grid_dim_mismatch`
+- `test_collect_rollout_auto_initializes_last_obs`
+- `test_ar_worker_warns_without_structured_masks`
+- Existing `test_feature_extractor_*` test renamed to reflect the
+  worker-only ownership of the encoder.
 
-**Fix options:**
-- (a) Use a single shared optimizer with all three parameter groups.
-- (b) Detach features for one of the two networks.
-- (c) Alternate which network's gradients flow through the feature extractor each epoch.
-
-### 2. No action masking in feudal mode
-**Location:** `reinforcetactics/rl/feudal_rl.py:641`, `scripts/train/train_feudal_rl.py:191`
-
-The worker samples actions freely without consulting the `action_mask` from the
-environment. The flat PPO baseline supports `MaskablePPO`, but the feudal agent
-ignores masking entirely. The worker will frequently sample invalid actions,
-receiving -10.0 penalties and wasting training signal.
-
-### 3. `_last_obs` not initialized before first `collect_rollout`
-**Location:** `reinforcetactics/rl/feudal_rl.py:606`
-
-`collect_rollout` reads `self._last_obs` at line 606, but this is only set at
-line 571 (`setup_training`) as `None`. The training script manually sets
-`agent._last_obs = obs`, but there's no guard — calling `collect_rollout` without
-this manual initialization will crash inside `_obs_to_tensor`.
-
-### 4. Intrinsic reward uses `state` parameter but never reads it
-**Location:** `reinforcetactics/rl/feudal_rl.py:914-916`
-
-The `state` argument is accepted but only `next_state` is ever used. If the intent
-is to compute a *delta* reward (progress toward goal), both states should be compared.
-Currently the function signature is misleading.
-
-### 5. `evaluate` method accesses `info` after the loop
-**Location:** `reinforcetactics/rl/feudal_rl.py:899`
-
-```python
-if info.get("winner") == self.agent_player:
-```
-
-The variable `info` is assigned inside the `while not done` loop. If the environment
-instantly terminates on reset, `info` would be unbound. For `truncated=True` episodes,
-the `info` may not contain the `winner` key, silently counting those as losses.
+The notebook `notebooks/feudal_rl_training.ipynb` is updated to match the new
+APIs (no manual `_last_obs` priming, new `compute_intrinsic_reward` signature,
+checkpoint-roundtrip validation now also asserts `manager_horizon` survived).
 
 ---
 
-## Functionality Gaps
+## Pass 3: system integration (Tier 1 #1 + Tier 2)
 
-### 1. No learning rate scheduling
-The training loop runs for up to 10M timesteps at a fixed learning rate. Most
-successful PPO implementations use linear or cosine annealing.
+The remaining functionality gaps that blocked feudal from being a first-class
+trainer in the project — tournament/GUI integration, self-play, multi-env
+rollout, AR validation, and intrinsic-reward visibility — are now closed.
 
-### 2. No reward normalization or clipping
-Extrinsic rewards span from -1000 (loss) to +1000 (win), while intrinsic rewards
-are roughly [-15, +10]. Even with `alpha=0.5` weighting, extrinsic reward dominates
-at terminal states, potentially causing large value function targets and unstable
-training.
+| Issue | Where | Notes |
+|---|---|---|
+| ModelBot couldn't load feudal `.pt` | `reinforcetactics/game/model_bot.py:51-174` | `_load_model` dispatches on `.zip` vs `.pt`. Feudal path reconstructs `FeudalRLAgent` from the checkpoint's `hyperparams` blob and refuses on grid-dim mismatch. `take_turn` routes through stage-conditional / per-dim masks built from the live `game_state`. |
+| Tournament didn't see feudal checkpoints | `reinforcetactics/tournament/bots.py:389-416` | `discover_model_bots` globs `*.pt` alongside `*.zip`; `_test_model_file` accepts either `bot.model` or `bot.is_feudal`. Fixed a long-standing broken hardcoded `6x6_beginner.csv` path while there. |
+| Mask-builder coupling to env | `reinforcetactics/rl/gym_env.py:60-203` | `build_per_dim_masks` and `build_structured_masks` factored into pure functions taking `(game_state, grid_w, grid_h, ...)`. Env methods now thin wrappers; ModelBot uses the same canonical layout. |
+| No self-play for feudal | `gym_env.py:262-279` (env), `train_feudal_rl.py:248-322` (script) | `set_self_play_opponent_factory` lets the trainer rebind the env opponent on each reset. Trainer adds `--opponent self`, `--opponent-snapshot-freq`, `--opponent-pool-size`, `--eval-opponent`. Snapshots roll over a fixed-size pool; opponents are loaded as `ModelBot` instances. Eval keeps a fixed opponent so scores don't drift. |
+| Single-env rollout was the throughput bottleneck | `feudal_rl.py:1438-1612` (`collect_rollout_vec`), `feudal_rl.py:1002-1062` (`merge_finalized_buffers`) | Vectorized rollout over N envs with per-env goal / segment state and a single batched feature-extractor forward per step. Per-env GAE; merged via concatenation post-finalize. Trainer uses it whenever `--n-envs > 1`. |
+| AR worker had no validation harness | `scripts/ab_feudal_ar.py` | A/B harness trains legacy + AR variants from the same seed with identical hyperparameters. Prints a side-by-side eval table (win-rate, mean reward, goal-reached rate) and a final-step verdict. ROADMAP Phase 3.7. |
+| Intrinsic-reward calibration was blind | `feudal_rl.py:837-902` (buffer fields), `train_feudal_rl.py:434-465` (logging) | Buffer now stores per-step `w_intrinsic`, `w_extrinsic`, `w_reached_goal`. Trainer logs `train/worker_intrinsic_mean`, `train/worker_extrinsic_mean`, `train/goal_reached_rate` — telling you whether the worker is being shaped by the manager or the env, and what fraction of steps actually achieve the goal. |
 
-### 3. No multi-environment support for feudal mode
-The flat baseline supports `SubprocVecEnv` with `n_envs`, but feudal training is
-locked to a single environment. This significantly slows data collection. Per-env
-goal state could be maintained to enable vectorized environments.
-
-### 4. No goal-conditioned exploration bonus
-The manager explores via entropy bonus alone. There's no mechanism to encourage
-diverse goals over time (e.g., goal coverage tracking, count-based exploration,
-or goal novelty reward).
-
-### 5. No curriculum or adaptive horizon
-The `manager_horizon` is fixed at 10. Early in training when the worker can barely
-execute actions, 10 is too long. An adaptive horizon could improve learning across
-training stages.
-
-### 6. W&B integration not used in feudal mode
-The `--wandb` flag is parsed and initialized in `main()`, but `train_feudal_rl()`
-only writes to TensorBoard. The W&B writer is never used by the feudal training
-function.
+Tests added: feudal `.pt` loader (extension dispatch, AR vs legacy, grid-mismatch
+guard, take_turn smoke), tournament discovery (`*.pt` pickup + bogus-checkpoint
+reject), self-play factory hook (factory called per reset; safe no-op without
+factory). 398 tests in the feudal-relevant suites pass.
 
 ---
 
-## Quality-of-Life Improvements
+## Pass 2: training-loop functionality
 
-### 1. Add goal visualization/logging
-Log goal distributions (heatmaps of goal_x/goal_y frequencies, goal type distribution)
-to TensorBoard to make debugging easier.
+This pass closed the operational gaps that were blocking actual training
+runs (value-loss explosion, no resume, brittle eval scheduling, no LR
+schedule, no grad-norm visibility).
 
-### 2. Track intrinsic vs. extrinsic reward separately
-Currently only `worker_mean_reward` (combined) is logged. Separating components
-would help diagnose whether intrinsic reward is shaping behavior effectively.
+| Issue | Where | Notes |
+|---|---|---|
+| Value-loss explosion from raw reward magnitudes | `feudal_rl.py:1278`, `train_feudal_rl.py:401` | `collect_rollout` accepts `reward_scale`; new `--reward-scale` CLI flag (and `feudal.reward_scale` YAML key). With Direction-A `±5000` terminals, `reward_scale=0.001` keeps `vf_coef * value_loss` in the same ballpark as the policy/entropy terms. |
+| Resume-from-checkpoint not wired | `train_feudal_rl.py:248-256`, `feudal_rl.py:1525,1583` | `save_checkpoint` accepts a `training_state` dict; `load_checkpoint` returns it. Training script's `--resume PATH` restores weights, optimizer state, `total_timesteps`, `best_eval_*`, and the eval/checkpoint high-watermarks so cadence picks up cleanly. |
+| Brittle eval/checkpoint scheduling (`% eval_freq < n_steps`) | `train_feudal_rl.py:354,392` | Replaced with high-watermark gating (`total_timesteps - last_eval_step >= eval_freq`), plus a forced eval on the final update. Robust to any `n_steps` that doesn't divide `eval_freq` evenly. |
+| No LR scheduling | `train_feudal_rl.py:268-289`, `configs/feudal_rl.yaml:24` | New `--lr-schedule {constant,linear}` with linear-anneal-to-zero across `total_timesteps`. Multiplier is logged as `train/lr_mult`. |
+| No per-network gradient-norm visibility | `feudal_rl.py:1479,1503` | `update()` now returns `worker_grad_norm` and `manager_grad_norm` (the pre-clip total norms returned by `clip_grad_norm_`). Surfaced to TensorBoard / W&B and printed in the per-update progress line. |
+| Best-checkpoint criterion was reward-only | `train_feudal_rl.py:367-385` | Best model now picked on `(win_rate, mean_reward)` tuple — wins are dominant in this env's reward shape; mean-reward is a tiebreak. |
 
-### 3. Add gradient norm logging
-Log gradient norms for manager and worker separately to detect training
-instabilities early.
+Tests added in `tests/test_feudal_rl_integration.py`:
+- `test_checkpoint_training_state_roundtrip`
+- `test_checkpoint_without_training_state_returns_none`
+- `test_reward_scale_shrinks_extrinsic_signal`
+- `test_update_reports_gradient_norms`
 
-### 4. Add `from_config` / `to_config` to `FeudalRLAgent`
-A serializable config would make checkpoint loading more robust and enable
-hyperparameter sweeps.
+The notebook now exposes `REWARD_SCALE = 0.001`, threads it through both
+sanity-check and training rollouts, and the metrics figure plots both
+gradient norms (log scale) and value losses (log scale) so the value-target
+range is immediately visible.
 
-### 5. Seed the feudal training path
-`set_random_seed` is called for flat mode but the feudal training path has no
-`torch.manual_seed`, `np.random.seed`, or `env.reset(seed=...)`.
+---
 
-### 6. Add early stopping
-No mechanism to stop training if performance plateaus. An early stopping check
-based on eval reward would save compute.
+## Still open
 
-### 7. Expose `max_steps` as a CLI arg
-The environment's `max_steps=500` is hardcoded in `train_feudal_rl` — making it
-configurable would be useful for faster iteration with shorter episodes.
+These are research / exploration items, not blockers. All system-integration
+gaps from the prior pass are closed.
 
-### 8. Resume training from checkpoint
-The `load_checkpoint` method exists but the training script has no `--resume` flag.
+### Functionality
+
+1. **Run the AR A/B at scale.** `scripts/ab_feudal_ar.py` is wired up but
+   nobody has produced a verdict yet. Same goes for an
+   `--worker-reward-alpha` sweep using the new `train/goal_reached_rate`
+   diagnostic to find the intrinsic-vs-extrinsic sweet spot.
+2. **Subprocess vec envs.** The current vectorized rollout runs envs
+   sequentially in-process. For env-bound runs a `SubprocVecEnv`-style
+   wrapper would buy real wall-clock speedup; the per-env state inside
+   `FeudalRLAgent` already supports it.
+3. **No goal-coverage exploration bonus.** Manager exploration is entropy-
+   only; nothing rewards covering the goal space.
+4. **No curriculum on `manager_horizon`.** Fixed throughout training;
+   shorter early, longer later is plausible.
+5. **No early stopping on plateau.** Would save compute on long runs.
+
+### Quality-of-life
+
+1. **No goal-distribution heatmap.** Goal-type histograms reach TensorBoard,
+   but spatial coverage (which `(x, y)` cells the manager picks) is not
+   visualized.
+2. **No `from_config` / `to_config` on `FeudalRLAgent`.** Checkpoints now
+   carry the runtime subset, but a full config serializer would simplify
+   hyperparameter sweeps.
 
 ---
 
@@ -133,13 +132,9 @@ The `load_checkpoint` method exists but the training script has no `--resume` fl
 
 | Priority | Issue | Type |
 |----------|-------|------|
-| High | Double-updated feature extractor via two optimizers | Bug |
-| High | No action masking in feudal mode | Gap |
-| High | No reward normalization/clipping | Gap |
-| Medium | `_last_obs` not safely initialized | Bug |
-| Medium | Unused `state` param in intrinsic reward | Bug |
-| Medium | No multi-env support for feudal training | Gap |
-| Medium | Seeding not applied in feudal training | QoL |
-| Low | No LR scheduling | Gap |
-| Low | No goal visualization logging | QoL |
-| Low | No resume-from-checkpoint flag | QoL |
+| Medium | Run AR A/B + intrinsic-reward sweep | Validation |
+| Low | Subprocess vec envs | Perf |
+| Low | Goal-coverage exploration / heatmap | Gap / QoL |
+| Low | Curriculum on manager_horizon | Gap |
+| Low | Early stopping | Gap |
+| Low | `from_config` / `to_config` serializer | QoL |

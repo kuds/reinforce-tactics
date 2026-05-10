@@ -76,6 +76,10 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     use_action_masking: bool = True
     device: str = "auto"
+    # LR schedule applied across the total budget. ``constant`` keeps the base
+    # LR; ``linear`` anneals to zero. Consumed by feudal training; SB3's PPO
+    # uses its own scheduler API so this field is ignored on the SB3 path.
+    lr_schedule: str = "constant"
     # Forwarded to MaskablePPO/PPO as ``policy_kwargs``. Use to set
     # ``net_arch`` (e.g. ``{"net_arch": {"pi": [256, 256], "vf": [256, 256]}}``)
     # or wire in a custom features extractor. ``None`` keeps SB3's defaults
@@ -93,7 +97,10 @@ class PPOConfig:
 
     def as_sb3_kwargs(self) -> Dict[str, Any]:
         """Return the subset of fields accepted by PPO/MaskablePPO __init__."""
-        skip = {"use_action_masking", "purchase_explore_eps"}
+        # Both feudal-only (``lr_schedule``) and PPO-bootstrap-only
+        # (``purchase_explore_eps``) fields need to be filtered before
+        # forwarding to SB3, which doesn't recognize either kwarg.
+        skip = {"use_action_masking", "lr_schedule", "purchase_explore_eps"}
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name not in skip}
 
 
@@ -105,6 +112,12 @@ class FeudalConfig:
     worker_reward_alpha: float = 0.5
     manager_lr_scale: float = 1.0
     worker_lr_scale: float = 1.0
+    # AlphaStar-style autoregressive worker head with stage-conditional masking.
+    autoregressive_worker: bool = False
+    # Multiplier on extrinsic reward inside collect_rollout. Default 1.0 keeps
+    # behavior unchanged; set << 1 (e.g. 0.001 against ±5000 terminals) to
+    # keep value-target magnitudes in a sane range.
+    reward_scale: float = 1.0
 
 
 @dataclass
@@ -120,6 +133,12 @@ class SelfPlayConfig:
     min_win_rate_for_pool: float = 0.55
     mixed_training: bool = False
     bot_ratio: float = 0.3
+    # Feudal-specific self-play knobs (consumed by train_feudal_rl.py).
+    # Snapshot the training agent every N env steps; sample opponents from
+    # the rolling pool of the most-recent ``pool_size`` snapshots; evaluate
+    # against a fixed opponent so eval scores don't drift with training.
+    snapshot_freq: int = 10000
+    eval_opponent: str = "random"
 
 
 @dataclass
