@@ -173,6 +173,7 @@ class PeriodicEvalCallback(BaseCallback):
         self.logger.record("eval/win_rate", m["win_rate"])
         self.logger.record("eval/mean_reward", m["avg_reward"])
         self.logger.record("eval/mean_ep_length", m["avg_length"])
+        self.logger.record("eval/mean_ep_turns", m["avg_turns"])
 
         if self.verbose:
             print(
@@ -180,6 +181,7 @@ class PeriodicEvalCallback(BaseCallback):
                 f"WR={m['win_rate'] * 100:5.1f}%  "
                 f"reward={m['avg_reward']:+8.1f} (+/-{m['std_reward']:5.1f})  "
                 f"len={m['avg_length']:5.1f}  "
+                f"turns={m['avg_turns']:5.1f}  "
                 f"W/L/D={m['wins']}/{m['losses']}/{m['draws']}"
             )
 
