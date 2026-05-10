@@ -201,7 +201,7 @@ UNIT_DATA = {
         "cost": 200,
         "color": (255, 215, 0),
         "movement": 2,
-        "health": 8,
+        "health": 10,
         "attack": 2,
         "defence": 4,
     },
@@ -291,7 +291,8 @@ ROGUE_EVADE_CHANCE = 0.15  # Rogue: 15% chance to dodge counter-attacks
 # Status effects
 PARALYZE_DURATION = 3
 PARALYZE_COOLDOWN = 2  # Turns before Mage can use Paralyze again
-HEAL_AMOUNT = 5
+HEAL_AMOUNT = 7
+CLERIC_HEAL_RANGE = 3  # Max Manhattan distance for Cleric heal and cure-paralyze abilities
 HASTE_COOLDOWN = 3  # Turns before Sorcerer can use Haste again
 
 # Rogue forest bonus

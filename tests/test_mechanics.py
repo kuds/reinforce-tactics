@@ -390,7 +390,7 @@ class TestClericAbilities:
         healed = GameMechanics.heal_unit(cleric, ally)
 
         assert healed > 0
-        assert ally.health == 15  # 10 + 5 HEAL_AMOUNT
+        assert ally.health == 15  # 10 + 7 HEAL_AMOUNT, capped at max_health=15
 
     def test_cleric_cannot_heal_full_health(self):
         """Test cleric cannot heal unit at full health."""
