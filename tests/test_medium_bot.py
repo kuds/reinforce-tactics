@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import MediumBot, SimpleBot
+from reinforcetactics.game.bot import AdvancedBot, MediumBot, SimpleBot
 from reinforcetactics.tournament import (
     BotDescriptor,
     BotType,
@@ -288,3 +288,148 @@ class TestTournamentMediumBot:
         bot = create_bot_instance(desc, game_state, player=2)
         assert isinstance(bot, MediumBot)
         assert bot.bot_player == 2
+
+
+@pytest.fixture
+def heal_game():
+    """Map with player-2 heal tiles in a known layout for retreat tests."""
+    # 6x6 grid: blue HQ at (5,5), blue Building at (4,5) and (5,4),
+    # blue Tower at (3,5). Red HQ at (0,0). Plenty of grass.
+    map_data = np.array([["p" for _ in range(6)] for _ in range(6)], dtype=object)
+    map_data[0][0] = "h_1"
+    map_data[5][5] = "h_2"
+    map_data[5][4] = "b_2"
+    map_data[4][5] = "b_2"
+    map_data[5][3] = "t_2"
+    return GameState(map_data, num_players=2)
+
+
+class TestSimpleBotHealRetreat:
+    """SimpleBot only stays put when wounded on a heal tile -- it does not
+    actively route to one. Tier-1 behaviour."""
+
+    def test_stays_on_heal_tile_when_wounded(self, heal_game):
+        bot = SimpleBot(heal_game, player=2)
+        heal_game.create_unit("W", 5, 5, 2)  # On HQ
+        unit = heal_game.units[-1]
+        unit.health = 2  # well below 50%
+
+        bot.act_with_unit(unit)
+        assert (unit.x, unit.y) == (5, 5)
+        assert not unit.can_move and not unit.can_attack
+
+    def test_does_not_route_to_heal_tile(self, heal_game):
+        """Tier ramp: SimpleBot won't search for a heal tile -- it only stays
+        if already standing on one. A wounded unit two tiles away from a
+        Building keeps acting normally."""
+        bot = SimpleBot(heal_game, player=2)
+        heal_game.create_unit("W", 3, 3, 2)  # NOT on a heal tile
+        unit = heal_game.units[-1]
+        unit.health = 1
+
+        # Simply asserting we don't crash and don't end up on a heal tile.
+        bot.act_with_unit(unit)
+        # Wherever it went, it must not be one of our heal tiles -- SimpleBot
+        # has no retreat routing.
+        assert bot.heal_amount_at(unit.x, unit.y) == 0
+
+
+class TestMediumBotHealRetreat:
+    """MediumBot routes wounded units to the nearest owned heal tile.
+    Tier-2 behaviour."""
+
+    def test_routes_wounded_unit_to_heal_tile(self, heal_game):
+        bot = MediumBot(heal_game, player=2)
+        # Place a Warrior next to a Building -- one move puts it on heal.
+        heal_game.create_unit("W", 4, 4, 2)
+        unit = heal_game.units[-1]
+        unit.health = 1
+
+        bot.act_with_unit(unit)
+        assert bot.heal_amount_at(unit.x, unit.y) > 0
+
+    def test_full_health_unit_does_not_retreat(self, heal_game):
+        bot = MediumBot(heal_game, player=2)
+        heal_game.create_unit("W", 4, 4, 2)
+        unit = heal_game.units[-1]
+        # Full HP -- should fall through retreat priority.
+        original_health = unit.health
+        bot.act_with_unit(unit)
+        # We don't care where it went; we just want to confirm retreat
+        # didn't fire (i.e. should_retreat_to_heal returns False).
+        assert unit.health == original_health
+        assert not bot.should_retreat_to_heal(unit)
+
+    def test_finishing_blow_overrides_retreat(self, heal_game):
+        """A wounded unit that can kill an adjacent enemy this turn should
+        attack instead of retreating."""
+        bot = MediumBot(heal_game, player=2)
+        heal_game.create_unit("W", 4, 4, 2)
+        attacker = heal_game.units[-1]
+        attacker.health = 1
+        # 1-HP enemy adjacent
+        heal_game.create_unit("W", 4, 3, 1)
+        target = heal_game.units[-1]
+        target.health = 1
+
+        bot.act_with_unit(attacker)
+        # Either target is dead OR attacker stayed in melee range; in either
+        # case it did NOT skitter back to a heal tile.
+        assert target.health <= 0 or bot.heal_amount_at(attacker.x, attacker.y) == 0
+
+
+class TestAdvancedBotHealRetreat:
+    """AdvancedBot uses per-archetype thresholds and prefers safer heal tiles.
+    Tier-3 behaviour."""
+
+    def test_archer_threshold_is_higher_than_warrior(self, heal_game):
+        bot = AdvancedBot(heal_game, player=2)
+        heal_game.player_gold[2] = 10_000  # cover both unit costs
+        warrior = heal_game.create_unit("W", 5, 5, 2)
+        archer = heal_game.create_unit("A", 4, 5, 2)
+        assert warrior is not None and archer is not None
+
+        # Set both to the same fraction (~50%): archer should retreat (>0.55
+        # threshold), warrior should not (<0.45 threshold).
+        warrior.health = int(warrior.max_health * 0.5)
+        archer.health = int(archer.max_health * 0.5)
+
+        assert bot.should_retreat_to_heal(archer)
+        assert not bot.should_retreat_to_heal(warrior)
+
+    def test_prefers_higher_heal_amount(self, heal_game):
+        """Building (+2) should beat Tower (+1) at equal distance."""
+        bot = AdvancedBot(heal_game, player=2)
+        # Place between a tower at (3,5) and a building at (4,5).
+        # Distance to (3,5) is 1, distance to (4,5) is 1.
+        heal_game.create_unit("W", 4, 4, 2)
+        unit = heal_game.units[-1]
+        unit.health = 1
+
+        target = bot.find_retreat_tile(unit)
+        # The chosen tile must be a building (heal=2), not the tower (heal=1).
+        assert target is not None
+        assert bot.heal_amount_at(*target) == 2
+
+    def test_prefers_safer_heal_tile_when_heal_equal(self, heal_game):
+        """When two heal tiles offer the same heal, pick the one with fewer
+        enemies in attack range."""
+        bot = AdvancedBot(heal_game, player=2)
+        heal_game.player_gold[1] = 10_000
+        heal_game.player_gold[2] = 10_000
+        unit = heal_game.create_unit("W", 1, 1, 2)
+        assert unit is not None
+        unit.health = 1
+        # Move the unit's reachable set toward the heal tiles by giving it
+        # high mobility -- simplest is to teleport it close.
+        unit.x, unit.y = 4, 4
+
+        # Enemy threatens (5,4) but not (4,5).
+        archer = heal_game.create_unit("A", 5, 2, 1)
+        assert archer is not None
+
+        target = bot.find_retreat_tile(unit)
+        assert target is not None
+        # Both buildings heal=2; HQ also heal=2. The safer ones are (4,5)
+        # and (5,5) -- (5,4) is in archer range from (5,2).
+        assert target != (5, 4)

@@ -83,6 +83,21 @@ class BotUnitMixin:
             ),
         )
 
+    # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
+    # HQ/building=+2 at the start of the owner's next turn.
+    _STRUCTURE_HEAL_AMOUNTS = {"t": 1, "h": 2, "b": 2}
+
+    def heal_amount_at(self, x: int, y: int) -> int:
+        """Return the per-turn HP a bot-owned unit would heal on tile (x, y)."""
+        tile = self.game_state.grid.get_tile(x, y)
+        if tile is None or tile.player != self.bot_player:
+            return 0
+        return self._STRUCTURE_HEAL_AMOUNTS.get(tile.type, 0)
+
+    def is_on_heal_tile(self, unit) -> bool:
+        """True if the unit currently stands on one of our heal-providing tiles."""
+        return self.heal_amount_at(unit.x, unit.y) > 0
+
     def find_best_move_position(self, unit, target_x, target_y):
         """Find the best position to move towards a target."""
         reachable = self.get_reachable(unit)
@@ -458,6 +473,14 @@ class SimpleBot(BotUnitMixin):
                 self.act_with_unit(unit, _depth + 1)
             return
 
+        # Stay put if wounded and already standing on one of our heal tiles --
+        # leaving would forfeit next turn's heal. This is the only retreat
+        # behaviour SimpleBot has; routing wounded units to heal tiles is a
+        # MediumBot+ feature.
+        if unit.health < unit.max_health * 0.5 and self.is_on_heal_tile(unit):
+            unit.end_unit_turn()
+            return
+
         # Cleric: try to heal damaged allies or cure paralyzed allies
         if unit.type == "C" and unit.can_attack:
             if self.try_cleric_abilities(unit):
@@ -711,6 +734,55 @@ class MediumBot(BotUnitMixin):
                 if tile.type == "h" and tile.player == self.bot_player:
                     return (tile.x, tile.y)
         return None
+
+    # Retreat to a friendly structure when below half HP. Subclasses tune this.
+    RETREAT_HEALTH_THRESHOLD = 0.5
+
+    def should_retreat_to_heal(self, unit) -> bool:
+        """Whether this unit's current HP warrants a heal retreat."""
+        return unit.health < unit.max_health * self.RETREAT_HEALTH_THRESHOLD
+
+    def find_retreat_tile(self, unit):
+        """Pick a reachable owned heal tile, preferring the highest heal amount
+        and breaking ties by closeness to the unit."""
+        reachable = self.get_reachable(unit)
+        if not reachable:
+            return None
+
+        # Standing still counts as a candidate -- if we're already on a heal
+        # tile, ending the turn there is the best move.
+        candidates = [(unit.x, unit.y)] + list(reachable)
+
+        best = None
+        best_score = (0, float("inf"))  # (heal_amount, -distance) maximised
+        for x, y in candidates:
+            heal = self.heal_amount_at(x, y)
+            if heal == 0:
+                continue
+            distance = self.manhattan_distance(unit.x, unit.y, x, y)
+            score = (heal, -distance)
+            if score > best_score:
+                best_score = score
+                best = (x, y)
+        return best
+
+    def try_retreat_to_heal(self, unit) -> bool:
+        """Move a wounded unit onto our nearest heal tile and end its turn.
+
+        Returns True if a retreat was committed. Caller is expected to skip
+        this when an interrupt or a finishing blow is available.
+        """
+        if not self.should_retreat_to_heal(unit):
+            return False
+
+        target = self.find_retreat_tile(unit)
+        if target is None:
+            return False
+
+        if (unit.x, unit.y) != target:
+            self.game_state.move_unit(unit, target[0], target[1])
+        unit.end_unit_turn()
+        return True
 
     def get_structure_priority(self, structure):
         """
@@ -1123,6 +1195,20 @@ class MediumBot(BotUnitMixin):
                     # accounting belongs in the value calc, not here.)
                     del move_distance
 
+        # Priority 1.5: Retreat to a heal tile when wounded, unless we can
+        # finish off an enemy in range right now (a killing blow is worth
+        # more than one turn of healing).
+        if self.should_retreat_to_heal(unit):
+            attackable_now = self.game_state.mechanics.get_attackable_enemies(
+                unit,
+                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                self.game_state.grid,
+            )
+            on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
+            can_finish = any(unit.get_attack_damage(e.x, e.y, on_mountain) >= e.health for e in attackable_now)
+            if not can_finish and self.try_retreat_to_heal(unit):
+                return
+
         # Priority 2: Attack enemies with good value trades
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
         if enemy_units:
@@ -1259,6 +1345,17 @@ class AdvancedBot(MediumBot):
         "S": 0.05,  # Sorcerers - buff support
     }
 
+    # Per-archetype retreat thresholds. Frontliners take hits and benefit
+    # from staying engaged longer; ranged/support are squishier and worth
+    # pulling back earlier. Cleric is highest -- a dead Cleric loses the
+    # whole heal economy.
+    RETREAT_THRESHOLDS = {
+        "W": 0.45, "K": 0.45, "B": 0.45,  # frontline
+        "R": 0.40,                         # flanker
+        "A": 0.55, "M": 0.55, "S": 0.55,  # ranged
+        "C": 0.65,                         # support
+    }
+
     def __init__(self, game_state, player=2):
         """
         Initialize the AdvancedBot.
@@ -1333,6 +1430,46 @@ class AdvancedBot(MediumBot):
                 enabled_targets = {k: v / total_enabled for k, v in enabled_targets.items()}
 
         return enabled_targets
+
+    def should_retreat_to_heal(self, unit) -> bool:
+        """Per-archetype retreat thresholds (frontline holds longer than ranged)."""
+        threshold = self.RETREAT_THRESHOLDS.get(unit.type, self.RETREAT_HEALTH_THRESHOLD)
+        return unit.health < unit.max_health * threshold
+
+    def find_retreat_tile(self, unit):
+        """Pick a heal tile that maximises HP recovered while minimising the
+        number of enemies that can attack it next turn. Falls back to the
+        MediumBot policy (heal amount, then proximity) when no enemies are
+        within striking range of any candidate."""
+        reachable = self.get_reachable(unit)
+        if not reachable:
+            return None
+
+        candidates = [(unit.x, unit.y)] + list(reachable)
+        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+
+        best = None
+        # Maximise (heal_amount, -threats_in_range, -distance).
+        best_score = (0, 1, float("inf"))
+        for x, y in candidates:
+            heal = self.heal_amount_at(x, y)
+            if heal == 0:
+                continue
+            # Approximate threat: enemies whose Manhattan distance to the tile
+            # is within their max attack range. Cheap and avoids the cost of
+            # simulating each enemy's reachable set.
+            threats = 0
+            for e in enemies:
+                e_on_mountain = self.game_state.grid.get_tile(e.x, e.y).type == "m"
+                _, e_max_range = e.get_attack_range(on_mountain=e_on_mountain)
+                if self.manhattan_distance(x, y, e.x, e.y) <= e_max_range:
+                    threats += 1
+            distance = self.manhattan_distance(unit.x, unit.y, x, y)
+            score = (heal, -threats, -distance)
+            if score > best_score:
+                best_score = score
+                best = (x, y)
+        return best
 
     def purchase_units_enhanced(self):
         """Enhanced unit purchasing with dynamic composition for all enabled units."""
@@ -1494,6 +1631,20 @@ class AdvancedBot(MediumBot):
                         if unit.can_move or unit.can_attack:
                             self.act_with_unit_enhanced(unit, _depth + 1)
                         return
+
+        # PRIORITY 4.5: Retreat to heal when wounded, unless a finishing blow
+        # is in range. Uses per-archetype thresholds and safety-aware tile
+        # scoring (see find_retreat_tile override).
+        if self.should_retreat_to_heal(unit):
+            attackable_now = self.game_state.mechanics.get_attackable_enemies(
+                unit,
+                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                self.game_state.grid,
+            )
+            on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
+            can_finish = any(unit.get_attack_damage(e.x, e.y, on_mountain) >= e.health for e in attackable_now)
+            if not can_finish and self.try_retreat_to_heal(unit):
+                return
 
         # PRIORITY 5: Position on mountains for attack bonus. Pre-evaluate
         # every reachable mountain (without committing the move) and pick
