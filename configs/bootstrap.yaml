@@ -115,10 +115,15 @@ ppo:
 
 eval:
   # eval_freq is in env steps across all sub-envs. With n_envs=8 and
-  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
-  # fires ~once per update. Per-stage CurriculumStage.n_eval_episodes
-  # overrides this default for stages that need tighter CIs.
-  eval_freq: 20_000
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=50000
+  # fires ~once per 3 PPO updates -- the efficient ratio for production
+  # runs. (20000 was used during the reward-rescale validation runs to
+  # catch value-head / reward-signal regressions early; once those were
+  # confirmed healthy the eval overhead at that cadence -- ~half of
+  # wall-clock -- stopped being worth it.) Per-stage
+  # CurriculumStage.n_eval_episodes overrides this default for stages
+  # that need tighter CIs.
+  eval_freq: 50_000
   n_eval_episodes: 80
 
 curriculum:
