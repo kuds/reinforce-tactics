@@ -1453,18 +1453,27 @@ class AdvancedBot(MediumBot):
     }
 
     # Game phase identifiers. EXPAND prioritises tempo (Warrior spam, willing
-    # to march multi-turn for captures, refuse chip-trade combat); CONSOLIDATE
-    # restores the existing balanced behaviour. Hysteresis (see take_turn) needs
-    # PHASE_TRANSITION_TURNS consecutive turns of agreement before flipping,
-    # so the bot doesn't oscillate when neutral_pct hovers around the threshold.
+    # to march multi-turn for captures, refuse chip-trade combat). CONSOLIDATE
+    # restores the existing balanced behaviour. CONQUER kicks in once nearly
+    # all neutrals are claimed: only the enemy HQ/buildings remain to be taken,
+    # so the bot accepts even bad trades to push through to the win condition.
+    # Hysteresis (see take_turn) needs PHASE_TRANSITION_TURNS consecutive
+    # turns of agreement before flipping, so the bot doesn't oscillate when
+    # the ratio hovers around a threshold.
     PHASE_EXPAND = "EXPAND"
     PHASE_CONSOLIDATE = "CONSOLIDATE"
+    PHASE_CONQUER = "CONQUER"
 
-    # If at least this fraction of capturable structures are still neutral,
-    # we're in EXPAND. Picked at 0.30 so even maps with many neutrals (eg
-    # tower_rush at 32 neutral towers) leave EXPAND once both sides have
-    # eaten their fair share.
-    EXPAND_NEUTRAL_THRESHOLD = 0.30
+    # Phase thresholds on the fraction of capturable structures still neutral:
+    #   neutral_pct > EXPAND_NEUTRAL_THRESHOLD -> EXPAND
+    #   neutral_pct < CONQUER_NEUTRAL_THRESHOLD -> CONQUER
+    #   otherwise                              -> CONSOLIDATE
+    # 0.45 (vs the original 0.30) is calibrated against beginner.csv where
+    # 4 of 10 capturable tiles are neutral (40%): below 0.45 so beginner
+    # stays in CONSOLIDATE and the strict EXPAND attack threshold doesn't
+    # refuse the close-range fights that small map demands.
+    EXPAND_NEUTRAL_THRESHOLD = 0.45
+    CONQUER_NEUTRAL_THRESHOLD = 0.10
     PHASE_TRANSITION_TURNS = 2
 
     # Floor for the Warrior target ratio while in EXPAND. Stops the matrix
@@ -1474,10 +1483,12 @@ class AdvancedBot(MediumBot):
 
     # Attack-value gates for Priority 7 (move-to-attack). EXPAND demands a
     # genuinely good trade (we'd rather walk past and capture); CONSOLIDATE
-    # accepts moderately bad trades to break stalls. Existing tournament
-    # data was captured with the -500 CONSOLIDATE value.
+    # accepts moderately bad trades to break stalls; CONQUER accepts almost
+    # any trade because the alternative is the timeout-draw stalemate seen
+    # on crossroads / last_stand when neutrals dry up.
     EXPAND_ATTACK_THRESHOLD = 200
     CONSOLIDATE_ATTACK_THRESHOLD = -500
+    CONQUER_ATTACK_THRESHOLD = -1000
 
     def __init__(self, game_state, player=2):
         """
@@ -1506,9 +1517,9 @@ class AdvancedBot(MediumBot):
     def compute_target_phase(self) -> str:
         """Phase the *current game state* suggests we should be in.
 
-        EXPAND while plenty of neutral structures remain to be captured;
-        CONSOLIDATE once the map has mostly been claimed. Hysteresis is
-        applied by take_turn rather than here.
+        EXPAND when plenty of neutrals remain (early/mid economy race);
+        CONQUER once nearly all neutrals are claimed (push enemy HQ);
+        CONSOLIDATE in between. Hysteresis is applied by update_phase.
         """
         total_capturable = 0
         neutral_capturable = 0
@@ -1522,7 +1533,11 @@ class AdvancedBot(MediumBot):
         if total_capturable == 0:
             return self.PHASE_CONSOLIDATE
         neutral_pct = neutral_capturable / total_capturable
-        return self.PHASE_EXPAND if neutral_pct > self.EXPAND_NEUTRAL_THRESHOLD else self.PHASE_CONSOLIDATE
+        if neutral_pct > self.EXPAND_NEUTRAL_THRESHOLD:
+            return self.PHASE_EXPAND
+        if neutral_pct < self.CONQUER_NEUTRAL_THRESHOLD:
+            return self.PHASE_CONQUER
+        return self.PHASE_CONSOLIDATE
 
     def update_phase(self) -> None:
         """Advance the phase state machine using ``compute_target_phase`` and
@@ -1880,7 +1895,11 @@ class AdvancedBot(MediumBot):
                     if unit.can_move or unit.can_attack:
                         self.act_with_unit_enhanced(unit, _depth + 1)
                     return
-            elif self.phase == self.PHASE_EXPAND:
+            elif self.phase in (self.PHASE_EXPAND, self.PHASE_CONQUER):
+                # EXPAND: walk the map to grab distant neutrals before the
+                # enemy does. CONQUER: with neutrals exhausted, the only
+                # remaining capture target is the enemy HQ/buildings -- a
+                # multi-turn march toward them is exactly the push we want.
                 self._capture_assignments().add(structure_pos)
                 target_pos = self.find_best_move_position(unit, structure_pos[0], structure_pos[1])
                 if target_pos is not None:
@@ -1950,9 +1969,12 @@ class AdvancedBot(MediumBot):
                         best_score = value
                         best_target = enemy
 
-            attack_threshold = (
-                self.EXPAND_ATTACK_THRESHOLD if self.phase == self.PHASE_EXPAND else self.CONSOLIDATE_ATTACK_THRESHOLD
-            )
+            if self.phase == self.PHASE_EXPAND:
+                attack_threshold = self.EXPAND_ATTACK_THRESHOLD
+            elif self.phase == self.PHASE_CONQUER:
+                attack_threshold = self.CONQUER_ATTACK_THRESHOLD
+            else:
+                attack_threshold = self.CONSOLIDATE_ATTACK_THRESHOLD
             if best_target and best_score > attack_threshold:
                 self.game_state.attack(unit, best_target)
                 if unit.can_move or unit.can_attack:

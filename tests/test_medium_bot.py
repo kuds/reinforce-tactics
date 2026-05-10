@@ -614,35 +614,42 @@ class TestAdvancedBotPhases:
         bot = AdvancedBot(game, player=2)
         assert bot.compute_target_phase() == bot.PHASE_EXPAND
 
-    def test_compute_target_phase_consolidate_when_few_neutrals(self):
-        """beginner has 2 neutral towers vs 4 owned buildings -- 33% (just
-        over threshold). last_stand has 8 neutral towers / 12 capturable =
-        67%, but skirmish has 0 neutrals."""
-        map_data = FileIO.load_map("maps/1v1/skirmish.csv")
+    def test_compute_target_phase_consolidate_when_mid_neutrals(self):
+        """beginner has 4 neutrals (2 towers + 2 owned-by-neither, actually
+        just the 2 t tiles) of 10 capturable = 40%, between the EXPAND
+        threshold (0.45) and CONQUER threshold (0.10) -> CONSOLIDATE."""
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         game = GameState(map_data, num_players=2)
         bot = AdvancedBot(game, player=2)
         assert bot.compute_target_phase() == bot.PHASE_CONSOLIDATE
 
+    def test_compute_target_phase_conquer_when_no_neutrals(self):
+        """skirmish has 0 neutrals -- everything is already owned by one
+        side or the other, so the only path to victory is conquest."""
+        map_data = FileIO.load_map("maps/1v1/skirmish.csv")
+        game = GameState(map_data, num_players=2)
+        bot = AdvancedBot(game, player=2)
+        assert bot.compute_target_phase() == bot.PHASE_CONQUER
+
     def test_update_phase_cold_start_adopts_target(self, simple_game):
         bot = AdvancedBot(simple_game, player=2)
         bot.update_phase()
-        # simple_game has 0 neutrals (only owned HQs and buildings) so
-        # CONSOLIDATE wins from a cold start.
-        assert bot.phase == bot.PHASE_CONSOLIDATE
+        # simple_game has 0 neutrals so CONQUER is suggested at cold start.
+        assert bot.phase == bot.PHASE_CONQUER
 
     def test_update_phase_hysteresis_ignores_one_off_flip(self, simple_game):
         """Setting the bot in EXPAND and then exposing it to a single
-        CONSOLIDATE-suggesting state must NOT flip phases on a single turn."""
+        differing observation must NOT flip phases on a single turn."""
         bot = AdvancedBot(simple_game, player=2)
         bot.phase = bot.PHASE_EXPAND
-        # simple_game has 0 neutrals -> compute_target_phase = CONSOLIDATE.
+        # simple_game has 0 neutrals -> compute_target_phase = CONQUER.
         bot.update_phase()
         # First differing observation only sets _pending_phase, not phase.
         assert bot.phase == bot.PHASE_EXPAND
-        assert bot._pending_phase == bot.PHASE_CONSOLIDATE
+        assert bot._pending_phase == bot.PHASE_CONQUER
         # Second consecutive differing observation completes the transition.
         bot.update_phase()
-        assert bot.phase == bot.PHASE_CONSOLIDATE
+        assert bot.phase == bot.PHASE_CONQUER
 
     def test_expand_phase_floors_warrior_target(self, simple_game):
         bot = AdvancedBot(simple_game, player=2)
@@ -660,3 +667,25 @@ class TestAdvancedBotPhases:
         # No EXPAND bias -- W stays at its baseline ratio.
         baseline_w = bot.FULL_COMPOSITION_TARGETS["W"] / sum(bot.FULL_COMPOSITION_TARGETS.values())
         assert abs(targets["W"] - baseline_w) < 1e-6
+
+    def test_conquer_phase_does_not_floor_warrior(self, simple_game):
+        """In CONQUER we want whatever helps break through (Knights, etc),
+        not Warrior spam -- so the EXPAND floor must NOT apply."""
+        bot = AdvancedBot(simple_game, player=2)
+        bot.phase = bot.PHASE_CONQUER
+        targets = bot.get_dynamic_composition_targets()
+        baseline_w = bot.FULL_COMPOSITION_TARGETS["W"] / sum(bot.FULL_COMPOSITION_TARGETS.values())
+        assert abs(targets["W"] - baseline_w) < 1e-6
+
+    def test_attack_thresholds_strictness_ordering(self):
+        """EXPAND should be the strictest, CONQUER the most permissive,
+        with CONSOLIDATE in the middle. This ordering is the whole point of
+        having phases -- if you tune them out of order the difficulty ramp
+        breaks the way it did in tournament 3 on crossroads."""
+        assert AdvancedBot.EXPAND_ATTACK_THRESHOLD > AdvancedBot.CONSOLIDATE_ATTACK_THRESHOLD
+        assert AdvancedBot.CONSOLIDATE_ATTACK_THRESHOLD > AdvancedBot.CONQUER_ATTACK_THRESHOLD
+
+    def test_phase_thresholds_ordering(self):
+        """EXPAND threshold must be above CONQUER threshold, otherwise
+        compute_target_phase has an undefined region."""
+        assert AdvancedBot.EXPAND_NEUTRAL_THRESHOLD > AdvancedBot.CONQUER_NEUTRAL_THRESHOLD
