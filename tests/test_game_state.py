@@ -74,14 +74,17 @@ class TestUnitEliminationWinCondition:
         """Test game ends when target is killed and they have no remaining units."""
         # Create attacker for player 1 and a single target for player 2
         attacker = simple_game.create_unit("W", 5, 5, player=1)
-        target = simple_game.create_unit("C", 6, 5, player=2)  # Cleric has 8 HP
+        target = simple_game.create_unit("C", 6, 5, player=2)  # Cleric: 10 HP, 4 def
+        # Pre-damage so the warrior's 8 dmg one-shots. Post-buff cleric
+        # would otherwise survive a single warrior hit (10 - 8 = 2 HP).
+        target.health = 8
 
         # Verify initial state
         assert simple_game.game_over is False
         assert simple_game.winner is None
         assert len([u for u in simple_game.units if u.player == 2]) == 1
 
-        # Attack - Warrior does 10 damage, should kill Cleric
+        # Attack - Warrior does 8 damage (10 atk - 4 def reduction), kills Cleric.
         result = simple_game.attack(attacker, target)
 
         # Verify target is killed
@@ -127,6 +130,8 @@ class TestUnitEliminationWinCondition:
         # Create attacker for player 1 and two units for player 2
         attacker = simple_game.create_unit("W", 5, 5, player=1)
         target = simple_game.create_unit("C", 6, 5, player=2)  # Will be killed
+        # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
+        target.health = 8
         _survivor = simple_game.create_unit("W", 7, 7, player=2)  # Will survive
 
         # Verify initial state
@@ -182,6 +187,8 @@ class TestUnitEliminationWinCondition:
         # Player 2 owns HQ at (9,9) but will lose their only unit
         attacker = simple_game.create_unit("W", 5, 5, player=1)
         target = simple_game.create_unit("C", 6, 5, player=2)
+        # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
+        target.health = 8
 
         # Verify player 2 owns HQ
         hq_tile = simple_game.grid.get_tile(9, 9)
