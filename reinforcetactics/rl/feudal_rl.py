@@ -836,6 +836,15 @@ class FeudalRolloutBuffer:
         self.w_goals = []
         self.w_rewards = []
         self.w_dones = []
+        # Diagnostics: per-step split of the worker reward into its intrinsic
+        # (goal-shaping) and extrinsic (env-reward × alpha) components, plus
+        # a bool per step recording whether the agent's nearest unit sat on
+        # the goal cell. The PPO update only reads ``w_rewards``; these are
+        # surfaced via ``finalize`` so the trainer can log them and we can
+        # see whether the goal-conditioning is actually shaping behavior.
+        self.w_intrinsic = []
+        self.w_extrinsic = []
+        self.w_reached_goal = []
         # Per-dim action masks for the legacy 6-head WorkerNetwork: list of
         # 6-tuples (each entry a np.bool array sized to that worker dim), or
         # an empty list if the env didn't provide masks. Stored so update()
@@ -890,6 +899,13 @@ class FeudalRolloutBuffer:
         self.w_goals.append(goal)
         self.w_rewards.append(intrinsic_reward + worker_reward_alpha * extrinsic_reward)
         self.w_dones.append(done)
+        # Diagnostics: keep raw components so the trainer can log mean
+        # intrinsic vs extrinsic separately. ``reached_goal`` captures the
+        # +5.0-bonus signal from compute_intrinsic_reward — easier to read
+        # as a percentage than as a reward magnitude.
+        self.w_intrinsic.append(float(intrinsic_reward))
+        self.w_extrinsic.append(float(extrinsic_reward))
+        self.w_reached_goal.append(bool(intrinsic_reward >= 5.0))
         if action_masks is not None:
             self.w_action_masks.append(tuple(np.asarray(m, dtype=bool) for m in action_masks))
         if self.store_masks:
@@ -943,6 +959,9 @@ class FeudalRolloutBuffer:
         self.w_goals = np.array(self.w_goals, dtype=np.float32)
         self.w_rewards = np.array(self.w_rewards, dtype=np.float32)
         self.w_dones = np.array(self.w_dones, dtype=np.float32)
+        self.w_intrinsic = np.array(self.w_intrinsic, dtype=np.float32)
+        self.w_extrinsic = np.array(self.w_extrinsic, dtype=np.float32)
+        self.w_reached_goal = np.array(self.w_reached_goal, dtype=bool)
         # Pivot from list-of-tuples to tuple-of-arrays so each dim can be
         # batch-indexed: w_action_masks[dim_i] is shape (N, dim_size_i).
         # Skipped (left as []) when no masks were captured — update() then
@@ -997,6 +1016,83 @@ class FeudalRolloutBuffer:
         else:
             self.m_advantages = np.empty((0,), dtype=np.float32)
             self.m_returns = np.empty((0,), dtype=np.float32)
+
+
+def merge_finalized_buffers(buffers: List["FeudalRolloutBuffer"]) -> "FeudalRolloutBuffer":
+    """Concatenate N already-finalized + advantage-computed buffers into one.
+
+    Used by the vectorized rollout (``FeudalRLAgent.collect_rollout_vec``) so
+    the existing PPO ``update()`` operates on a single merged buffer regardless
+    of how many envs produced it. Each input buffer must have run
+    :meth:`finalize` and :meth:`compute_advantages` independently — episode
+    boundaries (``dones``) are per-env, so GAE has to run per-env before merge.
+    """
+    if not buffers:
+        raise ValueError("merge_finalized_buffers needs at least one buffer")
+    merged = FeudalRolloutBuffer(store_masks=buffers[0].store_masks)
+
+    def _cat(field: str, axis: int = 0):
+        return np.concatenate([getattr(b, field) for b in buffers], axis=axis)
+
+    # Worker streams.
+    for f in (
+        "w_obs_grid",
+        "w_obs_units",
+        "w_obs_global",
+        "w_actions",
+        "w_log_probs",
+        "w_values",
+        "w_goals",
+        "w_rewards",
+        "w_dones",
+        "w_advantages",
+        "w_returns",
+        "w_intrinsic",
+        "w_extrinsic",
+        "w_reached_goal",
+    ):
+        setattr(merged, f, _cat(f))
+
+    # Per-dim worker masks (legacy 6-head): each env's buffer either has the
+    # tuple-of-stacked-arrays form or an empty list. Skip merge if any env
+    # didn't capture them — the update path's mask-aware branch only runs when
+    # all rollout steps have masks.
+    if all(isinstance(b.w_action_masks, tuple) and len(b.w_action_masks) > 0 for b in buffers):
+        n_dims = len(buffers[0].w_action_masks)
+        merged.w_action_masks = tuple(np.concatenate([b.w_action_masks[d] for b in buffers], axis=0) for d in range(n_dims))
+    else:
+        merged.w_action_masks = []
+
+    # AR conditional masks (only populated when store_masks=True).
+    if merged.store_masks and all(getattr(b, "w_mask_atype", None) is not None and len(b.w_mask_atype) > 0 for b in buffers):
+        for f in ("w_mask_atype", "w_mask_src", "w_mask_unit_type", "w_mask_target"):
+            setattr(merged, f, _cat(f))
+
+    # Manager streams (zero-length per-env buffers stay zero-length in merge).
+    for f in (
+        "m_obs_grid",
+        "m_obs_units",
+        "m_obs_global",
+        "m_goals",
+        "m_log_probs",
+        "m_values",
+        "m_rewards",
+        "m_dones",
+        "m_segment_lengths",
+        "m_advantages",
+        "m_returns",
+    ):
+        setattr(merged, f, _cat(f))
+
+    # Surface end_reasons / reward_breakdown across envs so the trainer can
+    # log them the same way as the single-env path.
+    merged.end_reasons = []
+    merged.reward_breakdown = {}
+    for b in buffers:
+        merged.end_reasons.extend(getattr(b, "end_reasons", []))
+        for k, v in getattr(b, "reward_breakdown", {}).items():
+            merged.reward_breakdown[k] = merged.reward_breakdown.get(k, 0.0) + float(v)
+    return merged
 
 
 class FeudalRLAgent:
@@ -1191,7 +1287,13 @@ class FeudalRLAgent:
         }
 
     def collect_rollout(
-        self, env, n_steps: int, gamma: float, gae_lambda: float, worker_reward_alpha: float = 0.5
+        self,
+        env,
+        n_steps: int,
+        gamma: float,
+        gae_lambda: float,
+        worker_reward_alpha: float = 0.5,
+        reward_scale: float = 1.0,
     ) -> FeudalRolloutBuffer:
         """
         Collect n_steps of experience using the feudal hierarchy.
@@ -1210,7 +1312,25 @@ class FeudalRLAgent:
         # masks so the PPO update can re-evaluate log-probs under the same
         # mask supports that were applied at sample time.
         use_ar_masks = self.autoregressive_worker and hasattr(env, "structured_action_masks")
+        if self.autoregressive_worker and not use_ar_masks:
+            # AR sampling without structured masks falls back to unmasked
+            # Categoricals at every stage, so the worker will spam invalid
+            # actions and waste training signal. Warn loudly once.
+            import warnings  # pylint: disable=import-outside-toplevel
+
+            warnings.warn(
+                "FeudalRLAgent(autoregressive_worker=True) is collecting rollouts on an env "
+                "without structured_action_masks(); AR sampling will run unmasked and the "
+                "worker will frequently sample illegal actions.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         buf = FeudalRolloutBuffer(store_masks=use_ar_masks)
+        # Auto-initialize the rolling obs on first call so callers don't have
+        # to remember to set ``agent._last_obs`` after every env.reset().
+        if self._last_obs is None:
+            self._last_obs, _ = env.reset()
+            self.reset_goal()
         obs = self._last_obs
         manager_reward_accum = 0.0
         manager_step_count = 0
@@ -1218,7 +1338,9 @@ class FeudalRLAgent:
         # Prevents closing a segment from a previous rollout in a fresh buffer.
         manager_segment_open = False
 
-        env_supports_masks = hasattr(env, "action_masks")
+        # When the AR worker captures stage-conditional masks we don't also
+        # need the per-dim 6-tuple — the PPO update path keys off store_masks.
+        env_supports_masks = hasattr(env, "action_masks") and not use_ar_masks
         end_reasons: List[str] = []
         reward_breakdown_sums: Dict[str, float] = {}
 
@@ -1251,7 +1373,10 @@ class FeudalRLAgent:
                     self.goal_step_counter = 0
                     manager_segment_open = True
 
-                # Worker selects action conditioned on goal.
+                # Worker selects action conditioned on goal. Three paths:
+                #   - AR worker + env supports structured masks: stage-conditional masking.
+                #   - AR worker, no structured masks: unmasked AR sampling (warned above).
+                #   - Legacy 6-head worker: per-dim masks from env.action_masks() if present.
                 ar_step_masks_np: Optional[Dict[str, np.ndarray]] = None
                 if use_ar_masks:
                     provider = StructuredMaskProvider(
@@ -1264,6 +1389,8 @@ class FeudalRLAgent:
                         features, self.current_goal, provider
                     )
                     ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
+                elif self.autoregressive_worker:
+                    action, w_log_prob, w_value = self.worker.sample_action(features, self.current_goal)
                 else:
                     action, w_log_prob, w_value = self.worker.sample_action(
                         features, self.current_goal, action_masks=worker_mask_tensors
@@ -1273,6 +1400,13 @@ class FeudalRLAgent:
             action_np = action.cpu().numpy()[0]
             next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
             done = terminated or truncated
+            # Scale extrinsic rewards before they enter the buffer. Default
+            # 1.0 leaves behavior unchanged; setting reward_scale << 1 keeps
+            # value-function targets in a numerically sane range when the
+            # env's terminal magnitude (e.g. ±5000) would otherwise dwarf
+            # the value head's MSE budget.
+            if reward_scale != 1.0:
+                ext_reward = float(ext_reward) * reward_scale
 
             # Surface info diagnostics so the training loop can show them.
             for k, v in info.get("reward_breakdown", {}).items():
@@ -1281,7 +1415,7 @@ class FeudalRLAgent:
             # Compute intrinsic reward
             assert self.current_goal is not None
             goal_np = self.current_goal.cpu().numpy()[0]
-            int_reward = compute_intrinsic_reward(obs, goal_np, next_obs, agent_player=self.agent_player)
+            int_reward = compute_intrinsic_reward(next_obs, goal_np)
 
             # Store worker transition
             buf.add_worker_step(
@@ -1343,6 +1477,219 @@ class FeudalRLAgent:
 
         return buf
 
+    def collect_rollout_vec(
+        self,
+        envs: List,
+        n_steps: int,
+        gamma: float,
+        gae_lambda: float,
+        worker_reward_alpha: float = 0.5,
+        reward_scale: float = 1.0,
+    ) -> FeudalRolloutBuffer:
+        """Vectorized variant of :meth:`collect_rollout` over N envs.
+
+        Each env carries its own goal / segment state but they share the
+        agent's networks. ``n_steps`` is per-env (so the merged buffer holds
+        ``n_envs * n_steps`` worker transitions). Returns a single buffer
+        formed by concatenating per-env buffers after each has had
+        ``finalize`` + ``compute_advantages`` applied — GAE has to be
+        computed per-env because dones are per-env episode boundaries.
+
+        Single-env semantics are preserved when ``len(envs) == 1``; the
+        scalar ``current_goal`` / ``goal_step_counter`` / ``_last_obs``
+        attributes are not touched (the per-env path uses local lists),
+        so a vec rollout doesn't disturb subsequent ``select_action`` calls.
+        """
+        n_envs = len(envs)
+        if n_envs == 0:
+            raise ValueError("collect_rollout_vec needs at least one env")
+
+        # AR mode: every env must expose structured_action_masks for masks
+        # to be captured. If any env lacks it we fall back to unmasked AR
+        # (with a warning, mirroring single-env behavior).
+        use_ar_masks = self.autoregressive_worker and all(hasattr(e, "structured_action_masks") for e in envs)
+        if self.autoregressive_worker and not use_ar_masks:
+            import warnings  # pylint: disable=import-outside-toplevel
+
+            warnings.warn(
+                "FeudalRLAgent(autoregressive_worker=True) collect_rollout_vec called with envs "
+                "that don't all expose structured_action_masks(); AR sampling will run unmasked.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        env_supports_masks = all(hasattr(e, "action_masks") for e in envs) and not use_ar_masks
+
+        # Per-env state.
+        if not hasattr(self, "_last_obs_vec") or len(getattr(self, "_last_obs_vec", []) or []) != n_envs:
+            # Auto-init on first vec call (or when n_envs changed).
+            self._last_obs_vec = [e.reset()[0] for e in envs]
+        obs_per_env = list(self._last_obs_vec)
+        goal_per_env: List[Optional[torch.Tensor]] = [None] * n_envs
+        goal_counter_per_env = [0] * n_envs
+        manager_open_per_env = [False] * n_envs
+        manager_step_count_per_env = [0] * n_envs
+        manager_reward_accum_per_env = [0.0] * n_envs
+
+        bufs = [FeudalRolloutBuffer(store_masks=use_ar_masks) for _ in range(n_envs)]
+        end_reasons_per_env: List[List[str]] = [[] for _ in range(n_envs)]
+        reward_breakdown_per_env: List[Dict[str, float]] = [{} for _ in range(n_envs)]
+
+        self.feature_extractor.eval()
+        self.manager.eval()
+        self.worker.eval()
+
+        for _ in range(n_steps):
+            # Batch obs across envs for one feature-extractor forward pass.
+            batched_obs = self._batch_obs_to_tensor(
+                np.stack([o["grid"] for o in obs_per_env]),
+                np.stack([o["units"] for o in obs_per_env]),
+                np.stack([o["global_features"] for o in obs_per_env]),
+            )
+            with torch.no_grad():
+                features = self.feature_extractor(batched_obs)  # (n_envs, feat_dim)
+
+            for env_idx in range(n_envs):
+                env = envs[env_idx]
+                env_features = features[env_idx : env_idx + 1]
+                step_masks_np = env.action_masks() if env_supports_masks else None
+                worker_mask_tensors = self._masks_to_tensors(step_masks_np)
+
+                with torch.no_grad():
+                    need_new_goal = goal_per_env[env_idx] is None or goal_counter_per_env[env_idx] >= self.manager_horizon
+                    if need_new_goal:
+                        if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
+                            bufs[env_idx].end_manager_segment(
+                                manager_reward_accum_per_env[env_idx],
+                                done=False,
+                                segment_length=manager_step_count_per_env[env_idx],
+                            )
+                            manager_reward_accum_per_env[env_idx] = 0.0
+                            manager_step_count_per_env[env_idx] = 0
+                        goal, m_log_prob, m_value = self.manager.sample_goal(env_features)
+                        bufs[env_idx].add_manager_step(
+                            obs_per_env[env_idx],
+                            goal.cpu().numpy()[0],
+                            m_log_prob.item(),
+                            m_value.squeeze(-1).item(),
+                        )
+                        goal_per_env[env_idx] = goal
+                        goal_counter_per_env[env_idx] = 0
+                        manager_open_per_env[env_idx] = True
+
+                    ar_step_masks_np: Optional[Dict[str, np.ndarray]] = None
+                    if use_ar_masks:
+                        provider = StructuredMaskProvider(
+                            env.structured_action_masks(),
+                            grid_height=self.grid_height,
+                            grid_width=self.grid_width,
+                            device=self.device,
+                        )
+                        action, w_log_prob, w_value, cond_masks = self.worker.sample_action_with_provider(
+                            env_features, goal_per_env[env_idx], provider
+                        )
+                        ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
+                    elif self.autoregressive_worker:
+                        action, w_log_prob, w_value = self.worker.sample_action(env_features, goal_per_env[env_idx])
+                    else:
+                        action, w_log_prob, w_value = self.worker.sample_action(
+                            env_features, goal_per_env[env_idx], action_masks=worker_mask_tensors
+                        )
+
+                action_np = action.cpu().numpy()[0]
+                next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
+                done = terminated or truncated
+                if reward_scale != 1.0:
+                    ext_reward = float(ext_reward) * reward_scale
+
+                for k, v in info.get("reward_breakdown", {}).items():
+                    reward_breakdown_per_env[env_idx][k] = reward_breakdown_per_env[env_idx].get(k, 0.0) + float(v)
+
+                goal_np = goal_per_env[env_idx].cpu().numpy()[0]
+                int_reward = compute_intrinsic_reward(next_obs, goal_np)
+
+                bufs[env_idx].add_worker_step(
+                    obs_per_env[env_idx],
+                    action_np,
+                    w_log_prob.item(),
+                    w_value.squeeze(-1).item(),
+                    goal_np,
+                    ext_reward,
+                    int_reward,
+                    done,
+                    worker_reward_alpha,
+                    action_masks=step_masks_np,
+                    masks=ar_step_masks_np,
+                )
+
+                manager_reward_accum_per_env[env_idx] += ext_reward
+                manager_step_count_per_env[env_idx] += 1
+                goal_counter_per_env[env_idx] += 1
+
+                if done:
+                    if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
+                        bufs[env_idx].end_manager_segment(
+                            manager_reward_accum_per_env[env_idx],
+                            done=True,
+                            segment_length=manager_step_count_per_env[env_idx],
+                        )
+                    manager_reward_accum_per_env[env_idx] = 0.0
+                    manager_step_count_per_env[env_idx] = 0
+                    manager_open_per_env[env_idx] = False
+                    reason = info.get("end_reason")
+                    if reason is not None:
+                        end_reasons_per_env[env_idx].append(reason)
+                    next_obs, _ = env.reset()
+                    goal_per_env[env_idx] = None
+                    goal_counter_per_env[env_idx] = 0
+
+                obs_per_env[env_idx] = next_obs
+
+        # Close any pending manager segments.
+        for env_idx in range(n_envs):
+            if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
+                bufs[env_idx].end_manager_segment(
+                    manager_reward_accum_per_env[env_idx],
+                    done=False,
+                    segment_length=manager_step_count_per_env[env_idx],
+                )
+
+        # Bootstrap last values for GAE — per env.
+        last_w_values: List[float] = []
+        last_m_values: List[float] = []
+        with torch.no_grad():
+            batched_obs = self._batch_obs_to_tensor(
+                np.stack([o["grid"] for o in obs_per_env]),
+                np.stack([o["units"] for o in obs_per_env]),
+                np.stack([o["global_features"] for o in obs_per_env]),
+            )
+            features = self.feature_extractor(batched_obs)
+            for env_idx in range(n_envs):
+                env_features = features[env_idx : env_idx + 1]
+                if goal_per_env[env_idx] is None:
+                    goal_per_env[env_idx], _, _ = self.manager.sample_goal(env_features)
+                _, lw = self.worker(env_features, goal_per_env[env_idx])
+                _, _, _, lm = self.manager(env_features)
+                last_w_values.append(lw.item())
+                last_m_values.append(lm.item())
+
+        self._last_obs_vec = obs_per_env
+
+        # Per-env finalize + GAE; then concatenate into the merged buffer.
+        for env_idx in range(n_envs):
+            bufs[env_idx].finalize()
+            bufs[env_idx].compute_advantages(last_w_values[env_idx], last_m_values[env_idx], gamma, gae_lambda)
+            bufs[env_idx].end_reasons = end_reasons_per_env[env_idx]
+            bufs[env_idx].reward_breakdown = reward_breakdown_per_env[env_idx]
+
+        merged = merge_finalized_buffers(bufs)
+
+        self.feature_extractor.train()
+        self.manager.train()
+        self.worker.train()
+
+        return merged
+
     def update(
         self,
         buf: FeudalRolloutBuffer,
@@ -1394,8 +1741,11 @@ class FeudalRLAgent:
             m_adv = torch.as_tensor(buf.m_advantages).to(self.device)
             m_ret = torch.as_tensor(buf.m_returns).to(self.device)
 
-        # Normalize advantages
-        w_adv = (w_adv - w_adv.mean()) / (w_adv.std() + 1e-8)
+        # Normalize advantages. With < 2 samples std is 0 (or undefined) and
+        # the normalization just amplifies a single value's noise — skip in
+        # that degenerate case.
+        if n_worker > 1:
+            w_adv = (w_adv - w_adv.mean()) / (w_adv.std() + 1e-8)
         if n_manager > 1:
             m_adv = (m_adv - m_adv.mean()) / (m_adv.std() + 1e-8)
 
@@ -1403,10 +1753,12 @@ class FeudalRLAgent:
         w_policy_loss_sum = 0.0
         w_value_loss_sum = 0.0
         w_entropy_sum = 0.0
+        w_grad_norm_sum = 0.0
         w_batch_count = 0
         m_policy_loss_sum = 0.0
         m_value_loss_sum = 0.0
         m_entropy_sum = 0.0
+        m_grad_norm_sum = 0.0
         m_batch_count = 0
 
         for _epoch in range(n_epochs):
@@ -1449,12 +1801,16 @@ class FeudalRLAgent:
 
                 self.worker_optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(worker_params, max_grad_norm)
+                # clip_grad_norm_ returns the pre-clip total norm — capture
+                # it so the training loop can spot exploding/vanishing
+                # gradients early.
+                w_grad_norm = torch.nn.utils.clip_grad_norm_(worker_params, max_grad_norm)
                 self.worker_optimizer.step()
 
                 w_policy_loss_sum += policy_loss.item()
                 w_value_loss_sum += value_loss.item()
                 w_entropy_sum += mean_entropy.item()
+                w_grad_norm_sum += float(w_grad_norm)
                 w_batch_count += 1
 
             # --- Manager update ---
@@ -1485,50 +1841,72 @@ class FeudalRLAgent:
 
                     self.manager_optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(manager_params, max_grad_norm)
+                    m_grad_norm = torch.nn.utils.clip_grad_norm_(manager_params, max_grad_norm)
                     self.manager_optimizer.step()
 
                     m_policy_loss_sum += policy_loss.item()
                     m_value_loss_sum += value_loss.item()
                     m_entropy_sum += mean_entropy.item()
+                    m_grad_norm_sum += float(m_grad_norm)
                     m_batch_count += 1
 
         metrics = {
             "worker_policy_loss": w_policy_loss_sum / max(w_batch_count, 1),
             "worker_value_loss": w_value_loss_sum / max(w_batch_count, 1),
             "worker_entropy": w_entropy_sum / max(w_batch_count, 1),
+            "worker_grad_norm": w_grad_norm_sum / max(w_batch_count, 1),
             "manager_policy_loss": m_policy_loss_sum / max(m_batch_count, 1),
             "manager_value_loss": m_value_loss_sum / max(m_batch_count, 1),
             "manager_entropy": m_entropy_sum / max(m_batch_count, 1),
+            "manager_grad_norm": m_grad_norm_sum / max(m_batch_count, 1),
         }
 
         return metrics
 
-    def save_checkpoint(self, path):
-        """Save all network weights and optimizer state."""
+    def save_checkpoint(self, path, training_state: Optional[Dict] = None):
+        """Save weights, optimizer state, the agent's runtime config, and an
+        optional ``training_state`` blob (timesteps / best metric / etc) so
+        long-running training can resume cleanly after a crash.
+
+        ``hyperparams`` carries the constructor settings + ``manager_horizon``
+        so a loader can reconstruct the agent in the same shape (grid size,
+        worker head, manager horizon) without the caller having to remember
+        what the checkpoint was trained with.
+        """
         from pathlib import Path as _Path  # pylint: disable=import-outside-toplevel
 
         _Path(path).parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "feature_extractor": self.feature_extractor.state_dict(),
-                "manager": self.manager.state_dict(),
-                "worker": self.worker.state_dict(),
-                "worker_optimizer": self.worker_optimizer.state_dict() if hasattr(self, "worker_optimizer") else None,
-                "manager_optimizer": self.manager_optimizer.state_dict() if hasattr(self, "manager_optimizer") else None,
+        payload = {
+            "feature_extractor": self.feature_extractor.state_dict(),
+            "manager": self.manager.state_dict(),
+            "worker": self.worker.state_dict(),
+            "worker_optimizer": self.worker_optimizer.state_dict() if hasattr(self, "worker_optimizer") else None,
+            "manager_optimizer": self.manager_optimizer.state_dict() if hasattr(self, "manager_optimizer") else None,
+            "autoregressive_worker": self.autoregressive_worker,
+            "hyperparams": {
+                "grid_width": self.grid_width,
+                "grid_height": self.grid_height,
+                "agent_player": self.agent_player,
                 "autoregressive_worker": self.autoregressive_worker,
+                "manager_horizon": self.manager_horizon,
             },
-            path,
-        )
+        }
+        if training_state is not None:
+            payload["training_state"] = training_state
+        torch.save(payload, path)
 
-    def load_checkpoint(self, path):
-        """Load network weights and optionally optimizer state.
+    def load_checkpoint(self, path) -> Optional[Dict]:
+        """Load weights, optimizer state, and the agent's saved hyperparams.
+
+        Returns the saved ``training_state`` dict if one was stored at save
+        time (so the training script can pick up timesteps/best-metric where
+        it left off), or ``None`` for older checkpoints.
 
         Refuses to load if the checkpoint was trained with the opposite worker
-        head (autoregressive vs legacy 6-head). The two have incompatible
-        state_dict shapes, but the more important reason is that callers who
-        forget to set ``autoregressive_worker`` would silently get a
-        misconfigured agent.
+        head (autoregressive vs legacy 6-head); the state_dicts have
+        incompatible shapes and a silent mismatch would misconfigure the agent.
+        Restores ``manager_horizon`` (and verifies grid dimensions match) so
+        callers don't have to re-set runtime config after loading.
         """
         checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         ckpt_ar = checkpoint.get("autoregressive_worker")
@@ -1538,6 +1916,18 @@ class FeudalRLAgent:
                 f"with autoregressive_worker={self.autoregressive_worker}. Reconstruct the "
                 f"agent with the matching flag before loading."
             )
+        hp = checkpoint.get("hyperparams") or {}
+        # Grid dims are baked into the feature-extractor's linear shape and
+        # the AR head's per-cell logits — refuse rather than produce a
+        # silent shape mismatch later.
+        for dim_name in ("grid_width", "grid_height"):
+            saved = hp.get(dim_name)
+            if saved is not None and saved != getattr(self, dim_name):
+                raise ValueError(
+                    f"Checkpoint {dim_name}={saved} but agent was constructed with "
+                    f"{dim_name}={getattr(self, dim_name)}. Reconstruct the agent "
+                    f"with matching grid dims before loading."
+                )
         self.feature_extractor.load_state_dict(checkpoint["feature_extractor"])
         self.manager.load_state_dict(checkpoint["manager"])
         self.worker.load_state_dict(checkpoint["worker"])
@@ -1545,11 +1935,12 @@ class FeudalRLAgent:
             self.worker_optimizer.load_state_dict(checkpoint["worker_optimizer"])
         if checkpoint.get("manager_optimizer") and hasattr(self, "manager_optimizer"):
             self.manager_optimizer.load_state_dict(checkpoint["manager_optimizer"])
-        # Backward compatibility: load old single-optimizer checkpoints
-        if checkpoint.get("optimizer") and not checkpoint.get("worker_optimizer"):
-            if hasattr(self, "worker_optimizer"):
-                # Can't reliably split old optimizer state; skip
-                pass
+        # Restore runtime config that lives outside the network state_dicts.
+        if "manager_horizon" in hp:
+            self.manager_horizon = int(hp["manager_horizon"])
+        if "agent_player" in hp:
+            self.agent_player = int(hp["agent_player"])
+        return checkpoint.get("training_state")
 
     def evaluate(self, env, n_episodes: int = 10) -> Dict[str, float]:
         """
@@ -1569,6 +1960,10 @@ class FeudalRLAgent:
             self.reset_goal()
             ep_reward = 0.0
             done = False
+            # Initialize so the post-loop ``info.get("winner")`` lookup is
+            # well-defined even if the episode terminates with zero steps
+            # (env reset returning ``done=True`` is unusual but possible).
+            info: Dict = {}
 
             while not done:
                 if self.autoregressive_worker and hasattr(env, "structured_action_masks"):
@@ -1597,10 +1992,8 @@ class FeudalRLAgent:
 
 
 def compute_intrinsic_reward(
-    state: Dict[str, np.ndarray],
-    goal: np.ndarray,
     next_state: Dict[str, np.ndarray],
-    agent_player: int = 1,
+    goal: np.ndarray,
 ) -> float:
     """
     Compute intrinsic reward for worker based on goal achievement.
@@ -1612,10 +2005,8 @@ def compute_intrinsic_reward(
       3=expand:  reward spreading units toward goal location
 
     Args:
-        state: Current state observation
+        next_state: Resulting state observation (agent-relative).
         goal: (3,) array [goal_x, goal_y, goal_type]
-        next_state: Next state observation
-        agent_player: Which player the agent controls (1 or 2)
 
     Returns:
         Intrinsic reward
@@ -1628,9 +2019,8 @@ def compute_intrinsic_reward(
     # Channel layout from rl.observation: the first NUM_UNIT_TYPES channels
     # are the type one-hot, then [self, opp, _reserved, hp]. Likewise grid:
     # NUM_TILE_TYPES one-hot, then [self_owner, opp_owner, neutral, hp].
-    # ``agent_player`` no longer has to match the observation's perspective:
-    # we read the "self" / "opp" channels directly.
-    del agent_player
+    # ``agent_player`` is not needed: we read the "self" / "opp" channels
+    # directly off the agent-relative observation.
     self_owner_unit_ch = NUM_UNIT_TYPES + 0
     opp_owner_unit_ch = NUM_UNIT_TYPES + 1
     self_owner_tile_ch = NUM_TILE_TYPES + 0

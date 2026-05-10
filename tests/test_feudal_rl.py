@@ -393,22 +393,21 @@ class TestComputeIntrinsicReward:
         }
 
     def test_no_player_units(self):
-        state = self._make_state()
         next_state = self._make_state()
-        reward = compute_intrinsic_reward(state, np.array([0, 0, 0]), next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, np.array([0, 0, 0]))
         assert reward == -10.0
 
     def test_unit_at_goal(self):
         next_state = self._make_state(player_positions=[(3, 4)])
         goal = np.array([4, 3, 0])  # goal_x=4, goal_y=3
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # distance=0 -> distance_reward=0 + 5.0 bonus
         assert reward >= 5.0
 
     def test_distance_penalty(self):
         next_state = self._make_state(player_positions=[(0, 0)])
         goal = np.array([7, 7, 0])  # far away
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # min_distance = |0-7| + |0-7| = 14, distance_reward = -1.4
         assert reward < 0
 
@@ -416,7 +415,7 @@ class TestComputeIntrinsicReward:
         # Enemy near goal location
         next_state = self._make_state(player_positions=[(3, 4)], opponent_positions=[(3, 5)])
         goal = np.array([4, 3, 0])  # attack goal_type=0
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # Unit at goal (+5.0) + enemy within 3 tiles of goal (+1.0)
         assert reward >= 6.0
 
@@ -426,7 +425,7 @@ class TestComputeIntrinsicReward:
         # channel (first owner channel after the tile-type one-hot block).
         next_state["grid"][2, 2, NUM_TILE_TYPES + 0] = 1.0
         goal = np.array([2, 2, 1])  # defend goal_type=1
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # Unit at goal (+5.0) + defend bonus (+3.0) + own structure (+2.0)
         assert reward >= 10.0
 
@@ -441,7 +440,7 @@ class TestComputeIntrinsicReward:
         next_state["grid"][1, 1, :NUM_TILE_TYPES] = 0.0
         next_state["grid"][1, 1, building_idx] = 1.0
         goal = np.array([1, 1, 2])  # capture goal_type=2
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # Unit at goal (+5.0) + capturable structure (+4.0)
         assert reward >= 9.0
 
@@ -450,19 +449,16 @@ class TestComputeIntrinsicReward:
         positions = [(3, 3), (3, 4), (4, 3)]
         next_state = self._make_state(player_positions=positions)
         goal = np.array([3, 3, 3])  # expand goal_type=3
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=1)
+        reward = compute_intrinsic_reward(next_state, goal)
         # All 3 units within radius 4 -> +1.5 spread bonus
         assert reward > 0
 
-    def test_agent_player_2(self):
-        """Intrinsic reward respects the perspective baked into the obs.
-
-        With agent-relative channels, "player 2 from P2's perspective" ==
-        "self" — the helper just toggles the self channel. The
-        ``agent_player`` argument is no longer load-bearing for ownership
-        lookup (kept for back-compat / signature stability).
+    def test_perspective_agnostic(self):
+        """Intrinsic reward reads ``self`` / ``opp`` straight off the
+        agent-relative observation, so it doesn't need an ``agent_player``
+        argument.
         """
         next_state = self._make_state(player_positions=[(0, 0)])
         goal = np.array([0, 0, 0])
-        reward = compute_intrinsic_reward(self._make_state(), goal, next_state, agent_player=2)
+        reward = compute_intrinsic_reward(next_state, goal)
         assert reward >= 5.0

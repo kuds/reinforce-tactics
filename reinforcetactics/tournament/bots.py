@@ -391,7 +391,10 @@ def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDe
     Discover trained model bots from a directory.
 
     Args:
-        models_dir: Directory containing .zip model files
+        models_dir: Directory containing model files. Both ``.zip``
+            (Stable-Baselines3 PPO/MaskablePPO/A2C/DQN) and ``.pt``
+            (FeudalRLAgent checkpoints) are picked up — ModelBot's loader
+            branches on extension.
         test_models: If True, test that models can be loaded
 
     Returns:
@@ -404,8 +407,7 @@ def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDe
         logger.warning(f"Models directory not found: {models_dir}")
         return bots
 
-    # Find all .zip files
-    model_files = list(models_path.glob("*.zip"))
+    model_files = list(models_path.glob("*.zip")) + list(models_path.glob("*.pt"))
 
     for model_file in model_files:
         if not test_models or _test_model_file(model_file):
@@ -488,19 +490,25 @@ def _test_google_key(api_key: str) -> bool:
 
 
 def _test_model_file(model_path: Path) -> bool:
-    """Test if a model file can be loaded."""
+    """Test if a model file can be loaded.
+
+    Both SB3 ``.zip`` files (set ``bot.model``) and feudal ``.pt`` files
+    (set ``bot.feudal_agent``) are valid — the bot exposes ``is_feudal``
+    so we accept either. Mismatched grid dims are a load-time error and
+    will be reported in the warning log.
+    """
     try:
         from reinforcetactics.core.game_state import GameState
         from reinforcetactics.game.model_bot import ModelBot
         from reinforcetactics.utils.file_io import FileIO
 
-        # Create a dummy game state for testing
-        map_data = FileIO.load_map("maps/1v1/6x6_beginner.csv")
+        # Create a dummy game state for testing. The map file just needs to
+        # exist and be 1v1; ``beginner.csv`` is a 6x6 starter.
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
         dummy_state = GameState(map_data, num_players=2)
 
-        # Try to create the bot
         bot = ModelBot(dummy_state, player=2, model_path=str(model_path))
-        return bot.model is not None
+        return bot.model is not None or bot.is_feudal
     except Exception as e:
         logger.warning(f"Failed to load model {model_path.name}: {e}")
         return False

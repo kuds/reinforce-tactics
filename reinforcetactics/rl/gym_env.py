@@ -65,7 +65,156 @@ class StructuredActionMasks:
 # build attempt + one random action per owned unit per turn) -- a lighter,
 # more resilient stepping stone between ``"noop"`` and ``"random"``;
 # see configs/bootstrap.yaml.
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced", "random", "balanced_random", "noop"})
+# ``"self"`` is included so ``_opponent_turn`` calls ``self.opponent.take_turn()``
+# in self-play training. The training script provides the opponent bot itself
+# (a snapshot of the agent under training, typically wrapped by ModelBot)
+# via ``set_self_play_opponent_factory`` so reset() can rebind a fresh bot
+# to the new game_state on every episode.
+_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced", "random", "balanced_random", "noop", "self"})
+
+
+# Mapping from action key → (action_type_idx, source_key, target_key).
+# Module-level so both StrategyGameEnv and the free mask builders below
+# share the same canonical layout.
+_ACTION_KEY_MAP_MODULE = {
+    "create_unit": (0, None, ("x", "y")),
+    "move": (1, ("from_x", "from_y"), ("to_x", "to_y")),
+    "attack": (2, "attacker", "target"),
+    "seize": (3, "unit", "tile"),
+    "heal": (4, "healer", "target"),
+    "cure": (4, "curer", "target"),
+    "paralyze": (6, "paralyzer", "target"),
+    "haste": (7, "sorcerer", "target"),
+    "defence_buff": (8, "sorcerer", "target"),
+    "attack_buff": (9, "sorcerer", "target"),
+}
+
+
+def _action_pos(obj_or_dict, fields):
+    """Extract (x, y) from an action object (.x/.y) or a dict (fields tuple)."""
+    if isinstance(fields, str):
+        o = obj_or_dict[fields]
+        return o.x, o.y
+    return obj_or_dict[fields[0]], obj_or_dict[fields[1]]
+
+
+def build_per_dim_masks(
+    game_state: "GameState",
+    grid_width: int,
+    grid_height: int,
+    enabled_units: Optional[List[str]] = None,
+    flat_action_size: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Pure-function port of ``StrategyGameEnv._build_masks``.
+
+    Used by ``StrategyGameEnv`` itself and by ``ModelBot`` so a feudal /
+    flat-PPO checkpoint can be played in the GUI / tournament without
+    constructing a full ``StrategyGameEnv`` around the live ``game_state``.
+
+    Returns ``(flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask)``.
+    """
+    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
+    area = grid_width * grid_height
+    flat_size = flat_action_size if flat_action_size is not None else 10 * area
+
+    flat_mask = np.zeros(flat_size, dtype=np.float32)
+    at_mask = np.zeros(10, dtype=bool)
+    ut_mask = np.zeros(8, dtype=bool)
+    fx_mask = np.zeros(grid_width, dtype=bool)
+    fy_mask = np.zeros(grid_height, dtype=bool)
+    tx_mask = np.zeros(grid_width, dtype=bool)
+    ty_mask = np.zeros(grid_height, dtype=bool)
+
+    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+        for action in legal_actions.get(key, []):
+            at_mask[at_idx] = True
+            tx, ty = _action_pos(action, tgt_fields)
+            tx_mask[tx] = True
+            ty_mask[ty] = True
+            flat_idx = at_idx * area + ty * grid_width + tx
+            if 0 <= flat_idx < flat_mask.size:
+                flat_mask[flat_idx] = 1.0
+            if src_fields is not None:
+                sx, sy = _action_pos(action, src_fields)
+                fx_mask[sx] = True
+                fy_mask[sy] = True
+            else:
+                fx_mask[tx] = True
+                fy_mask[ty] = True
+            if key == "create_unit":
+                ut_mask[UNIT_TYPE_TO_IDX.get(action["unit_type"], 0)] = True
+
+    at_mask[5] = True
+    flat_mask[5 * area] = 1.0
+    fx_mask[0] = True
+    fy_mask[0] = True
+    tx_mask[0] = True
+    ty_mask[0] = True
+
+    if not ut_mask.any():
+        if enabled_units:
+            ut_mask[UNIT_TYPE_TO_IDX.get(enabled_units[0], 0)] = True
+        else:
+            ut_mask[0] = True
+
+    return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
+
+
+def build_structured_masks(
+    game_state: "GameState",
+    grid_width: int,
+    grid_height: int,
+) -> "StructuredActionMasks":
+    """Pure-function port of ``StrategyGameEnv._build_structured_masks``.
+
+    Same purpose as :func:`build_per_dim_masks` — a free function so external
+    callers (e.g. ``ModelBot`` for AR worker inference) can build masks
+    against an arbitrary live ``game_state`` without owning an env.
+    """
+    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
+    H, W = grid_height, grid_width
+    num_action_types = 10
+    num_unit_types = 8
+
+    atype = np.zeros(num_action_types, dtype=bool)
+    source = np.zeros((num_action_types, H, W), dtype=bool)
+    target: Dict[Tuple[int, int, int], np.ndarray] = {}
+    unit_type: Dict[Tuple[int, int], np.ndarray] = {}
+
+    def _mark_target(at_idx: int, sx: int, sy: int, tx: int, ty: int) -> None:
+        key = (at_idx, sx, sy)
+        m = target.get(key)
+        if m is None:
+            m = np.zeros((H, W), dtype=bool)
+            target[key] = m
+        m[ty, tx] = True
+
+    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+        for action in legal_actions.get(key, []):
+            tx, ty = _action_pos(action, tgt_fields)
+            if src_fields is not None:
+                sx, sy = _action_pos(action, src_fields)
+            else:
+                sx, sy = tx, ty
+            atype[at_idx] = True
+            source[at_idx, sy, sx] = True
+            _mark_target(at_idx, sx, sy, tx, ty)
+            if key == "create_unit":
+                ut_idx = UNIT_TYPE_TO_IDX.get(action["unit_type"], 0)
+                ukey = (sx, sy)
+                m = unit_type.get(ukey)
+                if m is None:
+                    m = np.zeros(num_unit_types, dtype=bool)
+                    unit_type[ukey] = m
+                m[ut_idx] = True
+
+    atype[5] = True
+    source[5, 0, 0] = True
+    end_t = np.zeros((H, W), dtype=bool)
+    end_t[0, 0] = True
+    target[(5, 0, 0)] = end_t
+
+    return StructuredActionMasks(atype=atype, source=source, target=target, unit_type=unit_type)
 
 
 class StrategyGameEnv(gym.Env):
@@ -176,6 +325,11 @@ class StrategyGameEnv(gym.Env):
         self.opponent_type = opponent
         self.opponent_kwargs: Dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
         self.opponent: Optional[Any] = None
+        # Self-play hook: when ``opponent_type == "self"``, reset() rebinds the
+        # opponent by calling ``factory(game_state, opponent_player) -> Bot``.
+        # The training script provides it via ``set_self_play_opponent_factory``.
+        # ``None`` keeps the slot empty (no-op opponent turn).
+        self._self_play_opponent_factory: Optional[Any] = None
         self.max_steps = max_steps
         self.current_step = 0
         self.hierarchical = hierarchical
@@ -566,6 +720,16 @@ class StrategyGameEnv(gym.Env):
         existing 6-vector action format.
         """
         return self._build_structured_masks()
+
+    def set_self_play_opponent_factory(self, factory) -> None:
+        """Register a callable used to (re)build the opponent in self-play.
+
+        ``factory(game_state, opponent_player) -> Bot`` is invoked from
+        :meth:`reset` whenever ``opponent_type == "self"``. Pass ``None`` to
+        clear. The bot returned must implement ``take_turn()`` against the
+        given ``game_state`` (i.e. SimpleBot / ModelBot / etc.).
+        """
+        self._self_play_opponent_factory = factory
 
     @staticmethod
     def encode_structured_action(
@@ -1207,6 +1371,19 @@ class StrategyGameEnv(gym.Env):
                 rng=random.Random(bot_seed),
                 **self.opponent_kwargs,
             )
+        elif self.opponent_type == "self":
+            # Self-play: the training script supplies a callable that builds
+            # an opponent bot bound to the freshly-reset game_state. Without
+            # one we leave the slot empty — _opponent_turn safely no-ops if
+            # ``self.opponent is None``.
+            if self._self_play_opponent_factory is not None:
+                try:
+                    self.opponent = self._self_play_opponent_factory(self.game_state, opponent_player)
+                except Exception as exc:  # pragma: no cover — defensive
+                    logger.warning("self-play opponent factory raised %s; running with no opponent", exc)
+                    self.opponent = None
+            else:
+                self.opponent = None
         else:
             self.opponent = None
 
