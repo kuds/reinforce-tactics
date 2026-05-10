@@ -21,7 +21,6 @@ from reinforcetactics.rl.purchase_exploration import (
     substitute_purchase_unit_types,
 )
 
-
 # ---------------------------------------------------------------------------
 # Pure substitution function
 # ---------------------------------------------------------------------------

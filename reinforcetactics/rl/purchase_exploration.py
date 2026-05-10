@@ -34,7 +34,6 @@ from typing import Any, Optional, Sequence
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 
-
 # Layout of the MultiDiscrete action vector used by ``StrategyGameEnv``:
 # [action_type, unit_type, from_x, from_y, to_x, to_y]. ``create_unit``
 # is action_type 0 and ``unit_type`` lives in slot 1.
