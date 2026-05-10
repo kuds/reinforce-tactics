@@ -1180,33 +1180,58 @@ class MediumBot(BotUnitMixin):
 
 
 class MixedBot(BotUnitMixin):
-    """Curriculum bridge between SimpleBot and MediumBot.
+    """Curriculum bridge between two scripted bots.
 
-    On construction, samples one of ``SimpleBot`` or ``MediumBot`` using
-    ``p_medium`` (probability of choosing MediumBot, in ``[0, 1]``) and
+    On construction, samples one of two bots (``easy`` or ``hard``) using
+    ``p_hard`` (probability of choosing ``hard``, in ``[0, 1]``) and
     delegates ``take_turn()`` to that instance for the lifetime of this
     MixedBot. The env reconstructs its opponent on every ``reset()``
-    (gym_env.py:reset), so the choice is effectively resampled per episode
-    -- one episode is fully Simple or fully Medium, never a mid-episode
-    switch -- which preserves MediumBot's multi-turn strategy adaptation
-    on the episodes where it plays.
+    (gym_env.py:reset), so the choice is effectively resampled per
+    episode -- one episode is fully ``easy`` or fully ``hard``, never a
+    mid-episode switch -- which preserves multi-turn strategy adaptation
+    on the episodes where the harder bot plays.
 
-    Use as a curriculum stepping stone between ``simple`` and ``medium``
-    stages by stepping ``p_medium`` (e.g. 0.25 -> 0.50 -> 0.75 -> 1.0)
-    via ``opponent_kwargs`` in configs/bootstrap.yaml.
+    Bot type names: ``simple`` (SimpleBot), ``medium`` (MediumBot),
+    ``advanced`` (AdvancedBot). Defaults bridge ``simple`` -> ``medium``.
+
+    Use as a curriculum stepping stone via ``opponent_kwargs`` in
+    configs/bootstrap.yaml, e.g.
+    ``{easy: simple, hard: medium, p_hard: 0.5}`` for the simple->medium
+    bridge or ``{easy: medium, hard: advanced, p_hard: 0.5}`` for the
+    medium->advanced bridge.
     """
 
-    def __init__(self, game_state, player: int = 2, p_medium: float = 0.5, rng=None):
+    _BOT_NAMES = ("simple", "medium", "advanced")
+
+    def __init__(
+        self,
+        game_state,
+        player: int = 2,
+        easy: str = "simple",
+        hard: str = "medium",
+        p_hard: float = 0.5,
+        rng=None,
+    ):
         self.game_state = game_state
         self.bot_player = player
-        self.p_medium = p_medium
+        self.easy = easy
+        self.hard = hard
+        self.p_hard = p_hard
         # Both ``random`` and ``random.Random()`` instances expose ``.random``.
         self._rng = rng if rng is not None else random
-        self.use_medium = self._rng.random() < p_medium
-        if self.use_medium:
-            self._inner = MediumBot(game_state, player=player)
-        else:
-            self._inner = SimpleBot(game_state, player=player)
+        self.use_hard = self._rng.random() < p_hard
+        chosen = hard if self.use_hard else easy
+        self._inner = self._build_inner(chosen, game_state, player)
+
+    @classmethod
+    def _build_inner(cls, name: str, game_state, player: int):
+        if name == "simple":
+            return SimpleBot(game_state, player=player)
+        if name == "medium":
+            return MediumBot(game_state, player=player)
+        if name == "advanced":
+            return AdvancedBot(game_state, player=player)
+        raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
 
     def take_turn(self):
         self._inner.take_turn()

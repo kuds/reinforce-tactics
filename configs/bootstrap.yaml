@@ -243,15 +243,17 @@ curriculum:
 
     - name: beginner_mixed_50
       # Bridge stage between simple and medium. MixedBot samples
-      # SimpleBot or MediumBot per episode with p_medium=0.5, so half the
+      # SimpleBot or MediumBot per episode with p_hard=0.5, so half the
       # episodes mirror beginner_simple (which the policy just cleared at
       # 0.70 WR) and half preview beginner_medium. Mirrors the
-      # random_10 -> 15 -> 20 ladder: thresholds and budgets sit between
-      # the flanking stages (0.675 WR, 3.5M steps).
+      # random_10 -> 15 -> 20 ladder: budget sits halfway between the
+      # flanking stages (3.5M steps); threshold held at 0.70 to match.
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs:
-        p_medium: 0.5
+        easy: simple
+        hard: medium
+        p_hard: 0.5
       promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_500_000
@@ -271,13 +273,34 @@ curriculum:
       max_turns: 100
       ent_coef: 0.05
 
+    - name: beginner_mixed_med_adv_50
+      # Bridge stage between medium and advanced. MixedBot samples
+      # MediumBot or AdvancedBot per episode with p_hard=0.5: half the
+      # episodes mirror beginner_medium (just cleared at 0.70 WR) and
+      # half preview beginner_advanced. Threshold (0.65) and budget
+      # (4.5M) sit halfway between the flanking stages, mirroring the
+      # simple -> mixed_50 -> medium spacing.
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: medium
+        hard: advanced
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 4_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 100
+      ent_coef: 0.05
+
     - name: beginner_advanced
       # AdvancedBot extends MediumBot with map analysis and enhanced
-      # tactics (bot.py:1215). Continues the descending-threshold /
-      # rising-budget pattern: simple 0.70/3M -> mixed_50 0.675/3.5M ->
-      # medium 0.65/4M -> advanced 0.60/5M. The extra ~1M budget
-      # accounts for AdvancedBot's tighter play forcing the policy to
-      # convert draws into wins on the same map geometry.
+      # tactics (bot.py). Caps the descending-threshold / rising-budget
+      # ladder: simple 0.70/3M -> mixed_50 0.70/3.5M -> medium 0.70/4M ->
+      # mixed_med_adv_50 0.65/4.5M -> advanced 0.60/5M. The extra ~1M
+      # budget accounts for AdvancedBot's tighter play forcing the
+      # policy to convert draws into wins on the same map geometry.
       map_file: maps/1v1/beginner.csv
       opponent: advanced
       promotion_win_rate: 0.60
