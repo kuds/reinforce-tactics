@@ -304,6 +304,14 @@ class EvalConfig:
     eval_freq: int = 10000
     n_eval_episodes: int = 10
     checkpoint_freq: int = 50000
+    # Offset added to ``cfg.seed`` when constructing the eval env and when
+    # seeding per-episode resets inside ``PeriodicEvalCallback``. Keeps eval
+    # episodes from sharing seeds with the parallel training envs (which use
+    # ``cfg.seed + rank`` for ``rank in range(n_envs)``) and from colliding
+    # with the per-episode eval seeds emitted as
+    # ``eval_seed_base + 1000 * eval_block + episode_idx``. The default leaves
+    # ample headroom for any reasonable n_envs and total_timesteps.
+    seed_offset: int = 1_000_000
 
 
 @dataclass

@@ -138,6 +138,12 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
 def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
     from reinforcetactics.rl.masking import make_maskable_env
 
+    # Offset the eval env's construction seed away from the training envs'
+    # range (``cfg.seed + rank``) so eval episodes don't deterministically
+    # share map / opponent RNG state with concurrent training rollouts. Per
+    # eval block ``PeriodicEvalCallback`` reseeds the env on every reset
+    # via ``evaluate_model(seed=...)`` -- this offset matters mainly for
+    # the initial ``env.reset(seed=...)`` inside ``make_maskable_env``.
     return make_maskable_env(
         map_file=stage.map_file,
         opponent=stage.opponent,
@@ -147,7 +153,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
-        seed=cfg.seed,
+        seed=cfg.seed + cfg.eval.seed_offset,
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
     )
@@ -457,6 +463,10 @@ def run_curriculum(
             eval_env=eval_env,
             eval_freq=cfg.eval.eval_freq,
             n_eval_episodes=stage.n_eval_episodes,
+            # Seed eval episodes far above the training envs' range so a
+            # given (eval_block, episode_idx) reproduces across runs and
+            # never collides with a training rollout's seed.
+            eval_seed_base=cfg.seed + cfg.eval.seed_offset,
             save_dir=stage_dir,
         )
         promote_cb = PromotionCallback(

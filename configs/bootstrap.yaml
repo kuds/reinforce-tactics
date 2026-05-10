@@ -1,14 +1,23 @@
-# PPO bootstrap curriculum.
+# PPO bootstrap curriculum, hardware-tuned for Google Colab on an L4 GPU
+# (high-RAM tier, 12 vCPUs verified via ``!nproc``).
 #
 # Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
 # Stages live under curriculum.stages; if a stage exhausts its
 # `max_timesteps` without promoting, the runner raises CurriculumStalled.
+#
+# Hardware tuning (env.n_envs / env.use_subprocess / ppo.batch_size /
+# eval.eval_freq / eval.n_eval_episodes) targets the L4 + 12-vCPU Colab
+# tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
 total_timesteps: 14_000_000  # informational; per-stage budgets drive run length
 
 env:
-  n_envs: 4
+  # 8 envs leaves headroom on a 12-vCPU machine for the main process
+  # (PPO update + eval) without contention. SubprocVecEnv is required
+  # for real CPU parallelism with n_envs > 1.
+  n_envs: 8
+  use_subprocess: true
   max_steps: 400
   max_turns: 20
   enabled_units: [W, M, A]
@@ -59,8 +68,8 @@ env:
 
 ppo:
   learning_rate: 3.0e-4
-  n_steps: 2048
-  batch_size: 64
+  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
+  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
@@ -74,7 +83,12 @@ ppo:
       vf: [256, 256]
 
 eval:
-  eval_freq: 50_000
+  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
+  # fires ~once per update. Per-stage CurriculumStage.n_eval_episodes
+  # overrides this default for stages that need tighter CIs.
+  eval_freq: 20_000
+  n_eval_episodes: 80
 
 curriculum:
   stages:
@@ -84,7 +98,7 @@ curriculum:
       promotion_win_rate: 0.90
       patience: 1
       max_timesteps: 1_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: starter_simple
       map_file: maps/1v1/starter.csv
@@ -92,7 +106,7 @@ curriculum:
       promotion_win_rate: 0.90
       patience: 1
       max_timesteps: 2_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: starter_medium
       map_file: maps/1v1/starter.csv
@@ -100,7 +114,7 @@ curriculum:
       promotion_win_rate: 0.75
       patience: 1
       max_timesteps: 3_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: beginner_balanced_random
       map_file: maps/1v1/beginner.csv
@@ -108,7 +122,7 @@ curriculum:
       promotion_win_rate: 0.85
       patience: 2
       max_timesteps: 1_500_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -129,7 +143,7 @@ curriculum:
       promotion_win_rate: 0.75
       patience: 2
       max_timesteps: 1_500_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -146,11 +160,15 @@ curriculum:
       map_file: maps/1v1/beginner.csv
       opponent: random
       opponent_kwargs:
-        max_actions: 20
-      promotion_win_rate: 0.75
+        # Stepping from max_actions=10 (prev stage, 98% WR) straight to 20
+        # let the opponent survive long enough that episodes ran out the
+        # max_turns clock as draws (W/L/D ~30/0/30, plateauing at 40-60%
+        # WR for the full budget). 15 is a softer bridge between stages.
+        max_actions: 15
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -173,10 +191,10 @@ curriculum:
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv
       opponent: simple
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.70
       patience: 2
-      max_timesteps: 2_500_000
-      n_eval_episodes: 60
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
@@ -192,7 +210,7 @@ curriculum:
       promotion_win_rate: 0.65
       patience: 2
       max_timesteps: 4_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
