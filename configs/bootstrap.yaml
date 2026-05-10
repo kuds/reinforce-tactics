@@ -160,7 +160,11 @@ curriculum:
       map_file: maps/1v1/beginner.csv
       opponent: random
       opponent_kwargs:
-        max_actions: 20
+        # Stepping from max_actions=10 (prev stage, 98% WR) straight to 20
+        # let the opponent survive long enough that episodes ran out the
+        # max_turns clock as draws (W/L/D ~30/0/30, plateauing at 40-60%
+        # WR for the full budget). 15 is a softer bridge between stages.
+        max_actions: 15
       promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
