@@ -20,19 +20,18 @@ env:
   map_file: null
   opponent: bot
   max_steps: 500
-  # 12 envs on a 12-vCPU machine slightly oversubscribes when the main
-  # process is doing the PPO update, but Linux scheduling handles it
-  # cleanly and the alternative (n_envs=10, two cores idle) measurably
-  # underuses CPU during rollout.
-  n_envs: 12
+  # 8 envs leaves headroom on a 12-vCPU machine for the main process
+  # (PPO update + eval) without contention. Going to 12 oversubscribes
+  # during the update phase; the throughput gain is small and noisier.
+  n_envs: 8
   use_subprocess: true      # required for real CPU parallelism with n_envs > 1
   action_space_type: multi_discrete
   fog_of_war: false
 
 ppo:
   learning_rate: 3.0e-4
-  n_steps: 2048             # 2048 * 12 = 24576 transitions per PPO update
-  batch_size: 512           # bigger minibatches -- L4 absorbs them and you have ~24k samples
+  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
+  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
@@ -44,12 +43,12 @@ ppo:
   device: auto              # picks cuda on L4
 
 eval:
-  # eval_freq is in env steps across all sub-envs. With n_envs=12 and
-  # n_steps=2048, one PPO update = 24576 env steps, so eval_freq=25000
+  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
   # fires ~once per update. Tighter than that wastes env-stepping budget
-  # on eval; looser than ~75000 makes the PromotionCallback streak slow
+  # on eval; looser than ~50000 makes the PromotionCallback streak slow
   # to react.
-  eval_freq: 25000
+  eval_freq: 20000
   # 30 episodes at the 90% promotion threshold has roughly a +/-10%
   # binomial CI -- false promotions and false stalls are both common at
   # n_eval_episodes=10. 50 is a good compromise between confidence and
