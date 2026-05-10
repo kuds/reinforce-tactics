@@ -10,7 +10,7 @@
 # tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 14_000_000  # informational; per-stage budgets drive run length
+total_timesteps: 22_000_000  # informational; per-stage budgets drive run length
 
 env:
   # 8 envs leaves headroom on a 12-vCPU machine for the main process
@@ -156,14 +156,16 @@ curriculum:
         seize_progress: 50.0
         capture: 2000.0
 
-    - name: beginner_random_20
+    - name: beginner_random_15
       map_file: maps/1v1/beginner.csv
       opponent: random
       opponent_kwargs:
-        # Stepping from max_actions=10 (prev stage, 98% WR) straight to 20
-        # let the opponent survive long enough that episodes ran out the
-        # max_turns clock as draws (W/L/D ~30/0/30, plateauing at 40-60%
-        # WR for the full budget). 15 is a softer bridge between stages.
+        # Bridge stage between random_10 (max_actions=10, ~98% WR) and
+        # random_20 (max_actions=20). Stepping straight from 10 to 20 in
+        # an earlier run let the opponent survive long enough that episodes
+        # ran out the max_turns clock as draws (W/L/D ~30/0/30, plateauing
+        # at 40-60% WR). Splitting into 10 -> 15 -> 20 gives the policy a
+        # smoother difficulty ramp.
         max_actions: 15
       promotion_win_rate: 0.70
       patience: 2
@@ -182,6 +184,37 @@ curriculum:
       # rather than introduced here for the first time. The stage's own
       # ``capture: 2000`` remains as a fallback for any structure type
       # that isn't covered by a per-type key (none currently exist).
+      reward_config:
+        win_by_hq_capture: 3000.0
+        win_by_elimination: 3000.0
+        seize_progress: 50.0
+        capture: 2000.0
+
+    - name: beginner_random_20
+      map_file: maps/1v1/beginner.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      # Hardest random stage. Lower bar than random_15 (0.65 vs 0.70)
+      # because run 4 plateaued at ~62% WR against this opponent on the
+      # prior reward shape and was still budget-limited; 0.65 leaves room
+      # for the policy to clear without requiring runs to outperform that
+      # baseline by more than a few points.
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 100
+      # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
+      # this is the longest stage at 3M steps and the policy needs to
+      # commit during the last ~1M to convert draws into wins. A 0.03
+      # floor was still injecting meaningful exploration noise at the
+      # end of run 4's budget when the policy was structurally tying.
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
       reward_config:
         win_by_hq_capture: 3000.0
         win_by_elimination: 3000.0
