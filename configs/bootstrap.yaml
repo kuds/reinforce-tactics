@@ -131,24 +131,27 @@ curriculum:
       map_file: maps/1v1/starter.csv
       opponent: random
       promotion_win_rate: 0.90
-      patience: 1
+      patience: 2
       max_timesteps: 1_000_000
+      ent_coef: 0.10
       n_eval_episodes: 80
 
     - name: starter_simple
       map_file: maps/1v1/starter.csv
       opponent: simple
       promotion_win_rate: 0.90
-      patience: 1
+      patience: 2
       max_timesteps: 2_000_000
+      ent_coef: 0.10
       n_eval_episodes: 80
 
     - name: starter_medium
       map_file: maps/1v1/starter.csv
       opponent: medium
-      promotion_win_rate: 0.75
-      patience: 1
+      promotion_win_rate: 0.90
+      patience: 2
       max_timesteps: 3_000_000
+      ent_coef: 0.10
       n_eval_episodes: 80
 
     - name: beginner_balanced_random
