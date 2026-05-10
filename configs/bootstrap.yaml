@@ -215,11 +215,6 @@ curriculum:
         start: 0.10
         end: 0.01
         schedule: linear
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
 
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv
