@@ -32,12 +32,19 @@ env:
     # MLP's capacity. Ratios between scaled keys are preserved (a
     # uniform divide), so the curriculum's inductive biases (building >
     # HQ > tower; terminal >> shaping; ~1% turn-penalty pressure
-    # relative to a win) carry over unchanged. The small per-step
-    # potential-shaping signals (income_diff, unit_diff,
-    # structure_control) are intrinsically small -- they're fed
-    # through a potential function (gym_env.py:890) that telescopes
-    # across an episode -- so they're left at their original values;
-    # dividing them further would push them into gradient noise.
+    # relative to a win) carry over unchanged.
+    #
+    # The per-step potential-shaping signals (income_diff, unit_diff,
+    # structure_control) are fed through a potential function
+    # (gym_env.py:890) and are policy-invariant under discounted
+    # return, but the *undiscounted* eval reward sum carries a bias
+    # term -(1-gamma) * sum_t Phi(s_t) that scales with episode
+    # length * average Phi. On long beginner episodes (~400 steps)
+    # this made eval reward go negative on 100% WR, because Phi was
+    # dominated by ``structure_control`` (sticky throughout the game,
+    # unlike unit counts which fluctuate). Lowering ``structure_control``
+    # to its env default of 1.0 cuts the bias ~10x while leaving the
+    # policy's optimum unchanged.
     win_by_hq_capture: 50.0
     win_by_elimination: 10.0
     win: 50.0
@@ -45,7 +52,7 @@ env:
     draw: -50.0
     income_diff: 0.5
     unit_diff: 1.0
-    structure_control: 10.0
+    structure_control: 1.0
     create_unit: 0.0
     move: 0.0
     damage_scale: 0.0
