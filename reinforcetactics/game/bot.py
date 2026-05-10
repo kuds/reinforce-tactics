@@ -1452,6 +1452,33 @@ class AdvancedBot(MediumBot):
         "S": {"M": 0.04, "A": 0.02},
     }
 
+    # Game phase identifiers. EXPAND prioritises tempo (Warrior spam, willing
+    # to march multi-turn for captures, refuse chip-trade combat); CONSOLIDATE
+    # restores the existing balanced behaviour. Hysteresis (see take_turn) needs
+    # PHASE_TRANSITION_TURNS consecutive turns of agreement before flipping,
+    # so the bot doesn't oscillate when neutral_pct hovers around the threshold.
+    PHASE_EXPAND = "EXPAND"
+    PHASE_CONSOLIDATE = "CONSOLIDATE"
+
+    # If at least this fraction of capturable structures are still neutral,
+    # we're in EXPAND. Picked at 0.30 so even maps with many neutrals (eg
+    # tower_rush at 32 neutral towers) leave EXPAND once both sides have
+    # eaten their fair share.
+    EXPAND_NEUTRAL_THRESHOLD = 0.30
+    PHASE_TRANSITION_TURNS = 2
+
+    # Floor for the Warrior target ratio while in EXPAND. Stops the matrix
+    # from buying expensive ranged comp during the early-game tempo race
+    # which MediumBot dominates with cheap Warrior spam.
+    EXPAND_WARRIOR_FLOOR = 0.50
+
+    # Attack-value gates for Priority 7 (move-to-attack). EXPAND demands a
+    # genuinely good trade (we'd rather walk past and capture); CONSOLIDATE
+    # accepts moderately bad trades to break stalls. Existing tournament
+    # data was captured with the -500 CONSOLIDATE value.
+    EXPAND_ATTACK_THRESHOLD = 200
+    CONSOLIDATE_ATTACK_THRESHOLD = -500
+
     def __init__(self, game_state, player=2):
         """
         Initialize the AdvancedBot.
@@ -1469,6 +1496,59 @@ class AdvancedBot(MediumBot):
         self.forest_positions = []  # Forests (for Rogue evade bonus)
         self.turn_count = 0
 
+        # Game-phase state. ``phase`` is None until take_turn runs the first
+        # time so direct callers (tests, REPL probing) see the unbiased
+        # composition; the live bot updates it every turn.
+        self.phase: Optional[str] = None
+        self._pending_phase: Optional[str] = None
+        self._pending_phase_streak = 0
+
+    def compute_target_phase(self) -> str:
+        """Phase the *current game state* suggests we should be in.
+
+        EXPAND while plenty of neutral structures remain to be captured;
+        CONSOLIDATE once the map has mostly been claimed. Hysteresis is
+        applied by take_turn rather than here.
+        """
+        total_capturable = 0
+        neutral_capturable = 0
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if not tile.is_capturable():
+                    continue
+                total_capturable += 1
+                if tile.player is None:
+                    neutral_capturable += 1
+        if total_capturable == 0:
+            return self.PHASE_CONSOLIDATE
+        neutral_pct = neutral_capturable / total_capturable
+        return self.PHASE_EXPAND if neutral_pct > self.EXPAND_NEUTRAL_THRESHOLD else self.PHASE_CONSOLIDATE
+
+    def update_phase(self) -> None:
+        """Advance the phase state machine using ``compute_target_phase`` and
+        a hysteresis counter so a one-turn fluctuation can't flip phases."""
+        target = self.compute_target_phase()
+        if self.phase is None:
+            # Cold start: adopt the suggested phase immediately so the first
+            # turn's purchases see the right bias.
+            self.phase = target
+            self._pending_phase = None
+            self._pending_phase_streak = 0
+            return
+        if target == self.phase:
+            self._pending_phase = None
+            self._pending_phase_streak = 0
+            return
+        if target == self._pending_phase:
+            self._pending_phase_streak += 1
+            if self._pending_phase_streak >= self.PHASE_TRANSITION_TURNS:
+                self.phase = target
+                self._pending_phase = None
+                self._pending_phase_streak = 0
+        else:
+            self._pending_phase = target
+            self._pending_phase_streak = 1
+
     def take_turn(self):
         """Execute the bot's turn with enhanced strategy."""
         self.turn_count += 1
@@ -1477,6 +1557,8 @@ class AdvancedBot(MediumBot):
         self._interrupt_assigned = set()
         # Per-turn capture-target dedup; see MediumBot.pick_capture_target.
         self._capture_assigned = set()
+        # Phase update before any purchase/movement decisions read self.phase.
+        self.update_phase()
 
         # Phase 1: Analyze map on first turn
         if not self.map_analyzed:
@@ -1533,12 +1615,29 @@ class AdvancedBot(MediumBot):
                     if counter_type in enabled_targets:
                         enabled_targets[counter_type] += weight * count
 
-        # Redistribute disabled unit ratios proportionally
+        # Renormalise to 1.0 first so any phase bias below operates on
+        # comparable units.
         if enabled_targets:
             total_enabled = sum(enabled_targets.values())
             if total_enabled > 0:
-                # Normalize to 1.0
                 enabled_targets = {k: v / total_enabled for k, v in enabled_targets.items()}
+
+        # EXPAND phase: floor the Warrior ratio so we win the early tempo
+        # race. Other types are scaled proportionally to absorb the shift.
+        # Skipped when phase is None (e.g. tests poking the bot before any
+        # take_turn) or W is disabled.
+        if self.phase == self.PHASE_EXPAND and "W" in enabled_targets:
+            current_w = enabled_targets["W"]
+            if current_w < self.EXPAND_WARRIOR_FLOOR:
+                others_total = sum(v for k, v in enabled_targets.items() if k != "W")
+                if others_total > 0:
+                    scale = (1.0 - self.EXPAND_WARRIOR_FLOOR) / others_total
+                    enabled_targets = {
+                        k: (self.EXPAND_WARRIOR_FLOOR if k == "W" else v * scale)
+                        for k, v in enabled_targets.items()
+                    }
+                else:
+                    enabled_targets = {"W": 1.0}
 
         return enabled_targets
 
@@ -1763,6 +1862,10 @@ class AdvancedBot(MediumBot):
         # adds income next turn -- and the previous Priority 8-only policy
         # let units sit trading attacks while free buildings sat next door,
         # which is the dominant AdvancedBot stalemate failure mode.
+        #
+        # In EXPAND phase we additionally accept multi-turn marches: walking
+        # toward a distant capture beats parking next to one enemy and chip-
+        # trading attacks while the rest of the map gets snapped up.
         target_structure = self.pick_capture_target(unit)
         if target_structure is not None:
             structure_pos = (target_structure.x, target_structure.y)
@@ -1774,6 +1877,16 @@ class AdvancedBot(MediumBot):
                     self.game_state.move_unit(unit, structure_pos[0], structure_pos[1])
                 if (unit.x, unit.y) == structure_pos:
                     self.game_state.seize(unit)
+                    if unit.can_move or unit.can_attack:
+                        self.act_with_unit_enhanced(unit, _depth + 1)
+                    return
+            elif self.phase == self.PHASE_EXPAND:
+                self._capture_assignments().add(structure_pos)
+                target_pos = self.find_best_move_position(unit, structure_pos[0], structure_pos[1])
+                if target_pos is not None:
+                    self.game_state.move_unit(unit, target_pos[0], target_pos[1])
+                    if (unit.x, unit.y) == structure_pos:
+                        self.game_state.seize(unit)
                     if unit.can_move or unit.can_attack:
                         self.act_with_unit_enhanced(unit, _depth + 1)
                     return
@@ -1837,7 +1950,10 @@ class AdvancedBot(MediumBot):
                         best_score = value
                         best_target = enemy
 
-            if best_target and best_score > -500:  # More aggressive threshold
+            attack_threshold = (
+                self.EXPAND_ATTACK_THRESHOLD if self.phase == self.PHASE_EXPAND else self.CONSOLIDATE_ATTACK_THRESHOLD
+            )
+            if best_target and best_score > attack_threshold:
                 self.game_state.attack(unit, best_target)
                 if unit.can_move or unit.can_attack:
                     self.act_with_unit_enhanced(unit, _depth + 1)

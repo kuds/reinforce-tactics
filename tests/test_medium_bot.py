@@ -591,9 +591,72 @@ class TestAdvancedBotCounterMatrix:
 
     def test_no_enemies_matches_baseline(self, simple_game):
         bot = AdvancedBot(simple_game, player=2)
+        # Phase only takes effect after take_turn / update_phase. Calling the
+        # function directly on a fresh bot uses the unbiased baseline.
         targets = bot.get_dynamic_composition_targets()
-        # With no enemies the function should reduce to the renormalised
-        # FULL_COMPOSITION_TARGETS.
         baseline_sum = sum(bot.FULL_COMPOSITION_TARGETS.values())
         for unit_type, weight in bot.FULL_COMPOSITION_TARGETS.items():
             assert abs(targets[unit_type] - weight / baseline_sum) < 1e-6
+
+
+class TestAdvancedBotPhases:
+    """Phase detection plus EXPAND modifiers for composition / capture."""
+
+    def test_phase_starts_unset(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        assert bot.phase is None
+
+    def test_compute_target_phase_expand_when_neutrals_dominant(self):
+        """tower_rush has 32 neutral towers + 14 neutral buildings out of
+        ~60 capturable -- well above the 30% threshold."""
+        map_data = FileIO.load_map("maps/1v1/tower_rush.csv")
+        game = GameState(map_data, num_players=2)
+        bot = AdvancedBot(game, player=2)
+        assert bot.compute_target_phase() == bot.PHASE_EXPAND
+
+    def test_compute_target_phase_consolidate_when_few_neutrals(self):
+        """beginner has 2 neutral towers vs 4 owned buildings -- 33% (just
+        over threshold). last_stand has 8 neutral towers / 12 capturable =
+        67%, but skirmish has 0 neutrals."""
+        map_data = FileIO.load_map("maps/1v1/skirmish.csv")
+        game = GameState(map_data, num_players=2)
+        bot = AdvancedBot(game, player=2)
+        assert bot.compute_target_phase() == bot.PHASE_CONSOLIDATE
+
+    def test_update_phase_cold_start_adopts_target(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        bot.update_phase()
+        # simple_game has 0 neutrals (only owned HQs and buildings) so
+        # CONSOLIDATE wins from a cold start.
+        assert bot.phase == bot.PHASE_CONSOLIDATE
+
+    def test_update_phase_hysteresis_ignores_one_off_flip(self, simple_game):
+        """Setting the bot in EXPAND and then exposing it to a single
+        CONSOLIDATE-suggesting state must NOT flip phases on a single turn."""
+        bot = AdvancedBot(simple_game, player=2)
+        bot.phase = bot.PHASE_EXPAND
+        # simple_game has 0 neutrals -> compute_target_phase = CONSOLIDATE.
+        bot.update_phase()
+        # First differing observation only sets _pending_phase, not phase.
+        assert bot.phase == bot.PHASE_EXPAND
+        assert bot._pending_phase == bot.PHASE_CONSOLIDATE
+        # Second consecutive differing observation completes the transition.
+        bot.update_phase()
+        assert bot.phase == bot.PHASE_CONSOLIDATE
+
+    def test_expand_phase_floors_warrior_target(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        bot.phase = bot.PHASE_EXPAND
+        targets = bot.get_dynamic_composition_targets()
+        # W must hit at least the floor while everything else absorbs the
+        # shift.
+        assert targets["W"] >= bot.EXPAND_WARRIOR_FLOOR - 1e-9
+        assert abs(sum(targets.values()) - 1.0) < 1e-6
+
+    def test_consolidate_phase_does_not_floor_warrior(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        bot.phase = bot.PHASE_CONSOLIDATE
+        targets = bot.get_dynamic_composition_targets()
+        # No EXPAND bias -- W stays at its baseline ratio.
+        baseline_w = bot.FULL_COMPOSITION_TARGETS["W"] / sum(bot.FULL_COMPOSITION_TARGETS.values())
+        assert abs(targets["W"] - baseline_w) < 1e-6
