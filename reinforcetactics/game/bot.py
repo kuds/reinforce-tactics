@@ -112,6 +112,33 @@ class BotUnitMixin:
             counts[u.type] = counts.get(u.type, 0) + 1
         return counts
 
+    def is_actively_capturing(self, unit) -> bool:
+        """True if ``unit`` stands on a capturable enemy/neutral tile that
+        has already been damaged (i.e. it is mid-seize). Used to lock such
+        units out of the multi-unit coordination passes that would
+        otherwise pull them off the structure to attack a killable enemy
+        and forfeit the capture progress."""
+        tile = self.game_state.grid.get_tile(unit.x, unit.y)
+        if tile is None or not tile.is_capturable():
+            return False
+        if tile.player == self.bot_player:
+            return False
+        return tile.health < tile.max_health
+
+    def continue_active_seizes(self, units) -> None:
+        """Seize-in-place for any unit that is mid-capture, before the
+        multi-unit coordination passes (coordinate_attacks etc) get a chance
+        to drag them off. Mirrors the first check in act_with_unit /
+        act_with_unit_enhanced; consolidating it here keeps the per-unit
+        logic and the multi-unit logic agreeing on what counts as committed
+        capture progress.
+        """
+        for unit in units:
+            if not (unit.can_move or unit.can_attack):
+                continue
+            if self.is_actively_capturing(unit):
+                self.game_state.seize(unit)
+
     def find_best_move_position(self, unit, target_x, target_y):
         """Find the best position to move towards a target."""
         reachable = self.get_reachable(unit)
@@ -944,6 +971,11 @@ class MediumBot(BotUnitMixin):
             if u.player == self.bot_player and (u.can_move or u.can_attack) and not u.is_paralyzed()
         ]
 
+        # Lock in any in-progress captures before coordinate_attacks gets to
+        # pull units off their tower. seize() flips can_move/can_attack to
+        # False, so the subsequent steps will skip those units automatically.
+        self.continue_active_seizes(bot_units)
+
         # First, coordinate attacks to kill targets
         self.coordinate_attacks(bot_units)
 
@@ -1771,6 +1803,11 @@ class AdvancedBot(MediumBot):
             for u in self.game_state.units
             if u.player == self.bot_player and (u.can_move or u.can_attack) and not u.is_paralyzed()
         ]
+
+        # Lock in any in-progress captures before any of the coordination
+        # passes (Knight charge / focus-fire / per-unit) can drag those
+        # units off their tower and forfeit the half-finished seize.
+        self.continue_active_seizes(bot_units)
 
         # Step 1: Knights charge first so the bonus isn't burned on a chip-kill
         # in coordinated focus fire.
