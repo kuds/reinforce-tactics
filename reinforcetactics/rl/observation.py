@@ -36,7 +36,7 @@ and MaskablePPO already pulls them via ``env.action_masks()``. The
 included in the returned dict only when explicitly provided.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -60,6 +60,7 @@ def build_observation(
     perspective_player: int,
     action_mask: Optional[np.ndarray] = None,
     fog_of_war: Optional[bool] = None,
+    pad_to: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, np.ndarray]:
     """Build an RL observation from ``perspective_player``'s viewpoint.
 
@@ -75,6 +76,17 @@ def build_observation(
             space does not include this key — gym_env passes ``None``.
         fog_of_war: Override for the FOW flag. When ``None``, falls back to
             ``game_state.fog_of_war``.
+        pad_to: Optional ``(pad_h, pad_w)`` target shape for the spatial
+            tensors. When set, ``grid`` / ``units`` (and ``visibility`` if
+            present) are zero-padded so the real map sits at the top-left
+            and rows ``[h:pad_h]`` / cols ``[w:pad_w]`` are pad cells.
+            Padded cells have all-zero tile-type one-hot, all-zero owner
+            channels, and zero HP — a unique signature distinct from any
+            real cell, so a downstream MLP can learn to ignore them.
+            Each of ``pad_h`` / ``pad_w`` must be ``>=`` the live map's
+            corresponding dim. Used by the curriculum runner to keep
+            ``observation_space`` shape constant across stages with
+            different map sizes.
 
     Returns:
         Observation dict with keys ``grid``, ``units``, ``global_features``,
@@ -148,6 +160,21 @@ def build_observation(
     # owner, and unit ownership has no neutral case in the current rules.
     units[..., NUM_UNIT_TYPES + 3] = raw_units[..., 2].astype(np.float32) / 100.0
 
+    if pad_to is not None:
+        pad_h, pad_w = int(pad_to[0]), int(pad_to[1])
+        if pad_h < h or pad_w < w:
+            raise ValueError(
+                f"pad_to={(pad_h, pad_w)} is smaller than the live map's ({h}, {w}). pad_to must be >= the live map's dims."
+            )
+        if pad_h != h or pad_w != w:
+            padded_grid = np.zeros((pad_h, pad_w, GRID_CHANNELS), dtype=np.float32)
+            padded_grid[:h, :w, :] = grid
+            grid = padded_grid
+
+            padded_units = np.zeros((pad_h, pad_w, UNIT_CHANNELS), dtype=np.float32)
+            padded_units[:h, :w, :] = units
+            units = padded_units
+
     obs: Dict[str, np.ndarray] = {
         "grid": grid,
         "units": units,
@@ -158,6 +185,13 @@ def build_observation(
         obs["action_mask"] = action_mask
 
     if fog_of_war and "visibility" in state_arrays:
-        obs["visibility"] = state_arrays["visibility"]
+        visibility = state_arrays["visibility"]
+        if pad_to is not None:
+            pad_h, pad_w = int(pad_to[0]), int(pad_to[1])
+            if pad_h != h or pad_w != w:
+                padded_vis = np.zeros((pad_h, pad_w), dtype=visibility.dtype)
+                padded_vis[:h, :w] = visibility
+                visibility = padded_vis
+        obs["visibility"] = visibility
 
     return obs

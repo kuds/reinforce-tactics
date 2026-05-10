@@ -208,3 +208,51 @@ def test_hp_channel_is_normalized(game):
     # A freshly created unit at full health should be at HP=1.0 modulo
     # rounding from to_numpy's percentage encoding.
     assert hp == pytest.approx(1.0, abs=1e-3)
+
+
+# ---------- pad_to (cross-stage observation-shape unification) ----------
+
+
+def test_pad_to_zero_pads_grid_and_units(game):
+    h, w = game.grid.height, game.grid.width
+    pad = (h + 4, w + 6)
+    obs = build_observation(game, perspective_player=1, pad_to=pad)
+    assert obs["grid"].shape == (pad[0], pad[1], GRID_CHANNELS)
+    assert obs["units"].shape == (pad[0], pad[1], UNIT_CHANNELS)
+    # Real cells preserved at top-left.
+    obs_unpadded = build_observation(game, perspective_player=1)
+    np.testing.assert_array_equal(obs["grid"][:h, :w, :], obs_unpadded["grid"])
+    np.testing.assert_array_equal(obs["units"][:h, :w, :], obs_unpadded["units"])
+    # Padded region is zero across every channel — distinct from any real
+    # tile, which always has exactly one tile-type channel set.
+    assert obs["grid"][h:, :, :].sum() == 0
+    assert obs["grid"][:, w:, :].sum() == 0
+    assert obs["units"][h:, :, :].sum() == 0
+    assert obs["units"][:, w:, :].sum() == 0
+
+
+def test_pad_to_equal_dims_is_noop(game):
+    h, w = game.grid.height, game.grid.width
+    obs_pad = build_observation(game, perspective_player=1, pad_to=(h, w))
+    obs_no_pad = build_observation(game, perspective_player=1)
+    assert obs_pad["grid"].shape == obs_no_pad["grid"].shape
+    np.testing.assert_array_equal(obs_pad["grid"], obs_no_pad["grid"])
+    np.testing.assert_array_equal(obs_pad["units"], obs_no_pad["units"])
+
+
+def test_pad_to_smaller_than_map_raises(game):
+    h, w = game.grid.height, game.grid.width
+    with pytest.raises(ValueError, match="smaller than the live map"):
+        build_observation(game, perspective_player=1, pad_to=(h - 1, w))
+
+
+def test_pad_to_pads_visibility_under_fog(game_fow):
+    h, w = game_fow.grid.height, game_fow.grid.width
+    pad = (h + 2, w + 3)
+    obs = build_observation(game_fow, perspective_player=1, pad_to=pad)
+    assert obs["visibility"].shape == (pad[0], pad[1])
+    # Real visibility preserved at top-left, pad region all zero.
+    obs_unpadded = build_observation(game_fow, perspective_player=1)
+    np.testing.assert_array_equal(obs["visibility"][:h, :w], obs_unpadded["visibility"])
+    assert obs["visibility"][h:, :].sum() == 0
+    assert obs["visibility"][:, w:].sum() == 0

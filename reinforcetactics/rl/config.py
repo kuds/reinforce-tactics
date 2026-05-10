@@ -25,7 +25,7 @@ import copy
 import json
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 try:
     import yaml  # type: ignore
@@ -51,6 +51,13 @@ class EnvConfig:
     reward_config: Optional[Dict[str, float]] = None
     n_envs: int = 4
     use_subprocess: bool = True
+    # Optional ``(pad_h, pad_w)`` for cross-stage observation-shape unification.
+    # When the curriculum mixes maps of different sizes, the bootstrap runner
+    # auto-fills this with the curriculum-wide max so a single PPO policy can
+    # train across all stages without an observation-space mismatch. Set
+    # explicitly to override the auto-computed value (e.g. to leave headroom
+    # for a future larger map). Only honoured by ``flat_discrete``.
+    pad_to_size: Optional[Tuple[int, int]] = None
 
 
 @dataclass
