@@ -252,7 +252,7 @@ curriculum:
       opponent: mixed
       opponent_kwargs:
         p_medium: 0.5
-      promotion_win_rate: 0.675
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_500_000
       n_eval_episodes: 80
@@ -263,7 +263,7 @@ curriculum:
     - name: beginner_medium
       map_file: maps/1v1/beginner.csv
       opponent: medium
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
