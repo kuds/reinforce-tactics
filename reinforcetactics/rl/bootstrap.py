@@ -132,6 +132,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         use_subprocess=cfg.env.use_subprocess,
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
+        pad_to_size=cfg.env.pad_to_size,
     )
 
 
@@ -156,7 +157,74 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         seed=cfg.seed + cfg.eval.seed_offset,
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
+        pad_to_size=cfg.env.pad_to_size,
     )
+
+
+def _read_map_dims(map_file: str) -> tuple[int, int]:
+    """Return ``(height, width)`` of the map at ``map_file``.
+
+    Lightweight: parses the CSV with pandas and reads the resulting shape,
+    matching :class:`FileIO.load_map`'s post-strip behaviour. Used to
+    auto-compute the curriculum-wide max for ``pad_to_size``.
+    """
+    from reinforcetactics.utils.file_io import FileIO
+
+    map_data = FileIO.load_map(map_file)
+    if map_data is None:
+        raise FileNotFoundError(f"Could not load map at {map_file!r} for pad-size detection")
+    height, width = map_data.shape
+    return int(height), int(width)
+
+
+def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> Optional[tuple[int, int]]:
+    """Resolve ``cfg.env.pad_to_size`` for cross-stage obs unification.
+
+    Behaviour:
+      - If the user set ``cfg.env.pad_to_size`` explicitly, validate it
+        covers every stage's map and return the (possibly normalized) tuple.
+      - Else, scan curriculum stages. If maps differ in size *and* the
+        curriculum uses ``flat_discrete``, return the per-axis max so the
+        env factories can pad observations to a fixed shape across stages.
+      - Else (single map size or non-flat_discrete), return ``None``.
+    """
+    stages = cfg.curriculum.stages
+    if not stages:
+        return None
+    map_files = [s.map_file for s in stages if s.map_file]
+    if not map_files:
+        return None
+
+    dims = [_read_map_dims(mf) for mf in map_files]
+    max_h = max(h for h, _ in dims)
+    max_w = max(w for _, w in dims)
+
+    user_set = cfg.env.pad_to_size
+    if user_set is not None:
+        ph, pw = int(user_set[0]), int(user_set[1])
+        if ph < max_h or pw < max_w:
+            raise ValueError(
+                f"env.pad_to_size={(ph, pw)} is smaller than the curriculum's "
+                f"largest map ({max_h}, {max_w}). Either bump pad_to_size or "
+                f"drop the override to let the runner pick it automatically."
+            )
+        return (ph, pw)
+
+    sizes_differ = any((h, w) != dims[0] for h, w in dims)
+    if not sizes_differ:
+        return None
+
+    if cfg.env.action_space_type != "flat_discrete":
+        # multi_discrete's action space is grid-sized; padding obs alone
+        # leaves the action space mismatched. Surface the mismatch loudly
+        # rather than silently mis-shaping observations.
+        raise ValueError(
+            "Curriculum mixes maps of different sizes "
+            f"(found {sorted(set(dims))}) but env.action_space_type="
+            f"{cfg.env.action_space_type!r}. Padding is only supported with "
+            "'flat_discrete'; switch action_space_type or use a single map size."
+        )
+    return (max_h, max_w)
 
 
 def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
@@ -414,6 +482,14 @@ def run_curriculum(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve cross-stage pad_to_size before instantiating any env. When the
+    # curriculum mixes map sizes this is required for the policy to be
+    # reusable across stages (set_env in bootstrap rejects shape mismatches).
+    resolved_pad = _resolve_curriculum_pad_size(cfg)
+    if resolved_pad is not None and cfg.env.pad_to_size is None:
+        print(f"  curriculum spans multiple map sizes; auto-padding observations to {resolved_pad} (height, width)")
+    cfg.env.pad_to_size = resolved_pad
 
     train_env_factory = train_env_factory or _default_train_env_factory
     eval_env_factory = eval_env_factory or _default_eval_env_factory

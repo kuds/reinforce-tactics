@@ -114,6 +114,7 @@ class StrategyGameEnv(gym.Env):
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
         opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
         gamma: float = 0.99,  # Discount used by potential-based shaping; should match the trainer's gamma
+        pad_to_size: Optional[Tuple[int, int]] = None,  # (pad_h, pad_w) for cross-stage obs-shape unification
     ):
         """
         Initialize environment.
@@ -137,6 +138,15 @@ class StrategyGameEnv(gym.Env):
             action_space_type: 'multi_discrete' (per-dimension masks) or
                 'flat_discrete' (exact per-action masks, eliminates invalid actions)
             max_flat_actions: Upper bound on legal actions per step for flat_discrete
+            pad_to_size: Optional ``(pad_h, pad_w)`` to zero-pad the spatial
+                observation tensors to a fixed shape independent of the live
+                map size. Used by the curriculum runner so a single PPO
+                policy can train across stages with different map sizes
+                without an observation-space mismatch. Only supported with
+                ``action_space_type='flat_discrete'`` because flat-discrete's
+                action space is sized to ``max_flat_actions`` and is
+                therefore already grid-independent; multi_discrete's action
+                space depends on grid dims and would need separate padding.
         """
         super().__init__()
 
@@ -226,14 +236,42 @@ class StrategyGameEnv(gym.Env):
         self.grid_height = self.game_state.grid.height
         self.grid_width = self.game_state.grid.width
 
+        # Padded observation shape (defaults to the live map's dims when
+        # ``pad_to_size`` is None). Stored on the env so ``_get_obs`` can
+        # forward it to ``build_observation`` without re-checking each step.
+        if pad_to_size is not None:
+            pad_h, pad_w = int(pad_to_size[0]), int(pad_to_size[1])
+            if pad_h < self.grid_height or pad_w < self.grid_width:
+                raise ValueError(
+                    f"pad_to_size={pad_to_size} is smaller than the live map "
+                    f"({self.grid_height}, {self.grid_width}). pad_to_size must "
+                    f"be >= the largest map in the curriculum."
+                )
+            if action_space_type != "flat_discrete":
+                # multi_discrete's action_space is MultiDiscrete([10, 8, W, H, W, H]) — sized
+                # to the live grid. Padding obs alone would still leave the action space
+                # mismatched across stages. flat_discrete's action_space is Discrete(max_flat_actions)
+                # so padding obs is sufficient there.
+                raise NotImplementedError(
+                    "pad_to_size is currently only supported with "
+                    "action_space_type='flat_discrete'. multi_discrete's "
+                    "action space depends on grid dims; padding it would "
+                    "also need a per-dim mask rewrite."
+                )
+            self.pad_height = pad_h
+            self.pad_width = pad_w
+        else:
+            self.pad_height = self.grid_height
+            self.pad_width = self.grid_width
+
         # Define observation space.
         # ``action_mask`` is intentionally NOT part of the policy observation
         # — MaskablePPO consumes masks via ``action_masks()``, and including
         # the (10*W*H,)-sized mask in the obs dict just bloats the features
         # extractor input without adding any state information.
         obs_dict: dict[str, spaces.Space] = {
-            "grid": spaces.Box(low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, GRID_CHANNELS), dtype=np.float32),
-            "units": spaces.Box(low=0.0, high=1.0, shape=(self.grid_height, self.grid_width, UNIT_CHANNELS), dtype=np.float32),
+            "grid": spaces.Box(low=0.0, high=1.0, shape=(self.pad_height, self.pad_width, GRID_CHANNELS), dtype=np.float32),
+            "units": spaces.Box(low=0.0, high=1.0, shape=(self.pad_height, self.pad_width, UNIT_CHANNELS), dtype=np.float32),
             # Gold can grow into the thousands; turn and unit counts are
             # bounded but small. A loose upper bound here is fine — values
             # are not normalized by gymnasium's bounds, only sanity-checked.
@@ -245,7 +283,7 @@ class StrategyGameEnv(gym.Env):
             obs_dict["visibility"] = spaces.Box(
                 low=0,
                 high=2,  # 0=unexplored, 1=shrouded, 2=visible
-                shape=(self.grid_height, self.grid_width),
+                shape=(self.pad_height, self.pad_width),
                 dtype=np.uint8,
             )
 
@@ -331,11 +369,15 @@ class StrategyGameEnv(gym.Env):
         callers needing it should use :meth:`action_masks` (MaskablePPO) or
         :meth:`get_action_mask_flat` (for diagnostics).
         """
+        pad_to: Optional[Tuple[int, int]] = None
+        if self.pad_height != self.grid_height or self.pad_width != self.grid_width:
+            pad_to = (self.pad_height, self.pad_width)
         return build_observation(
             self.game_state,
             perspective_player=self.agent_player,
             action_mask=None,
             fog_of_war=self.fog_of_war,
+            pad_to=pad_to,
         )
 
     # Mapping from action key → (action_type_idx, source_key, target_key)

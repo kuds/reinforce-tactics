@@ -20,7 +20,7 @@ Usage:
     model.learn(total_timesteps=100000)
 """
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -125,6 +125,7 @@ def make_maskable_env(
     seed: Optional[int] = None,
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
+    pad_to_size: Optional[Tuple[int, int]] = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -168,6 +169,7 @@ def make_maskable_env(
         max_flat_actions=max_flat_actions,
         opponent_kwargs=opponent_kwargs,
         gamma=gamma,
+        pad_to_size=pad_to_size,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -187,6 +189,7 @@ def _make_env_fn(
     max_turns: Optional[int] = None,
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
+    pad_to_size: Optional[Tuple[int, int]] = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -207,6 +210,7 @@ def _make_env_fn(
             max_flat_actions=max_flat_actions,
             opponent_kwargs=opponent_kwargs,
             gamma=gamma,
+            pad_to_size=pad_to_size,
         )
         env.reset(seed=seed + rank)
         wrapped = ActionMaskedEnv(env)
@@ -229,6 +233,7 @@ def make_maskable_vec_env(
     max_flat_actions: int = 512,
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
+    pad_to_size: Optional[Tuple[int, int]] = None,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -279,6 +284,7 @@ def make_maskable_vec_env(
             max_turns,
             opponent_kwargs,
             gamma,
+            pad_to_size,
         )
         for i in range(n_envs)
     ]

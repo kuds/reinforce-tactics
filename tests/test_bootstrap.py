@@ -265,6 +265,12 @@ class TestCurriculumLoading:
             "beginner_medium",
             "beginner_mixed_med_adv_50",
             "beginner_advanced",
+            "corner_points_balanced_random",
+            "corner_points_random_10",
+            "corner_points_random_15",
+            "corner_points_random_20",
+            "corner_points_simple",
+            "corner_points_medium",
         ]
         assert "starter_noop" not in names, "noop stages broke PPO learning in earlier runs -- removing them was deliberate"
         assert "beginner_noop" not in names
@@ -1060,3 +1066,149 @@ class TestWriteResultsCsv:
         stages_seen = [r["stage"] for r in rows]
         assert stages_seen.count("a") == 2
         assert stages_seen.count("b") == 2
+
+
+# ---------------------------------------------------------------------------
+# Curriculum-wide pad_to_size resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCurriculumPadSize:
+    """Cover the auto-detection that lets a single PPO policy span stages
+    with different map sizes (gym_env.set_env rejects shape mismatches)."""
+
+    @staticmethod
+    def _stage(name: str, map_file: str) -> CurriculumStage:
+        return CurriculumStage(
+            name=name,
+            map_file=map_file,
+            opponent="random",
+            promotion_win_rate=0.5,
+            patience=1,
+            max_timesteps=1,
+            n_eval_episodes=1,
+        )
+
+    def _cfg(self, stages: List[CurriculumStage], **env_kwargs: Any) -> TrainingConfig:
+        env_defaults: Dict[str, Any] = {"n_envs": 1, "max_steps": 1, "action_space_type": "flat_discrete"}
+        env_defaults.update(env_kwargs)
+        return TrainingConfig(
+            env=EnvConfig(**env_defaults),
+            curriculum=CurriculumConfig(stages=stages),
+        )
+
+    def test_returns_none_when_all_maps_same_size(self):
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
+
+        cfg = self._cfg(
+            [
+                self._stage("a", "maps/1v1/starter.csv"),
+                self._stage("b", "maps/1v1/starter.csv"),
+            ]
+        )
+        assert _resolve_curriculum_pad_size(cfg) is None
+
+    def test_returns_per_axis_max_for_mixed_sizes(self):
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
+
+        # beginner is 6x6, skirmish is 8x8, corner_points is 10x12 (h, w).
+        cfg = self._cfg(
+            [
+                self._stage("a", "maps/1v1/beginner.csv"),
+                self._stage("b", "maps/1v1/skirmish.csv"),
+                self._stage("c", "maps/1v1/corner_points.csv"),
+            ]
+        )
+        pad = _resolve_curriculum_pad_size(cfg)
+        assert pad == (10, 12)
+
+    def test_user_override_is_validated_against_max(self):
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
+
+        cfg = self._cfg(
+            [
+                self._stage("a", "maps/1v1/beginner.csv"),
+                self._stage("b", "maps/1v1/corner_points.csv"),
+            ],
+            pad_to_size=(8, 8),  # too small for corner_points (10, 12)
+        )
+        with pytest.raises(ValueError, match="smaller than the curriculum's largest map"):
+            _resolve_curriculum_pad_size(cfg)
+
+    def test_user_override_with_headroom_is_kept(self):
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
+
+        cfg = self._cfg(
+            [
+                self._stage("a", "maps/1v1/beginner.csv"),
+                self._stage("b", "maps/1v1/corner_points.csv"),
+            ],
+            pad_to_size=(20, 20),
+        )
+        assert _resolve_curriculum_pad_size(cfg) == (20, 20)
+
+    def test_mixed_sizes_with_multi_discrete_raises(self):
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
+
+        cfg = self._cfg(
+            [
+                self._stage("a", "maps/1v1/beginner.csv"),
+                self._stage("b", "maps/1v1/corner_points.csv"),
+            ],
+            action_space_type="multi_discrete",
+        )
+        with pytest.raises(ValueError, match="only supported with 'flat_discrete'"):
+            _resolve_curriculum_pad_size(cfg)
+
+
+class TestPaddedEnvAcrossMaps:
+    """End-to-end: padded envs on different maps share an obs_space, so
+    SB3 ``set_env`` would accept the swap (the actual check that previously
+    blocked cross-map curricula at gym_env.py:455)."""
+
+    def test_envs_on_different_maps_share_obs_space_when_padded(self):
+        from reinforcetactics.rl.masking import make_maskable_env
+
+        env_small = make_maskable_env(
+            map_file="maps/1v1/beginner.csv",
+            opponent="noop",
+            action_space_type="flat_discrete",
+            pad_to_size=(10, 12),
+            seed=0,
+        )
+        env_large = make_maskable_env(
+            map_file="maps/1v1/corner_points.csv",
+            opponent="noop",
+            action_space_type="flat_discrete",
+            pad_to_size=(10, 12),
+            seed=0,
+        )
+        assert env_small.observation_space == env_large.observation_space
+        # And action_space too — flat_discrete is sized to max_flat_actions,
+        # so this should hold even without pad_to_size, but assert it for
+        # safety since it's the other half of set_env's check.
+        assert env_small.action_space == env_large.action_space
+
+    def test_pad_smaller_than_map_raises(self):
+        from reinforcetactics.rl.masking import make_maskable_env
+
+        with pytest.raises(ValueError, match="smaller than the live map"):
+            make_maskable_env(
+                map_file="maps/1v1/corner_points.csv",
+                opponent="noop",
+                action_space_type="flat_discrete",
+                pad_to_size=(6, 6),
+                seed=0,
+            )
+
+    def test_pad_with_multi_discrete_raises(self):
+        from reinforcetactics.rl.masking import make_maskable_env
+
+        with pytest.raises(NotImplementedError, match="flat_discrete"):
+            make_maskable_env(
+                map_file="maps/1v1/beginner.csv",
+                opponent="noop",
+                action_space_type="multi_discrete",
+                pad_to_size=(10, 12),
+                seed=0,
+            )
