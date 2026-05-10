@@ -270,3 +270,20 @@ curriculum:
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
+
+    - name: beginner_advanced
+      # AdvancedBot extends MediumBot with map analysis and enhanced
+      # tactics (bot.py:1215). Continues the descending-threshold /
+      # rising-budget pattern: simple 0.70/3M -> mixed_50 0.675/3.5M ->
+      # medium 0.65/4M -> advanced 0.60/5M. The extra ~1M budget
+      # accounts for AdvancedBot's tighter play forcing the policy to
+      # convert draws into wins on the same map geometry.
+      map_file: maps/1v1/beginner.csv
+      opponent: advanced
+      promotion_win_rate: 0.60
+      patience: 2
+      max_timesteps: 5_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 100
+      ent_coef: 0.05
