@@ -143,6 +143,7 @@ _CURRICULUM_OPPONENTS = (
     "simple",
     "bot",
     "medium",
+    "mixed",
     "advanced",
     "noop",
 )
