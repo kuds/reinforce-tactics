@@ -23,11 +23,23 @@ env:
   enabled_units: [W, M, A]
   action_space_type: flat_discrete
   reward_config:
-    win_by_hq_capture: 5000.0
-    win_by_elimination: 1000.0
-    win: 5000.0
-    loss: -5000.0
-    draw: -5000.0
+    # All "large" reward magnitudes (terminals, captures, seize_progress)
+    # are scaled to 1/100 of their original values to keep the value
+    # head in a fittable range -- prior runs showed value_loss climbing
+    # without bound and explained_variance pinned near zero, the
+    # canonical signature of the value targets outpacing a [256,256]
+    # MLP's capacity. Ratios between scaled keys are preserved (a
+    # uniform divide), so the curriculum's inductive biases (building >
+    # HQ > tower; terminal >> shaping) carry over unchanged. Small
+    # per-step shaping signals (income_diff, unit_diff, structure_control)
+    # and small penalties (invalid_action, turn_penalty) are left at
+    # their original values -- they're already in a fittable range and
+    # dividing them further would push them into gradient noise.
+    win_by_hq_capture: 50.0
+    win_by_elimination: 10.0
+    win: 50.0
+    loss: -50.0
+    draw: -50.0
     income_diff: 0.5
     unit_diff: 1.0
     structure_control: 10.0
@@ -35,8 +47,8 @@ env:
     move: 0.0
     damage_scale: 0.0
     kill: 0.0
-    seize_progress: 300.0
-    capture: 1000.0          # back-compat fallback (no longer reached
+    seize_progress: 3.0
+    capture: 10.0            # back-compat fallback (no longer reached
                              # when the per-type keys below are set)
     # Per-structure capture differentiation. Hoisted to the global env
     # config (rather than scoped to a single late stage) so every stage
@@ -51,12 +63,12 @@ env:
     # entropy is high and the value function is plastic. Both starter
     # and beginner maps have HQs, buildings, and towers in equivalent
     # layouts, so the gradient is meaningful on every stage.
-    tower_capture: 1500.0    # neutral towers; modest downweight on the
+    tower_capture: 15.0      # neutral towers; modest downweight on the
                              # local optimum the prior run converged to
-    building_capture: 4000.0 # enemy economy; ~2050/turn vs tower 800/turn
+    building_capture: 40.0   # enemy economy; ~20.5/turn vs tower 8/turn
                              # makes this the per-turn-best capture target
-    hq_capture: 2500.0       # stacks with win_by_hq_capture (+5000) so
-                             # HQ seize pays ~1875/turn including terminal
+    hq_capture: 25.0         # stacks with win_by_hq_capture (+50) so
+                             # HQ seize pays ~18.75/turn including terminal
     cure: 0.0
     heal_scale: 0.0
     paralyze: 0.0
@@ -129,11 +141,6 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
 
     - name: beginner_random_10
       map_file: maps/1v1/beginner.csv
@@ -150,11 +157,6 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
 
     - name: beginner_random_15
       map_file: maps/1v1/beginner.csv
@@ -177,18 +179,6 @@ curriculum:
         start: 0.10
         end: 0.03
         schedule: linear
-      # Per-type capture weights (tower_capture / building_capture /
-      # hq_capture) are inherited from the global env.reward_config so
-      # the building-attack inductive bias is established in earlier
-      # stages (when entropy is high and the value function is plastic)
-      # rather than introduced here for the first time. The stage's own
-      # ``capture: 2000`` remains as a fallback for any structure type
-      # that isn't covered by a per-type key (none currently exist).
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
 
     - name: beginner_random_20
       map_file: maps/1v1/beginner.csv
@@ -231,11 +221,6 @@ curriculum:
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
 
     - name: beginner_medium
       map_file: maps/1v1/beginner.csv
@@ -247,8 +232,3 @@ curriculum:
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
-      reward_config:
-        win_by_hq_capture: 3000.0
-        win_by_elimination: 3000.0
-        seize_progress: 50.0
-        capture: 2000.0
