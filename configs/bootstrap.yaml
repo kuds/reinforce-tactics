@@ -20,7 +20,6 @@ env:
   use_subprocess: true
   max_steps: 400
   max_turns: 20
-  enabled_units: [W, M, A]
   action_space_type: flat_discrete
   reward_config:
     # All reward magnitudes that were calibrated *relative to* the old
@@ -286,7 +285,7 @@ curriculum:
         easy: medium
         hard: advanced
         p_hard: 0.5
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 4_500_000
       n_eval_episodes: 80
@@ -303,7 +302,7 @@ curriculum:
       # policy to convert draws into wins on the same map geometry.
       map_file: maps/1v1/beginner.csv
       opponent: advanced
-      promotion_win_rate: 0.60
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 5_000_000
       n_eval_episodes: 80
