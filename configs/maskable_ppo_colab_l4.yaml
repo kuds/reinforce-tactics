@@ -1,4 +1,4 @@
-# MaskablePPO preset tuned for Google Colab on an L4 GPU.
+# MaskablePPO preset tuned for Google Colab on an L4 GPU (high-RAM, 12 vCPUs).
 #
 # The L4 is wildly underutilized by PPO updates on a small policy; the
 # real bottleneck is env stepping on Colab's CPU. This preset trades a
@@ -9,8 +9,9 @@
 #
 # Run: python scripts/train/train_feudal_rl.py --config configs/maskable_ppo_colab_l4.yaml
 #
-# Verify Colab vCPU count with ``!nproc`` before running -- drop n_envs
-# to 4 on the free tier (2 vCPUs) or bump to 16 on Pro+ if available.
+# Verify Colab vCPU count with ``!nproc`` before running. Tested target
+# is 12 vCPUs (Colab Pro L4 high-RAM); drop n_envs to 8 on standard L4
+# (8 vCPUs) or to 4 on the free tier (2 vCPUs).
 algorithm: maskable_ppo
 total_timesteps: 10000000
 seed: 0
@@ -19,15 +20,19 @@ env:
   map_file: null
   opponent: bot
   max_steps: 500
-  n_envs: 8                 # Colab Pro typically gives 8 vCPUs; verify with !nproc
+  # 12 envs on a 12-vCPU machine slightly oversubscribes when the main
+  # process is doing the PPO update, but Linux scheduling handles it
+  # cleanly and the alternative (n_envs=10, two cores idle) measurably
+  # underuses CPU during rollout.
+  n_envs: 12
   use_subprocess: true      # required for real CPU parallelism with n_envs > 1
   action_space_type: multi_discrete
   fog_of_war: false
 
 ppo:
   learning_rate: 3.0e-4
-  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
-  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
+  n_steps: 2048             # 2048 * 12 = 24576 transitions per PPO update
+  batch_size: 512           # bigger minibatches -- L4 absorbs them and you have ~24k samples
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
@@ -39,16 +44,18 @@ ppo:
   device: auto              # picks cuda on L4
 
 eval:
-  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
-  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
+  # eval_freq is in env steps across all sub-envs. With n_envs=12 and
+  # n_steps=2048, one PPO update = 24576 env steps, so eval_freq=25000
   # fires ~once per update. Tighter than that wastes env-stepping budget
-  # on eval; looser than ~50000 makes the PromotionCallback streak slow
+  # on eval; looser than ~75000 makes the PromotionCallback streak slow
   # to react.
-  eval_freq: 20000
+  eval_freq: 25000
   # 30 episodes at the 90% promotion threshold has roughly a +/-10%
   # binomial CI -- false promotions and false stalls are both common at
   # n_eval_episodes=10. 50 is a good compromise between confidence and
-  # the env-step cost of each eval block.
+  # the env-step cost of each eval block. The high-RAM Colab tier has
+  # plenty of headroom to push this to 100 on late curriculum stages
+  # via per-stage CurriculumStage.n_eval_episodes overrides.
   n_eval_episodes: 50
   checkpoint_freq: 50000
 
