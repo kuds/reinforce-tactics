@@ -98,6 +98,20 @@ class BotUnitMixin:
         """True if the unit currently stands on one of our heal-providing tiles."""
         return self.heal_amount_at(unit.x, unit.y) > 0
 
+    def count_enemy_units_by_type(self) -> Dict[str, int]:
+        """Tally living enemy units by type (e.g. ``{'W': 3, 'A': 2}``).
+
+        Used by counter-composition logic; SimpleBot does not call this so
+        purchasing remains static at that tier."""
+        counts: Dict[str, int] = {}
+        for u in self.game_state.units:
+            if u.player == self.bot_player or u.player is None:
+                continue
+            if u.health <= 0:
+                continue
+            counts[u.type] = counts.get(u.type, 0) + 1
+        return counts
+
     def find_best_move_position(self, unit, target_x, target_y):
         """Find the best position to move towards a target."""
         reachable = self.get_reachable(unit)
@@ -851,9 +865,36 @@ class MediumBot(BotUnitMixin):
         candidates.sort(key=lambda x: x[1])
         return candidates[0][0]
 
+    # Single hard-counter rule: when the enemy has at least
+    # COUNTER_TRIGGER_THRESHOLD of one unit type, MediumBot rotates one slot
+    # of priority to the named counter. AdvancedBot uses a smoother weighted
+    # matrix instead (see FULL_COUNTER_MATRIX).
+    SINGLE_COUNTER_TARGETS = {
+        "W": "A", "B": "A", "K": "A", "R": "A",  # melee → kite with Archer
+        "A": "K",                                  # Archers → close gap with Knight
+        "M": "K", "S": "A",                        # ranged casters → close or outrange
+        "C": "M",                                  # Cleric → paralyze
+    }
+    COUNTER_TRIGGER_THRESHOLD = 3
+
+    def get_counter_unit(self) -> Optional[str]:
+        """Return the unit type that should be prioritised based on the
+        single most common enemy unit, or None when nothing crosses the
+        trigger threshold."""
+        counts = self.count_enemy_units_by_type()
+        if not counts:
+            return None
+        # Pick the most common enemy type; tie-break by alphabetical so
+        # the choice is deterministic across calls.
+        dominant_type = max(counts, key=lambda k: (counts[k], -ord(k[0])))
+        if counts[dominant_type] < self.COUNTER_TRIGGER_THRESHOLD:
+            return None
+        return self.SINGLE_COUNTER_TARGETS.get(dominant_type)
+
     def purchase_units(self):
         """Purchase units based on priority from all enabled types."""
         # Keep buying units until we can't afford any more
+        counter_unit = self.get_counter_unit()
         while True:
             legal_actions = self.game_state.get_legal_actions(self.bot_player)
             create_actions = legal_actions["create_unit"]
@@ -873,11 +914,15 @@ class MediumBot(BotUnitMixin):
             if not affordable_actions:
                 break
 
-            # Sort by priority (uses UNIT_PRIORITIES), then by cost
+            # Sort by priority (uses UNIT_PRIORITIES), then by cost. When a
+            # counter unit applies, it leaps to the front of the queue;
+            # other types keep their relative ordering behind it.
             def unit_priority(action):
                 unit_type = action["unit_type"]
                 cost = UNIT_DATA[unit_type]["cost"]
                 priority = self.UNIT_PRIORITIES.get(unit_type, (99, "unknown"))[0]
+                if counter_unit is not None and unit_type == counter_unit:
+                    priority = -1
                 return (priority, cost)
 
             affordable_actions.sort(key=unit_priority)
@@ -1383,6 +1428,22 @@ class AdvancedBot(MediumBot):
         "C": 0.65,                         # support
     }
 
+    # Per-enemy-unit weight bumps applied to FULL_COMPOSITION_TARGETS. For
+    # every observed enemy unit of type ``key``, each counter in the inner
+    # dict gets its target ratio bumped by that amount before
+    # renormalisation. Smoother than MediumBot's single-counter rule:
+    # mixed enemy comps produce mixed responses.
+    FULL_COUNTER_MATRIX = {
+        "W": {"A": 0.04, "M": 0.02},
+        "B": {"A": 0.04, "M": 0.02},
+        "K": {"A": 0.06, "M": 0.02},
+        "R": {"A": 0.04},
+        "A": {"K": 0.06, "B": 0.02},
+        "M": {"K": 0.04, "A": 0.02},
+        "C": {"M": 0.06, "R": 0.02},
+        "S": {"M": 0.04, "A": 0.02},
+    }
+
     def __init__(self, game_state, player=2):
         """
         Initialize the AdvancedBot.
@@ -1446,10 +1507,23 @@ class AdvancedBot(MediumBot):
                     self.forest_positions.append((tile.x, tile.y))
 
     def get_dynamic_composition_targets(self) -> Dict[str, float]:
-        """Calculate target composition based on enabled units."""
+        """Calculate target composition based on enabled units, then bias
+        toward counters of the observed enemy composition."""
         # Filter to only enabled units
         enabled = self.get_enabled_units()
         enabled_targets = {k: v for k, v in self.FULL_COMPOSITION_TARGETS.items() if k in enabled}
+
+        # Apply counter-composition bumps. For each enemy unit observed, walk
+        # FULL_COUNTER_MATRIX and add the per-counter bump to our target.
+        # Counters that aren't enabled (e.g. opponent locked us out of "K")
+        # are silently skipped -- the renormalisation below absorbs them.
+        enemy_counts = self.count_enemy_units_by_type()
+        if enemy_counts:
+            for enemy_type, count in enemy_counts.items():
+                bumps = self.FULL_COUNTER_MATRIX.get(enemy_type, {})
+                for counter_type, weight in bumps.items():
+                    if counter_type in enabled_targets:
+                        enabled_targets[counter_type] += weight * count
 
         # Redistribute disabled unit ratios proportionally
         if enabled_targets:

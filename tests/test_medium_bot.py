@@ -505,3 +505,105 @@ class TestCaptureAssignment:
         # this turn, but our point is the set is rebuilt, not appended to.)
         assert isinstance(bot._capture_assigned, set)
         assert (5, 5) not in bot._capture_assigned or bot.bot_player == 1
+
+
+class TestEnemyCountHelper:
+    """count_enemy_units_by_type underpins both counter-comp tiers."""
+
+    def test_counts_living_enemies_only(self, simple_game):
+        bot = MediumBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        simple_game.player_gold[2] = 10_000
+        simple_game.create_unit("W", 3, 3, 1)
+        simple_game.create_unit("W", 3, 4, 1)
+        simple_game.create_unit("A", 3, 5, 1)
+        # Friendly unit must not be counted.
+        simple_game.create_unit("W", 7, 7, 2)
+        # Dead unit must not be counted.
+        dead = simple_game.create_unit("M", 4, 4, 1)
+        if dead is not None:
+            dead.health = 0
+
+        counts = bot.count_enemy_units_by_type()
+        assert counts == {"W": 2, "A": 1}
+
+
+class TestMediumBotCounterRule:
+    """MediumBot bumps a single counter when one enemy type dominates."""
+
+    def test_no_counter_below_threshold(self, simple_game):
+        bot = MediumBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        simple_game.create_unit("A", 3, 3, 1)
+        simple_game.create_unit("A", 3, 4, 1)  # only 2 archers, below threshold
+        assert bot.get_counter_unit() is None
+
+    def test_three_archers_trigger_knight_counter(self, simple_game):
+        bot = MediumBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        for y in range(3, 6):
+            simple_game.create_unit("A", 3, y, 1)
+        assert bot.get_counter_unit() == "K"
+
+    def test_three_warriors_trigger_archer_counter(self, simple_game):
+        bot = MediumBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        for y in range(3, 6):
+            simple_game.create_unit("W", 3, y, 1)
+        assert bot.get_counter_unit() == "A"
+
+    def test_purchase_prefers_counter(self, simple_game):
+        """When archers swarm, MediumBot's purchase priority should rank
+        Knight ahead of Warrior even though Warrior normally outranks it."""
+        bot = MediumBot(simple_game, player=2)
+        simple_game.current_player = 2
+        simple_game.player_gold[1] = 10_000
+        simple_game.player_gold[2] = 10_000
+        for y in range(3, 6):
+            simple_game.create_unit("A", 3, y, 1)
+
+        # Force the affordable list to include both K and W.
+        from reinforcetactics.constants import UNIT_DATA
+
+        priorities = []
+        for unit_type in ("W", "K"):
+            base_priority = bot.UNIT_PRIORITIES[unit_type][0]
+            if unit_type == bot.get_counter_unit():
+                base_priority = -1
+            priorities.append((unit_type, base_priority, UNIT_DATA[unit_type]["cost"]))
+
+        priorities.sort(key=lambda x: (x[1], x[2]))
+        assert priorities[0][0] == "K"
+
+
+class TestAdvancedBotCounterMatrix:
+    """AdvancedBot smoothly bumps targets for counters of the enemy comp."""
+
+    def test_archer_heavy_enemy_lifts_knight_target(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        # Archer-heavy enemy comp.
+        for y in range(2, 7):
+            simple_game.create_unit("A", 3, y, 1)
+
+        targets = bot.get_dynamic_composition_targets()
+        baseline = bot.FULL_COMPOSITION_TARGETS["K"] / sum(bot.FULL_COMPOSITION_TARGETS.values())
+        # Knight target should be meaningfully above its un-biased share.
+        assert targets["K"] > baseline + 0.05
+
+    def test_targets_renormalise_to_one(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        simple_game.player_gold[1] = 10_000
+        for y in range(2, 6):
+            simple_game.create_unit("W", 3, y, 1)
+        targets = bot.get_dynamic_composition_targets()
+        assert abs(sum(targets.values()) - 1.0) < 1e-6
+
+    def test_no_enemies_matches_baseline(self, simple_game):
+        bot = AdvancedBot(simple_game, player=2)
+        targets = bot.get_dynamic_composition_targets()
+        # With no enemies the function should reduce to the renormalised
+        # FULL_COMPOSITION_TARGETS.
+        baseline_sum = sum(bot.FULL_COMPOSITION_TARGETS.values())
+        for unit_type, weight in bot.FULL_COMPOSITION_TARGETS.items():
+            assert abs(targets[unit_type] - weight / baseline_sum) < 1e-6
