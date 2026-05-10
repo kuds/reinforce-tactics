@@ -36,8 +36,8 @@ UNIT TYPES:
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)
+3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
+   - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -69,8 +69,8 @@ AVAILABLE ACTIONS:
 2. MOVE: Move a unit to a reachable position (up to movement range)
 3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
 4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
-5. HEAL: (Cleric only) Heal an ally unit within range 1-2
-6. CURE: (Cleric only) Remove paralysis from an ally within range 1-2
+5. HEAL: (Cleric only) Heal an ally unit within range 1-3
+6. CURE: (Cleric only) Remove paralysis from an ally within range 1-3
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
 8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
 9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
@@ -137,8 +137,8 @@ UNIT TYPES:
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
-3. Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)
+3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
+   - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -170,8 +170,8 @@ AVAILABLE ACTIONS:
 2. MOVE: Move a unit to a reachable position (up to movement range)
 3. ATTACK: Attack an enemy unit (adjacent for most units, ranged for Mage/Archer/Sorcerer)
 4. PARALYZE: (Mage only) Paralyze an enemy unit within range 1-2
-5. HEAL: (Cleric only) Heal an ally unit within range 1-2
-6. CURE: (Cleric only) Remove paralysis from an ally within range 1-2
+5. HEAL: (Cleric only) Heal an ally unit within range 1-3
+6. CURE: (Cleric only) Remove paralysis from an ally within range 1-3
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
 8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
 9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
@@ -269,7 +269,7 @@ GAME OBJECTIVE:
 UNIT TYPES (for reference):
 - Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement
 - Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies (2-turn cooldown), 10 HP, 2 movement
-- Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement
+- Cleric (C): Support unit, can HEAL/CURE allies (range 1-3), 10 HP, 2 movement
 - Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement
 - Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement
 - Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement
@@ -442,8 +442,8 @@ UNIT_DESCRIPTIONS = {
     "M": """Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
    - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
-    "C": """Cleric (C): Cost 200 gold, HP 8, Attack 2, Defense 4, Movement 2
-   - Can HEAL allies (range 1-2) and CURE paralyzed units (range 1-2)""",
+    "C": """Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 2
+   - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)""",
     "A": """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
    - Ranged unit that attacks at distance 2-3 (2-4 on mountains)
    - Cannot attack adjacent enemies (distance 0-1)
@@ -470,7 +470,7 @@ UNIT_DESCRIPTIONS = {
 UNIT_DESCRIPTIONS_SHORT = {
     "W": "Warrior (W): Melee fighter, 15 HP, high attack/defense, 3 movement",
     "M": "Mage (M): Ranged attacker (1-2 range), can PARALYZE enemies (2-turn cooldown), 10 HP, 2 movement",
-    "C": "Cleric (C): Support unit, can HEAL/CURE allies (range 1-2), 8 HP, 2 movement",
+    "C": "Cleric (C): Support unit, can HEAL/CURE allies (range 1-3), 10 HP, 2 movement",
     "A": "Archer (A): Ranged (2-3, or 2-4 from mountains), cannot attack at range 0-1, 15 HP, 3 movement",
     "K": "Knight (K): Heavy cavalry, CHARGE (+50% dmg if moved 3+ tiles), 18 HP, 4 movement",
     "R": "Rogue (R): Assassin, FLANK (+50% dmg if target adjacent to ally), EVADE (15% dodge, 30% in forest), 12 HP, 4 movement",

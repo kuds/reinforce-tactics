@@ -8,6 +8,7 @@ from reinforcetactics.constants import (
     BUILDING_INCOME,
     CHARGE_BONUS,
     CHARGE_MIN_DISTANCE,
+    CLERIC_HEAL_RANGE,
     COUNTER_ATTACK_MULTIPLIER,
     DEFENCE_REDUCTION_PER_POINT,
     FLANK_BONUS,
@@ -133,22 +134,14 @@ class GameMechanics:
     @staticmethod
     def get_healable_allies(cleric, units):
         """
-        Get list of damaged friendly units within the Cleric's heal range (1-2 tiles).
-
-        Args:
-            cleric: The Cleric unit
-            units: List of all units
-
-        Returns:
-            List of allied units within range 1-2 that are damaged
+        Get damaged friendly units within the Cleric's heal range (1..CLERIC_HEAL_RANGE).
         """
         healable = []
 
         for ally in units:
             if ally.player == cleric.player and ally.health > 0 and ally != cleric:
-                # Check distance (range 1-2)
                 distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-                if 1 <= distance <= 2 and ally.health < ally.max_health:
+                if 1 <= distance <= CLERIC_HEAL_RANGE and ally.health < ally.max_health:
                     healable.append(ally)
 
         return healable
@@ -156,22 +149,14 @@ class GameMechanics:
     @staticmethod
     def get_curable_allies(cleric, units):
         """
-        Get list of paralyzed friendly units within the Cleric's cure range (1-2 tiles).
-
-        Args:
-            cleric: The Cleric unit
-            units: List of all units
-
-        Returns:
-            List of allied units within range 1-2 that are paralyzed
+        Get paralyzed friendly units within the Cleric's cure range (1..CLERIC_HEAL_RANGE).
         """
         curable = []
 
         for ally in units:
             if ally.player == cleric.player and ally.health > 0 and ally != cleric:
-                # Check distance (range 1-2)
                 distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-                if 1 <= distance <= 2 and ally.is_paralyzed():
+                if 1 <= distance <= CLERIC_HEAL_RANGE and ally.is_paralyzed():
                     curable.append(ally)
 
         return curable

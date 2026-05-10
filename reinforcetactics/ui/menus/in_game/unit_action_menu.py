@@ -79,12 +79,12 @@ class UnitActionMenu:
 
         # Heal and Cure - only for Clerics
         if self.unit.type == "C":
-            # Heal - damaged allies within range 1-2
+            # Heal - damaged allies within CLERIC_HEAL_RANGE
             healable_allies = GameMechanics.get_healable_allies(self.unit, self.game_state.units)
             if healable_allies:
                 actions.append({"name": "Heal (H)", "key": "h", "type": "heal", "targets": healable_allies})
 
-            # Cure - paralyzed allies within range 1-2
+            # Cure - paralyzed allies within CLERIC_HEAL_RANGE
             curable_allies = GameMechanics.get_curable_allies(self.unit, self.game_state.units)
             if curable_allies:
                 actions.append({"name": "Cure (C)", "key": "c", "type": "cure", "targets": curable_allies})
