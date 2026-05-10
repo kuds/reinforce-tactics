@@ -49,13 +49,12 @@ eval:
   # on eval; looser than ~50000 makes the PromotionCallback streak slow
   # to react.
   eval_freq: 20000
-  # 30 episodes at the 90% promotion threshold has roughly a +/-10%
-  # binomial CI -- false promotions and false stalls are both common at
-  # n_eval_episodes=10. 50 is a good compromise between confidence and
-  # the env-step cost of each eval block. The high-RAM Colab tier has
-  # plenty of headroom to push this to 100 on late curriculum stages
-  # via per-stage CurriculumStage.n_eval_episodes overrides.
-  n_eval_episodes: 50
+  # 80 episodes per eval block tightens the 90%-WR binomial CI to
+  # roughly +/-7% (vs +/-15% at the YAML default of 10). The env-step
+  # cost is ~16k extra steps per eval, negligible against the 16k-per-
+  # update training rollout. Bump per-stage via
+  # CurriculumStage.n_eval_episodes if a specific late stage needs more.
+  n_eval_episodes: 80
   checkpoint_freq: 50000
 
 logging:

@@ -147,7 +147,7 @@ curriculum:
       opponent: random
       opponent_kwargs:
         max_actions: 20
-      promotion_win_rate: 0.75
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 60
@@ -173,9 +173,9 @@ curriculum:
     - name: beginner_simple
       map_file: maps/1v1/beginner.csv
       opponent: simple
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.70
       patience: 2
-      max_timesteps: 2_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 60
       max_steps: 1500
       max_turns: 100
