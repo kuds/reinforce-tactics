@@ -74,10 +74,19 @@ class PPOConfig:
     # or wire in a custom features extractor. ``None`` keeps SB3's defaults
     # (MlpPolicy: ``[64, 64]``; CombinedExtractor for Dict obs spaces).
     policy_kwargs: Optional[Dict[str, Any]] = None
+    # Probability with which a sampled ``create_unit`` action has its
+    # ``unit_type`` sub-action resampled uniformly over the env's
+    # currently-legal (enabled + affordable) unit types. Pure exploration
+    # knob: ε=0 disables, ε=1 always randomizes purchases. The substituted
+    # action is what gets executed *and* what gets stored in the rollout
+    # buffer (with log-prob recomputed under the masked policy at the
+    # substituted action), so PPO's ratio stays internally consistent.
+    # Per-stage overrides live on :class:`CurriculumStage`.
+    purchase_explore_eps: float = 0.0
 
     def as_sb3_kwargs(self) -> Dict[str, Any]:
         """Return the subset of fields accepted by PPO/MaskablePPO __init__."""
-        skip = {"use_action_masking"}
+        skip = {"use_action_masking", "purchase_explore_eps"}
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name not in skip}
 
 
@@ -172,6 +181,10 @@ class CurriculumStage:
     ent_coef: Optional[Union[float, Dict[str, Any]]] = None
     reward_config: Optional[Dict[str, float]] = None
     opponent_kwargs: Optional[Dict[str, Any]] = None
+    # Per-stage override for ``ppo.purchase_explore_eps``. Constant float
+    # or a ``{start, end, schedule}`` mapping (same layout as ``ent_coef``)
+    # that drives :class:`PurchaseExploreScheduleCallback`.
+    purchase_explore_eps: Optional[Union[float, Dict[str, Any]]] = None
 
     def validate(self) -> None:
         if not self.name:
@@ -225,6 +238,38 @@ class CurriculumStage:
                     f"stage '{self.name}': ent_coef must be a number or a "
                     f"{{start, end, schedule}} mapping, got {type(self.ent_coef).__name__}"
                 )
+        if self.purchase_explore_eps is not None:
+            if isinstance(self.purchase_explore_eps, Mapping):
+                unknown = set(self.purchase_explore_eps.keys()) - {"start", "end", "schedule"}
+                if unknown:
+                    raise ValueError(
+                        f"stage '{self.name}': purchase_explore_eps schedule has unknown keys {sorted(unknown)}. "
+                        "Valid keys: start, end, schedule"
+                    )
+                for required in ("start", "end"):
+                    if required not in self.purchase_explore_eps:
+                        raise ValueError(
+                            f"stage '{self.name}': purchase_explore_eps schedule missing required key '{required}'"
+                        )
+                    val = self.purchase_explore_eps[required]
+                    if not isinstance(val, (int, float)) or not 0.0 <= float(val) <= 1.0:
+                        raise ValueError(
+                            f"stage '{self.name}': purchase_explore_eps.{required} must be in [0, 1], got {val!r}"
+                        )
+                schedule_kind = self.purchase_explore_eps.get("schedule", "linear")
+                if schedule_kind not in ("linear", "cosine"):
+                    raise ValueError(
+                        f"stage '{self.name}': purchase_explore_eps.schedule must be 'linear' or 'cosine', "
+                        f"got {schedule_kind!r}"
+                    )
+            elif isinstance(self.purchase_explore_eps, (int, float)):
+                if not 0.0 <= float(self.purchase_explore_eps) <= 1.0:
+                    raise ValueError(f"stage '{self.name}': purchase_explore_eps override must be in [0, 1]")
+            else:
+                raise TypeError(
+                    f"stage '{self.name}': purchase_explore_eps must be a number or a "
+                    f"{{start, end, schedule}} mapping, got {type(self.purchase_explore_eps).__name__}"
+                )
         if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
             raise TypeError(
                 f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
@@ -265,6 +310,30 @@ class CurriculumStage:
                 "start": float(self.ent_coef["start"]),
                 "end": float(self.ent_coef["end"]),
                 "schedule": str(self.ent_coef.get("schedule", "linear")),
+            }
+        return None
+
+    def resolve_purchase_explore_eps(self, ppo: "PPOConfig") -> float:
+        """Return the *initial* purchase-exploration ε for the stage.
+
+        Mirrors :meth:`resolve_ent_coef`: a constant override returns its
+        own value; a ``{start, end, schedule}`` mapping returns ``start``
+        so the model attribute is seeded before the schedule callback
+        takes over; ``None`` falls back to ``ppo.purchase_explore_eps``.
+        """
+        if self.purchase_explore_eps is None:
+            return ppo.purchase_explore_eps
+        if isinstance(self.purchase_explore_eps, Mapping):
+            return float(self.purchase_explore_eps["start"])
+        return float(self.purchase_explore_eps)
+
+    def resolve_purchase_explore_eps_schedule(self) -> Optional[Dict[str, Any]]:
+        """Return ``{start, end, schedule}`` if the override is a mapping, else ``None``."""
+        if isinstance(self.purchase_explore_eps, Mapping):
+            return {
+                "start": float(self.purchase_explore_eps["start"]),
+                "end": float(self.purchase_explore_eps["end"]),
+                "schedule": str(self.purchase_explore_eps.get("schedule", "linear")),
             }
         return None
 
