@@ -35,23 +35,32 @@ env:
     # relative to a win) carry over unchanged.
     #
     # The per-step potential-shaping signals (income_diff, unit_diff,
-    # structure_control) are fed through a potential function
-    # (gym_env.py:890) and are policy-invariant under discounted
-    # return, but the *undiscounted* eval reward sum carries a bias
-    # term -(1-gamma) * sum_t Phi(s_t) that scales with episode
-    # length * average Phi. On long beginner episodes (~400 steps)
-    # this made eval reward go negative on 100% WR, because Phi was
-    # dominated by ``structure_control`` (sticky throughout the game,
-    # unlike unit counts which fluctuate). Lowering ``structure_control``
-    # to its env default of 1.0 cuts the bias ~10x while leaving the
-    # policy's optimum unchanged.
+    # structure_control) are pinned to the env defaults at gym_env.py:188-190.
+    # They feed a potential function (gym_env.py:890) that is
+    # policy-invariant under discounted return, but the *undiscounted*
+    # eval reward sum carries a bias term -(1-gamma) * sum_t Phi(s_t)
+    # that scales with episode length * average Phi. On long beginner
+    # episodes (~800 steps) the prior weights (income_diff: 0.5,
+    # unit_diff: 1.0, structure_control: 10.0) made avg Phi ~33,
+    # biasing eval reward by ~-260 even on 100% WR runs. The env
+    # defaults give avg Phi ~3, cutting the bias 10x while leaving
+    # the policy's optimum unchanged: shaping invariance holds under
+    # discounted return regardless of weight.
+    #
+    # win_by_hq_capture and win_by_elimination are equalised at 50
+    # rather than the old 5:1 ratio favouring HQ. On the bigger
+    # beginner map HQ capture is structurally harder than elimination
+    # (more terrain, more units to fight through to reach the HQ), so
+    # over-rewarding HQ pushes the policy toward an unattainable
+    # strategy. Equalising lets the policy take whichever finishing
+    # path the map affords.
     win_by_hq_capture: 50.0
-    win_by_elimination: 10.0
+    win_by_elimination: 50.0
     win: 50.0
     loss: -50.0
     draw: -50.0
-    income_diff: 0.5
-    unit_diff: 1.0
+    income_diff: 0.05
+    unit_diff: 0.3
     structure_control: 1.0
     create_unit: 0.0
     move: 0.0
@@ -106,10 +115,15 @@ ppo:
 
 eval:
   # eval_freq is in env steps across all sub-envs. With n_envs=8 and
-  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
-  # fires ~once per update. Per-stage CurriculumStage.n_eval_episodes
-  # overrides this default for stages that need tighter CIs.
-  eval_freq: 20_000
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=50000
+  # fires ~once per 3 PPO updates -- the efficient ratio for production
+  # runs. (20000 was used during the reward-rescale validation runs to
+  # catch value-head / reward-signal regressions early; once those were
+  # confirmed healthy the eval overhead at that cadence -- ~half of
+  # wall-clock -- stopped being worth it.) Per-stage
+  # CurriculumStage.n_eval_episodes overrides this default for stages
+  # that need tighter CIs.
+  eval_freq: 50_000
   n_eval_episodes: 80
 
 curriculum:

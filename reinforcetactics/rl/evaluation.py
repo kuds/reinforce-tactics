@@ -122,6 +122,7 @@ def evaluate_model(
     wins, losses, draws = 0, 0, 0
     rewards = []
     lengths = []
+    turns = []
     # Only forward action masks to ``model.predict`` when the model itself
     # accepts them. Plain ``stable_baselines3.PPO.predict`` will raise
     # ``TypeError`` on an unexpected ``action_masks`` kwarg, which would
@@ -182,6 +183,11 @@ def evaluate_model(
 
         rewards.append(ep_reward)
         lengths.append(ep_len)
+        # Final game-turn count from the terminal info dict. ``ep_len`` is
+        # env steps (one per agent action); a single turn comprises many
+        # steps, so reporting both gives a clearer signal of game length
+        # than steps alone -- particularly for stages with max_turns caps.
+        turns.append(int(info.get("turn", 0)))
 
         # Determine outcome from info
         episode_stats = info.get("episode_stats", {})
@@ -227,6 +233,7 @@ def evaluate_model(
 
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
+    turns_arr = np.array(turns)
 
     result: Dict[str, Any] = {
         "win_rate": wins / n_episodes if n_episodes > 0 else 0.0,
@@ -234,12 +241,15 @@ def evaluate_model(
         "std_reward": float(rewards_arr.std()) if n_episodes > 0 else 0.0,
         "avg_length": float(lengths_arr.mean()) if n_episodes > 0 else 0.0,
         "std_length": float(lengths_arr.std()) if n_episodes > 0 else 0.0,
+        "avg_turns": float(turns_arr.mean()) if n_episodes > 0 else 0.0,
+        "std_turns": float(turns_arr.std()) if n_episodes > 0 else 0.0,
         "wins": wins,
         "losses": losses,
         "draws": draws,
         "episodes": n_episodes,
         "rewards": [float(r) for r in rewards],
         "lengths": [int(length) for length in lengths],
+        "turns": [int(t) for t in turns],
         "end_reasons": end_reasons,
         "outcome_reasons": outcome_reasons,
         "units_built": units_built,

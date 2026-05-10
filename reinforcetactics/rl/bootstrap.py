@@ -326,6 +326,8 @@ _RESULTS_CSV_COLUMNS = (
     "std_reward",
     "avg_length",
     "std_length",
+    "avg_turns",
+    "std_turns",
     "wins",
     "losses",
     "draws",
