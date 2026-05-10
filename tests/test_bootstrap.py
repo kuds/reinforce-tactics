@@ -258,6 +258,7 @@ class TestCurriculumLoading:
             "starter_medium",
             "beginner_balanced_random",
             "beginner_random_10",
+            "beginner_random_15",
             "beginner_random_20",
             "beginner_simple",
             "beginner_medium",

@@ -10,7 +10,7 @@
 # tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 14_000_000  # informational; per-stage budgets drive run length
+total_timesteps: 22_000_000  # informational; per-stage budgets drive run length
 
 env:
   # 8 envs leaves headroom on a 12-vCPU machine for the main process
@@ -206,9 +206,14 @@ curriculum:
       n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
+      # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
+      # this is the longest stage at 3M steps and the policy needs to
+      # commit during the last ~1M to convert draws into wins. A 0.03
+      # floor was still injecting meaningful exploration noise at the
+      # end of run 4's budget when the policy was structurally tying.
       ent_coef:
         start: 0.10
-        end: 0.03
+        end: 0.01
         schedule: linear
       reward_config:
         win_by_hq_capture: 3000.0
