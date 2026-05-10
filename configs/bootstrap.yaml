@@ -214,7 +214,7 @@ curriculum:
       # prior reward shape and was still budget-limited; 0.65 leaves room
       # for the policy to clear without requiring runs to outperform that
       # baseline by more than a few points.
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
