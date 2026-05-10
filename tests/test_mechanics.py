@@ -305,7 +305,11 @@ class TestCombat:
     def test_attack_kills_target(self):
         """Test attacker kills target."""
         attacker = Unit("W", 5, 5, 1)
-        target = Unit("C", 6, 5, 2)  # Cleric with 8 HP, 4 defence
+        target = Unit("C", 6, 5, 2)  # Cleric with 10 HP, 4 defence
+        # Pre-damage so the warrior's one-shot of 8 dmg is fatal - a
+        # full-health cleric (10 HP) would otherwise survive a single
+        # warrior hit at the post-buff stats.
+        target.health = 8
 
         result = GameMechanics.attack_unit(attacker, target)
 
@@ -567,7 +571,7 @@ class TestArcherCounterAttack:
         # Archer (5 attack) vs Cleric (4 defence) = 5 * 0.8 = 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert cleric.health == 4  # 8 - 4 damage
+        assert cleric.health == 6  # 10 - 4 damage
 
         # Cleric should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
