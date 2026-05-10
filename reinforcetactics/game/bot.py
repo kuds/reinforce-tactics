@@ -870,10 +870,14 @@ class MediumBot(BotUnitMixin):
     # of priority to the named counter. AdvancedBot uses a smoother weighted
     # matrix instead (see FULL_COUNTER_MATRIX).
     SINGLE_COUNTER_TARGETS = {
-        "W": "A", "B": "A", "K": "A", "R": "A",  # melee → kite with Archer
-        "A": "K",                                  # Archers → close gap with Knight
-        "M": "K", "S": "A",                        # ranged casters → close or outrange
-        "C": "M",                                  # Cleric → paralyze
+        "W": "A",
+        "B": "A",
+        "K": "A",
+        "R": "A",  # melee → kite with Archer
+        "A": "K",  # Archers → close gap with Knight
+        "M": "K",
+        "S": "A",  # ranged casters → close or outrange
+        "C": "M",  # Cleric → paralyze
     }
     COUNTER_TRIGGER_THRESHOLD = 3
 
@@ -1422,10 +1426,14 @@ class AdvancedBot(MediumBot):
     # pulling back earlier. Cleric is highest -- a dead Cleric loses the
     # whole heal economy.
     RETREAT_THRESHOLDS = {
-        "W": 0.45, "K": 0.45, "B": 0.45,  # frontline
-        "R": 0.40,                         # flanker
-        "A": 0.55, "M": 0.55, "S": 0.55,  # ranged
-        "C": 0.65,                         # support
+        "W": 0.45,
+        "K": 0.45,
+        "B": 0.45,  # frontline
+        "R": 0.40,  # flanker
+        "A": 0.55,
+        "M": 0.55,
+        "S": 0.55,  # ranged
+        "C": 0.65,  # support
     }
 
     # Per-enemy-unit weight bumps applied to FULL_COMPOSITION_TARGETS. For

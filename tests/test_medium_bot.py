@@ -122,19 +122,9 @@ class TestMediumBotStructurePriority:
         bot = MediumBot(game, player=2)
 
         # Central towers in beginner.csv are unowned (player is None).
-        neutral_tower = next(
-            tile
-            for row in game.grid.tiles
-            for tile in row
-            if tile.type == "t" and tile.player is None
-        )
+        neutral_tower = next(tile for row in game.grid.tiles for tile in row if tile.type == "t" and tile.player is None)
         # Enemy building far from blue's HQ.
-        enemy_building = next(
-            tile
-            for row in game.grid.tiles
-            for tile in row
-            if tile.type == "b" and tile.player == 1
-        )
+        enemy_building = next(tile for row in game.grid.tiles for tile in row if tile.type == "b" and tile.player == 1)
 
         assert bot.get_structure_priority(neutral_tower) < bot.get_structure_priority(enemy_building)
 
