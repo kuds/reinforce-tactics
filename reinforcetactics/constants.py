@@ -200,7 +200,7 @@ UNIT_DATA = {
         "name": "Cleric",
         "cost": 200,
         "color": (255, 215, 0),
-        "movement": 2,
+        "movement": 3,
         "health": 10,
         "attack": 2,
         "defence": 4,
