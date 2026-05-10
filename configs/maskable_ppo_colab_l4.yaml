@@ -1,0 +1,59 @@
+# MaskablePPO preset tuned for Google Colab on an L4 GPU.
+#
+# The L4 is wildly underutilized by PPO updates on a small policy; the
+# real bottleneck is env stepping on Colab's CPU. This preset trades a
+# bigger batch (more GPU per update, fewer minibatch passes) and more
+# parallel envs (more CPU throughput) for ~3-4x wall-clock speedup vs
+# the baseline ``maskable_ppo.yaml``. Eval cadence is tightened too --
+# see notes inline.
+#
+# Run: python scripts/train/train_feudal_rl.py --config configs/maskable_ppo_colab_l4.yaml
+#
+# Verify Colab vCPU count with ``!nproc`` before running -- drop n_envs
+# to 4 on the free tier (2 vCPUs) or bump to 16 on Pro+ if available.
+algorithm: maskable_ppo
+total_timesteps: 10000000
+seed: 0
+
+env:
+  map_file: null
+  opponent: bot
+  max_steps: 500
+  n_envs: 8                 # Colab Pro typically gives 8 vCPUs; verify with !nproc
+  use_subprocess: true      # required for real CPU parallelism with n_envs > 1
+  action_space_type: multi_discrete
+  fog_of_war: false
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
+  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  use_action_masking: true
+  device: auto              # picks cuda on L4
+
+eval:
+  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
+  # fires ~once per update. Tighter than that wastes env-stepping budget
+  # on eval; looser than ~50000 makes the PromotionCallback streak slow
+  # to react.
+  eval_freq: 20000
+  # 30 episodes at the 90% promotion threshold has roughly a +/-10%
+  # binomial CI -- false promotions and false stalls are both common at
+  # n_eval_episodes=10. 50 is a good compromise between confidence and
+  # the env-step cost of each eval block.
+  n_eval_episodes: 50
+  checkpoint_freq: 50000
+
+logging:
+  log_dir: ./logs           # write to /content/logs locally; rsync to Drive after each stage
+  wandb: false
+  wandb_project: reinforcetactics
+  tensorboard: true
