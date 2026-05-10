@@ -38,7 +38,7 @@ class TestUnitInitialization:
         assert cleric.player == 1
         assert cleric.health == 10
         assert cleric.max_health == 10
-        assert cleric.movement_range == 2
+        assert cleric.movement_range == 3
 
     def test_archer_initialization(self):
         """Test archer unit initialization."""
