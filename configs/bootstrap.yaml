@@ -98,7 +98,7 @@ curriculum:
       promotion_win_rate: 0.90
       patience: 1
       max_timesteps: 1_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: starter_simple
       map_file: maps/1v1/starter.csv
@@ -106,7 +106,7 @@ curriculum:
       promotion_win_rate: 0.90
       patience: 1
       max_timesteps: 2_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: starter_medium
       map_file: maps/1v1/starter.csv
@@ -114,7 +114,7 @@ curriculum:
       promotion_win_rate: 0.75
       patience: 1
       max_timesteps: 3_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
 
     - name: beginner_balanced_random
       map_file: maps/1v1/beginner.csv
@@ -122,7 +122,7 @@ curriculum:
       promotion_win_rate: 0.85
       patience: 2
       max_timesteps: 1_500_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -143,7 +143,7 @@ curriculum:
       promotion_win_rate: 0.75
       patience: 2
       max_timesteps: 1_500_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -164,7 +164,7 @@ curriculum:
       promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef:
@@ -190,7 +190,7 @@ curriculum:
       promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
@@ -206,7 +206,7 @@ curriculum:
       promotion_win_rate: 0.65
       patience: 2
       max_timesteps: 4_000_000
-      n_eval_episodes: 60
+      n_eval_episodes: 80
       max_steps: 1500
       max_turns: 100
       ent_coef: 0.05
