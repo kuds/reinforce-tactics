@@ -1,14 +1,23 @@
-# PPO bootstrap curriculum.
+# PPO bootstrap curriculum, hardware-tuned for Google Colab on an L4 GPU
+# (high-RAM tier, 12 vCPUs verified via ``!nproc``).
 #
 # Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
 # Stages live under curriculum.stages; if a stage exhausts its
 # `max_timesteps` without promoting, the runner raises CurriculumStalled.
+#
+# Hardware tuning (env.n_envs / env.use_subprocess / ppo.batch_size /
+# eval.eval_freq / eval.n_eval_episodes) targets the L4 + 12-vCPU Colab
+# tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
 total_timesteps: 14_000_000  # informational; per-stage budgets drive run length
 
 env:
-  n_envs: 4
+  # 8 envs leaves headroom on a 12-vCPU machine for the main process
+  # (PPO update + eval) without contention. SubprocVecEnv is required
+  # for real CPU parallelism with n_envs > 1.
+  n_envs: 8
+  use_subprocess: true
   max_steps: 400
   max_turns: 20
   enabled_units: [W, M, A]
@@ -59,8 +68,8 @@ env:
 
 ppo:
   learning_rate: 3.0e-4
-  n_steps: 2048
-  batch_size: 64
+  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
+  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
@@ -74,7 +83,12 @@ ppo:
       vf: [256, 256]
 
 eval:
-  eval_freq: 50_000
+  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=20000
+  # fires ~once per update. Per-stage CurriculumStage.n_eval_episodes
+  # overrides this default for stages that need tighter CIs.
+  eval_freq: 20_000
+  n_eval_episodes: 80
 
 curriculum:
   stages:
