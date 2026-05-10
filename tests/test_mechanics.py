@@ -552,10 +552,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, simple_grid)
 
-        # Archer (6 attack) vs Warrior (6 defence) = 6 * 0.7 = 4.2 → 4 damage
-        assert result["damage"] == 4
+        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
+        assert result["damage"] == 3
         assert result["target_alive"] is True
-        assert warrior.health == 11  # 15 - 4 damage
+        assert warrior.health == 12  # 15 - 3 damage
 
         # Warrior should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
@@ -568,7 +568,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, cleric, simple_grid)
 
-        # Archer (6 attack) vs Cleric (4 defence) = 6 * 0.8 = 4.8 → 4 damage
+        # Archer (5 attack) vs Cleric (4 defence) = 5 * 0.8 = 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert cleric.health == 6  # 10 - 4 damage
@@ -584,10 +584,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, barbarian, simple_grid)
 
-        # Archer (6 attack) vs Barbarian (2 defence) = 6 * 0.9 = 5.4 → 5 damage
-        assert result["damage"] == 5
+        # Archer (5 attack) vs Barbarian (2 defence) = 5 * 0.9 = 4.5 → 4 damage
+        assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert barbarian.health == 15  # 20 - 5 damage
+        assert barbarian.health == 16  # 20 - 4 damage
 
         # Barbarian should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
@@ -600,12 +600,12 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer1, archer2, simple_grid)
 
-        # Archer1 (6 attack) vs Archer2 (1 defence) = 6 * 0.95 = 5.7 → 5 damage
-        assert result["damage"] == 5
+        # Archer1 (5 attack) vs Archer2 (1 defence) = 5 * 0.95 = 4.75 → 4 damage
+        assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert archer2.health == 10  # 15 - 5 damage
+        assert archer2.health == 11  # 15 - 4 damage
 
-        # Archer2 counter-attack: int(6 * 0.8) = 4, then int(4 * 0.95) = 3 (1 defence)
+        # Archer2 counter-attack: int(5 * 0.8) = 4, then int(4 * 0.95) = 3 (1 defence)
         assert result["counter_damage"] == 3
         assert archer1.health == 12  # 15 - 3 damage
 
@@ -616,7 +616,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer (6 attack) vs Mage (4 defence) = 6 * 0.8 = 4.8 → 4 damage
+        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert mage.health == 6  # 10 - 4 damage
@@ -632,7 +632,7 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, mage, simple_grid)
 
-        # Archer (6 attack) vs Mage (4 defence) = 6 * 0.8 = 4.8 → 4 damage
+        # Archer (5 attack) vs Mage (4 defence) = 5 * 0.8 = 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
         assert mage.health == 6  # 10 - 4 damage
@@ -653,10 +653,10 @@ class TestArcherCounterAttack:
 
         result = GameMechanics.attack_unit(archer, warrior, grid)
 
-        # Archer (6 attack) vs Warrior (6 defence) = 6 * 0.7 = 4.2 → 4 damage
-        assert result["damage"] == 4
+        # Archer (5 attack) vs Warrior (6 defence) = 5 * 0.7 = 3.5 → 3 damage
+        assert result["damage"] == 3
         assert result["target_alive"] is True
-        assert warrior.health == 11  # 15 - 4 damage
+        assert warrior.health == 12  # 15 - 3 damage
 
         # Warrior cannot counter from distance 3
         assert result["counter_damage"] == 0

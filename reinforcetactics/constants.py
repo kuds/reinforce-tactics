@@ -224,7 +224,7 @@ UNIT_DATA = {
         "color": (34, 139, 34),
         "movement": 3,
         "health": 15,
-        "attack": 6,
+        "attack": 5,
         "defence": 1,
     },
     "K": {
