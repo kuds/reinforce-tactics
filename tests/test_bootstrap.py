@@ -261,7 +261,10 @@ class TestCurriculumLoading:
             "beginner_random_15",
             "beginner_random_20",
             "beginner_simple",
+            "beginner_mixed_50",
             "beginner_medium",
+            "beginner_mixed_med_adv_50",
+            "beginner_advanced",
         ]
         assert "starter_noop" not in names, "noop stages broke PPO learning in earlier runs -- removing them was deliberate"
         assert "beginner_noop" not in names
