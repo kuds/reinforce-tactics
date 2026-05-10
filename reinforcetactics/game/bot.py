@@ -1648,8 +1648,7 @@ class AdvancedBot(MediumBot):
                 if others_total > 0:
                     scale = (1.0 - self.EXPAND_WARRIOR_FLOOR) / others_total
                     enabled_targets = {
-                        k: (self.EXPAND_WARRIOR_FLOOR if k == "W" else v * scale)
-                        for k, v in enabled_targets.items()
+                        k: (self.EXPAND_WARRIOR_FLOOR if k == "W" else v * scale) for k, v in enabled_targets.items()
                     }
                 else:
                     enabled_targets = {"W": 1.0}
