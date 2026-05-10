@@ -264,9 +264,7 @@ class CurriculumStage:
                     )
             elif isinstance(self.purchase_explore_eps, (int, float)):
                 if not 0.0 <= float(self.purchase_explore_eps) <= 1.0:
-                    raise ValueError(
-                        f"stage '{self.name}': purchase_explore_eps override must be in [0, 1]"
-                    )
+                    raise ValueError(f"stage '{self.name}': purchase_explore_eps override must be in [0, 1]")
             else:
                 raise TypeError(
                     f"stage '{self.name}': purchase_explore_eps must be a number or a "

@@ -135,16 +135,10 @@ class TestSubstitutePurchaseUnitTypes:
 
     def test_seed_reproducibility(self):
         """Same seed → identical substitution results."""
-        actions = _make_actions(
-            [[CREATE_UNIT_ACTION_TYPE, 0, 0, 0, 0, 0]] * 32
-        )
+        actions = _make_actions([[CREATE_UNIT_ACTION_TYPE, 0, 0, 0, 0, 0]] * 32)
         masks = np.tile(np.array([True] * 8, dtype=bool), (32, 1))
-        out_a = substitute_purchase_unit_types(
-            actions, masks, eps=0.5, rng=np.random.default_rng(2024)
-        )
-        out_b = substitute_purchase_unit_types(
-            actions, masks, eps=0.5, rng=np.random.default_rng(2024)
-        )
+        out_a = substitute_purchase_unit_types(actions, masks, eps=0.5, rng=np.random.default_rng(2024))
+        out_b = substitute_purchase_unit_types(actions, masks, eps=0.5, rng=np.random.default_rng(2024))
         np.testing.assert_array_equal(out_a, out_b)
 
     def test_invalid_eps_raises(self):
@@ -235,9 +229,7 @@ def _drive_callback(callback, model, steps_at_each_call):
 class TestPurchaseExploreScheduleCallback:
     def test_linear_anneal(self):
         model = _FakeModel()
-        cb = PurchaseExploreScheduleCallback(
-            start=0.5, end=0.0, total_timesteps=1000, schedule="linear"
-        )
+        cb = PurchaseExploreScheduleCallback(start=0.5, end=0.0, total_timesteps=1000, schedule="linear")
         seen = _drive_callback(cb, model, [0, 250, 500, 750, 1000])
         # Linear: 0.5, 0.375, 0.25, 0.125, 0.0
         assert seen[0] == pytest.approx(0.5)
@@ -248,9 +240,7 @@ class TestPurchaseExploreScheduleCallback:
 
     def test_cosine_anneal_endpoints(self):
         model = _FakeModel()
-        cb = PurchaseExploreScheduleCallback(
-            start=1.0, end=0.0, total_timesteps=100, schedule="cosine"
-        )
+        cb = PurchaseExploreScheduleCallback(start=1.0, end=0.0, total_timesteps=100, schedule="cosine")
         seen = _drive_callback(cb, model, [0, 100])
         assert seen[0] == pytest.approx(1.0)
         assert seen[1] == pytest.approx(0.0, abs=1e-9)
@@ -258,9 +248,7 @@ class TestPurchaseExploreScheduleCallback:
     def test_progress_clamped_after_overshoot(self):
         """num_timesteps beyond total_timesteps must clamp at ``end``."""
         model = _FakeModel()
-        cb = PurchaseExploreScheduleCallback(
-            start=0.5, end=0.05, total_timesteps=100, schedule="linear"
-        )
+        cb = PurchaseExploreScheduleCallback(start=0.5, end=0.05, total_timesteps=100, schedule="linear")
         seen = _drive_callback(cb, model, [200, 1000])
         assert seen[0] == pytest.approx(0.05)
         assert seen[1] == pytest.approx(0.05)
@@ -270,9 +258,7 @@ class TestPurchaseExploreScheduleCallback:
         progress should be measured from the per-stage starting offset."""
         model = _FakeModel()
         model.num_timesteps = 5_000  # cumulative offset from prior stage
-        cb = PurchaseExploreScheduleCallback(
-            start=0.5, end=0.0, total_timesteps=1000, schedule="linear"
-        )
+        cb = PurchaseExploreScheduleCallback(start=0.5, end=0.0, total_timesteps=1000, schedule="linear")
         cb.model = model  # type: ignore[assignment]
         cb.num_timesteps = model.num_timesteps
         cb._on_training_start()
@@ -289,9 +275,7 @@ class TestPurchaseExploreScheduleCallback:
         with pytest.raises(ValueError):
             PurchaseExploreScheduleCallback(start=0.0, end=0.0, total_timesteps=0)
         with pytest.raises(ValueError):
-            PurchaseExploreScheduleCallback(
-                start=0.0, end=0.0, total_timesteps=1, schedule="exp"
-            )
+            PurchaseExploreScheduleCallback(start=0.0, end=0.0, total_timesteps=1, schedule="exp")
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +302,7 @@ def maskable_env():
         def __init__(self):
             super().__init__()
             self.action_space = spaces.MultiDiscrete([10, 8, 2, 2, 2, 2])
-            self.observation_space = spaces.Box(
-                low=0.0, high=1.0, shape=(4,), dtype=np.float32
-            )
+            self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(4,), dtype=np.float32)
             # Legal unit types: indices 0, 2, 5 only.
             self._legal_units = (0, 2, 5)
             self._steps = 0

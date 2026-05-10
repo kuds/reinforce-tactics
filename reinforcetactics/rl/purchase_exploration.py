@@ -84,14 +84,9 @@ def substitute_purchase_unit_types(
         return out
 
     if unit_type_masks.ndim != 2:
-        raise ValueError(
-            f"unit_type_masks must be 2-D (n_envs, n_units), got shape {unit_type_masks.shape}"
-        )
+        raise ValueError(f"unit_type_masks must be 2-D (n_envs, n_units), got shape {unit_type_masks.shape}")
     if unit_type_masks.shape[0] != out.shape[0]:
-        raise ValueError(
-            f"unit_type_masks n_envs={unit_type_masks.shape[0]} does not match "
-            f"actions n_envs={out.shape[0]}"
-        )
+        raise ValueError(f"unit_type_masks n_envs={unit_type_masks.shape[0]} does not match actions n_envs={out.shape[0]}")
 
     n_envs = out.shape[0]
     for i in range(n_envs):
@@ -203,22 +198,17 @@ def install_purchase_explore_hook(model: Any, eps: float, seed: Optional[int] = 
         nvec = getattr(model.action_space, "nvec", None)
         if nvec is None:
             raise TypeError(
-                "purchase exploration only supports MultiDiscrete action spaces; "
-                f"got {type(model.action_space).__name__}"
+                f"purchase exploration only supports MultiDiscrete action spaces; got {type(model.action_space).__name__}"
             )
         action_dims = list(int(x) for x in nvec)
     action_dims = list(int(x) for x in action_dims)
     if len(action_dims) <= UNIT_TYPE_DIM_INDEX:
-        raise ValueError(
-            f"action_dims {action_dims} has no unit_type slot at index {UNIT_TYPE_DIM_INDEX}"
-        )
+        raise ValueError(f"action_dims {action_dims} has no unit_type slot at index {UNIT_TYPE_DIM_INDEX}")
 
     original_forward = policy.forward
 
     def wrapped_forward(obs, deterministic: bool = False, action_masks=None):
-        actions, values, log_prob = original_forward(
-            obs, deterministic=deterministic, action_masks=action_masks
-        )
+        actions, values, log_prob = original_forward(obs, deterministic=deterministic, action_masks=action_masks)
         eps_now = float(getattr(model, "purchase_explore_eps", 0.0))
         if deterministic or eps_now <= 0.0 or action_masks is None:
             return actions, values, log_prob
@@ -234,9 +224,7 @@ def install_purchase_explore_hook(model: Any, eps: float, seed: Optional[int] = 
         # case a future SB3 change drops the reshape.
         if actions_np.ndim == 1:
             actions_np = actions_np.reshape(1, -1)
-        substituted = substitute_purchase_unit_types(
-            actions_np, ut_mask, eps_now, model._purchase_explore_rng
-        )
+        substituted = substitute_purchase_unit_types(actions_np, ut_mask, eps_now, model._purchase_explore_rng)
         if np.array_equal(substituted, actions_np):
             return actions, values, log_prob
 
@@ -249,9 +237,7 @@ def install_purchase_explore_hook(model: Any, eps: float, seed: Optional[int] = 
         # times the rate of create_unit sampling — typically a small
         # fraction of rollout steps.
         with th.no_grad():
-            _v, new_log_prob, _ent = policy.evaluate_actions(
-                obs, new_actions, action_masks=action_masks
-            )
+            _v, new_log_prob, _ent = policy.evaluate_actions(obs, new_actions, action_masks=action_masks)
         return new_actions, values, new_log_prob
 
     policy.forward = wrapped_forward
