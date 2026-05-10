@@ -689,3 +689,68 @@ class TestAdvancedBotPhases:
         """EXPAND threshold must be above CONQUER threshold, otherwise
         compute_target_phase has an undefined region."""
         assert AdvancedBot.EXPAND_NEUTRAL_THRESHOLD > AdvancedBot.CONQUER_NEUTRAL_THRESHOLD
+
+
+class TestMidCapturePreservation:
+    """Regression: a unit that is mid-capture on a tower must NOT be pulled
+    off by coordinate_attacks to chase a killable enemy. The user observed
+    this on the beginner map (Advanced as blue) -- the bot would seize
+    once, then leave on the next turn, dropping the tower's health back to
+    full and burning the previous turn's progress."""
+
+    def _setup_mid_capture(self, bot_cls):
+        """Place a bot warrior mid-seize on a neutral tower, plus a
+        killable enemy two tiles away from the tower."""
+        map_data = FileIO.load_map("maps/1v1/beginner.csv")
+        game = GameState(map_data, num_players=2)
+        game.player_gold[1] = 10_000
+        game.player_gold[2] = 10_000
+
+        # Find a neutral tower (beginner has 4 in the centre).
+        neutral_tower = next(tile for row in game.grid.tiles for tile in row if tile.type == "t" and tile.player is None)
+
+        # Park a Warrior on the tower with a partial seize already applied.
+        warrior = game.create_unit("W", neutral_tower.x, neutral_tower.y, 2)
+        assert warrior is not None
+        neutral_tower.health = max(1, neutral_tower.max_health // 2)
+
+        # Killable enemy adjacent to a position the warrior could reach
+        # (max move radius covers a 1-tower step). 1 HP so it's "killable".
+        enemy = game.create_unit("W", neutral_tower.x + 1, neutral_tower.y, 1)
+        assert enemy is not None
+        enemy.health = 1
+
+        bot = bot_cls(game, player=2)
+        # Reset can_act flags so the bot's turn loop will see them as
+        # eligible. After a fresh create_unit they're already True; we
+        # spell it out for clarity.
+        warrior.can_move = True
+        warrior.can_attack = True
+        return game, bot, warrior, neutral_tower, enemy
+
+    def test_medium_bot_does_not_abandon_capture(self):
+        game, bot, warrior, tower, enemy = self._setup_mid_capture(MediumBot)
+        starting_tower_pos = (tower.x, tower.y)
+        bot.move_and_act_units()
+        # Warrior must still be on the tower (capture preserved); tower
+        # must still be ours-or-pending (not magically reset to full HP
+        # and definitely not vacated).
+        assert (warrior.x, warrior.y) == starting_tower_pos
+        # Either we completed the seize this turn (tile.player == 2 and
+        # health back at max) or we continued damaging it (health below
+        # max). Both are fine; the regression is "warrior left + tower
+        # health reset to full".
+        same_tile = game.grid.get_tile(*starting_tower_pos)
+        captured = same_tile.player == 2 and same_tile.health == same_tile.max_health
+        still_progressing = same_tile.player is None and same_tile.health < same_tile.max_health
+        assert captured or still_progressing
+
+    def test_advanced_bot_does_not_abandon_capture(self):
+        game, bot, warrior, tower, enemy = self._setup_mid_capture(AdvancedBot)
+        starting_tower_pos = (tower.x, tower.y)
+        bot.move_and_act_units_enhanced()
+        assert (warrior.x, warrior.y) == starting_tower_pos
+        same_tile = game.grid.get_tile(*starting_tower_pos)
+        captured = same_tile.player == 2 and same_tile.health == same_tile.max_health
+        still_progressing = same_tile.player is None and same_tile.health < same_tile.max_health
+        assert captured or still_progressing
