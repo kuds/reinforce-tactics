@@ -17,7 +17,6 @@ from reinforcetactics.rl.observation import (
     GRID_CHANNELS,
     NUM_TILE_TYPES,
     NUM_UNIT_TYPES,
-    TURN_SCALE,
     UNIT_CHANNELS,
     UNIT_COUNT_SCALE,
     build_observation,
