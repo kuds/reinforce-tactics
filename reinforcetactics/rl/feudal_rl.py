@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import nn
 
 from reinforcetactics.rl.gym_env import StructuredActionMasks
@@ -104,79 +103,11 @@ class StructuredMaskProvider:
         return self._to_tensor(m.reshape(-1))  # (1, H*W)
 
 
-class SpatialFeatureExtractor(BaseFeaturesExtractor):
-    """
-    CNN-based feature extractor for spatial game state.
-    Processes grid channels, unit channels, and global features
-    (gold, turn number, unit counts, current player).
-    """
-
-    def __init__(self, observation_space, features_dim: int = 512):
-        super().__init__(observation_space, features_dim)
-
-        # Pull spatial channel counts from the observation space rather than
-        # hardcoding them, so this extractor follows the canonical encoding
-        # in ``rl.observation`` even if its channel layout changes.
-        grid_channels = observation_space["grid"].shape[-1]
-        unit_channels = observation_space["units"].shape[-1]
-        n_input_channels = grid_channels + unit_channels
-
-        self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-        )
-
-        # Determine global_features size if present in observation space
-        if "global_features" in observation_space.spaces:
-            self.n_global = observation_space["global_features"].shape[0]
-        else:
-            self.n_global = 0
-
-        # Compute CNN output shape by doing one forward pass
-        with torch.no_grad():
-            sample_obs = observation_space.sample()
-            grid = torch.as_tensor(sample_obs["grid"]).float()
-            units = torch.as_tensor(sample_obs["units"]).float()
-            combined = torch.cat([grid, units], dim=-1).permute(2, 0, 1).unsqueeze(0)
-            n_flatten = self.cnn(combined).flatten(1).shape[1]
-
-        # Linear projection: CNN output + global features -> features_dim
-        self.linear = nn.Sequential(nn.Linear(n_flatten + self.n_global, features_dim), nn.ReLU())
-
-    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Extract features from observations.
-
-        Args:
-            observations: Dict with 'grid', 'units', and optionally 'global_features'
-
-        Returns:
-            Feature tensor of shape (batch, features_dim)
-        """
-        grid = observations["grid"]  # (B, H, W, C_grid)
-        units = observations["units"]  # (B, H, W, C_units)
-
-        # Combine and permute to (B, C, H, W)
-        combined = torch.cat([grid, units], dim=-1)  # (B, H, W, C_grid + C_units)
-        combined = combined.permute(0, 3, 1, 2)  # (B, C, H, W)
-
-        # CNN forward
-        features = self.cnn(combined)  # (B, 64, H, W)
-        features = features.flatten(1)  # (B, 64*H*W)
-
-        # Concatenate global features (gold, turn, own/opp unit counts).
-        if self.n_global > 0 and "global_features" in observations:
-            global_feat = observations["global_features"]  # (B, GLOBAL_FEATURES_DIM)
-            features = torch.cat([features, global_feat], dim=1)
-
-        # Linear projection
-        features = self.linear(features)  # (B, features_dim)
-
-        return features
+# ``SpatialFeatureExtractor`` was lifted into ``reinforcetactics.rl.extractors``
+# so MaskablePPO (via ``policy_kwargs.features_extractor_class``) and the
+# feudal trainer share one implementation. Re-exported here for
+# backwards-compat with anything that imports it from this module.
+from reinforcetactics.rl.extractors import SpatialFeatureExtractor  # noqa: F401, E402
 
 
 class ManagerNetwork(nn.Module):

@@ -111,6 +111,29 @@ class TestSpatialFeatureExtractor:
         out = ext(obs)
         assert out.shape == (1, 64)
 
+    def test_pool_avg_collapses_spatial_dims(self, obs_space, batched_obs):
+        """``pool='avg'`` makes the linear input independent of (H, W).
+
+        The Linear-input dim should be ``64 + GLOBAL_FEATURES_DIM`` (one
+        feature per CNN output channel after AdaptiveAvgPool2d(1)), not
+        ``64 * H * W + GLOBAL_FEATURES_DIM`` as it is for ``flatten``.
+        """
+        ext = SpatialFeatureExtractor(obs_space, features_dim=64, pool="avg")
+        linear_in = ext.linear[0].in_features
+        assert linear_in == 64 + GLOBAL_FEATURES_DIM
+        out = ext(batched_obs)
+        assert out.shape == (2, 64)
+
+    def test_pool_flatten_is_default_and_unchanged(self, obs_space):
+        """Default pool='flatten' preserves the pre-existing feudal behavior."""
+        ext = SpatialFeatureExtractor(obs_space, features_dim=64)
+        # flatten produces 64 * H * W + GLOBAL_FEATURES_DIM input width.
+        assert ext.linear[0].in_features == 64 * GRID_H * GRID_W + GLOBAL_FEATURES_DIM
+
+    def test_pool_invalid_raises(self, obs_space):
+        with pytest.raises(ValueError, match="pool must be one of"):
+            SpatialFeatureExtractor(obs_space, features_dim=64, pool="max")
+
 
 # ---------------------------------------------------------------------------
 # ManagerNetwork

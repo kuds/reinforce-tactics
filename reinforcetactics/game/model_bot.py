@@ -153,7 +153,11 @@ class ModelBot:  # pylint: disable=too-few-public-methods
             {
                 "grid": spaces.Box(low=0.0, high=1.0, shape=(gh, gw, GRID_CHANNELS), dtype=np.float32),
                 "units": spaces.Box(low=0.0, high=1.0, shape=(gh, gw, UNIT_CHANNELS), dtype=np.float32),
-                "global_features": spaces.Box(low=0.0, high=1e5, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
+                # ``global_features`` are tanh-squashed in ``build_observation``
+                # (see ``reinforcetactics.rl.observation``), so all five
+                # entries land in [0, 1). Matches the env-side bounds in
+                # ``StrategyGameEnv``.
+                "global_features": spaces.Box(low=0.0, high=1.0, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
             }
         )
         autoregressive = bool(hp.get("autoregressive_worker", ckpt.get("autoregressive_worker", False)))

@@ -126,6 +126,9 @@ def make_maskable_env(
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
     pad_to_size: Optional[Tuple[int, int]] = None,
+    gold_scale: Optional[float] = None,
+    turn_scale: Optional[float] = None,
+    unit_count_scale: Optional[float] = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -157,6 +160,14 @@ def make_maskable_env(
         # Reproducible eval against a random opponent:
         env = make_maskable_env(opponent="random", seed=42)
     """
+    scale_kwargs: Dict[str, Any] = {}
+    if gold_scale is not None:
+        scale_kwargs["gold_scale"] = gold_scale
+    if turn_scale is not None:
+        scale_kwargs["turn_scale"] = turn_scale
+    if unit_count_scale is not None:
+        scale_kwargs["unit_count_scale"] = unit_count_scale
+
     env = StrategyGameEnv(
         map_file=map_file,
         opponent=opponent,
@@ -170,6 +181,7 @@ def make_maskable_env(
         opponent_kwargs=opponent_kwargs,
         gamma=gamma,
         pad_to_size=pad_to_size,
+        **scale_kwargs,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -190,12 +202,23 @@ def _make_env_fn(
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
     pad_to_size: Optional[Tuple[int, int]] = None,
+    gold_scale: Optional[float] = None,
+    turn_scale: Optional[float] = None,
+    unit_count_scale: Optional[float] = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
 
     Used for vectorized environment creation.
     """
+
+    scale_kwargs: Dict[str, Any] = {}
+    if gold_scale is not None:
+        scale_kwargs["gold_scale"] = gold_scale
+    if turn_scale is not None:
+        scale_kwargs["turn_scale"] = turn_scale
+    if unit_count_scale is not None:
+        scale_kwargs["unit_count_scale"] = unit_count_scale
 
     def _init() -> ActionMaskedEnv:
         env = StrategyGameEnv(
@@ -211,6 +234,7 @@ def _make_env_fn(
             opponent_kwargs=opponent_kwargs,
             gamma=gamma,
             pad_to_size=pad_to_size,
+            **scale_kwargs,
         )
         env.reset(seed=seed + rank)
         wrapped = ActionMaskedEnv(env)
@@ -234,6 +258,9 @@ def make_maskable_vec_env(
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
     pad_to_size: Optional[Tuple[int, int]] = None,
+    gold_scale: Optional[float] = None,
+    turn_scale: Optional[float] = None,
+    unit_count_scale: Optional[float] = None,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -285,6 +312,9 @@ def make_maskable_vec_env(
             opponent_kwargs,
             gamma,
             pad_to_size,
+            gold_scale,
+            turn_scale,
+            unit_count_scale,
         )
         for i in range(n_envs)
     ]

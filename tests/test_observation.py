@@ -13,10 +13,12 @@ import pytest
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
+    GOLD_SCALE,
     GRID_CHANNELS,
     NUM_TILE_TYPES,
     NUM_UNIT_TYPES,
     UNIT_CHANNELS,
+    UNIT_COUNT_SCALE,
     build_observation,
 )
 from reinforcetactics.utils.file_io import FileIO
@@ -62,17 +64,27 @@ def test_keys_and_dtypes(game):
 
 
 def test_perspective_p1_vs_p2_swaps_gold(game):
-    """global_features[0] must always be the perspective player's gold."""
+    """global_features[0] must always be the perspective player's gold.
+
+    Values are tanh(gold / GOLD_SCALE); the test verifies the *perspective
+    swap* by checking that obs1[own] == obs2[opp] and vice versa, without
+    pinning the exact scaled value.
+    """
     game.player_gold[1] = 42
     game.player_gold[2] = 99
 
     obs1 = build_observation(game, perspective_player=1)
     obs2 = build_observation(game, perspective_player=2)
 
-    assert obs1["global_features"][0] == 42
-    assert obs1["global_features"][1] == 99
-    assert obs2["global_features"][0] == 99
-    assert obs2["global_features"][1] == 42
+    own_p1, opp_p1 = obs1["global_features"][0], obs1["global_features"][1]
+    own_p2, opp_p2 = obs2["global_features"][0], obs2["global_features"][1]
+
+    # Perspective swap: own-from-P1 == opp-from-P2 (= tanh(42/GOLD_SCALE))
+    # and own-from-P2 == opp-from-P1 (= tanh(99/GOLD_SCALE)).
+    assert own_p1 == pytest.approx(np.tanh(42 / GOLD_SCALE), rel=1e-5)
+    assert opp_p1 == pytest.approx(np.tanh(99 / GOLD_SCALE), rel=1e-5)
+    assert own_p2 == pytest.approx(np.tanh(99 / GOLD_SCALE), rel=1e-5)
+    assert opp_p2 == pytest.approx(np.tanh(42 / GOLD_SCALE), rel=1e-5)
 
 
 def test_perspective_swaps_unit_counts(game):
@@ -90,11 +102,12 @@ def test_perspective_swaps_unit_counts(game):
     obs1 = build_observation(game, perspective_player=1)
     obs2 = build_observation(game, perspective_player=2)
 
-    # global_features: [own_gold, opp_gold, turn, own_units, opp_units]
-    assert obs1["global_features"][3] == 3
-    assert obs1["global_features"][4] == 1
-    assert obs2["global_features"][3] == 1
-    assert obs2["global_features"][4] == 3
+    # global_features: [own_gold, opp_gold, turn, own_units, opp_units],
+    # each tanh(count / UNIT_COUNT_SCALE).
+    assert obs1["global_features"][3] == pytest.approx(np.tanh(3 / UNIT_COUNT_SCALE), rel=1e-5)
+    assert obs1["global_features"][4] == pytest.approx(np.tanh(1 / UNIT_COUNT_SCALE), rel=1e-5)
+    assert obs2["global_features"][3] == pytest.approx(np.tanh(1 / UNIT_COUNT_SCALE), rel=1e-5)
+    assert obs2["global_features"][4] == pytest.approx(np.tanh(3 / UNIT_COUNT_SCALE), rel=1e-5)
 
 
 def test_current_player_dropped_from_global_features(game):
@@ -122,8 +135,10 @@ def test_fog_of_war_hides_enemy_gold(game_fow):
     game_fow.player_gold[1] = 50
     game_fow.player_gold[2] = 200
     obs = build_observation(game_fow, perspective_player=1)
-    assert obs["global_features"][0] == 50
-    assert obs["global_features"][1] == 0  # enemy gold hidden
+    # tanh(50 / GOLD_SCALE) for own gold; opp gold is hidden under FOW so
+    # the raw input is 0 -> tanh(0) = 0.
+    assert obs["global_features"][0] == pytest.approx(np.tanh(50 / GOLD_SCALE), rel=1e-5)
+    assert obs["global_features"][1] == 0.0  # enemy gold hidden -> tanh(0) = 0
     # visibility layer is included under FOW
     assert "visibility" in obs
 
@@ -244,6 +259,88 @@ def test_pad_to_smaller_than_map_raises(game):
     h, w = game.grid.height, game.grid.width
     with pytest.raises(ValueError, match="smaller than the live map"):
         build_observation(game, perspective_player=1, pad_to=(h - 1, w))
+
+
+# ---------- global_features normalization ----------
+
+
+def test_global_features_bounded_under_extreme_inputs(game):
+    """tanh(x/scale) stays within the [0, 1] Box bounds, even for inputs
+    far past the linear regime (float32 tanh saturates to exactly 1.0)."""
+    from reinforcetactics.core.unit import Unit
+
+    game.player_gold[1] = 10**9
+    game.player_gold[2] = 10**9
+    game.turn_number = 10**6
+    game.units = [Unit("W", 0, 0, 1) for _ in range(500)]
+
+    obs = build_observation(game, perspective_player=1)
+    g = obs["global_features"]
+    assert g.dtype == np.float32
+    assert np.all(g >= 0.0)
+    assert np.all(g <= 1.0)
+
+
+def test_global_features_monotonic_in_gold(game):
+    """Doubling own_gold strictly increases the own_gold feature."""
+    game.player_gold[1] = 100
+    low = build_observation(game, perspective_player=1)["global_features"][0]
+    game.player_gold[1] = 200
+    high = build_observation(game, perspective_player=1)["global_features"][0]
+    assert high > low
+
+
+def test_global_features_zero_at_origin():
+    """A game with no gold / no turns / no units yields a zero vector
+    in the gold/turn/unit-count slots (modulo the starting state)."""
+    from reinforcetactics.core.unit import Unit
+
+    map_data = FileIO.generate_random_map(10, 10, num_players=2)
+    game = GameState(map_data, num_players=2)
+    game.player_gold[1] = 0
+    game.player_gold[2] = 0
+    game.turn_number = 0
+    game.units = [Unit("W", 0, 0, 1)]  # need at least one to exercise the path
+
+    obs = build_observation(game, perspective_player=2)
+    g = obs["global_features"]
+    # Player-2 perspective: own gold/units = 0 -> tanh(0) = 0.
+    assert g[0] == 0.0
+    assert g[2] == 0.0  # turn
+    assert g[3] == 0.0  # own_units (P2 has none)
+
+
+def test_scale_overrides_are_honoured(game):
+    """Passing custom scales changes the output exactly as expected."""
+    game.player_gold[1] = 500
+    game.player_gold[2] = 500
+    game.turn_number = 30
+
+    custom_obs = build_observation(
+        game,
+        perspective_player=1,
+        gold_scale=100.0,
+        turn_scale=10.0,
+        unit_count_scale=5.0,
+    )
+    g = custom_obs["global_features"]
+    assert g[0] == pytest.approx(np.tanh(500 / 100.0), rel=1e-5)
+    assert g[2] == pytest.approx(np.tanh(30 / 10.0), rel=1e-5)
+
+
+def test_global_features_within_box_bounds(game):
+    """Output respects the [0, 1] Box bounds advertised by gym_env / model_bot."""
+    from reinforcetactics.core.unit import Unit
+
+    game.player_gold[1] = 5000
+    game.player_gold[2] = 5000
+    game.turn_number = 100
+    game.units = [Unit("W", i % 10, i // 10, 1 + (i % 2)) for i in range(50)]
+
+    obs = build_observation(game, perspective_player=1)
+    g = obs["global_features"]
+    assert np.all(g >= 0.0)
+    assert np.all(g <= 1.0)
 
 
 def test_pad_to_pads_visibility_under_fog(game_fow):
