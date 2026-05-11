@@ -376,6 +376,32 @@ curriculum:
         end: 0.03
         schedule: linear
 
+    # Bridge between intermediate_random_20 (78% WR) and intermediate_simple
+    # (which collapsed in run 20260512). Random bot is degenerate on a map
+    # with neutral buildings -- it scatters units instead of competing for
+    # the centre -- so the policy promotes through random_20 without learning
+    # the capture race, then face-plants on simple. MixedBot(random, simple,
+    # p_hard=0.5) keeps half the episodes winnable while previewing simple's
+    # land-grab tempo. Mirrors the beginner_mixed_50 pattern that already
+    # bridges beginner_simple -> beginner_medium successfully.
+    - name: intermediate_mixed_random_simple
+      map_file: maps/1v1/intermediate.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 2_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 80
+      ent_coef:
+        start: 0.07
+        end: 0.03
+        schedule: linear
+
     # The real test: capture-greedy opponent on a board with contested
     # neutrals. Promotion threshold sits at 0.65 (lower than beginner_simple's
     # 0.70) because this is the first stage where the agent has to learn a
@@ -464,6 +490,48 @@ curriculum:
         end: 0.01
         schedule: linear
 
+    # Two-stage bridge between skirmish_random_20 and skirmish_simple.
+    # On the 8x8 skirmish map the random -> simple difficulty gap is much
+    # wider than on smaller maps: random units scatter into empty space and
+    # never compete for the 4 neutral buildings, while SimpleBot's
+    # closest-structure logic gets *more* effective with map area (more
+    # buildings to greedily seize). A single mixed_50 isn't enough surface
+    # area to teach the policy how to win on this map -- it needs gradual
+    # exposure starting with mostly-random episodes (p_hard=0.25), then a
+    # standard 50/50 mix.
+    - name: skirmish_mixed_25
+      map_file: maps/1v1/skirmish.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.25
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 2_000_000
+      n_eval_episodes: 80
+      max_steps: 2000
+      max_turns: 120
+      ent_coef:
+        start: 0.07
+        end: 0.03
+        schedule: linear
+
+    - name: skirmish_mixed_50
+      map_file: maps/1v1/skirmish.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 2_500_000
+      n_eval_episodes: 80
+      max_steps: 2000
+      max_turns: 120
+      ent_coef: 0.05
+
     - name: skirmish_simple
       map_file: maps/1v1/skirmish.csv
       opponent: simple
@@ -547,6 +615,48 @@ curriculum:
         start: 0.10
         end: 0.01
         schedule: linear
+
+    # Two-stage bridge between corner_points_random_20 and
+    # corner_points_simple. The random -> simple gap on a 12x10 map is so
+    # wide that RandomBot is essentially useless as the easy half of a
+    # MixedBot: its units scatter into 120 tiles of empty space and never
+    # press on the agent's structures. BalancedRandomBot scales its action
+    # throughput with army size (one build + one random action per owned
+    # unit per turn), so it stays competitive on big maps where plain
+    # RandomBot degrades. Substituting balanced_random for random on the
+    # easy side keeps the mixed-bot signal meaningful at this scale.
+    - name: corner_points_mixed_25
+      map_file: maps/1v1/corner_points.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: balanced_random
+        hard: simple
+        p_hard: 0.25
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 2_000_000
+      n_eval_episodes: 80
+      max_steps: 2500
+      max_turns: 200
+      ent_coef:
+        start: 0.07
+        end: 0.03
+        schedule: linear
+
+    - name: corner_points_mixed_50
+      map_file: maps/1v1/corner_points.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: balanced_random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 2_500_000
+      n_eval_episodes: 80
+      max_steps: 2500
+      max_turns: 200
+      ent_coef: 0.05
 
     - name: corner_points_simple
       map_file: maps/1v1/corner_points.csv
