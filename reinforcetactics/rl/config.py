@@ -58,6 +58,15 @@ class EnvConfig:
     # explicitly to override the auto-computed value (e.g. to leave headroom
     # for a future larger map). Only honoured by ``flat_discrete``.
     pad_to_size: Optional[Tuple[int, int]] = None
+    # ``global_features`` tanh normalization divisors. Defaults match the
+    # module-level constants in ``reinforcetactics.rl.observation`` and
+    # are tuned for the current curriculum's gold / turn / army-size
+    # ranges. Override on a per-run basis when shipping a map / economy
+    # whose typical values differ enough that the linear regime of
+    # ``tanh`` no longer covers the relevant operating point.
+    gold_scale: float = 1000.0
+    turn_scale: float = 60.0
+    unit_count_scale: float = 20.0
 
 
 @dataclass

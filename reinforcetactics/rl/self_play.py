@@ -411,6 +411,9 @@ class SelfPlayEnv(gym.Wrapper):
             perspective_player=player,
             action_mask=None,
             fog_of_war=base_env.fog_of_war,
+            gold_scale=base_env.gold_scale,
+            turn_scale=base_env.turn_scale,
+            unit_count_scale=base_env.unit_count_scale,
         )
 
     def _resolve_action(self, action) -> np.ndarray:

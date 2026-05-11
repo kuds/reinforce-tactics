@@ -347,6 +347,8 @@ class TestFlipObservationFogOfWar:
 
     def test_flipped_obs_hides_opponent_gold_under_fow(self, fow_self_play_env):
         """In the opponent's obs, the agent's gold (now the 'enemy') must be hidden."""
+        from reinforcetactics.rl.observation import GOLD_SCALE
+
         base_env = fow_self_play_env.env.unwrapped
         # Distinct gold values so we can tell them apart.
         base_env.game_state.player_gold[1] = 123
@@ -355,10 +357,10 @@ class TestFlipObservationFogOfWar:
         opp_obs = fow_self_play_env._get_obs_for_player(3 - fow_self_play_env.agent_player)
 
         # Opponent (player 2 when agent_player=1) sees its own gold first
-        # and the agent's (enemy) gold hidden as 0 under FOW.
-        # global_features layout: [own_gold, opp_gold, turn, own_units, opp_units, current_player]
-        assert opp_obs["global_features"][0] == 456
-        assert opp_obs["global_features"][1] == 0  # hidden under FOW
+        # (tanh-normalized) and the agent's (enemy) gold hidden as 0 under FOW.
+        # global_features layout: [own_gold, opp_gold, turn, own_units, opp_units].
+        assert opp_obs["global_features"][0] == pytest.approx(np.tanh(456 / GOLD_SCALE), rel=1e-5)
+        assert opp_obs["global_features"][1] == 0.0  # hidden under FOW -> tanh(0) = 0
 
     def test_flip_observation_swaps_gold_without_fow(self, self_play_env):
         """The non-FOW behavior is preserved: the existing swap test still holds."""

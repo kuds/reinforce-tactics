@@ -133,6 +133,9 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
         pad_to_size=cfg.env.pad_to_size,
+        gold_scale=cfg.env.gold_scale,
+        turn_scale=cfg.env.turn_scale,
+        unit_count_scale=cfg.env.unit_count_scale,
     )
 
 
@@ -158,6 +161,9 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
         pad_to_size=cfg.env.pad_to_size,
+        gold_scale=cfg.env.gold_scale,
+        turn_scale=cfg.env.turn_scale,
+        unit_count_scale=cfg.env.unit_count_scale,
     )
 
 
@@ -227,8 +233,47 @@ def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> Optional[tuple[int, int
     return (max_h, max_w)
 
 
+def _resolve_dotted(path: str) -> Any:
+    """Import ``"pkg.module.Attr"`` and return the attribute.
+
+    YAML configs can't carry Python class objects, so
+    ``policy_kwargs.features_extractor_class`` is spelled as a dotted
+    string and resolved here. Falls back to raising the underlying
+    ``ImportError`` / ``AttributeError`` so misconfiguration surfaces
+    immediately at model construction.
+    """
+    import importlib
+
+    if "." not in path:
+        raise ValueError(
+            f"features_extractor_class string {path!r} is not dotted; expected 'pkg.module.Attr'"
+        )
+    module_path, attr = path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, attr)
+
+
+def _resolve_policy_kwargs(policy_kwargs: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Resolve any string-valued class references inside ``policy_kwargs``.
+
+    Currently handles ``features_extractor_class`` (the only key whose
+    SB3 contract requires a class object rather than a primitive).
+    Other entries pass through unchanged. ``None`` returns ``None``.
+    """
+    if not policy_kwargs:
+        return policy_kwargs
+    resolved = dict(policy_kwargs)
+    fe_class = resolved.get("features_extractor_class")
+    if isinstance(fe_class, str):
+        resolved["features_extractor_class"] = _resolve_dotted(fe_class)
+    return resolved
+
+
 def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
     from sb3_contrib import MaskablePPO
+
+    sb3_kwargs = cfg.ppo.as_sb3_kwargs()
+    sb3_kwargs["policy_kwargs"] = _resolve_policy_kwargs(sb3_kwargs.get("policy_kwargs"))
 
     return MaskablePPO(
         "MultiInputPolicy",
@@ -239,7 +284,7 @@ def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
         # is independent of this setting so curves still land on disk.
         verbose=0,
         tensorboard_log=str(output_dir / "tensorboard"),
-        **cfg.ppo.as_sb3_kwargs(),
+        **sb3_kwargs,
     )
 
 

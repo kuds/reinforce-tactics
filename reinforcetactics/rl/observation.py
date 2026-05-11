@@ -22,8 +22,20 @@ Observation contract (2-player, agent-relative):
         channel  9    owner == opp
         channel  10   reserved (kept zero; preserved for symmetry with grid)
         channel  11   unit HP fraction in [0, 1]
-    global_features: (5,) float32
-        [own_gold, opp_gold, turn, own_units, opp_units]
+    global_features: (5,) float32, each in [0, 1)
+        [own_gold, opp_gold, turn, own_units, opp_units], each squashed
+        through ``tanh(x / scale)`` so all dims share a comparable
+        magnitude regardless of map size or game length. Raw inputs are
+        monotonically non-decreasing in expectation (gold compounds via
+        income, ``turn_number`` is strictly monotonic, unit counts trend
+        up over a game), so without normalization a flat MLP head sees
+        gold values ~10^3 alongside unit counts ~10^1 — the dominant
+        feature swamps the gradients. ``tanh`` keeps the typical regime
+        roughly linear and saturates gracefully on the tails (e.g.
+        a runaway 10k-gold game). Scale defaults live in module-level
+        constants (``GOLD_SCALE`` / ``TURN_SCALE`` / ``UNIT_COUNT_SCALE``)
+        and can be overridden per-call (e.g. by ``StrategyGameEnv`` from
+        ``EnvConfig``).
         ``current_player`` is intentionally omitted: the agent only acts on
         its own turn, so this slot is always equal to ``perspective_player``
         and only adds spurious side information.
@@ -54,6 +66,23 @@ GRID_CHANNELS = NUM_TILE_TYPES + 3 + 1  # 12: 8 tile + 3 owner + 1 hp
 UNIT_CHANNELS = NUM_UNIT_TYPES + 3 + 1  # 12: 8 unit + 3 owner + 1 hp
 GLOBAL_FEATURES_DIM = 5
 
+# Default ``tanh`` scale factors for ``global_features`` normalization.
+# Each chosen so the typical mid-game value lands in the linear regime of
+# ``tanh`` (input ~ 1.0) and tails saturate gracefully:
+#   GOLD_SCALE        — early-mid game gold sits ~250-3000 (STARTING_GOLD=250
+#                       plus a few turns of compounding income at 50-150 per
+#                       owned structure); 1000 centers the linear regime.
+#   TURN_SCALE        — matches the ``max_turns: 60`` cap used by every stage
+#                       in configs/bootstrap.yaml; still useful when
+#                       ``max_turns`` is unbounded since tanh saturates ~120+.
+#   UNIT_COUNT_SCALE  — per-side army sizes realistically peak around 20-30
+#                       on current maps; 20 lands the linear regime there.
+# Override per-call via ``build_observation(..., gold_scale=..., ...)`` or
+# per-env via the corresponding ``StrategyGameEnv``/``EnvConfig`` knobs.
+GOLD_SCALE = 1000.0
+TURN_SCALE = 60.0
+UNIT_COUNT_SCALE = 20.0
+
 
 def build_observation(
     game_state: Any,
@@ -61,6 +90,9 @@ def build_observation(
     action_mask: Optional[np.ndarray] = None,
     fog_of_war: Optional[bool] = None,
     pad_to: Optional[Tuple[int, int]] = None,
+    gold_scale: float = GOLD_SCALE,
+    turn_scale: float = TURN_SCALE,
+    unit_count_scale: float = UNIT_COUNT_SCALE,
 ) -> Dict[str, np.ndarray]:
     """Build an RL observation from ``perspective_player``'s viewpoint.
 
@@ -76,6 +108,13 @@ def build_observation(
             space does not include this key — gym_env passes ``None``.
         fog_of_war: Override for the FOW flag. When ``None``, falls back to
             ``game_state.fog_of_war``.
+        gold_scale: Divisor applied before ``tanh`` to ``own_gold`` /
+            ``opp_gold``. Defaults to :data:`GOLD_SCALE`.
+        turn_scale: Divisor applied before ``tanh`` to ``turn_number``.
+            Defaults to :data:`TURN_SCALE`.
+        unit_count_scale: Divisor applied before ``tanh`` to
+            ``own_units`` / ``opp_units``. Defaults to
+            :data:`UNIT_COUNT_SCALE`.
         pad_to: Optional ``(pad_h, pad_w)`` target shape for the spatial
             tensors. When set, ``grid`` / ``units`` (and ``visibility`` if
             present) are zero-padded so the real map sits at the top-left
@@ -115,9 +154,21 @@ def build_observation(
         opp_gold = game_state.player_gold.get(opp, 0)
         opp_units = sum(1 for u in game_state.units if u.player == opp)
 
-    global_features = np.array(
-        [own_gold, opp_gold, game_state.turn_number, own_units, opp_units],
-        dtype=np.float32,
+    # tanh-squash to keep features comparable in magnitude. All five raw
+    # inputs are non-negative, so the output sits in [0, 1). Under fog of
+    # war, ``opp_gold`` is forced to 0 above, which maps to tanh(0)=0 —
+    # preserving the "hidden info" sentinel.
+    global_features = np.tanh(
+        np.array(
+            [
+                own_gold / gold_scale,
+                opp_gold / gold_scale,
+                game_state.turn_number / turn_scale,
+                own_units / unit_count_scale,
+                opp_units / unit_count_scale,
+            ],
+            dtype=np.float32,
+        )
     )
 
     raw_grid = state_arrays["grid"]

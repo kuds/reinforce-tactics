@@ -125,6 +125,17 @@ ppo:
     net_arch:
       pi: [256, 256]
       vf: [256, 256]
+    # CNN trunk over the (grid, units) spatial planes. Without this SB3's
+    # default ``CombinedExtractor`` flattens both planes — the policy
+    # then has to relearn map adjacency from a flat vector and pays a
+    # large parameter cost on the first Linear layer (input grows with
+    # H * W * channels). ``pool: avg`` makes the trunk's output size
+    # independent of ``pad_to_size``, which matters for cross-stage
+    # curricula that pad to the largest map.
+    features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
+    features_extractor_kwargs:
+      features_dim: 256
+      pool: avg
 
 eval:
   # eval_freq is in env steps across all sub-envs. With n_envs=8 and

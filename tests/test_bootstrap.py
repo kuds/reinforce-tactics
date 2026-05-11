@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from reinforcetactics.rl.bootstrap import CurriculumStalled, _write_results_csv, run_curriculum
+from reinforcetactics.rl.bootstrap import (
+    CurriculumStalled,
+    _resolve_dotted,
+    _resolve_policy_kwargs,
+    _write_results_csv,
+    run_curriculum,
+)
 from reinforcetactics.rl.callbacks import (
     EntropyScheduleCallback,
     PeriodicEvalCallback,
@@ -240,6 +246,34 @@ class TestCurriculumLoading:
         stage = {**VALID_DICT["curriculum"]["stages"][0], "opponent": "balanced_random"}
         cfg = config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
         assert cfg.curriculum.stages[0].opponent == "balanced_random"
+
+    def test_shipped_config_resolves_features_extractor_class(self):
+        """``policy_kwargs.features_extractor_class`` in bootstrap.yaml is
+        a dotted string. The resolver must turn it into the actual class
+        before MaskablePPO is constructed."""
+        from reinforcetactics.rl.extractors import SpatialFeatureExtractor
+
+        repo_root = Path(__file__).resolve().parents[1]
+        cfg = load_config(repo_root / "configs" / "bootstrap.yaml")
+        kwargs = cfg.ppo.as_sb3_kwargs().get("policy_kwargs") or {}
+        # As loaded, the value is still a string (YAML can't carry classes).
+        assert isinstance(kwargs.get("features_extractor_class"), str)
+        # After resolution, it's the actual extractor class.
+        resolved = _resolve_policy_kwargs(kwargs)
+        assert resolved is not None
+        assert resolved["features_extractor_class"] is SpatialFeatureExtractor
+
+    def test_resolve_dotted_rejects_non_dotted(self):
+        with pytest.raises(ValueError, match="is not dotted"):
+            _resolve_dotted("SpatialFeatureExtractor")
+
+    def test_resolve_policy_kwargs_none_passes_through(self):
+        assert _resolve_policy_kwargs(None) is None
+        assert _resolve_policy_kwargs({}) == {}
+
+    def test_resolve_policy_kwargs_preserves_non_class_keys(self):
+        resolved = _resolve_policy_kwargs({"net_arch": [64, 64]})
+        assert resolved == {"net_arch": [64, 64]}
 
     def test_shipped_config_loads(self):
         repo_root = Path(__file__).resolve().parents[1]

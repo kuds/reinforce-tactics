@@ -26,8 +26,11 @@ from reinforcetactics.game.bot import (
 )
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
+    GOLD_SCALE,
     GRID_CHANNELS,
+    TURN_SCALE,
     UNIT_CHANNELS,
+    UNIT_COUNT_SCALE,
     build_observation,
 )
 from reinforcetactics.utils.file_io import FileIO
@@ -264,6 +267,9 @@ class StrategyGameEnv(gym.Env):
         opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
         gamma: float = 0.99,  # Discount used by potential-based shaping; should match the trainer's gamma
         pad_to_size: Optional[Tuple[int, int]] = None,  # (pad_h, pad_w) for cross-stage obs-shape unification
+        gold_scale: float = GOLD_SCALE,  # tanh divisor for own_gold/opp_gold in global_features
+        turn_scale: float = TURN_SCALE,  # tanh divisor for turn_number in global_features
+        unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
     ):
         """
         Initialize environment.
@@ -287,6 +293,19 @@ class StrategyGameEnv(gym.Env):
             action_space_type: 'multi_discrete' (per-dimension masks) or
                 'flat_discrete' (exact per-action masks, eliminates invalid actions)
             max_flat_actions: Upper bound on legal actions per step for flat_discrete
+            gold_scale: ``tanh`` divisor applied to ``own_gold`` /
+                ``opp_gold`` before they enter ``global_features``. Default
+                :data:`~reinforcetactics.rl.observation.GOLD_SCALE` (1000)
+                is tuned for the current curriculum's gold range; override
+                for maps with very different income economies.
+            turn_scale: ``tanh`` divisor applied to ``turn_number``.
+                Default :data:`~reinforcetactics.rl.observation.TURN_SCALE`
+                (60) matches the ``max_turns`` cap used by every stage in
+                ``configs/bootstrap.yaml``.
+            unit_count_scale: ``tanh`` divisor applied to per-side unit
+                counts. Default
+                :data:`~reinforcetactics.rl.observation.UNIT_COUNT_SCALE`
+                (20) targets typical per-side army sizes.
             pad_to_size: Optional ``(pad_h, pad_w)`` to zero-pad the spatial
                 observation tensors to a fixed shape independent of the live
                 map size. Used by the curriculum runner so a single PPO
@@ -383,6 +402,13 @@ class StrategyGameEnv(gym.Env):
             default_reward_config.update(reward_config)
         self.reward_config = default_reward_config
 
+        # ``global_features`` normalization scales — stored so ``_get_obs``
+        # can forward them to ``build_observation`` without re-reading
+        # config on each call.
+        self.gold_scale = float(gold_scale)
+        self.turn_scale = float(turn_scale)
+        self.unit_count_scale = float(unit_count_scale)
+
         # Previous potential for potential-based reward shaping (Phi(s) tracking).
         # ``gamma`` is the trainer's discount; the shaping delta uses
         # gamma * Phi(s') - Phi(s) per Ng et al. (1999) so the shaping is
@@ -436,10 +462,12 @@ class StrategyGameEnv(gym.Env):
         obs_dict: dict[str, spaces.Space] = {
             "grid": spaces.Box(low=0.0, high=1.0, shape=(self.pad_height, self.pad_width, GRID_CHANNELS), dtype=np.float32),
             "units": spaces.Box(low=0.0, high=1.0, shape=(self.pad_height, self.pad_width, UNIT_CHANNELS), dtype=np.float32),
-            # Gold can grow into the thousands; turn and unit counts are
-            # bounded but small. A loose upper bound here is fine — values
-            # are not normalized by gymnasium's bounds, only sanity-checked.
-            "global_features": spaces.Box(low=0.0, high=1e5, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
+            # ``global_features`` are tanh-squashed in ``build_observation``
+            # (gold / turn / unit-count divided by their respective scales
+            # before tanh), so all five entries land in [0, 1). The Box
+            # bounds here advertise that contract to SB3 and to any obs
+            # validators downstream.
+            "global_features": spaces.Box(low=0.0, high=1.0, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
         }
 
         # Add visibility layer when fog of war is enabled
@@ -544,6 +572,9 @@ class StrategyGameEnv(gym.Env):
             action_mask=None,
             fog_of_war=self.fog_of_war,
             pad_to=pad_to,
+            gold_scale=self.gold_scale,
+            turn_scale=self.turn_scale,
+            unit_count_scale=self.unit_count_scale,
         )
 
     # Mapping from action key → (action_type_idx, source_key, target_key)
