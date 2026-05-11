@@ -18,7 +18,11 @@ env:
   # for real CPU parallelism with n_envs > 1.
   n_envs: 8
   use_subprocess: true
-  max_steps: 400
+  # max_steps is uniform across stages: 3000 is well above any
+  # realistic game length (max_turns=120 * ~20 env-steps/turn ~ 2400)
+  # so truncation never fires under normal play. Per-stage max_turns
+  # still varies (20 / 60 / 120) to bound the natural game-clock.
+  max_steps: 3000
   max_turns: 20
   action_space_type: flat_discrete
   reward_config:
@@ -94,7 +98,23 @@ env:
     defence_buff: 0.0
     attack_buff: 0.0
     invalid_action: -0.1
-    turn_penalty: -0.2
+    # ``turn_penalty`` is now 0.0: prior runs charged a per-end_turn
+    # cost which (combined with seize_progress and free move/attack
+    # actions) trained the policy into a "never end the turn"
+    # attractor — episodes truncated at ``max_steps`` with very few
+    # game-turns elapsed and 0% win rate (see PR description for the
+    # eval log). Per-turn pressure now lives in ``win_speed_bonus``
+    # below, which scales the terminal reward linearly with how
+    # quickly the agent finishes the game.
+    turn_penalty: 0.0
+    # ``win_speed_bonus`` adds up to this magnitude on a turn-1 win
+    # and tapers linearly to 0 at ``max_turns``. With ``win=50`` the
+    # terminal range becomes 50..100 depending on speed, so the
+    # agent gets a clear gradient toward faster wins without paying
+    # a per-action or per-end_turn cost mid-game. Stacks with the
+    # ``win`` / ``win_by_*`` terminals; only fires on the agent's
+    # win.
+    win_speed_bonus: 50.0
     # Opponent-capture penalty. Fires once per capturable tile the
     # opponent seizes during their turn (gym_env.py:_execute_action,
     # action_type=5). Tiered to encode two different failures:
@@ -195,7 +215,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -211,7 +230,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -233,7 +251,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -254,7 +271,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
       # this is the longest stage at 3M steps and the policy needs to
@@ -273,7 +289,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -297,7 +312,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -308,7 +322,6 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -329,7 +342,6 @@ curriculum:
       patience: 2
       max_timesteps: 4_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -346,7 +358,6 @@ curriculum:
       patience: 2
       max_timesteps: 5_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -373,7 +384,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 1500
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -389,7 +399,6 @@ curriculum:
       patience: 3
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 1500
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -415,7 +424,6 @@ curriculum:
       patience: 2
       max_timesteps: 2_500_000
       n_eval_episodes: 80
-      max_steps: 1500
       max_turns: 60
       ent_coef:
         start: 0.07
@@ -433,7 +441,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 1500
       max_turns: 60
       ent_coef: 0.05
 
@@ -444,7 +451,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 1500
       max_turns: 60
       ent_coef: 0.05
 
@@ -455,7 +461,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef:
         start: 0.10
@@ -471,7 +476,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef:
         start: 0.10
@@ -487,7 +491,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef:
         start: 0.10
@@ -503,7 +506,6 @@ curriculum:
       patience: 3
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef:
         start: 0.10
@@ -530,7 +532,6 @@ curriculum:
       patience: 2
       max_timesteps: 2_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef:
         start: 0.07
@@ -548,7 +549,6 @@ curriculum:
       patience: 2
       max_timesteps: 2_500_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef: 0.05
 
@@ -559,7 +559,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef: 0.05
 
@@ -570,7 +569,6 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_steps: 2000
       max_turns: 120
       ent_coef: 0.05
 
@@ -581,7 +579,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef:
         start: 0.10
@@ -597,7 +594,6 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef:
         start: 0.10
@@ -613,7 +609,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef:
         start: 0.10
@@ -629,7 +624,6 @@ curriculum:
       patience: 3
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef:
         start: 0.10
@@ -656,7 +650,6 @@ curriculum:
       patience: 2
       max_timesteps: 2_000_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef:
         start: 0.07
@@ -674,7 +667,6 @@ curriculum:
       patience: 2
       max_timesteps: 2_500_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef: 0.05
 
@@ -685,7 +677,6 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef: 0.05
 
@@ -696,6 +687,5 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_steps: 2500
       max_turns: 200
       ent_coef: 0.05
