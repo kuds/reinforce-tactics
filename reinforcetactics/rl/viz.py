@@ -34,6 +34,11 @@ Kept deliberately minimal — three plot families that together cover the
   saturate-at-cap pattern that broader dashboards can hide.
 - ``plot_curriculum_summary``: multi-stage win-rate timeline used by
   the bootstrap notebook to show stage progression on a single axis.
+- ``plot_curriculum_metrics``: curriculum-wide companion to
+  ``plot_curriculum_summary`` — concatenates every stage's eval
+  snapshots and renders the full per-eval diagnostic suite (length,
+  outcome, reward, action, unit build, combat) on one timestep axis
+  with stage-transition lines.
 - ``plot_stage_diagnostics``: convenience wrapper that runs the full
   per-stage diagnostic suite (length / outcome / reward / action /
   unit build / combat) into one ``charts_dir``. Used by both
@@ -102,6 +107,14 @@ _COMBAT_STAT_COLORS = {
 }
 
 
+def _draw_stage_boundaries(ax: Any, stage_boundaries: Optional[Sequence[int]]) -> None:
+    """Dashed vertical lines at each cumulative-timestep stage transition."""
+    if not stage_boundaries:
+        return
+    for ts in stage_boundaries:
+        ax.axvline(ts, color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
+
+
 def _save_and_return(fig: plt.Figure, charts_dir: Optional[Any], name: str) -> plt.Figure:
     if charts_dir is not None:
         path = Path(charts_dir) / name
@@ -158,10 +171,7 @@ def plot_eval_curves(
     eval_ts = [r["timesteps"] for r in results]
 
     def _draw_stage_lines(ax: Any) -> None:
-        if not stage_boundaries:
-            return
-        for ts in stage_boundaries:
-            ax.axvline(ts, color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
+        _draw_stage_boundaries(ax, stage_boundaries)
 
     # Panel 1: win rate
     ax = axes[0]
@@ -295,6 +305,7 @@ def plot_reward_decomposition(
     results: Sequence[dict],
     *,
     charts_dir: Optional[Any] = None,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Stacked area of summed reward components per eval.
 
@@ -327,6 +338,7 @@ def plot_reward_decomposition(
     ax.stackplot(timesteps, pos, colors=colors, alpha=0.85, labels=REWARD_COMPONENTS)
     ax.stackplot(timesteps, neg, colors=colors, alpha=0.85)
     ax.axhline(0, color="black", linewidth=0.5, alpha=0.5)
+    _draw_stage_boundaries(ax, stage_boundaries)
 
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Summed reward across eval episodes")
@@ -342,6 +354,7 @@ def plot_action_distribution(
     *,
     charts_dir: Optional[Any] = None,
     drop_unused: bool = True,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Stacked area of action-type usage % per eval.
 
@@ -380,6 +393,7 @@ def plot_action_distribution(
 
     fig, ax = plt.subplots(figsize=(11, 4.5))
     ax.stackplot(timesteps, pct, colors=colors, alpha=0.85, labels=names)
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Action share (%)")
     ax.set_ylim(0, 100)
@@ -414,6 +428,7 @@ def plot_outcome_breakdown(
     *,
     charts_dir: Optional[Any] = None,
     drop_unused: bool = True,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Stacked bar of outcome × end-reason per eval.
 
@@ -460,6 +475,7 @@ def plot_outcome_breakdown(
     for k, color, counts in zip(keys, colors, arr):
         ax.bar(timesteps, counts, bottom=bottom, color=color, label=k, width=width, edgecolor="white", linewidth=0.3)
         bottom = bottom + counts
+    _draw_stage_boundaries(ax, stage_boundaries)
 
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Episodes")
@@ -475,6 +491,7 @@ def plot_unit_build_distribution(
     *,
     charts_dir: Optional[Any] = None,
     drop_unused: bool = True,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Stacked area of unit-build mix per eval (% of units built per type).
 
@@ -509,6 +526,7 @@ def plot_unit_build_distribution(
 
     fig, ax = plt.subplots(figsize=(11, 4.5))
     ax.stackplot(timesteps, pct, colors=colors, alpha=0.85, labels=names)
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Build share (%)")
     ax.set_ylim(0, 100)
@@ -523,6 +541,7 @@ def plot_combat_summary(
     results: Sequence[dict],
     *,
     charts_dir: Optional[Any] = None,
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Per-eval combat counters normalized to a per-game average.
 
@@ -550,6 +569,7 @@ def plot_combat_summary(
     ax = axes[0]
     ax.plot(timesteps, per_game["captures"], "o-", color=_COMBAT_STAT_COLORS["captures"], label="captures")
     ax.plot(timesteps, per_game["kills"], "s-", color=_COMBAT_STAT_COLORS["kills"], label="kills")
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Per game (avg)")
     ax.set_title("Captures and kills per game")
@@ -563,6 +583,7 @@ def plot_combat_summary(
     ax.fill_between(timesteps, delta, 0, where=delta >= 0, color="#4caf50", alpha=0.15, label="net dealt")
     ax.fill_between(timesteps, delta, 0, where=delta < 0, color="#f44336", alpha=0.15, label="net taken")
     ax.axhline(0, color="black", linewidth=0.6, alpha=0.5)
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("HP per game (avg)")
     ax.set_title("Damage dealt vs taken")
@@ -572,6 +593,7 @@ def plot_combat_summary(
     ax = axes[2]
     ax.plot(timesteps, per_game["attacks"], "o-", color=_COMBAT_STAT_COLORS["attacks"], label="attacks")
     ax.plot(timesteps, per_game["seize_attempts"], "s-", color=_COMBAT_STAT_COLORS["seize_attempts"], label="seize attempts")
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Per game (avg)")
     ax.set_title("Attack / seize activity")
@@ -793,6 +815,7 @@ def plot_episode_length(
     *,
     charts_dir: Optional[Any] = None,
     title_suffix: str = "",
+    stage_boundaries: Optional[Sequence[int]] = None,
 ) -> Optional[plt.Figure]:
     """Mean episode length per eval — small standalone chart.
 
@@ -815,6 +838,7 @@ def plot_episode_length(
     lengths = [r["avg_length"] for r in results]
     fig, ax = plt.subplots(figsize=(10, 3.2))
     ax.plot(timesteps, lengths, marker="o", color="#4caf50")
+    _draw_stage_boundaries(ax, stage_boundaries)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Mean episode length")
     title = "Episode length per eval"
@@ -880,6 +904,132 @@ def plot_curriculum_summary(
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
     return _save_and_return(fig, charts_dir, "curriculum_winrate.png")
+
+
+def plot_curriculum_metrics(
+    history: Sequence[Mapping[str, Any]],
+    *,
+    charts_dir: Optional[Any] = None,
+) -> dict[str, Optional[plt.Figure]]:
+    """Curriculum-wide diagnostic timelines on a single timestep axis.
+
+    Flattens every stage's eval snapshots into one list and renders the
+    full per-eval diagnostic suite (episode length, outcome breakdown,
+    reward decomposition, action distribution, unit-build distribution,
+    combat summary) across the entire run. Vertical dashed lines mark
+    stage transitions so the impact of map / opponent shifts on each
+    metric is visible at a glance — companion to
+    :func:`plot_curriculum_summary` (which covers win rate only).
+
+    Saves each PNG under ``charts_dir/curriculum/`` with the
+    ``curriculum_<metric>.png`` naming scheme so the curriculum-wide
+    views don't collide with the per-stage diagnostics written by
+    :func:`plot_stage_diagnostics`.
+
+    Args:
+        history: ``run_curriculum`` result's ``"history"`` list — each
+            entry has ``"stage"`` (name) and ``"results"`` (list of
+            eval dicts). Stage order in the list defines the timeline.
+        charts_dir: Optional save directory. PNGs go under
+            ``{charts_dir}/curriculum/``.
+
+    Returns:
+        Dict keyed by chart name with the matplotlib ``Figure``
+        (or ``None`` when the underlying data was missing). Callers
+        can iterate the returned figures to call ``plt.show()`` inline.
+    """
+    all_results: list[dict] = []
+    stage_boundaries: list[int] = []
+    for h in history[:-1]:
+        all_results.extend(h.get("results") or [])
+        if h.get("results"):
+            stage_boundaries.append(int(h["results"][-1]["timesteps"]))
+    if history:
+        all_results.extend(history[-1].get("results") or [])
+
+    if not all_results:
+        return {
+            "episode_length": None,
+            "outcome_breakdown": None,
+            "reward_decomposition": None,
+            "action_distribution": None,
+            "unit_build_distribution": None,
+            "combat_summary": None,
+        }
+
+    sub_dir = None
+    if charts_dir is not None:
+        sub_dir = Path(charts_dir) / "curriculum"
+        sub_dir.mkdir(parents=True, exist_ok=True)
+
+    def _renamed(fig: Optional[plt.Figure], default: str, new: str) -> Optional[plt.Figure]:
+        # ``_save_and_return`` writes the helpers' canonical filenames;
+        # rename in place under the ``curriculum/`` subdir so the
+        # curriculum-wide PNGs don't shadow the per-stage ones.
+        if fig is None or sub_dir is None:
+            return fig
+        src = sub_dir / default
+        if src.exists():
+            src.rename(sub_dir / new)
+        return fig
+
+    return {
+        "episode_length": _renamed(
+            plot_episode_length(
+                all_results,
+                charts_dir=sub_dir,
+                title_suffix="curriculum",
+                stage_boundaries=stage_boundaries,
+            ),
+            "episode_length.png",
+            "curriculum_episode_length.png",
+        ),
+        "outcome_breakdown": _renamed(
+            plot_outcome_breakdown(
+                all_results,
+                charts_dir=sub_dir,
+                stage_boundaries=stage_boundaries,
+            ),
+            "outcome_breakdown.png",
+            "curriculum_outcome_breakdown.png",
+        ),
+        "reward_decomposition": _renamed(
+            plot_reward_decomposition(
+                all_results,
+                charts_dir=sub_dir,
+                stage_boundaries=stage_boundaries,
+            ),
+            "reward_decomposition.png",
+            "curriculum_reward_decomposition.png",
+        ),
+        "action_distribution": _renamed(
+            plot_action_distribution(
+                all_results,
+                charts_dir=sub_dir,
+                stage_boundaries=stage_boundaries,
+            ),
+            "action_distribution.png",
+            "curriculum_action_distribution.png",
+        ),
+        "unit_build_distribution": _renamed(
+            plot_unit_build_distribution(
+                all_results,
+                charts_dir=sub_dir,
+                stage_boundaries=stage_boundaries,
+            ),
+            "unit_build_distribution.png",
+            "curriculum_unit_build_distribution.png",
+        ),
+        "combat_summary": _renamed(
+            plot_combat_summary(
+                all_results,
+                charts_dir=sub_dir,
+                stage_boundaries=stage_boundaries,
+            ),
+            "combat_summary.png",
+            "curriculum_combat_summary.png",
+        ),
+    }
 
 
 def plot_stage_diagnostics(
