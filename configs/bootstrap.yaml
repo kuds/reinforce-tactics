@@ -184,7 +184,7 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -200,7 +200,7 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -222,7 +222,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -243,7 +243,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
       # this is the longest stage at 3M steps and the policy needs to
@@ -262,7 +262,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef:
         start: 0.10
@@ -286,7 +286,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_500_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -297,7 +297,7 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -318,7 +318,7 @@ curriculum:
       patience: 2
       max_timesteps: 4_500_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
@@ -335,7 +335,7 @@ curriculum:
       patience: 2
       max_timesteps: 5_000_000
       n_eval_episodes: 80
-      max_steps: 1500
+      max_steps: 2000
       max_turns: 60
       ent_coef: 0.05
 
