@@ -1085,10 +1085,7 @@ class StrategyGameEnv(gym.Env):
                         # their turn can be attributed back as a penalty
                         # on the agent's reward (the action_type==3 branch
                         # only credits the agent's own captures).
-                        pre_owners = {
-                            id(t): t.player
-                            for t in self.game_state.grid.get_capturable_tiles()
-                        }
+                        pre_owners = {id(t): t.player for t in self.game_state.grid.get_capturable_tiles()}
                         self._opponent_turn()
                         # Safety net: if the opponent's take_turn() did not end its
                         # turn for some reason, end it here so play returns to the agent.
