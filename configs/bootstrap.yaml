@@ -150,13 +150,22 @@ curriculum:
       ent_coef: 0.10
       n_eval_episodes: 80
 
+    # starter_simple/medium drop to 0.05 from starter_random's 0.10.
+    # By the time the policy reaches these stages it has already cleared
+    # starter_random at >=90% WR (the curriculum guarantees this via
+    # promotion gates), so the entropy bonus has done its job for the
+    # starter map. Run 20260511_203654 shows both stages clearing at
+    # 100% WR with deterministic reward (std=0) on the first eval,
+    # confirming the policy is already converged -- 0.10 is just noise
+    # on top of a solved problem. 0.05 matches the convention used by
+    # every other simple/medium stage in the curriculum.
     - name: starter_simple
       map_file: maps/1v1/starter.csv
       opponent: simple
       promotion_win_rate: 0.90
       patience: 2
       max_timesteps: 2_000_000
-      ent_coef: 0.10
+      ent_coef: 0.05
       n_eval_episodes: 80
 
     - name: starter_medium
@@ -165,7 +174,7 @@ curriculum:
       promotion_win_rate: 0.90
       patience: 2
       max_timesteps: 3_000_000
-      ent_coef: 0.10
+      ent_coef: 0.05
       n_eval_episodes: 80
 
     - name: beginner_balanced_random
