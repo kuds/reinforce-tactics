@@ -341,8 +341,11 @@ curriculum:
     # map control on the larger board.
     #
     # The 7x7 intermediate.csv has 3 neutrals on the anti-diagonal (1 b at
-    # center, 2 t flanking) and no terrain, so the agent learns the capture
-    # race in isolation before facing skirmish's terrain blockers.
+    # center, 2 t flanking), two forests covering each player's push toward
+    # their *far* tower, and water in the off-corners (top-right and
+    # bottom-left). The water corners eliminate the flank-around option so
+    # both players must engage through the centre -- exactly the lesson the
+    # earlier random-opponent stages don't teach.
     - name: intermediate_balanced_random
       map_file: maps/1v1/intermediate.csv
       opponent: balanced_random

@@ -1,7 +1,7 @@
-h_1,b_1,p,p,p,p,p
-b_1,p,p,p,p,p,p
-p,p,t,p,p,p,p
+h_1,b_1,p,p,p,o,o
+b_1,p,p,p,p,p,o
+p,p,t,p,p,f,p
 p,p,p,b,p,p,p
-p,p,p,p,t,p,p
-p,p,p,p,p,p,b_2
-p,p,p,p,p,b_2,h_2
+p,f,p,p,t,p,p
+o,p,p,p,p,p,b_2
+o,o,p,p,p,b_2,h_2
