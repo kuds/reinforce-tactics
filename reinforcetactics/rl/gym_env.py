@@ -368,6 +368,16 @@ class StrategyGameEnv(gym.Env):
             "haste": 6.0,
             "defence_buff": 5.0,
             "attack_buff": 5.0,
+            # Opponent-capture penalty. Fires once per capturable tile the
+            # opponent seizes during their turn (tracked in the end_turn
+            # branch of _execute_action). Tiered to encode two distinct
+            # behaviours: neutral captures punish ignoring the capture race
+            # (the failure mode that collapsed skirmish_simple), owned
+            # captures punish letting the opponent take ground we already
+            # held. Defaults are 0.0 so old reward_configs are unaffected;
+            # configs/bootstrap.yaml sets the active magnitudes.
+            "enemy_neutral_capture": 0.0,
+            "enemy_owned_capture": 0.0,
         }
         if reward_config:
             default_reward_config.update(reward_config)
@@ -508,6 +518,8 @@ class StrategyGameEnv(gym.Env):
             "seize_attempts": 0,
             "damage_dealt": 0.0,
             "damage_taken": 0.0,
+            "structures_lost_neutral": 0,
+            "structures_lost_owned": 0,
         }
 
     def _get_action_space_size(self) -> int:
@@ -1068,6 +1080,15 @@ class StrategyGameEnv(gym.Env):
                         # both wounded survivors (HP delta) and units that
                         # died entirely (full remaining HP counted as taken).
                         pre_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
+                        # Snapshot structure ownership before the opponent
+                        # moves so any captures the opponent makes during
+                        # their turn can be attributed back as a penalty
+                        # on the agent's reward (the action_type==3 branch
+                        # only credits the agent's own captures).
+                        pre_owners = {
+                            id(t): t.player
+                            for t in self.game_state.grid.get_capturable_tiles()
+                        }
                         self._opponent_turn()
                         # Safety net: if the opponent's take_turn() did not end its
                         # turn for some reason, end it here so play returns to the agent.
@@ -1077,6 +1098,36 @@ class StrategyGameEnv(gym.Env):
                         post_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
                         damage_taken = sum(max(0, hp - post_hp.get(uid, 0)) for uid, hp in pre_hp.items())
                         self.episode_stats["damage_taken"] += float(damage_taken)
+                        # Tiered opponent-capture penalty. ``neutral_lost``
+                        # fires when the opponent seized an unowned tile
+                        # (we lost a race); ``owned_lost`` fires when the
+                        # opponent flipped one of our tiles (we lost
+                        # ground). HQ flips end the game, so the loss
+                        # terminal handles them -- skip them here.
+                        opp = 3 - ap
+                        neutral_lost = 0
+                        owned_lost = 0
+                        for t in self.game_state.grid.get_capturable_tiles():
+                            if t.player != opp:
+                                continue
+                            prev = pre_owners.get(id(t))
+                            if prev == opp:
+                                continue
+                            if t.type == "h":
+                                continue
+                            if prev is None or prev == 0:
+                                neutral_lost += 1
+                            elif prev == ap:
+                                owned_lost += 1
+                        # Penalty keys are signed (negative magnitudes in the
+                        # reward_config), added directly -- matches the
+                        # convention used by turn_penalty / invalid_action.
+                        if neutral_lost:
+                            reward += neutral_lost * rc.get("enemy_neutral_capture", 0.0)
+                            self.episode_stats["structures_lost_neutral"] += neutral_lost
+                        if owned_lost:
+                            reward += owned_lost * rc.get("enemy_owned_capture", 0.0)
+                            self.episode_stats["structures_lost_owned"] += owned_lost
             elif action_type == 6:
                 reward += rc.get("paralyze", 8.0)
             elif action_type == 7:
