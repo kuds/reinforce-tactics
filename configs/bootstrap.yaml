@@ -95,6 +95,20 @@ env:
     attack_buff: 0.0
     invalid_action: -0.1
     turn_penalty: -0.2
+    # Opponent-capture penalty. Fires once per capturable tile the
+    # opponent seizes during their turn (gym_env.py:_execute_action,
+    # action_type=5). Tiered to encode two different failures:
+    # ``enemy_neutral_capture`` punishes letting the opponent grab a
+    # contested neutral (the failure that collapsed skirmish_simple --
+    # the agent never learned the capture race because beginner has 0
+    # neutrals and random opponents don't compete for them).
+    # ``enemy_owned_capture`` punishes losing a tile we already held;
+    # the structure_control shaping already gives a small differential
+    # signal here, but the discrete event reward sharpens it. Magnitudes
+    # are calibrated against building_capture=+40 so re-capturing
+    # remains net-positive even after eating both penalties.
+    enemy_neutral_capture: -8.0
+    enemy_owned_capture: -15.0
 
 ppo:
   learning_rate: 3.0e-4
@@ -162,7 +176,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef:
         start: 0.10
         end: 0.03
@@ -178,7 +192,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef:
         start: 0.10
         end: 0.03
@@ -200,7 +214,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef:
         start: 0.10
         end: 0.03
@@ -221,7 +235,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
       # this is the longest stage at 3M steps and the policy needs to
       # commit during the last ~1M to convert draws into wins. A 0.03
@@ -240,7 +254,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef:
         start: 0.10
         end: 0.03
@@ -264,7 +278,7 @@ curriculum:
       max_timesteps: 3_500_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef: 0.05
 
     - name: beginner_medium
@@ -275,7 +289,7 @@ curriculum:
       max_timesteps: 4_000_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef: 0.05
 
     - name: beginner_mixed_med_adv_50
@@ -296,7 +310,7 @@ curriculum:
       max_timesteps: 4_500_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
       ent_coef: 0.05
 
     - name: beginner_advanced
@@ -313,7 +327,79 @@ curriculum:
       max_timesteps: 5_000_000
       n_eval_episodes: 80
       max_steps: 1500
-      max_turns: 100
+      max_turns: 60
+      ent_coef: 0.05
+
+    # Bridge between beginner (6x6, 0 neutral buildings) and skirmish (8x8,
+    # 4 neutral buildings). A run trained through beginner_advanced collapsed
+    # at skirmish_simple (0% WR, deterministic +186 reward plateau) because
+    # the agent never had to compete for neutral structures: every beginner
+    # stage starts with all buildings pre-owned, and the random opponents
+    # used in the earlier skirmish stages don't capture aggressively. By the
+    # time SimpleBot's land-grab tempo shows up, the policy has already
+    # converged on "spawn warriors near HQ, march outward" and can't relearn
+    # map control on the larger board.
+    #
+    # The 7x7 intermediate.csv has 3 neutrals on the anti-diagonal (1 b at
+    # center, 2 t flanking), two forests covering each player's push toward
+    # their *far* tower, and water in the off-corners (top-right and
+    # bottom-left). The water corners eliminate the flank-around option so
+    # both players must engage through the centre -- exactly the lesson the
+    # earlier random-opponent stages don't teach.
+    - name: intermediate_balanced_random
+      map_file: maps/1v1/intermediate.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 80
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    - name: intermediate_random_20
+      map_file: maps/1v1/intermediate.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 1_500_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 80
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    # The real test: capture-greedy opponent on a board with contested
+    # neutrals. Promotion threshold sits at 0.65 (lower than beginner_simple's
+    # 0.70) because this is the first stage where the agent has to learn a
+    # genuinely new skill (map control), not just transfer an existing one.
+    - name: intermediate_simple
+      map_file: maps/1v1/intermediate.csv
+      opponent: simple
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 80
+      ent_coef: 0.05
+
+    - name: intermediate_medium
+      map_file: maps/1v1/intermediate.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_steps: 1500
+      max_turns: 80
       ent_coef: 0.05
 
     - name: skirmish_balanced_random
@@ -324,7 +410,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef:
         start: 0.10
         end: 0.03
@@ -340,7 +426,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef:
         start: 0.10
         end: 0.03
@@ -356,7 +442,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef:
         start: 0.10
         end: 0.03
@@ -372,7 +458,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef:
         start: 0.10
         end: 0.01
@@ -386,7 +472,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef: 0.05
 
     - name: skirmish_medium
@@ -397,7 +483,7 @@ curriculum:
       max_timesteps: 4_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 150
+      max_turns: 120
       ent_coef: 0.05
 
     - name: corner_points_balanced_random
