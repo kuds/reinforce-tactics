@@ -324,7 +324,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef:
         start: 0.10
         end: 0.03
@@ -340,7 +340,7 @@ curriculum:
       max_timesteps: 1_500_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef:
         start: 0.10
         end: 0.03
@@ -356,7 +356,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef:
         start: 0.10
         end: 0.03
@@ -372,7 +372,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef:
         start: 0.10
         end: 0.01
@@ -386,7 +386,7 @@ curriculum:
       max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef: 0.05
 
     - name: skirmish_medium
@@ -397,7 +397,7 @@ curriculum:
       max_timesteps: 4_000_000
       n_eval_episodes: 80
       max_steps: 2000
-      max_turns: 120
+      max_turns: 150
       ent_coef: 0.05
 
     - name: corner_points_balanced_random
@@ -407,8 +407,8 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef:
         start: 0.10
         end: 0.03
@@ -423,8 +423,8 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef:
         start: 0.10
         end: 0.03
@@ -439,8 +439,8 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef:
         start: 0.10
         end: 0.03
@@ -455,8 +455,8 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef:
         start: 0.10
         end: 0.01
@@ -469,8 +469,8 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef: 0.05
 
     - name: corner_points_medium
@@ -480,6 +480,6 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_steps: 2000
-      max_turns: 150
+      max_steps: 2500
+      max_turns: 200
       ent_coef: 0.05
