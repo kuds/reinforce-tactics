@@ -245,9 +245,7 @@ def _resolve_dotted(path: str) -> Any:
     import importlib
 
     if "." not in path:
-        raise ValueError(
-            f"features_extractor_class string {path!r} is not dotted; expected 'pkg.module.Attr'"
-        )
+        raise ValueError(f"features_extractor_class string {path!r} is not dotted; expected 'pkg.module.Attr'")
     module_path, attr = path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     return getattr(module, attr)

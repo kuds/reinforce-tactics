@@ -66,9 +66,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim)
 
         if pool not in self._SUPPORTED_POOLS:
-            raise ValueError(
-                f"pool must be one of {self._SUPPORTED_POOLS}, got {pool!r}"
-            )
+            raise ValueError(f"pool must be one of {self._SUPPORTED_POOLS}, got {pool!r}")
 
         # Pull spatial channel counts from the observation space rather
         # than hardcoding them, so this extractor follows the canonical
@@ -88,9 +86,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         )
 
         self.pool = pool
-        self._avg_pool: Optional[nn.Module] = (
-            nn.AdaptiveAvgPool2d(1) if pool == "avg" else None
-        )
+        self._avg_pool: Optional[nn.Module] = nn.AdaptiveAvgPool2d(1) if pool == "avg" else None
 
         # Determine global_features size if present in the observation space.
         if "global_features" in observation_space.spaces:
