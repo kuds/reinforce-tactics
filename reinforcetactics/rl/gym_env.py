@@ -373,7 +373,24 @@ class StrategyGameEnv(gym.Env):
             "unit_diff": 0.3,
             "structure_control": 1.0,
             "invalid_action": -10.0,
-            "turn_penalty": -1.0,
+            # ``turn_penalty`` defaults to 0.0. Earlier defaults charged
+            # a per-end_turn cost to incentivize game progress, but that
+            # made ``end_turn`` the only individually-negative-valued
+            # action and PPO converged to a "never end the turn"
+            # attractor — episodes truncated at ``max_steps`` with very
+            # few game-turns elapsed and 0% win rate. Per-turn pressure
+            # now lives in ``win_speed_bonus`` (terminal-only, can't be
+            # dodged by stalling) and in gamma's natural discount.
+            "turn_penalty": 0.0,
+            # ``win_speed_bonus`` scales linearly with how many turns
+            # remained when the agent won: at turn 1, a winning agent
+            # gets the full bonus; at ``max_turns`` it gets 0. Stacks
+            # with the ``win`` / ``win_by_*`` terminals and only fires
+            # on the agent's own win. With ``max_turns`` unset the bonus
+            # is skipped (no horizon to normalize against). Default 0.0
+            # keeps old configs behaviour-identical; bootstrap.yaml sets
+            # the active magnitude.
+            "win_speed_bonus": 0.0,
             # Action rewards
             "create_unit": 0.5,
             "move": 0.0,
@@ -1329,6 +1346,16 @@ class StrategyGameEnv(gym.Env):
                     terminal_bonus = rc["win_by_elimination"]
                 else:
                     terminal_bonus = rc.get("win", 0.0)
+                # Speed bonus: linearly rewards winning early. Needs both
+                # a configured magnitude and a finite max_turns to scale
+                # against; with max_turns=None we'd have no horizon and
+                # the bonus is skipped. Capped at 0 below if the win
+                # somehow lands past max_turns (defensive — game would
+                # have terminated as max_turns_draw before then).
+                speed_bonus = rc.get("win_speed_bonus", 0.0)
+                if speed_bonus > 0 and self.max_turns:
+                    remaining = max(0, self.max_turns - self.game_state.turn_number)
+                    terminal_bonus += speed_bonus * remaining / self.max_turns
                 self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)

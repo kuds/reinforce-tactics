@@ -685,18 +685,103 @@ class TestRewardCalculation:
 
         env.close()
 
-    def test_turn_penalty_on_end_turn(self, env_default):
-        """Test turn_penalty on end_turn action."""
-        env_default.reset()
+    def test_turn_penalty_defaults_to_zero(self, env_default):
+        """``turn_penalty`` is 0.0 by default — ending the turn no longer
+        carries a per-action cost. Prior default of -1.0 created the
+        "never end the turn" attractor we saw in beginner_random_15
+        eval logs; per-turn pressure now lives in ``win_speed_bonus``.
+        """
+        assert env_default.reward_config["turn_penalty"] == 0.0
 
-        # End turn action should apply turn penalty
+    def test_turn_penalty_when_explicitly_configured(self):
+        """The penalty still applies if a config explicitly sets it."""
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"turn_penalty": -5.0},
+        )
+        env.reset()
         action = np.array([5, 0, 0, 0, 0, 0])
-        _, reward, _, _, _ = env_default.step(action)
+        _, reward, _, _, info = env.step(action)
+        # action_reward (-5.0) shows up under ``info["reward_breakdown"]
+        # ["action"]``; the final reward also pulls in potential shaping
+        # so we just verify the action contribution.
+        assert info["reward_breakdown"]["action"] == pytest.approx(-5.0)
+        env.close()
 
-        # Reward should include turn penalty (negative)
-        assert reward <= 0
+    def test_win_speed_bonus_scales_with_remaining_turns(self):
+        """A win on turn 1 (out of max_turns=20) gets ~full bonus; a win
+        on the last turn gets ~0."""
+        bonus = 50.0
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            max_turns=20,
+            reward_config={"win": 100.0, "win_speed_bonus": bonus},
+        )
 
-        env_default.close()
+        # Turn-1 win.
+        env.reset()
+        env.game_state.turn_number = 1
+        env.game_state.game_over = True
+        env.game_state.winner = env.agent_player
+        # Synthesize a few alive opponent units so end_reason resolves
+        # to ``hq_capture`` rather than ``elimination`` (irrelevant for
+        # the bonus calculation but keeps the path deterministic).
+        _, fast_reward, _, _, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+
+        env.reset()
+        env.game_state.turn_number = 20  # last turn
+        env.game_state.game_over = True
+        env.game_state.winner = env.agent_player
+        _, slow_reward, _, _, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+
+        # Speed bonus contribution: (20 - 1) / 20 * 50 = 47.5 for fast win,
+        # (20 - 20) / 20 * 50 = 0 for slow win. The non-terminal pieces of
+        # reward are identical between the two runs (same starting state)
+        # so the delta isolates the bonus.
+        assert (fast_reward - slow_reward) == pytest.approx(47.5, rel=1e-3)
+        env.close()
+
+    def test_win_speed_bonus_not_applied_on_loss(self):
+        """``win_speed_bonus`` is win-only; losing on turn 1 should not
+        get any speed credit."""
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            max_turns=20,
+            reward_config={"win_speed_bonus": 100.0, "loss": -50.0},
+        )
+        env.reset()
+        env.game_state.turn_number = 1
+        env.game_state.game_over = True
+        env.game_state.winner = 3 - env.agent_player  # opponent wins
+        _, reward, _, _, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        # Terminal piece should be exactly the loss key, no speed bonus.
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(-50.0)
+        env.close()
+
+    def test_win_speed_bonus_skipped_when_max_turns_unset(self):
+        """Without a finite ``max_turns`` there's no horizon to scale
+        against, so the bonus is skipped rather than divided by zero."""
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            max_turns=None,
+            reward_config={"win": 100.0, "win_speed_bonus": 50.0},
+        )
+        env.reset()
+        env.game_state.turn_number = 5
+        env.game_state.game_over = True
+        env.game_state.winner = env.agent_player
+        _, _, _, _, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        # Terminal is exactly ``win`` (or win_by_*) with no bonus.
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(100.0)
+        env.close()
 
     def test_invalid_action_penalty(self, env_default):
         """Test invalid_action penalty."""
