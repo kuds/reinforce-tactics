@@ -619,6 +619,13 @@ def run_curriculum(
             # never collides with a training rollout's seed.
             eval_seed_base=cfg.seed + cfg.eval.seed_offset,
             save_dir=stage_dir,
+            # Dump per-step JSONL traces for any eval episode that hits
+            # the env step limit without ending (the stalling signature
+            # we added ``env.max_actions_per_turn`` to defend against).
+            # Healthy episodes leave no files on disk; truncated ones
+            # land under ``<stage_dir>/traces/eval_<timesteps>/`` so it's
+            # easy to grep for which actions the policy spammed.
+            trace_dir=stage_dir / "traces",
         )
         promote_cb = PromotionCallback(
             eval_callback=eval_cb,

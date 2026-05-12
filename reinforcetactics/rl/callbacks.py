@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
@@ -130,6 +130,7 @@ class PeriodicEvalCallback(BaseCallback):
         eval_seed_base: int = 0,
         save_dir: Any = None,
         track_breakdown: bool = True,
+        trace_dir: Any = None,
         verbose: int = 1,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -139,6 +140,12 @@ class PeriodicEvalCallback(BaseCallback):
         self.eval_seed_base = int(eval_seed_base)
         self.save_dir = Path(save_dir) if save_dir is not None else None
         self.track_breakdown = bool(track_breakdown)
+        # ``trace_dir`` (when set) is the root under which per-eval-block
+        # subdirectories are created -- each block's stall-episode JSONL
+        # files land in ``trace_dir/eval_<timesteps>/``. Forwarded to
+        # ``evaluate_model``; only ``max_steps_truncate`` episodes are
+        # dumped, so healthy evals leave no artefacts on disk.
+        self.trace_dir = Path(trace_dir) if trace_dir is not None else None
 
         self.results: List[dict] = []
         self.best_win_rate: float = -1.0
@@ -157,12 +164,20 @@ class PeriodicEvalCallback(BaseCallback):
 
     def _do_eval(self) -> None:
         eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
+        eval_kwargs: Dict[str, Any] = {}
+        if self.trace_dir is not None:
+            # One subdir per eval block, named by the timestep at which
+            # the block fires, so traces from different evals don't
+            # collide and a stalled episode is easy to map back to the
+            # eval row in the printed log.
+            eval_kwargs["trace_dir"] = self.trace_dir / f"eval_{int(self.num_timesteps):09d}"
         m = evaluate_model(
             self.model,
             self.eval_env,
             n_episodes=self.n_eval_episodes,
             seed=eval_seed,
             track_breakdown=self.track_breakdown,
+            **eval_kwargs,
         )
         m["timesteps"] = int(self.num_timesteps)
         m["eval_seed"] = eval_seed

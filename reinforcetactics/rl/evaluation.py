@@ -12,8 +12,10 @@ Usage:
 """
 
 import inspect
+import json
 import logging
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 
@@ -86,6 +88,8 @@ def evaluate_model(
     deterministic: bool = True,
     seed: Any = None,
     track_breakdown: bool = False,
+    trace_dir: Optional[Union[str, Path]] = None,
+    trace_end_reasons: Optional[tuple] = ("max_steps_truncate",),
 ) -> Dict[str, Any]:
     """
     Evaluate a trained model and return summary statistics.
@@ -118,6 +122,14 @@ def evaluate_model(
         ``action_counts`` (dict keyed by ACTION_TYPE_NAMES, summed over
         every step of every episode) and ``reward_components`` (dict
         keyed by REWARD_COMPONENTS, summed analogously).
+
+        When ``trace_dir`` is set, episodes whose ``info["end_reason"]``
+        is in ``trace_end_reasons`` are dumped to JSON Lines at
+        ``<trace_dir>/episode_<ep_idx>_<end_reason>.jsonl`` -- one line
+        per env step with the chosen action, env info, and reward.
+        Default trigger captures only ``max_steps_truncate`` episodes
+        (the stalling failure mode); pass an empty tuple to disable.
+        The returned dict gains a ``traces`` list of dumped file paths.
     """
     wins, losses, draws = 0, 0, 0
     rewards = []
@@ -149,6 +161,19 @@ def evaluate_model(
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
         reward_components = {name: 0.0 for name in REWARD_COMPONENTS}
 
+    # Per-step trace capture, gated on ``trace_dir`` being set. Steps are
+    # buffered in memory for the duration of each episode and flushed to
+    # disk only if the terminal ``end_reason`` matches the trigger set.
+    # That avoids spamming the filesystem with healthy-episode traces
+    # while still giving full visibility on the failure modes we care
+    # about (default: ``max_steps_truncate``, the stalling signature).
+    trace_dir_path: Optional[Path] = None
+    trace_paths: list[str] = []
+    if trace_dir is not None and trace_end_reasons:
+        trace_dir_path = Path(trace_dir)
+        trace_dir_path.mkdir(parents=True, exist_ok=True)
+    trace_triggers = set(trace_end_reasons or ())
+
     for ep_idx in range(n_episodes):
         if seed is not None:
             obs, _ = env.reset(seed=int(seed) + ep_idx)
@@ -157,6 +182,7 @@ def evaluate_model(
         done = False
         ep_reward = 0.0
         ep_len = 0
+        ep_trace: Optional[list[dict]] = [] if trace_dir_path is not None else None
 
         while not done:
             predict_kwargs: Dict[str, Any] = {"deterministic": deterministic}
@@ -180,6 +206,30 @@ def evaluate_model(
                 for k, v in info.get("reward_breakdown", {}).items():
                     if k in reward_components:
                         reward_components[k] += float(v)
+
+            if ep_trace is not None:
+                at_idx = info.get("action_type")
+                at_name = (
+                    ACTION_TYPE_NAMES[int(at_idx)]
+                    if isinstance(at_idx, (int, np.integer)) and 0 <= int(at_idx) < len(ACTION_TYPE_NAMES)
+                    else None
+                )
+                ep_trace.append(
+                    {
+                        "step": ep_len,
+                        "action_index": int(np.asarray(action).flatten()[0]) if np.ndim(action) else int(action),
+                        "action_type": int(at_idx) if isinstance(at_idx, (int, np.integer)) else None,
+                        "action_type_name": at_name,
+                        "unit_type": info.get("unit_type"),
+                        "turn": int(info.get("turn", 0)),
+                        "valid_action": bool(info.get("valid_action", False)),
+                        "n_legal_actions": int(info.get("n_legal_actions", 0)),
+                        "reward": float(reward),
+                        "reward_breakdown": {k: float(v) for k, v in info.get("reward_breakdown", {}).items()},
+                        "terminated": bool(terminated),
+                        "truncated": bool(truncated),
+                    }
+                )
 
         rewards.append(ep_reward)
         lengths.append(ep_len)
@@ -210,6 +260,30 @@ def evaluate_model(
         if reason in END_REASONS:
             end_reasons[reason] += 1
             outcome_reasons[f"{outcome}_by_{reason}"] += 1
+
+        # Flush per-step trace if this episode tripped the configured
+        # trigger (default: ``max_steps_truncate``, i.e. the stall mode
+        # this dump is meant to diagnose). One JSONL file per matching
+        # episode; healthy episodes are discarded without touching disk.
+        if ep_trace is not None and reason in trace_triggers and trace_dir_path is not None:
+            ep_seed = (int(seed) + ep_idx) if seed is not None else None
+            trace_file = trace_dir_path / f"episode_{ep_idx:04d}_{reason}.jsonl"
+            with trace_file.open("w") as fh:
+                header = {
+                    "episode_index": ep_idx,
+                    "seed": ep_seed,
+                    "end_reason": reason,
+                    "outcome": outcome,
+                    "winner": winner,
+                    "agent_player": int(agent_player) if agent_player is not None else None,
+                    "ep_length": ep_len,
+                    "ep_reward": float(ep_reward),
+                    "final_turn": int(info.get("turn", 0)),
+                }
+                fh.write(json.dumps({"_header": header}) + "\n")
+                for record in ep_trace:
+                    fh.write(json.dumps(record) + "\n")
+            trace_paths.append(str(trace_file))
 
         # Aggregate combat / build counters from the env's per-episode
         # stats dict. Older envs that don't populate these keys just
@@ -259,4 +333,6 @@ def evaluate_model(
     if track_breakdown:
         result["action_counts"] = action_counts
         result["reward_components"] = reward_components
+    if trace_dir_path is not None:
+        result["traces"] = trace_paths
     return result
