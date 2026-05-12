@@ -436,6 +436,18 @@ class GameMechanics:
         if target.player == paralyzer.player:
             return False
 
+        # Mage paralyze range is 1..2 -- mirror of the mask gate in
+        # ``GameState.get_legal_actions`` (``distance <= 2``). Kept
+        # symmetric with haste/buff helpers so any future mask
+        # tightening can't reopen the heal-spam loop pattern:
+        # mask-only filters let through a legal-but-unexecutable
+        # action that, under a deterministic policy, traps the
+        # legal-actions cache (which only invalidates on successful
+        # mutations).
+        distance = abs(paralyzer.x - target.x) + abs(paralyzer.y - target.y)
+        if distance < 1 or distance > 2:
+            return False
+
         target.paralyzed_turns = PARALYZE_DURATION
         paralyzer.paralyze_cooldown = PARALYZE_COOLDOWN
         return True
