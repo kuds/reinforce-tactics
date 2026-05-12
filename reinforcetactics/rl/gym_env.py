@@ -651,10 +651,7 @@ class StrategyGameEnv(gym.Env):
         # the agent has used up its budget, advertise only end_turn at
         # the canonical (0, 0) coordinates so the multi_discrete policy
         # has exactly one legal action.
-        if (
-            self.max_actions_per_turn is not None
-            and self._actions_this_turn >= self.max_actions_per_turn
-        ):
+        if self.max_actions_per_turn is not None and self._actions_this_turn >= self.max_actions_per_turn:
             width = self.grid_width
             height = self.grid_height
             area = width * height
@@ -865,10 +862,7 @@ class StrategyGameEnv(gym.Env):
         # moves, etc.) can spin until ``max_steps`` truncates the
         # episode -- which surfaces in eval as len near max_steps with
         # turns very low (the "never end the turn" attractor).
-        if (
-            self.max_actions_per_turn is not None
-            and self._actions_this_turn >= self.max_actions_per_turn
-        ):
+        if self.max_actions_per_turn is not None and self._actions_this_turn >= self.max_actions_per_turn:
             self._current_actions = [np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)]
             return
 
