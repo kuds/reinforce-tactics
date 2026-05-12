@@ -440,6 +440,43 @@ class TestClericAbilities:
         assert ally.can_move is True
         assert ally.can_attack is True
 
+    def test_cleric_heals_at_max_range(self):
+        """Heal must succeed at every distance the mask advertises.
+
+        Regression for the heal-spam stall: ``get_healable_allies``
+        (mask builder) accepts Manhattan distance up to
+        ``CLERIC_HEAL_RANGE`` (3), but ``heal_unit`` used to hardcode
+        ``distance > 2`` as invalid -- so a cleric/ally pair at
+        distance 3 produced a legal-but-unexecutable heal that PPO's
+        deterministic eval would lock onto for thousands of steps
+        until ``max_steps`` truncation.
+        """
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 3, 0, 1)  # Manhattan distance 3
+        ally.health = 10
+
+        healed = GameMechanics.heal_unit(cleric, ally)
+
+        assert healed > 0
+        assert ally.health > 10
+
+    def test_cleric_heal_rejects_beyond_range(self):
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 4, 0, 1)  # Manhattan distance 4 -- one past range
+        ally.health = 10
+
+        assert GameMechanics.heal_unit(cleric, ally) == -1
+        assert ally.health == 10
+
+    def test_cleric_cures_at_max_range(self):
+        """Cure must mirror heal's distance bound."""
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 3, 0, 1)
+        ally.paralyzed_turns = 2
+
+        assert GameMechanics.cure_unit(cleric, ally) is True
+        assert ally.paralyzed_turns == 0
+
 
 class TestStructureCapture:
     """Test structure capture mechanics."""

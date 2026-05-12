@@ -458,9 +458,15 @@ class GameMechanics:
         if target.player != healer.player:
             return -1
 
-        # Check distance (range 1-2)
+        # Check distance (range 1..CLERIC_HEAL_RANGE). Must agree with
+        # ``get_healable_allies`` (the mask builder); a tighter bound here
+        # produces mask/execution drift -- the mask advertises heal
+        # actions whose execution returns -1 with no state change, and
+        # under a deterministic policy that loops the legal_actions
+        # cache forever (eval signature: thousands of consecutive
+        # invalid heal actions until max_steps truncation).
         distance = abs(healer.x - target.x) + abs(healer.y - target.y)
-        if distance < 1 or distance > 2:
+        if distance < 1 or distance > CLERIC_HEAL_RANGE:
             return -1
 
         if target.health >= target.max_health:
@@ -479,9 +485,12 @@ class GameMechanics:
         if target.player != curer.player:
             return False
 
-        # Check distance (range 1-2)
+        # Check distance (range 1..CLERIC_HEAL_RANGE). Mirror of the
+        # same fix applied to ``heal_unit``: mask uses
+        # ``CLERIC_HEAL_RANGE`` so cure must too, or the mask/execution
+        # disagreement re-opens the heal-spam loop on a paralyzed ally.
         distance = abs(curer.x - target.x) + abs(curer.y - target.y)
-        if distance < 1 or distance > 2:
+        if distance < 1 or distance > CLERIC_HEAL_RANGE:
             return False
 
         if not target.is_paralyzed():
