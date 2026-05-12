@@ -30,10 +30,16 @@ env:
   # forcing the turn to close. Bounded blast-radius defense against
   # the "never end the turn" attractor that re-emerges as max_steps
   # is raised (eval signature: ``len`` near ``max_steps`` with
-  # ``turns`` very low). 60 actions/turn comfortably covers a healthy
-  # turn on the beginner map (~25 legal actions worst-case for the
-  # current enabled_units roster) without clipping legitimate play.
-  max_actions_per_turn: 60
+  # ``turns`` very low).
+  #
+  # Disabled (``null``) for now so the per-stage stall traces
+  # (``<stage_dir>/traces/eval_*/episode_*_max_steps_truncate.jsonl``)
+  # capture the unmodified policy behaviour. Once the loop mechanism
+  # is identified from the traces, set this back to 60 to enforce the
+  # cap -- 60 actions/turn comfortably covers a healthy turn on the
+  # beginner map (~25 legal actions worst-case for the current
+  # enabled_units roster) without clipping legitimate play.
+  max_actions_per_turn: null
   action_space_type: flat_discrete
   reward_config:
     # All reward magnitudes that were calibrated *relative to* the old
