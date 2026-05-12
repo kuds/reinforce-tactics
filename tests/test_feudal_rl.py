@@ -166,9 +166,6 @@ class TestSpatialFeatureExtractor:
         units[:, 1, 1, 0] = 1.0
         units[:, 2, 2, NUM_UNIT_TYPES + 0] = 1.0
 
-        global_features = torch.zeros(1, GLOBAL_FEATURES_DIM)
-        obs = {"grid": grid, "units": units, "global_features": global_features}
-
         # Replicate the extractor's pre-pool CNN forward so we can pool
         # by hand under both schemes for comparison.
         combined = torch.cat([grid, units], dim=-1).permute(0, 3, 1, 2)
