@@ -167,12 +167,15 @@ def evaluate_model(
     # That avoids spamming the filesystem with healthy-episode traces
     # while still giving full visibility on the failure modes we care
     # about (default: ``max_steps_truncate``, the stalling signature).
-    trace_dir_path: Optional[Path] = None
+    # The directory is created lazily at first flush so eval blocks
+    # without any trigger-matching episodes leave no empty folders
+    # behind (relevant for Google-Drive-backed run dirs where empty
+    # subfolders pile up across eval cadence).
+    trace_dir_path: Optional[Path] = Path(trace_dir) if trace_dir is not None else None
     trace_paths: list[str] = []
-    if trace_dir is not None and trace_end_reasons:
-        trace_dir_path = Path(trace_dir)
-        trace_dir_path.mkdir(parents=True, exist_ok=True)
     trace_triggers = set(trace_end_reasons or ())
+    if not trace_triggers:
+        trace_dir_path = None
 
     for ep_idx in range(n_episodes):
         if seed is not None:
@@ -265,7 +268,10 @@ def evaluate_model(
         # trigger (default: ``max_steps_truncate``, i.e. the stall mode
         # this dump is meant to diagnose). One JSONL file per matching
         # episode; healthy episodes are discarded without touching disk.
+        # ``trace_dir_path`` is created lazily here so eval blocks with
+        # no trigger-matching episodes leave no empty folder behind.
         if ep_trace is not None and reason in trace_triggers and trace_dir_path is not None:
+            trace_dir_path.mkdir(parents=True, exist_ok=True)
             ep_seed = (int(seed) + ep_idx) if seed is not None else None
             trace_file = trace_dir_path / f"episode_{ep_idx:04d}_{reason}.jsonl"
             with trace_file.open("w") as fh:

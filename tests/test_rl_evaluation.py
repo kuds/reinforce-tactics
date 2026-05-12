@@ -240,3 +240,49 @@ class TestEvaluateModel:
         env = _StubEnv([[(0.0, True, 1)]])
         result = evaluate_model(_StubModel(), env, n_episodes=1)
         assert result["captures_by_type"] == {"tower": 0, "building": 0, "hq": 0}
+
+    def test_trace_dir_not_created_when_no_trigger_matches(self, tmp_path):
+        """Empty eval blocks must not leave empty trace folders behind.
+
+        Regression for eval blocks where every episode finishes cleanly:
+        we used to ``mkdir`` the eval-block subdir unconditionally,
+        which produced one empty folder per eval cadence on
+        Drive-backed run dirs (visible noise + sync overhead).
+        """
+
+        class _CleanEnv(_StubEnv):
+            def step(self, action):
+                obs, r, term, trunc, info = super().step(action)
+                if term:
+                    info["end_reason"] = "hq_capture"
+                return obs, r, term, trunc, info
+
+        env = _CleanEnv([[(0.0, True, 1)], [(0.0, True, 1)]])
+        trace_dir = tmp_path / "eval_000050000"
+        result = evaluate_model(_StubModel(), env, n_episodes=2, trace_dir=trace_dir)
+
+        assert result["traces"] == []
+        assert not trace_dir.exists()
+
+    def test_trace_dir_created_lazily_on_first_trigger(self, tmp_path):
+        """The eval-block dir is created the moment a trigger fires."""
+
+        class _ReasonEnv(_StubEnv):
+            def __init__(self, reasons):
+                super().__init__([[(0.0, True, None)] for _ in reasons])
+                self._reasons = list(reasons)
+
+            def step(self, action):
+                obs, r, term, trunc, info = super().step(action)
+                if term:
+                    info["end_reason"] = self._reasons[self._idx]
+                return obs, r, term, trunc, info
+
+        env = _ReasonEnv(["hq_capture", "max_steps_truncate", "max_turns_draw"])
+        trace_dir = tmp_path / "eval_000100000"
+        result = evaluate_model(_StubModel(), env, n_episodes=3, trace_dir=trace_dir)
+
+        assert len(result["traces"]) == 1
+        assert trace_dir.exists()
+        files = sorted(p.name for p in trace_dir.iterdir())
+        assert files == ["episode_0001_max_steps_truncate.jsonl"]
