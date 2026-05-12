@@ -375,9 +375,6 @@ class TestShippedConfigs:
             "configs/feudal_rl.yaml",
             "configs/self_play.yaml",
             "configs/alphazero.yaml",
-            "configs/curriculum/easy.yaml",
-            "configs/curriculum/medium.yaml",
-            "configs/curriculum/hard.yaml",
         ],
     )
     def test_shipped_config_loads(self, path: str):

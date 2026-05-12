@@ -15,7 +15,7 @@ Usage:
     python examples/train_with_action_masking.py
 
     # With custom settings
-    python examples/train_with_action_masking.py --timesteps 500000 --difficulty medium
+    python examples/train_with_action_masking.py --mode parallel --timesteps 500000
 """
 
 import argparse
@@ -31,7 +31,6 @@ except ImportError:
     sys.exit(1)
 
 from reinforcetactics.rl import (
-    make_curriculum_env,
     make_maskable_env,
     make_maskable_vec_env,
     validate_action_mask,
@@ -119,59 +118,6 @@ def train_parallel(timesteps: int = 500000, n_envs: int = 4, save_path: str = "m
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     model.save(save_path)
     print(f"\nModel saved to: {save_path}")
-
-    return model
-
-
-def train_with_curriculum(timesteps_per_stage: int = 100000, save_path: str = "models/maskable_ppo_curriculum.zip"):
-    """
-    Curriculum learning: progressively increase difficulty.
-
-    This approach often produces better agents by starting with
-    easier tasks and gradually increasing complexity.
-    """
-    print("\n" + "=" * 60)
-    print("Curriculum Learning: Easy -> Medium -> Hard")
-    print("=" * 60)
-
-    difficulties = ["easy", "medium", "hard"]
-    model = None
-
-    for i, difficulty in enumerate(difficulties):
-        print(f"\n--- Stage {i + 1}/3: {difficulty.upper()} ---")
-
-        # Create environment for this difficulty level
-        env = make_curriculum_env(difficulty=difficulty)
-
-        if model is None:
-            # Create new model for first stage
-            model = MaskablePPO(
-                "MultiInputPolicy",
-                env,
-                learning_rate=3e-4,
-                n_steps=2048,
-                batch_size=64,
-                verbose=1,
-            )
-        else:
-            # Transfer to new environment
-            model.set_env(env)
-
-        # Train at this difficulty
-        print(f"Training for {timesteps_per_stage:,} timesteps at {difficulty} difficulty...")
-        model.learn(total_timesteps=timesteps_per_stage, progress_bar=True, reset_num_timesteps=False)
-
-        # Save checkpoint
-        checkpoint_path = f"models/curriculum_stage_{i + 1}_{difficulty}.zip"
-        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
-        model.save(checkpoint_path)
-        print(f"Checkpoint saved: {checkpoint_path}")
-
-    # Save final model
-    assert model is not None, "Model was not created during training"
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    model.save(save_path)
-    print(f"\nFinal model saved to: {save_path}")
 
     return model
 
@@ -270,7 +216,7 @@ def main():
         "--mode",
         type=str,
         default="basic",
-        choices=["basic", "parallel", "curriculum", "evaluate", "watch"],
+        choices=["basic", "parallel", "evaluate", "watch"],
         help="Training mode",
     )
     parser.add_argument("--timesteps", type=int, default=100000, help="Total training timesteps")
@@ -285,9 +231,6 @@ def main():
 
     elif args.mode == "parallel":
         train_parallel(timesteps=args.timesteps, n_envs=args.n_envs, save_path=args.model_path)
-
-    elif args.mode == "curriculum":
-        train_with_curriculum(timesteps_per_stage=args.timesteps // 3, save_path=args.model_path)
 
     elif args.mode == "evaluate":
         evaluate_agent(model_path=args.model_path, num_episodes=args.episodes)

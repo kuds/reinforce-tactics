@@ -12,9 +12,8 @@ hardcoded hyperparameter dicts.
 | `feudal_rl.yaml` | Feudal RL | Manager-Worker hierarchy |
 | `self_play.yaml` | Self-play | With opponent pool |
 | `alphazero.yaml` | AlphaZero | MCTS + policy/value network |
-| `curriculum/easy.yaml` | MaskablePPO | Random opponent, generous shaping |
-| `curriculum/medium.yaml` | MaskablePPO | Scripted bot, standard shaping |
-| `curriculum/hard.yaml` | MaskablePPO | Long episodes, harsh penalties |
+| `bootstrap.yaml` | MaskablePPO | Full multi-stage curriculum (entry point for production training) |
+| `bootstrap_sweep/v*.yaml` | MaskablePPO | Per-axis sweep variants of `bootstrap.yaml` (entropy schedule, etc.) |
 
 ## Usage
 

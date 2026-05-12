@@ -416,9 +416,11 @@ Bigger efforts that grow the project's reach and research utility.
 - Stages: 6×6 map → 10×14 map → 20×20 map; warriors only → all units; no fog → fog of war.
 - Track and visualize progress across stages.
 
-> **Note:** `make_curriculum_env()` in `masking.py` provides difficulty presets
-> (easy/medium/hard), but auto-advancement based on win-rate thresholds is not
-> implemented.
+> **Status:** Implemented as the bootstrap stage runner
+> (`reinforcetactics/rl/bootstrap.py` + `configs/bootstrap.yaml`).
+> Win-rate-gated auto-advancement is live; sweep variants live under
+> `configs/bootstrap_sweep/`. The previous `make_curriculum_env()`
+> three-preset API was removed in favour of this richer pipeline.
 >
 > **Dependency:** The 10×14 and 20×20 map stages require Phase 3.2 (Auto-Regressive
 > Action Decomposition) to be completed first. Without it, the combinatorial action

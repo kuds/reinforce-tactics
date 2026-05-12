@@ -5,9 +5,7 @@ import pytest
 
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.rl.masking import (
-    _CURRICULUM_PRESETS,
     ActionMaskedEnv,
-    make_curriculum_env,
     make_maskable_env,
     make_maskable_vec_env,
     validate_action_mask,
@@ -141,22 +139,4 @@ class TestValidateActionMask:
         env.reset()
         result = validate_action_mask(env)
         assert result["mask_summary"]["end_turn"]["has_legal_actions"] is True
-        env.close()
-
-
-class TestCurriculum:
-    @pytest.mark.parametrize("difficulty", _CURRICULUM_PRESETS)
-    def test_builtin_presets_load(self, difficulty):
-        env = make_curriculum_env(difficulty=difficulty)
-        env.reset()
-        env.close()
-
-    def test_unknown_difficulty_raises(self):
-        with pytest.raises(ValueError, match="Unknown curriculum difficulty"):
-            make_curriculum_env(difficulty="does_not_exist")
-
-    def test_kwargs_override_preset(self):
-        # max_steps from kwargs should override whatever is in the YAML preset.
-        env = make_curriculum_env(difficulty="easy", max_steps=77)
-        assert env.env.max_steps == 77
         env.close()
