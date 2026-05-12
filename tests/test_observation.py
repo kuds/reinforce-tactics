@@ -188,7 +188,7 @@ def test_units_one_hot_and_agent_relative_owner(game):
 
 
 def test_grid_owner_channels_are_agent_relative(game):
-    """Tile owner is encoded as one-hot (self / opp / neutral) per-perspective."""
+    """Tile owner is encoded as a pair of agent-relative binary channels."""
     # Force a known ownership: pick the first capturable tile, make it P1's.
     capturable = game.grid.get_capturable_tiles()
     assert capturable, "fixture map must have at least one capturable tile"
@@ -200,7 +200,6 @@ def test_grid_owner_channels_are_agent_relative(game):
 
     self_ch = NUM_TILE_TYPES + 0
     opp_ch = NUM_TILE_TYPES + 1
-    neutral_ch = NUM_TILE_TYPES + 2
     y, x = tile.y, tile.x
 
     # P1 view: self-owned. P2 view: opp-owned.
@@ -208,8 +207,54 @@ def test_grid_owner_channels_are_agent_relative(game):
     assert p1["grid"][y, x, opp_ch] == 0.0
     assert p2["grid"][y, x, self_ch] == 0.0
     assert p2["grid"][y, x, opp_ch] == 1.0
-    # Neutral channel is mutually exclusive with self/opp.
-    assert p1["grid"][y, x, neutral_ch] == 0.0
+
+
+def test_grid_neutral_owner_is_implicit(game):
+    """Neutral tiles are encoded as (self=0, opp=0); the dedicated neutral
+    channel was dropped as a linear combination of the other two."""
+    # Force a known capturable tile to be neutral.
+    capturable = game.grid.get_capturable_tiles()
+    assert capturable, "fixture map must have at least one capturable tile"
+    tile = capturable[0]
+    tile.player = 0
+
+    obs = build_observation(game, perspective_player=1)
+    self_ch = NUM_TILE_TYPES + 0
+    opp_ch = NUM_TILE_TYPES + 1
+    assert obs["grid"][tile.y, tile.x, self_ch] == 0.0
+    assert obs["grid"][tile.y, tile.x, opp_ch] == 0.0
+
+
+def test_own_acted_channel_reflects_has_moved(game):
+    """Channel ``NUM_UNIT_TYPES + 2`` is 1.0 for own units that have already
+    acted this turn and 0.0 otherwise."""
+    from reinforcetactics.core.unit import Unit
+
+    fresh = Unit("W", 1, 1, player=1)
+    spent = Unit("W", 2, 2, player=1)
+    spent.has_moved = True
+    game.units = [fresh, spent]
+
+    obs = build_observation(game, perspective_player=1)
+    acted_ch = NUM_UNIT_TYPES + 2
+    assert obs["units"][1, 1, acted_ch] == 0.0
+    assert obs["units"][2, 2, acted_ch] == 1.0
+
+
+def test_own_acted_channel_is_zero_for_opp_units(game):
+    """Opponent ``has_moved`` is stale on our turn (they reset it at their
+    own turn start), so the acted channel must be gated to own units only."""
+    from reinforcetactics.core.unit import Unit
+
+    opp_unit = Unit("W", 3, 3, player=2)
+    opp_unit.has_moved = True
+    game.units = [opp_unit]
+
+    obs = build_observation(game, perspective_player=1)
+    acted_ch = NUM_UNIT_TYPES + 2
+    # Even though the opp unit has has_moved=True, the channel is 0 from
+    # our perspective: it only encodes own-unit exhaustion.
+    assert obs["units"][3, 3, acted_ch] == 0.0
 
 
 def test_hp_channel_is_normalized(game):
@@ -353,3 +398,21 @@ def test_pad_to_pads_visibility_under_fog(game_fow):
     np.testing.assert_array_equal(obs["visibility"][:h, :w], obs_unpadded["visibility"])
     assert obs["visibility"][h:, :].sum() == 0
     assert obs["visibility"][:, w:].sum() == 0
+
+
+# ---------- 1v1 enforcement ----------
+
+
+def test_build_observation_rejects_non_1v1_games(map_data):
+    """The agent-relative encoding hard-codes opp = 3 - perspective_player
+    and a single opp_gold scalar; multi-player games would silently
+    misrepresent the state, so guard with a clear ValueError."""
+    game = GameState(map_data, num_players=3)
+    with pytest.raises(ValueError, match="only supports 1v1"):
+        build_observation(game, perspective_player=1)
+
+
+def test_build_observation_rejects_invalid_perspective(game):
+    """perspective_player must be 1 or 2 under the 1v1 contract."""
+    with pytest.raises(ValueError, match="perspective_player must be 1 or 2"):
+        build_observation(game, perspective_player=3)
