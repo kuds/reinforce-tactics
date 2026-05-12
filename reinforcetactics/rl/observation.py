@@ -8,19 +8,25 @@ consumed by the gym environment, MCTS, and ModelBot. The observation is
 same encoding when it later plays as player 2 (e.g. under self-play role
 swaps).
 
-Observation contract (2-player, agent-relative):
-    grid:            (H, W, C_GRID=12) float32
+Observation contract (1v1 only, agent-relative):
+    grid:            (H, W, C_GRID=11) float32
         channels 0-7  one-hot tile type in TILE_TYPE_ORDER
         channel  8    owner == self
         channel  9    owner == opp
-        channel  10   owner == neutral (no player owns the tile)
-        channel  11   structure HP fraction in [0, 1]
+        channel  10   structure HP fraction in [0, 1]
+        Neutral ownership is encoded implicitly as ``(own=0, opp=0)`` — the
+        explicit neutral channel was dropped as a linear combination of the
+        other two owner channels.
     units:           (H, W, C_UNITS=12) float32
         channels 0-7  one-hot unit type in ALL_UNIT_TYPES
                       ("empty cell" = all-zero across these eight channels)
         channel  8    owner == self
         channel  9    owner == opp
-        channel  10   reserved (kept zero; preserved for symmetry with grid)
+        channel  10   own_acted: 1.0 iff this is an own unit that has already
+                      acted this turn (``unit.has_moved``); always 0.0 for
+                      opponent units (they don't act on our turn). Lets the
+                      policy / value head see which own units are exhausted
+                      without inferring it from the action mask.
         channel  11   unit HP fraction in [0, 1]
     global_features: (5,) float32, each in [0, 1)
         [own_gold, opp_gold, turn, own_units, opp_units], each squashed
@@ -62,9 +68,14 @@ NUM_UNIT_TYPES = len(ALL_UNIT_TYPES)
 
 # Channel layout constants — exposed so model factories / tests can size
 # input layers without duplicating the encoding logic.
-GRID_CHANNELS = NUM_TILE_TYPES + 3 + 1  # 12: 8 tile + 3 owner + 1 hp
-UNIT_CHANNELS = NUM_UNIT_TYPES + 3 + 1  # 12: 8 unit + 3 owner + 1 hp
+GRID_CHANNELS = NUM_TILE_TYPES + 2 + 1  # 11: 8 tile + 2 owner (self/opp) + 1 hp
+UNIT_CHANNELS = NUM_UNIT_TYPES + 2 + 1 + 1  # 12: 8 unit + 2 owner + own_acted + hp
 GLOBAL_FEATURES_DIM = 5
+
+# Only 1v1 games are supported. The agent-relative encoding uses
+# ``opp = 3 - perspective_player`` to identify the single opponent; any
+# ``num_players != 2`` setting would silently misrepresent the state.
+SUPPORTED_NUM_PLAYERS = 2
 
 # Default ``tanh`` scale factors for ``global_features`` normalization.
 # Each chosen so the typical mid-game value lands in the linear regime of
@@ -134,6 +145,21 @@ def build_observation(
     if fog_of_war is None:
         fog_of_war = bool(getattr(game_state, "fog_of_war", False))
 
+    # 1v1 enforcement. The encoding (self/opp owner channels, single
+    # opp_gold scalar, ``opp = 3 - perspective_player``) is hard-coded to
+    # two players. Multi-player (FFA / team) games need a permutation-
+    # invariant rewrite (self/ally/enemy channels, aggregated globals)
+    # which is intentionally out of scope right now — fail loudly instead
+    # of silently producing a malformed observation.
+    num_players = int(getattr(game_state, "num_players", SUPPORTED_NUM_PLAYERS))
+    if num_players != SUPPORTED_NUM_PLAYERS:
+        raise ValueError(
+            f"build_observation only supports 1v1 games (num_players=2); got num_players={num_players}. "
+            "Multi-player observations require a separate team-relative encoding (own/ally/enemy)."
+        )
+    if perspective_player not in (1, 2):
+        raise ValueError(f"perspective_player must be 1 or 2 in a 1v1 game; got {perspective_player}.")
+
     opp = 3 - perspective_player
 
     if fog_of_war:
@@ -188,14 +214,18 @@ def build_observation(
     raw_owner = raw_grid[..., 1]
     grid[..., NUM_TILE_TYPES + 0] = (raw_owner == perspective_player).astype(np.float32)
     grid[..., NUM_TILE_TYPES + 1] = (raw_owner == opp).astype(np.float32)
-    grid[..., NUM_TILE_TYPES + 2] = (raw_owner == 0).astype(np.float32)
-    grid[..., NUM_TILE_TYPES + 3] = raw_grid[..., 2].astype(np.float32) / 100.0
+    # Neutral ownership is implicit: (own=0, opp=0). The explicit neutral
+    # channel that used to live at NUM_TILE_TYPES + 2 was dropped because
+    # it's exactly ``1 - own - opp`` — a linear combination of the other
+    # two owner channels and pure dead weight in every conv kernel.
+    grid[..., NUM_TILE_TYPES + 2] = raw_grid[..., 2].astype(np.float32) / 100.0
 
     # ---- Units one-hot -------------------------------------------------
     # Raw layout (from GameState.to_numpy):
     #   [..., 0] = unit_type int (0 = empty, 1..8 = ALL_UNIT_TYPES)
     #   [..., 1] = absolute owner (0 = empty cell, else player number)
     #   [..., 2] = unit HP percentage in [0, 100]
+    #   [..., 3] = has_moved flag in {0.0, 1.0}
     units = np.zeros((h, w, UNIT_CHANNELS), dtype=np.float32)
     unit_type_idx = raw_units[..., 0].astype(np.int64)
     has_unit = unit_type_idx > 0
@@ -204,11 +234,14 @@ def build_observation(
     one_hot_idx = np.clip(unit_type_idx - 1, 0, NUM_UNIT_TYPES - 1)
     units[yy[has_unit], xx[has_unit], one_hot_idx[has_unit]] = 1.0
     raw_unit_owner = raw_units[..., 1]
-    units[..., NUM_UNIT_TYPES + 0] = (raw_unit_owner == perspective_player).astype(np.float32)
+    own_mask = raw_unit_owner == perspective_player
+    units[..., NUM_UNIT_TYPES + 0] = own_mask.astype(np.float32)
     units[..., NUM_UNIT_TYPES + 1] = (raw_unit_owner == opp).astype(np.float32)
-    # Channel NUM_UNIT_TYPES + 2 ("neutral / empty") is intentionally left
-    # zero: empty cells are already encoded by all-zero one-hot + zero
-    # owner, and unit ownership has no neutral case in the current rules.
+    # own_acted: gated by own_mask because (a) opponent ``has_moved`` is
+    # stale on our turn (it's reset at *their* turn start) and (b) the
+    # policy only cares which of *its own* units are exhausted.
+    if raw_units.shape[-1] > 3:
+        units[..., NUM_UNIT_TYPES + 2] = (raw_units[..., 3] * own_mask).astype(np.float32)
     units[..., NUM_UNIT_TYPES + 3] = raw_units[..., 2].astype(np.float32) / 100.0
 
     if pad_to is not None:

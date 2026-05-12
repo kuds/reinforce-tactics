@@ -165,13 +165,22 @@ ppo:
     # default ``CombinedExtractor`` flattens both planes — the policy
     # then has to relearn map adjacency from a flat vector and pays a
     # large parameter cost on the first Linear layer (input grows with
-    # H * W * channels). ``pool: avg`` makes the trunk's output size
-    # independent of ``pad_to_size``, which matters for cross-stage
-    # curricula that pad to the largest map.
+    # H * W * channels). ``pool: masked_avg`` makes the trunk's output
+    # size independent of ``pad_to_size`` *and* skips padded cells in
+    # the spatial average, which matters because early-curriculum stages
+    # train on 6x6 maps padded up to (10, 12) — under plain ``avg`` the
+    # global average pool would be ~70% zero-padding noise on those
+    # stages. ``coord_conv`` prepends two normalized (y, x) channels so
+    # the policy can reason about absolute position (HQ corner, etc.)
+    # without spending conv capacity rediscovering it. ``extra_conv``
+    # adds a 4th 3x3 conv block, lifting the receptive field from ~7x7
+    # to ~9x9 — most of corner_points (10x12) in one CNN look.
     features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
     features_extractor_kwargs:
       features_dim: 256
-      pool: avg
+      pool: masked_avg
+      coord_conv: true
+      extra_conv: true
 
 eval:
   # eval_freq is in env steps across all sub-envs. With n_envs=8 and

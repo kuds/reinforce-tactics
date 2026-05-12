@@ -1056,8 +1056,14 @@ class GameState:
         # Grid representation
         grid_state = self.grid.to_numpy()
 
-        # Unit representation (height x width x 3)
-        unit_state = np.zeros((self.grid.height, self.grid.width, 3), dtype=np.float32)
+        # Unit representation (height x width x 4)
+        #   [..., 0] = unit_type int (0 = empty, 1..8 = ALL_UNIT_TYPES)
+        #   [..., 1] = absolute owner (0 = empty cell, else player number)
+        #   [..., 2] = unit HP percentage in [0, 100]
+        #   [..., 3] = has_moved flag (1.0 if the unit has already acted this
+        #             turn, 0.0 otherwise). Consumed by build_observation as
+        #             a per-unit "exhausted" signal for the policy.
+        unit_state = np.zeros((self.grid.height, self.grid.width, 4), dtype=np.float32)
 
         # Encoding for all 8 unit types: W, M, C, A, K, R, S, B
         unit_type_encoding = {"W": 1, "M": 2, "C": 3, "A": 4, "K": 5, "R": 6, "S": 7, "B": 8}
@@ -1079,6 +1085,7 @@ class GameState:
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)
             unit_state[unit.y, unit.x, 1] = unit.player
             unit_state[unit.y, unit.x, 2] = (unit.health / unit.max_health) * 100
+            unit_state[unit.y, unit.x, 3] = 1.0 if unit.has_moved else 0.0
 
         # FOW: Mask grid ownership for non-visible tiles
         if self.fog_of_war and for_player is not None:

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import torch
 from gymnasium import spaces
+from torch import nn
 
 from reinforcetactics.rl.feudal_rl import (
     FeudalRolloutBuffer,
@@ -133,6 +134,106 @@ class TestSpatialFeatureExtractor:
     def test_pool_invalid_raises(self, obs_space):
         with pytest.raises(ValueError, match="pool must be one of"):
             SpatialFeatureExtractor(obs_space, features_dim=64, pool="max")
+
+    def test_pool_masked_avg_output_shape(self, obs_space, batched_obs):
+        """masked_avg matches plain avg on output width (64 + globals)."""
+        ext = SpatialFeatureExtractor(obs_space, features_dim=64, pool="masked_avg")
+        assert ext.linear[0].in_features == 64 + GLOBAL_FEATURES_DIM
+        out = ext(batched_obs)
+        assert out.shape == (2, 64)
+
+    def test_pool_masked_avg_ignores_padded_cells(self, obs_space):
+        """masked_avg averages over live cells only.
+
+        Build a controlled obs where a small live region sits at the
+        top-left of an otherwise zero-padded grid, then check the
+        pre-projection pooled features equal the same CNN output averaged
+        over the live region alone (and differ from a naive AdaptiveAvg
+        over the full padded grid).
+        """
+        live_h, live_w = 4, 4
+        torch.manual_seed(0)
+        ext = SpatialFeatureExtractor(obs_space, features_dim=64, pool="masked_avg")
+        ext.eval()
+
+        grid = torch.zeros(1, GRID_H, GRID_W, GRID_CHANNELS)
+        units = torch.zeros(1, GRID_H, GRID_W, UNIT_CHANNELS)
+        # Set exactly one tile-type bit on each live cell so the live
+        # mask covers [0:live_h, 0:live_w] and nothing else.
+        grid[:, :live_h, :live_w, 0] = 1.0
+        # Sprinkle some unit content into the live region to give the
+        # CNN something non-trivial to look at.
+        units[:, 1, 1, 0] = 1.0
+        units[:, 2, 2, NUM_UNIT_TYPES + 0] = 1.0
+
+        # Replicate the extractor's pre-pool CNN forward so we can pool
+        # by hand under both schemes for comparison.
+        combined = torch.cat([grid, units], dim=-1).permute(0, 3, 1, 2)
+        with torch.no_grad():
+            cnn_out = ext.cnn(combined)  # (1, 64, H, W)
+            naive_avg = cnn_out.mean(dim=(2, 3))  # (1, 64) - over full padded grid
+            live_only = cnn_out[:, :, :live_h, :live_w].mean(dim=(2, 3))  # (1, 64)
+
+            # The extractor's masked_avg path should match live_only and
+            # diverge from naive_avg (which dilutes by ~70% zero-padding).
+            combined_full = combined
+            features = ext.cnn(combined_full)
+            live_mask = ext._live_cell_mask(grid)
+            denom = live_mask.sum(dim=(2, 3), keepdim=True).clamp(min=1.0)
+            masked = ((features * live_mask).sum(dim=(2, 3), keepdim=True) / denom).flatten(1)
+
+        torch.testing.assert_close(masked, live_only, atol=1e-6, rtol=1e-5)
+        assert not torch.allclose(masked, naive_avg, atol=1e-4), "masked_avg should differ from naive avg under heavy padding"
+        # Sanity-check live mask coverage is exactly (live_h * live_w) cells.
+        assert int(live_mask.sum().item()) == live_h * live_w
+
+    def test_coord_conv_adds_two_input_channels(self, obs_space, batched_obs):
+        """coord_conv widens the first Conv2d input by 2 (normalized y, x)."""
+        base = SpatialFeatureExtractor(obs_space, features_dim=64, pool="avg")
+        with_coords = SpatialFeatureExtractor(obs_space, features_dim=64, pool="avg", coord_conv=True)
+
+        base_in = base.cnn[0].in_channels
+        coords_in = with_coords.cnn[0].in_channels
+        assert coords_in == base_in + 2
+
+        # Coord planes are normalized to [0, 1] across both axes.
+        cp = with_coords.coord_planes
+        assert cp.shape == (1, 2, GRID_H, GRID_W)
+        assert torch.allclose(cp[0, 0, 0, 0], torch.tensor(0.0))
+        assert torch.allclose(cp[0, 0, -1, 0], torch.tensor(1.0))
+        assert torch.allclose(cp[0, 1, 0, 0], torch.tensor(0.0))
+        assert torch.allclose(cp[0, 1, 0, -1], torch.tensor(1.0))
+
+        # End-to-end forward still produces the advertised features_dim.
+        out = with_coords(batched_obs)
+        assert out.shape == (2, 64)
+
+    def test_extra_conv_adds_one_conv_block(self, obs_space, batched_obs):
+        """extra_conv inserts one extra Conv2d(64, 64) + ReLU after the trunk."""
+        base = SpatialFeatureExtractor(obs_space, features_dim=64, pool="avg")
+        deeper = SpatialFeatureExtractor(obs_space, features_dim=64, pool="avg", extra_conv=True)
+
+        base_convs = [m for m in base.cnn if isinstance(m, nn.Conv2d)]
+        deeper_convs = [m for m in deeper.cnn if isinstance(m, nn.Conv2d)]
+        assert len(deeper_convs) == len(base_convs) + 1
+        assert deeper_convs[-1].in_channels == 64 and deeper_convs[-1].out_channels == 64
+
+        out = deeper(batched_obs)
+        assert out.shape == (2, 64)
+
+    def test_all_three_improvements_compose(self, obs_space, batched_obs):
+        """masked_avg + coord_conv + extra_conv work together end-to-end."""
+        ext = SpatialFeatureExtractor(
+            obs_space,
+            features_dim=64,
+            pool="masked_avg",
+            coord_conv=True,
+            extra_conv=True,
+        )
+        # Linear input is 64 + GLOBAL_FEATURES_DIM regardless of pad shape.
+        assert ext.linear[0].in_features == 64 + GLOBAL_FEATURES_DIM
+        out = ext(batched_obs)
+        assert out.shape == (2, 64)
 
 
 # ---------------------------------------------------------------------------

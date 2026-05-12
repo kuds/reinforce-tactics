@@ -339,6 +339,11 @@ class StrategyGameEnv(gym.Env):
         # Fog of war setting
         self.fog_of_war = fog_of_war
         self.max_turns = max_turns
+        # 1v1 only. The PPO/MaskablePPO observation contract (self/opp owner
+        # channels, ``opp = 3 - perspective_player``, single opp_gold scalar)
+        # is hard-coded to two players. Pygame 1v1v1-vs-bots still works
+        # because it doesn't go through this env — it only uses the core
+        # GameState and non-RL bot opponents.
         self.game_state = GameState(
             map_data,
             num_players=2,
@@ -346,6 +351,13 @@ class StrategyGameEnv(gym.Env):
             enabled_units=self.enabled_units,
             fog_of_war=fog_of_war,
         )
+        if self.game_state.num_players != 2:
+            raise ValueError(
+                "StrategyGameEnv only supports 1v1 games (num_players=2). "
+                f"Got num_players={self.game_state.num_players}. Multi-player "
+                "(FFA / team) training requires a separate team-relative "
+                "observation encoding."
+            )
 
         # Initialize visibility at game start
         if fog_of_war:
