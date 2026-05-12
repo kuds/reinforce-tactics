@@ -18,7 +18,6 @@ from typing import Any, Callable
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parent.parent
 BASE_PATH = ROOT / "configs" / "bootstrap.yaml"
 OUT_DIR = ROOT / "configs" / "bootstrap_sweep"
