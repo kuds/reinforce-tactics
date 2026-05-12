@@ -83,9 +83,12 @@ SUPPORTED_NUM_PLAYERS = 2
 #   GOLD_SCALE        — early-mid game gold sits ~250-3000 (STARTING_GOLD=250
 #                       plus a few turns of compounding income at 50-150 per
 #                       owned structure); 1000 centers the linear regime.
-#   TURN_SCALE        — matches the ``max_turns: 60`` cap used by every stage
-#                       in configs/bootstrap.yaml; still useful when
-#                       ``max_turns`` is unbounded since tanh saturates ~120+.
+#   TURN_SCALE        — tuned for the early-curriculum cap (starter=20,
+#                       beginner=75, intermediate/skirmish=60-120,
+#                       corner_points=200 in configs/bootstrap.yaml).
+#                       At turn=60 the feature is ~tanh(1.0)=0.76 (linear
+#                       regime); at turn=200 it saturates near 1.0 — still
+#                       useful when ``max_turns`` is unbounded.
 #   UNIT_COUNT_SCALE  — per-side army sizes realistically peak around 20-30
 #                       on current maps; 20 lands the linear regime there.
 # Override per-call via ``build_observation(..., gold_scale=..., ...)`` or
