@@ -309,8 +309,10 @@ class StrategyGameEnv(gym.Env):
                 for maps with very different income economies.
             turn_scale: ``tanh`` divisor applied to ``turn_number``.
                 Default :data:`~reinforcetactics.rl.observation.TURN_SCALE`
-                (60) matches the ``max_turns`` cap used by every stage in
-                ``configs/bootstrap.yaml``.
+                (60) sits in the linear regime for the early-curriculum
+                ``max_turns`` range in ``configs/bootstrap.yaml`` (20-75)
+                and saturates gracefully on the longer late stages
+                (120-200).
             unit_count_scale: ``tanh`` divisor applied to per-side unit
                 counts. Default
                 :data:`~reinforcetactics.rl.observation.UNIT_COUNT_SCALE`

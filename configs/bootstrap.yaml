@@ -240,7 +240,7 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef:
         start: 0.10
         end: 0.03
@@ -255,7 +255,7 @@ curriculum:
       patience: 2
       max_timesteps: 1_500_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef:
         start: 0.10
         end: 0.03
@@ -276,7 +276,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef:
         start: 0.10
         end: 0.03
@@ -296,7 +296,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
       # this is the longest stage at 3M steps and the policy needs to
       # commit during the last ~1M to convert draws into wins. A 0.03
@@ -314,7 +314,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_000_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef:
         start: 0.10
         end: 0.03
@@ -337,7 +337,7 @@ curriculum:
       patience: 2
       max_timesteps: 3_500_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef: 0.05
 
     - name: beginner_medium
@@ -347,7 +347,7 @@ curriculum:
       patience: 2
       max_timesteps: 4_000_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef: 0.05
 
     - name: beginner_mixed_med_adv_50
@@ -367,7 +367,7 @@ curriculum:
       patience: 2
       max_timesteps: 4_500_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef: 0.05
 
     - name: beginner_advanced
@@ -383,7 +383,7 @@ curriculum:
       patience: 2
       max_timesteps: 5_000_000
       n_eval_episodes: 80
-      max_turns: 60
+      max_turns: 75
       ent_coef: 0.05
 
     # Bridge between beginner (6x6, 0 neutral buildings) and skirmish (8x8,
