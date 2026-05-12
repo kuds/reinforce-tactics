@@ -27,7 +27,6 @@ from reinforcetactics.rl.imitation import (
 )
 from reinforcetactics.rl.masking import (
     ActionMaskedEnv,
-    make_curriculum_env,
     make_maskable_env,
     make_maskable_vec_env,
     validate_action_mask,
@@ -48,7 +47,6 @@ __all__ = [
     "ActionMaskedEnv",
     "make_maskable_env",
     "make_maskable_vec_env",
-    "make_curriculum_env",
     "validate_action_mask",
     # Evaluation
     "evaluate_model",

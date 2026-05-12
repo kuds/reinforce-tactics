@@ -1256,20 +1256,6 @@ class TestActionMaskingWrapper:
 
         env.close()
 
-    def test_make_curriculum_env(self):
-        """Test curriculum environment creation."""
-        from reinforcetactics.rl.masking import make_curriculum_env
-
-        for difficulty in ["easy", "medium", "hard"]:
-            env = make_curriculum_env(difficulty=difficulty)
-
-            assert env is not None
-            env.reset()
-            masks = env.action_masks()
-            assert masks is not None
-
-            env.close()
-
     def test_wrapper_with_stats_tracking(self):
         """Test ActionMaskedEnv with stats tracking enabled."""
         from reinforcetactics.rl.masking import ActionMaskedEnv
