@@ -158,9 +158,7 @@ def build_observation(
             "Multi-player observations require a separate team-relative encoding (own/ally/enemy)."
         )
     if perspective_player not in (1, 2):
-        raise ValueError(
-            f"perspective_player must be 1 or 2 in a 1v1 game; got {perspective_player}."
-        )
+        raise ValueError(f"perspective_player must be 1 or 2 in a 1v1 game; got {perspective_player}.")
 
     opp = 3 - perspective_player
 
@@ -236,7 +234,7 @@ def build_observation(
     one_hot_idx = np.clip(unit_type_idx - 1, 0, NUM_UNIT_TYPES - 1)
     units[yy[has_unit], xx[has_unit], one_hot_idx[has_unit]] = 1.0
     raw_unit_owner = raw_units[..., 1]
-    own_mask = (raw_unit_owner == perspective_player)
+    own_mask = raw_unit_owner == perspective_player
     units[..., NUM_UNIT_TYPES + 0] = own_mask.astype(np.float32)
     units[..., NUM_UNIT_TYPES + 1] = (raw_unit_owner == opp).astype(np.float32)
     # own_acted: gated by own_mask because (a) opponent ``has_moved`` is
