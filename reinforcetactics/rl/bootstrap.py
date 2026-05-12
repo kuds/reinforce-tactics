@@ -128,6 +128,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
+        max_actions_per_turn=cfg.env.max_actions_per_turn,
         seed=cfg.seed,
         use_subprocess=cfg.env.use_subprocess,
         opponent_kwargs=stage.opponent_kwargs,
@@ -157,6 +158,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         enabled_units=cfg.env.enabled_units,
         action_space_type=cfg.env.action_space_type,
         max_flat_actions=cfg.env.max_flat_actions,
+        max_actions_per_turn=cfg.env.max_actions_per_turn,
         seed=cfg.seed + cfg.eval.seed_offset,
         opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
@@ -395,6 +397,7 @@ def _write_stage_config(
         "enabled_units": list(cfg.env.enabled_units) if cfg.env.enabled_units else None,
         "action_space_type": cfg.env.action_space_type,
         "max_flat_actions": cfg.env.max_flat_actions,
+        "max_actions_per_turn": cfg.env.max_actions_per_turn,
         "reward_config": stage.resolve_reward_config(cfg.env),
         "opponent_kwargs": dict(stage.opponent_kwargs) if stage.opponent_kwargs else None,
     }
@@ -616,6 +619,13 @@ def run_curriculum(
             # never collides with a training rollout's seed.
             eval_seed_base=cfg.seed + cfg.eval.seed_offset,
             save_dir=stage_dir,
+            # Dump per-step JSONL traces for any eval episode that hits
+            # the env step limit without ending (the stalling signature
+            # we added ``env.max_actions_per_turn`` to defend against).
+            # Healthy episodes leave no files on disk; truncated ones
+            # land under ``<stage_dir>/traces/eval_<timesteps>/`` so it's
+            # easy to grep for which actions the policy spammed.
+            trace_dir=stage_dir / "traces",
         )
         promote_cb = PromotionCallback(
             eval_callback=eval_cb,
