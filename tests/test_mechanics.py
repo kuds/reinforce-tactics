@@ -381,6 +381,27 @@ class TestMageAbilities:
         assert result is False
         assert ally.paralyzed_turns == 0
 
+    def test_mage_paralyze_distance_matches_mask(self):
+        """Paralyze must agree with the mask's distance gate (<= 2).
+
+        Defensive: ``GameState.get_legal_actions`` only queues
+        paralyze for enemies at Manhattan distance <= 2. If
+        ``paralyze_unit`` is ever called outside that range (e.g.
+        via a future mask widening or a test stub) it must refuse,
+        otherwise mask/execution drift can produce the same
+        legal-actions-cache stall pattern documented on heal/cure.
+        """
+        mage = Unit("M", 0, 0, 1)
+        # Distance 2 -- legal under the mask, must succeed.
+        near_enemy = Unit("W", 2, 0, 2)
+        assert GameMechanics.paralyze_unit(mage, near_enemy) is True
+        # Reset cooldown for the next attempt.
+        mage.paralyze_cooldown = 0
+        # Distance 3 -- outside the mask's gate, must refuse.
+        far_enemy = Unit("W", 3, 0, 2)
+        assert GameMechanics.paralyze_unit(mage, far_enemy) is False
+        assert far_enemy.paralyzed_turns == 0
+
 
 class TestClericAbilities:
     """Test cleric special abilities."""
@@ -439,6 +460,43 @@ class TestClericAbilities:
         assert ally.paralyzed_turns == 0
         assert ally.can_move is True
         assert ally.can_attack is True
+
+    def test_cleric_heals_at_max_range(self):
+        """Heal must succeed at every distance the mask advertises.
+
+        Regression for the heal-spam stall: ``get_healable_allies``
+        (mask builder) accepts Manhattan distance up to
+        ``CLERIC_HEAL_RANGE`` (3), but ``heal_unit`` used to hardcode
+        ``distance > 2`` as invalid -- so a cleric/ally pair at
+        distance 3 produced a legal-but-unexecutable heal that PPO's
+        deterministic eval would lock onto for thousands of steps
+        until ``max_steps`` truncation.
+        """
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 3, 0, 1)  # Manhattan distance 3
+        ally.health = 10
+
+        healed = GameMechanics.heal_unit(cleric, ally)
+
+        assert healed > 0
+        assert ally.health > 10
+
+    def test_cleric_heal_rejects_beyond_range(self):
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 4, 0, 1)  # Manhattan distance 4 -- one past range
+        ally.health = 10
+
+        assert GameMechanics.heal_unit(cleric, ally) == -1
+        assert ally.health == 10
+
+    def test_cleric_cures_at_max_range(self):
+        """Cure must mirror heal's distance bound."""
+        cleric = Unit("C", 0, 0, 1)
+        ally = Unit("W", 3, 0, 1)
+        ally.paralyzed_turns = 2
+
+        assert GameMechanics.cure_unit(cleric, ally) is True
+        assert ally.paralyzed_turns == 0
 
 
 class TestStructureCapture:
