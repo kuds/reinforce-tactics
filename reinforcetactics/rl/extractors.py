@@ -19,11 +19,12 @@ before the convolution stack, then pooled (see ``pool``) and concatenated
 with the (already tanh-normalized) global features.
 """
 
-from typing import Dict, Optional
+from typing import Dict
 
 import torch
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import nn
+from torch.nn import functional as F
 
 from reinforcetactics.rl.observation import NUM_TILE_TYPES
 
@@ -128,8 +129,6 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             )
         self.cnn = nn.Sequential(*conv_layers)
 
-        self._adaptive_avg: Optional[nn.Module] = nn.AdaptiveAvgPool2d(1) if pool == "avg" else None
-
         # Determine global_features size if present in the observation space.
         if "global_features" in observation_space.spaces:
             self.n_global = observation_space["global_features"].shape[0]
@@ -144,7 +143,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
             units = torch.as_tensor(sample_obs["units"]).float()
             combined = torch.cat([grid, units], dim=-1).permute(2, 0, 1).unsqueeze(0)
             if self.coord_conv:
-                combined = torch.cat([combined, self.coord_planes], dim=1)
+                combined = torch.cat([combined, self.get_buffer("coord_planes")], dim=1)
             cnn_out = self.cnn(combined)
             if pool in ("avg", "masked_avg"):
                 # Both collapse the spatial dims to 1x1; only the
@@ -181,13 +180,13 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         combined = combined.permute(0, 3, 1, 2)  # (B, C, H, W)
 
         if self.coord_conv:
-            coords = self.coord_planes.expand(combined.shape[0], -1, -1, -1)
+            coords = self.get_buffer("coord_planes").expand(combined.shape[0], -1, -1, -1)
             combined = torch.cat([combined, coords], dim=1)
 
         features = self.cnn(combined)  # (B, 64, H, W)
 
         if self.pool == "avg":
-            features = self._adaptive_avg(features)  # (B, 64, 1, 1)
+            features = F.adaptive_avg_pool2d(features, 1)  # (B, 64, 1, 1)
             features = features.flatten(1)
         elif self.pool == "masked_avg":
             live = self._live_cell_mask(grid)  # (B, 1, H, W)
