@@ -48,6 +48,14 @@ class EnvConfig:
     enabled_units: Optional[List[str]] = None
     action_space_type: str = "multi_discrete"
     max_flat_actions: int = 512
+    # Optional hard cap on agent actions per game-turn. When set, the
+    # action mask narrows to end_turn-only once the agent has executed
+    # this many actions in the current game-turn. Defends against the
+    # "never end the turn" stall mode where the policy cycles through
+    # legal-but-unproductive actions until ``max_steps`` truncates the
+    # episode. ``None`` (default) disables the cap. See
+    # :class:`reinforcetactics.rl.gym_env.StrategyGameEnv` for details.
+    max_actions_per_turn: Optional[int] = None
     reward_config: Optional[Dict[str, float]] = None
     n_envs: int = 4
     use_subprocess: bool = True
@@ -458,6 +466,8 @@ class TrainingConfig:
             raise ValueError("env.n_envs must be positive")
         if self.env.max_steps <= 0:
             raise ValueError("env.max_steps must be positive")
+        if self.env.max_actions_per_turn is not None and self.env.max_actions_per_turn <= 0:
+            raise ValueError("env.max_actions_per_turn must be positive (or None to disable)")
         if not 0.0 <= self.ppo.gamma <= 1.0:
             raise ValueError("ppo.gamma must be in [0, 1]")
         if not 0.0 <= self.ppo.gae_lambda <= 1.0:

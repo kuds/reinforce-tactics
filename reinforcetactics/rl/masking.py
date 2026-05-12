@@ -122,6 +122,7 @@ def make_maskable_env(
     enabled_units: Optional[List[str]] = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    max_actions_per_turn: Optional[int] = None,
     seed: Optional[int] = None,
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
@@ -178,6 +179,7 @@ def make_maskable_env(
         enabled_units=enabled_units,
         action_space_type=action_space_type,
         max_flat_actions=max_flat_actions,
+        max_actions_per_turn=max_actions_per_turn,
         opponent_kwargs=opponent_kwargs,
         gamma=gamma,
         pad_to_size=pad_to_size,
@@ -205,6 +207,7 @@ def _make_env_fn(
     gold_scale: Optional[float] = None,
     turn_scale: Optional[float] = None,
     unit_count_scale: Optional[float] = None,
+    max_actions_per_turn: Optional[int] = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -231,6 +234,7 @@ def _make_env_fn(
             enabled_units=enabled_units,
             action_space_type=action_space_type,
             max_flat_actions=max_flat_actions,
+            max_actions_per_turn=max_actions_per_turn,
             opponent_kwargs=opponent_kwargs,
             gamma=gamma,
             pad_to_size=pad_to_size,
@@ -255,6 +259,7 @@ def make_maskable_vec_env(
     enabled_units: Optional[List[str]] = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    max_actions_per_turn: Optional[int] = None,
     opponent_kwargs: Optional[Dict[str, Any]] = None,
     gamma: float = 0.99,
     pad_to_size: Optional[Tuple[int, int]] = None,
@@ -315,6 +320,7 @@ def make_maskable_vec_env(
             gold_scale,
             turn_scale,
             unit_count_scale,
+            max_actions_per_turn,
         )
         for i in range(n_envs)
     ]

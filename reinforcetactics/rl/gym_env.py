@@ -264,6 +264,7 @@ class StrategyGameEnv(gym.Env):
         fog_of_war: bool = False,  # Enable fog of war
         action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
+        max_actions_per_turn: Optional[int] = None,  # Hard cap on agent actions per game-turn (None = unlimited)
         opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
         gamma: float = 0.99,  # Discount used by potential-based shaping; should match the trainer's gamma
         pad_to_size: Optional[Tuple[int, int]] = None,  # (pad_h, pad_w) for cross-stage obs-shape unification
@@ -293,6 +294,14 @@ class StrategyGameEnv(gym.Env):
             action_space_type: 'multi_discrete' (per-dimension masks) or
                 'flat_discrete' (exact per-action masks, eliminates invalid actions)
             max_flat_actions: Upper bound on legal actions per step for flat_discrete
+            max_actions_per_turn: Optional hard cap on the number of agent
+                actions taken within a single game-turn before the action
+                mask is narrowed to end_turn only. Defends against the
+                "never end the turn" failure mode where the policy spins
+                through legal-but-unproductive actions (idle moves, etc.)
+                until ``max_steps`` truncates the episode. Resets on every
+                end_turn the agent executes. ``None`` (default) disables
+                the cap.
             gold_scale: ``tanh`` divisor applied to ``own_gold`` /
                 ``opp_gold`` before they enter ``global_features``. Default
                 :data:`~reinforcetactics.rl.observation.GOLD_SCALE` (1000)
@@ -351,6 +360,15 @@ class StrategyGameEnv(gym.Env):
         self._self_play_opponent_factory: Optional[Any] = None
         self.max_steps = max_steps
         self.current_step = 0
+        # Hard per-game-turn action budget. When the agent has executed
+        # ``max_actions_per_turn`` actions without ending the turn, the
+        # mask is narrowed to end_turn only on subsequent steps. The
+        # counter is bumped in ``step`` for every agent action and reset
+        # whenever the agent actually ends its turn.
+        if max_actions_per_turn is not None and max_actions_per_turn <= 0:
+            raise ValueError("max_actions_per_turn must be > 0 (or None to disable)")
+        self.max_actions_per_turn = max_actions_per_turn
+        self._actions_this_turn = 0
         self.hierarchical = hierarchical
         self.goal_space_size = goal_space_size
 
@@ -629,6 +647,33 @@ class StrategyGameEnv(gym.Env):
             (flat_mask, action_type_mask, unit_type_mask,
              from_x_mask, from_y_mask, to_x_mask, to_y_mask)
         """
+        # Per-turn action budget gate (see ``_build_flat_actions``). When
+        # the agent has used up its budget, advertise only end_turn at
+        # the canonical (0, 0) coordinates so the multi_discrete policy
+        # has exactly one legal action.
+        if (
+            self.max_actions_per_turn is not None
+            and self._actions_this_turn >= self.max_actions_per_turn
+        ):
+            width = self.grid_width
+            height = self.grid_height
+            area = width * height
+            flat_mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
+            at_mask = np.zeros(10, dtype=bool)
+            ut_mask = np.zeros(8, dtype=bool)
+            fx_mask = np.zeros(width, dtype=bool)
+            fy_mask = np.zeros(height, dtype=bool)
+            tx_mask = np.zeros(width, dtype=bool)
+            ty_mask = np.zeros(height, dtype=bool)
+            at_mask[5] = True
+            flat_mask[5 * area] = 1.0
+            fx_mask[0] = True
+            fy_mask[0] = True
+            tx_mask[0] = True
+            ty_mask[0] = True
+            ut_mask[0] = True
+            return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
+
         legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
 
         width = self.grid_width
@@ -813,6 +858,20 @@ class StrategyGameEnv(gym.Env):
 
         End turn is always appended as the last action.
         """
+        # Per-turn action budget: once the agent has taken
+        # ``max_actions_per_turn`` actions in the current game-turn,
+        # collapse the legal-action set to end_turn only. Without this
+        # cap a policy that finds a legal-but-unproductive cycle (idle
+        # moves, etc.) can spin until ``max_steps`` truncates the
+        # episode -- which surfaces in eval as len near max_steps with
+        # turns very low (the "never end the turn" attractor).
+        if (
+            self.max_actions_per_turn is not None
+            and self._actions_this_turn >= self.max_actions_per_turn
+        ):
+            self._current_actions = [np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)]
+            return
+
         legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
 
         actions = []
@@ -1290,6 +1349,20 @@ class StrategyGameEnv(gym.Env):
 
         # Decode and execute action
         action_dict = self._encode_action(action)
+
+        # Bump / reset the per-game-turn action counter that drives the
+        # mask-narrowing safety net (see ``_build_flat_actions``). The
+        # update happens *before* dispatch so that an end_turn step
+        # clears the counter for the next agent turn, while non-end_turn
+        # steps see the post-increment value reflected on the next
+        # mask query. ``_execute_action`` handles the opponent's turn
+        # internally for action_type=5, so the counter doesn't need to
+        # be touched again afterward.
+        if action_dict["action_type"] == 5:
+            self._actions_this_turn = 0
+        else:
+            self._actions_this_turn += 1
+
         action_reward, is_valid = self._execute_action(action_dict)
 
         # Determine terminal status BEFORE shaping so potential-based shaping
@@ -1423,6 +1496,7 @@ class StrategyGameEnv(gym.Env):
             fog_of_war=self.fog_of_war,
         )
         self.current_step = 0
+        self._actions_this_turn = 0
 
         # Initialize visibility at game start
         if self.fog_of_war:
