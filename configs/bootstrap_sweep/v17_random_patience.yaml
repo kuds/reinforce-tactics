@@ -382,7 +382,7 @@ curriculum:
         max_actions: 10
       promotion_win_rate: 0.75
       patience: 2
-      max_timesteps: 1_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
