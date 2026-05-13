@@ -277,7 +277,7 @@ UNIT TYPES (for reference):
 - Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
 BUILDING TYPES:
-- HQ (h): 150 gold/turn, losing it = defeat
+- HQ (h): 100 gold/turn, losing it = defeat
 - Building (b): 100 gold/turn
 - Tower (t): 50 gold/turn
 

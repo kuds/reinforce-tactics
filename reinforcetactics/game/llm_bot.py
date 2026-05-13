@@ -629,7 +629,7 @@ Respond with your strategic plan in JSON format."""
                     building_info = {
                         "type": tile.type,
                         "position": [orig_x, orig_y],
-                        "income": 150 if tile.type == "h" else (100 if tile.type == "b" else 50),
+                        "income": 100 if tile.type == "h" else (100 if tile.type == "b" else 50),
                     }
 
                     # FOW: For non-visible structures, don't show current ownership

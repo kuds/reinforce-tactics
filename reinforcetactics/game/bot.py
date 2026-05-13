@@ -840,7 +840,7 @@ class MediumBot(BotUnitMixin):
         formula so callers that don't yet thread a unit (e.g. ad-hoc
         scoring in tests) still work.
         """
-        income_weights = {"h": 150, "b": 100, "t": 50}
+        income_weights = {"h": 100, "b": 100, "t": 50}
         income_bonus = income_weights.get(structure.type, 0)
         neutral_bonus = 80 if structure.player is None else 0
 

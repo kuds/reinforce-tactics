@@ -572,8 +572,8 @@ class TestIncome:
         assert income["headquarters"] == 1
         assert income["towers"] == 0
         assert income["buildings"] == 0
-        # Total: 150 (HQ)
-        assert income["total"] == 150
+        # Total: 100 (HQ)
+        assert income["total"] == 100
 
 
 class TestParalysisDecrement:
