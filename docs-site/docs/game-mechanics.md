@@ -16,14 +16,14 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 
 | Unit | Code | Cost | Health | Movement | Attack | Defence | Special Abilities |
 |------|------|------|--------|----------|--------|---------|-------------------|
-| **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
+| **Warrior** | W | 200 | 15 | 3 | 8 | 6 | Melee only (range 1) |
 | **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns (2-turn cooldown) |
 | **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
 | **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
 | **Sorcerer** | S | 400 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE: Grant ally extra action, ATTACK/DEFENCE BUFF: +35% damage/reduction for 3 turns |
-| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High HP glass cannon with excellent mobility |
+| **Barbarian** | B | 400 | 24 | 5 | 11 | 2 | High HP glass cannon with excellent mobility |
 
 ### Unit Details
 
@@ -130,7 +130,7 @@ Structures provide income and serve as strategic objectives. They can be capture
   - Headquarters: $150 per turn
   - Buildings: $100 per turn
   - Towers: $50 per turn
-- Players start with **$250** in gold (`STARTING_GOLD = 250`)
+- Players start with **$200** in gold (`STARTING_GOLD = 200`)
 
 ## Combat System
 
