@@ -236,7 +236,7 @@ UNIT_DATA = {
         "movement": 4,
         "health": 18,
         "attack": 8,
-        "defence": 5,
+        "defence": 7,
     },
     "R": {
         "static_path": "rogue.png",
