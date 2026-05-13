@@ -263,7 +263,7 @@ curriculum:
     - name: starter_random
       map_file: maps/1v1/starter.csv
       opponent: random
-      promotion_win_rate: 0.90
+      promotion_win_rate: 0.85
       patience: 2
       max_timesteps: 1_000_000
       ent_coef:
