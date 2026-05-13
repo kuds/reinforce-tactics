@@ -301,12 +301,12 @@ curriculum:
       opponent: balanced_random
       promotion_win_rate: 0.85
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
-        start: 0.07
-        end: 0.03
+        start: 0.05
+        end: 0.01
         schedule: linear
 
     - name: beginner_random_10
@@ -316,7 +316,7 @@ curriculum:
         max_actions: 10
       promotion_win_rate: 0.75
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -337,7 +337,7 @@ curriculum:
         max_actions: 15
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 3_000_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -357,7 +357,7 @@ curriculum:
       # baseline by more than a few points.
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 3_000_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       # Tier 3 (within-class scaling): same opponent class as random_15,
@@ -376,7 +376,7 @@ curriculum:
       opponent: simple
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 3_000_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -399,7 +399,7 @@ curriculum:
         p_hard: 0.5
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 3_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -412,7 +412,7 @@ curriculum:
       opponent: medium
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 4_000_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -435,7 +435,7 @@ curriculum:
         p_hard: 0.5
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 4_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -454,7 +454,7 @@ curriculum:
       opponent: advanced
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 5_000_000
+      max_timesteps: 2_500_000
       n_eval_episodes: 80
       max_turns: 75
       ent_coef:
@@ -483,12 +483,12 @@ curriculum:
       opponent: balanced_random
       promotion_win_rate: 0.85
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 60
       ent_coef:
-        start: 0.07
-        end: 0.03
+        start: 0.05
+        end: 0.01
         schedule: linear
 
     - name: intermediate_random_20
@@ -498,7 +498,7 @@ curriculum:
         max_actions: 20
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 60
       ent_coef:
@@ -540,7 +540,7 @@ curriculum:
       opponent: simple
       promotion_win_rate: 0.65
       patience: 4
-      max_timesteps: 3_000_000
+      max_timesteps: 2_000_000
       n_eval_episodes: 80
       max_turns: 60
       ent_coef:
@@ -566,12 +566,12 @@ curriculum:
       opponent: balanced_random
       promotion_win_rate: 0.85
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 120
       ent_coef:
-        start: 0.07
-        end: 0.03
+        start: 0.05
+        end: 0.01
         schedule: linear
 
     - name: skirmish_random_10
@@ -581,7 +581,7 @@ curriculum:
         max_actions: 10
       promotion_win_rate: 0.75
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 120
       ent_coef:
@@ -637,7 +637,7 @@ curriculum:
         p_hard: 0.25
       promotion_win_rate: 0.70
       patience: 4
-      max_timesteps: 2_000_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 120
       ent_coef:
@@ -654,7 +654,7 @@ curriculum:
         p_hard: 0.5
       promotion_win_rate: 0.65
       patience: 4
-      max_timesteps: 2_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 120
       ent_coef:
@@ -693,12 +693,12 @@ curriculum:
       opponent: balanced_random
       promotion_win_rate: 0.85
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 200
       ent_coef:
-        start: 0.07
-        end: 0.03
+        start: 0.05
+        end: 0.01
         schedule: linear
 
     - name: corner_points_random_10
@@ -708,7 +708,7 @@ curriculum:
         max_actions: 10
       promotion_win_rate: 0.75
       patience: 4
-      max_timesteps: 1_500_000
+      max_timesteps: 3_000_000
       n_eval_episodes: 80
       max_turns: 200
       ent_coef:
