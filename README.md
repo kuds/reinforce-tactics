@@ -150,11 +150,11 @@ See the `examples/` directory for more, including an action-masking training dem
 | Knight | 350 | 4 | 18 | Charge (+50% dmg if moved 3+ tiles) |
 | Rogue | 350 | 4 | 12 | Flank (+50% dmg), Evade (15% dodge, 30% in forest) |
 | Sorcerer | 400 | 2 | 10 | Haste, Attack/Defence Buff (+35%) |
-| Barbarian | 400 | 5 | 20 | Fast, high-damage melee |
+| Barbarian | 400 | 5 | 24 | Fast, high-damage melee |
 
 **Win Conditions**: Capture enemy HQ or eliminate all enemy units
 
-**Economy**: Starting gold $250. Income from structures each turn (HQ: $150, Building: $100, Tower: $50)
+**Economy**: Starting gold $200. Income from structures each turn (HQ: $150, Building: $100, Tower: $50)
 
 **Terrain**: Grass, forest (stealth bonus), mountains (vision/range bonus), roads (fast movement), water/ocean (impassable)
 
