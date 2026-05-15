@@ -418,9 +418,7 @@ def _write_run_status(
             "written_at": datetime.now(timezone.utc).isoformat(),
             **fields,
         }
-        (Path(output_dir) / "run_status.json").write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
+        (Path(output_dir) / "run_status.json").write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
 

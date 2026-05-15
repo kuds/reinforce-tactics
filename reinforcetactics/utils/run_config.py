@@ -86,10 +86,7 @@ def _engine_economy() -> Dict[str, Any]:
             # for every unit code. Attack may be an int or a dict
             # ({adjacent, range}) for ranged units -- stored as-is.
             "unit_data": {
-                code: {
-                    k: spec.get(k)
-                    for k in ("cost", "health", "attack", "defence", "movement")
-                }
+                code: {k: spec.get(k) for k in ("cost", "health", "attack", "defence", "movement")}
                 for code, spec in (getattr(_c, "UNIT_DATA", {}) or {}).items()
             },
         }
