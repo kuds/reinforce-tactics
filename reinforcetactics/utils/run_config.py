@@ -11,6 +11,7 @@ engine constants drift.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -97,6 +98,45 @@ def _engine_economy() -> Dict[str, Any]:
         return {}
 
 
+def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
+    """Fingerprint the map CSV by content, not just path.
+
+    Maps are referenced by path; a silent terrain edit to e.g.
+    ``beginner.csv`` makes runs before/after incomparable and nothing
+    records it -- the same confound class as enabled_units. The
+    sha256 of the raw bytes is the load-bearing fingerprint; dims are
+    a convenience derived from the CSV grid (rows x first-row cols).
+    Missing/unreadable file -> null hash, never raises.
+    """
+    if not map_file:
+        return {"map_file": None, "map_sha256": None, "map_dims": None}
+    out: Dict[str, Any] = {"map_file": map_file, "map_sha256": None, "map_dims": None}
+    try:
+        raw = Path(map_file).read_bytes()
+        out["map_sha256"] = hashlib.sha256(raw).hexdigest()
+        rows = [ln for ln in raw.decode("utf-8", "replace").splitlines() if ln.strip()]
+        if rows:
+            out["map_dims"] = [len(rows), len(rows[0].split(","))]  # [h, w]
+    except Exception:
+        pass
+    return out
+
+
+def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> Optional[str]:
+    """Short stable hash of the engine economy, so runs can be grouped
+    by balance era in one column instead of diffing constants. Derived
+    from the already-captured engine_economy block (canonical JSON ->
+    sha1, first 12 hex). Empty economy -> None.
+    """
+    if not engine_economy:
+        return None
+    try:
+        canon = json.dumps(engine_economy, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+    except Exception:
+        return None
+
+
 def _hardware_meta() -> Dict[str, Any]:
     info: Dict[str, Any] = {
         "platform": platform.platform(),
@@ -145,6 +185,7 @@ def build_run_config(
     merge), so the snapshot is reproducible without re-deriving the
     merge logic.
     """
+    _econ = _engine_economy()
     return {
         "run_type": run_type,
         "map_file": map_file,
@@ -157,7 +198,9 @@ def build_run_config(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
-            "engine_economy": _engine_economy(),
+            "engine_economy": _econ,
+            "balance_profile_hash": _balance_profile_hash(_econ),
+            "map": _map_meta(map_file),
             "hardware": _hardware_meta(),
         },
     }

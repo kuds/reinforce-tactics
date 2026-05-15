@@ -33,8 +33,10 @@ Usage:
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
@@ -363,6 +365,66 @@ def _print_policy_summary(model: Any, output_dir: Optional[Path] = None) -> None
         pass
 
 
+def _curriculum_hash(cfg: TrainingConfig) -> str:
+    """Stable short hash of the ordered curriculum structure.
+
+    Surfaces stage-list changes (e.g. the v19 consolidate-stage
+    insertion) at a glance: two runs that "look like v18" but differ
+    by one stage get different hashes. Keyed on the fields that define
+    a stage's identity/difficulty, not cosmetic ones.
+    """
+    spine = [
+        {
+            "name": s.name,
+            "map_file": s.map_file,
+            "opponent": s.opponent,
+            "opponent_kwargs": s.opponent_kwargs or {},
+            "promotion_win_rate": s.promotion_win_rate,
+            "patience": s.patience,
+            "max_timesteps": s.max_timesteps,
+        }
+        for s in cfg.curriculum.stages
+    ]
+    canon = json.dumps(spine, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+
+
+def _write_run_status(
+    output_dir: Path,
+    status: str,
+    **fields: Any,
+) -> None:
+    """Write/overwrite ``<output_dir>/run_status.json`` -- the single
+    run-level record of HOW a run ended.
+
+    Status semantics (this is the resolution to the historical
+    "ended-early vs stalled" ambiguity):
+
+      * file present, status=="completed_curriculum"  -> ran to the end
+      * file present, status=="curriculum_stalled"    -> genuine stall
+        (a stage exhausted max_timesteps without promoting)
+      * file ABSENT                                   -> the run never
+        finished cleanly: Colab disconnect / OOM / kill. A killed
+        process cannot self-report, so absence *is* the "aborted"
+        signal. (This is exactly the Colab-disconnect case that made
+        6/33-stage runs indistinguishable from stalls in runs_summary.)
+
+    Per-stage config.json has ``extra.promoted`` but no run-level
+    "why did this stop". Best effort: never raises.
+    """
+    try:
+        payload = {
+            "status": status,
+            "written_at": datetime.now(timezone.utc).isoformat(),
+            **fields,
+        }
+        (Path(output_dir) / "run_status.json").write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _write_stage_config(
     *,
     stage: CurriculumStage,
@@ -420,6 +482,8 @@ def _write_stage_config(
             "promoted": promoted,
             "best_win_rate": best_win_rate,
             "output_dir": str(output_dir),
+            "curriculum_hash": _curriculum_hash(cfg),
+            "stage_count": len(cfg.curriculum.stages),
         },
     )
     write_run_config(run_config, stage_dir / "config.json")
@@ -800,6 +864,16 @@ def run_curriculum(
                 stalled_final_path = str(final_path)
             except Exception:  # noqa: BLE001
                 stalled_final_path = None
+            _write_run_status(
+                output_dir,
+                "curriculum_stalled",
+                stalled_stage=stage.name,
+                stages_completed=len(history),
+                achieved_win_rate=eval_cb.best_win_rate,
+                threshold=stage.promotion_win_rate,
+                curriculum_hash=_curriculum_hash(cfg),
+                stage_count=len(cfg.curriculum.stages),
+            )
             raise CurriculumStalled(
                 stage_name=stage.name,
                 achieved_win_rate=eval_cb.best_win_rate,
@@ -813,6 +887,14 @@ def run_curriculum(
     final_path = output_dir / "final_model.zip"
     assert model is not None  # validate() guarantees stages is non-empty
     model.save(str(final_path))
+
+    _write_run_status(
+        output_dir,
+        "completed_curriculum",
+        stages_completed=len(cfg.curriculum.stages),
+        stage_count=len(cfg.curriculum.stages),
+        curriculum_hash=_curriculum_hash(cfg),
+    )
 
     return {
         "model": model,
