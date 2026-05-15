@@ -445,6 +445,15 @@ class TrainingConfig:
     algorithm: str = "maskable_ppo"
     total_timesteps: int = 1_000_000
     seed: int = 0
+    # Optional path to a saved SB3 model (.zip) whose policy + optimizer
+    # parameters are loaded into the freshly-built model before stage-1
+    # training. Used for warm-starting a curriculum from a checkpoint of
+    # an earlier run (e.g. transplanting a policy that already cleared
+    # early stages directly into a later stage). The checkpoint's
+    # observation/action spaces must match the curriculum's resolved
+    # spaces (same pad_to_size, same enabled_units, same
+    # action_space_type). None = cold start from random init.
+    warm_start_path: Optional[str] = None
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     feudal: FeudalConfig = field(default_factory=FeudalConfig)
@@ -551,7 +560,7 @@ def config_from_dict(data: Mapping[str, Any]) -> TrainingConfig:
     if not isinstance(data, Mapping):
         raise TypeError(f"Config data must be a mapping, got {type(data).__name__}")
 
-    top_level_scalars = {"algorithm", "total_timesteps", "seed"}
+    top_level_scalars = {"algorithm", "total_timesteps", "seed", "warm_start_path"}
     valid_keys = top_level_scalars | set(_SECTION_TYPES)
     unknown = set(data.keys()) - valid_keys
     if unknown:

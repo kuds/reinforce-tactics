@@ -554,6 +554,27 @@ def run_curriculum(
 
         if model is None:
             model = model_factory(vec_env, cfg, output_dir)
+            # Warm-start from a checkpoint before any training. Loaded
+            # after the model is built (so the env / spaces are already
+            # bound) but before the policy-summary print and the
+            # exploration hook, so the summary reflects the loaded
+            # weights and the hook wraps the warm-started policy.
+            # ``set_parameters`` keeps the freshly-constructed model's
+            # env, schedules, and callbacks intact and only overwrites
+            # the policy + optimizer tensors -- exactly the semantics we
+            # want for transplanting a prior run's policy into a new
+            # curriculum. A space mismatch surfaces here with an
+            # actionable SB3 error rather than a silent mis-load.
+            if cfg.warm_start_path:
+                warm_path = Path(cfg.warm_start_path)
+                if not warm_path.exists():
+                    raise FileNotFoundError(
+                        f"warm_start_path '{warm_path}' does not exist. "
+                        "Provide a valid SB3 .zip checkpoint or unset "
+                        "warm_start_path for a cold start."
+                    )
+                print(f"  warm-starting policy from {warm_path}")
+                model.set_parameters(str(warm_path), exact_match=True)
             _print_policy_summary(model, output_dir)
             # Install the purchase-exploration hook once on the freshly
             # built policy. Wrapping is idempotent and the hook short-

@@ -253,11 +253,167 @@ sparse-reward exploration genuinely fails.
 - **More training steps**. Stalls don't unstall by waiting. If the
   policy hasn't shifted in 250k steps, it won't shift in 2.5M.
 
+## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
+
+After the original 6-stage layout shipped, a long sweep
+(`configs/bootstrap_sweep/v15…v23`) tried to push the agent past the
+`beginner_random_*` stages on a longer curriculum that adds
+`balanced_random` stepping stones, a `consolidate` stage, and a tail
+of intermediate / skirmish / corner_points maps. **Every run since v17
+has stalled at `beginner_random_15`.** v19 is the high-water mark: 6
+stages cleared, stalled at random_15 with peak WR 0.74. v20, v21, v22
+all regressed. The lessons below are as expensive as the cold-start
+ones above — read before touching the curriculum again.
+
+### TL;DR (sweep edition)
+
+1. **v19 is the best config. Every "make it simpler" change regressed.**
+   v20 (lower entropy), v21 (split-entropy consolidate), v22 (reduced
+   unit roster) each removed something the agent implicitly relied on
+   and each cleared *fewer* stages than v19. The careful balance is
+   load-bearing; do not assume simplification is free.
+2. **Entropy is load-bearing for *generalization*, not just exploration.**
+   Lowering `beginner_balanced_random` start entropy 0.07 → 0.05 (v20)
+   caused a catastrophic regression at random_10 (90% → 0% in one eval,
+   all draws). The high entropy was producing a policy robust to the
+   opponent-class change, not merely "noisy."
+3. **The entropy *step* at a stage boundary is NOT the consolidate
+   shock cause.** v21 split v19's single 0.05→0.003 consolidate into
+   two smaller steps (≈no boundary jump) and the policy dropped HARDER
+   (86% → 8.75%). Disproved the boundary-step hypothesis cleanly.
+4. **Reducing the unit roster is confounded with opponent strength.**
+   v22 (`enabled_units: [W,K,A,M]`) made `starter_random` — the
+   *easiest* stage — unlearnable. Removing Cleric/Sorcerer/Rogue/
+   Barbarian stopped RandomBot from wasting ~25% of its builds on
+   units it can't use randomly, turning the "random" opponent into a
+   much stronger one. The early curriculum's easiness was partly an
+   artifact of opponents handicapping themselves with weak units.
+5. **`patience` against stochastic opponents must be low.** patience=4
+   demands 4 consecutive evals ≥ threshold against a noisy RandomBot —
+   effectively asking for skill *and* luck. v17/v18 dropped random_N
+   stages to patience=2; that fixed random_10 (cleared in 50k steps
+   where v16 stalled the full 1.5M budget). It did not fix random_15
+   (the policy never sustains the bar there).
+6. **Lowering the gate ≠ fixing the policy, but it answers a different
+   question.** v23 relaxes random_15/20 promotion 0.70 → 0.60 (a level
+   v19 demonstrably sustained) purely to learn whether the
+   post-random_15 curriculum is *reachable at all*, or whether the
+   stall is a genuine capability ceiling. It is explicitly the last
+   curriculum-config experiment.
+
+### The draw-with-shaping equilibrium (the random_15 stall mechanism)
+
+Across v17/v18/v19/v21, the random_15 stall has one consistent
+signature: the policy reaches a winning composition (Warrior+Knight,
+sometimes +Mage), then **drifts off it** over ~hundreds of k steps
+into a max-turns-draw attractor, and never recovers within the stage
+budget.
+
+The mechanism: against a *static stochastic* opponent there is no
+curriculum gradient *inside* the stage. Once PPO finds a winning
+policy, nothing pulls it back if it wanders, because the value
+function correctly estimates that "stall to max_turns" has a higher
+variance-adjusted return than "risk a loss attempting to win" given
+the current weights. `turn_penalty = -0.5` (added in v16) reprices
+drawing from ≈+45 expected to ≈−40, which *partially* counters this —
+but the policy still drifts there because its *alternative* (commit to
+winning) scores even worse when it isn't a competent winner. The
+penalty changed the value, not the behaviour.
+
+### The decisive diagnostic: drift vs plateau
+
+The single most useful discriminator we found this sweep:
+
+| Signal | random_15 stall (what we see) | capacity-bound (what it'd be) |
+|--------|-------------------------------|-------------------------------|
+| `explained_variance` | ~0.85–0.95 | low, ~0.3–0.5 |
+| `value_loss` | low, stable | high, possibly climbing |
+| `approx_kl` | ~0.005–0.01 (barely updating) | higher (thrashing) |
+| WR trajectory | **drifts** off a winning policy | **plateaus** below optimal |
+
+The observed signature is "value function fits returns very well,
+policy barely updating, but the policy is *wandering*." That is an
+**optimization / attractor** problem, not a representational-capacity
+problem. A bigger network would fit the same returns and reach the
+same "drawing is best" conclusion. This is why we did *not* jump to
+architecture changes during the sweep — the data didn't support
+capacity-bound. (When curriculum tuning is exhausted after v23, the
+discriminating control is: train a fresh policy on random_15 alone,
+no curriculum, 3M steps. If it clears, random_15 is solvable at this
+capacity and the curriculum failures are interference/forgetting; if
+it can't, it's a genuine ceiling and the network must grow.)
+
+### GPU non-determinism amplifies divergence
+
+v19 and v21 share an identical config through `beginner_random_10`
+(same seed). v19's r10 promote eval hit 100%; v21's hit 90%. CUDA
+atomic-add non-determinism over ~50k training steps + ~24 PPO updates
+is enough to send otherwise-identical runs into different basins. When
+comparing runs, treat ±10% at a promotion eval as noise, not signal —
+and don't over-interpret a single run. This is a known deep-RL
+reproducibility limitation, not a config bug.
+
+### Warm-starting is not shareable
+
+We added a dormant `warm_start_path` to `TrainingConfig` /
+`run_curriculum` (loads policy+optimizer via `set_parameters` before
+stage 1). It works, but a config that points at a *specific prior
+run's* checkpoint is not reproducible from a clean checkout — other
+people can't run it. Keep warm-start as opt-in infrastructure; do not
+build a sweep variant that *depends* on it. This is why v23 pivoted
+from "warm-start the post-consolidate policy into random_15" to the
+self-contained gate-relaxation.
+
+### Knight buff: invisible to scripted bots, visible to RL
+
+A separate but related finding from the balance work: bumping Knight
+defence 5→7 produced *byte-identical* bot-tournament outcomes (scripted
+bots use static heuristic priorities and never perceive a stat change)
+but a measurable +3.6pt Knight survival-rate change in replay analysis,
+and RL agents *do* build more Knights post-buff (gradient discovers the
+durability). **`balance_analysis` (bot tournaments) cannot validate
+RL-relevant stat changes.** Use replay-level metrics or RL training
+deltas, not bot win/loss, to assess unit-stat tuning.
+
+### What is *not* worth chasing again (sweep edition)
+
+- **Entropy-schedule variants.** Two clean negatives (v20, v21). The
+  problem is not entropy shape. Lower entropy reduces generalization;
+  smaller entropy steps don't soften the consolidate shock.
+- **Unit-roster reduction as a "simplification."** It changes opponent
+  strength (v22). If unit-complexity must be tested, it requires
+  *asymmetric* rosters (agent-only restriction) which needs an env-
+  factory code change, not a YAML toggle.
+- **More `patience` / threshold permutations beyond v23.** patience is
+  already 2 on random_N; v23 is the last meaningful gate move. After
+  v23 the curriculum-config search space is spent.
+- **Re-running for luck.** Same as the cold-start lesson: a stall that
+  holds for ~1M steps does not unstall by extending the budget. v17's
+  random_15 ran the full 3M and never recovered.
+
 ## Future work
 
+- **Decide network changes off v23 + a single-stage control.** v23 is
+  the terminal curriculum experiment. If it stalls (or clears random_15
+  but a downstream stage walls with the same drift signature), widen
+  the MLP `net_arch [256,256] → [512,512]` first (cheapest meaningful
+  capacity bump, ~1.3M params, ~1.5–2× wall-clock), then `features_dim`
+  + CNN width, then a unit-attention block. Run the single-stage
+  random_15-only control in parallel to discriminate capacity-bound
+  from reward-shaping before committing.
+- **Opponent diversity in random stages (Option C).** The diagnosed
+  draw-attractor mechanism is "static opponent → no in-stage gradient
+  → drift." A per-episode *mixed* RandomBot (e.g. max_actions sampled
+  from {10,15,20}) would give a multi-modal gradient that resists
+  collapse. Requires extending `MixedBot._build_inner` to support
+  `random`/`balanced_random` sub-bots with kwargs (it currently only
+  supports simple/medium/advanced). Mid-effort; the most principled
+  remaining lever if v23 + bigger network don't crack random_15.
 - A **CNN features extractor** over the `grid` and `units` channels
   would probably accelerate convergence, especially as we move to
-  bigger maps. Mid-effort (~80 LOC).
+  bigger maps. Mid-effort (~80 LOC). *(Note: a `SpatialFeatureExtractor`
+  was subsequently shipped — this item is largely done; the open part
+  is unit-attention on top of it.)*
 - **Drop `action_mask` from the observation dict for MaskablePPO**
   via a small custom features extractor. It's redundant with
   MaskablePPO's masking pipeline and currently consumes ~70% of the
