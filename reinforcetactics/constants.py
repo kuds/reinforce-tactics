@@ -236,7 +236,7 @@ UNIT_DATA = {
         "movement": 4,
         "health": 18,
         "attack": 8,
-        "defence": 7,
+        "defence": 5,
     },
     "R": {
         "static_path": "rogue.png",
@@ -266,7 +266,7 @@ UNIT_DATA = {
 STARTING_GOLD = 200
 
 # Income rates
-HEADQUARTERS_INCOME = 100
+HEADQUARTERS_INCOME = 150
 BUILDING_INCOME = 100
 TOWER_INCOME = 50
 
