@@ -253,6 +253,65 @@ sparse-reward exploration genuinely fails.
 - **More training steps**. Stalls don't unstall by waiting. If the
   policy hasn't shifted in 250k steps, it won't shift in 2.5M.
 
+## ⚠️ CORRECTION — the v15–v23 conclusions below were confounded
+
+**Read this before the sweep section.** The analysis in
+"The curriculum-tuning sweep (v15–v23)" (below) was built on a
+`runs_summary.csv` whose `enabled_units` column was wrong. The
+analysis notebook sourced the roster from the run-root YAML and fell
+back to "all 8" for every run without one — which was almost every
+run. A corrected audit reading the authoritative
+`config.json:env_config.enabled_units` overturned two headline
+conclusions:
+
+1. **"Reducing the unit roster fails catastrophically" (from v22) is
+   FALSE.** v22 used `[W,K,A,M]` (Knight, *no Cleric*) + `tp=-0.5` +
+   the post-v16 engine. The *deepest-progressing runs in the entire
+   history* used a **restricted** roster:
+   - `20260511_132922`: roster `[W,M,C,A,K]`, `tp=-0.2`, rt 0.2.5 →
+     **reached `skirmish_simple` — 17 curriculum stages**, ~3× deeper
+     than v19, the supposed "high-water mark."
+   - `20260512_163309` / `_195716`: roster `[W,M,C,A,K]`, `tp=0.0` →
+     cleared `beginner_random_15` at **100% WR in 50k steps** (the
+     stage v17–v23 spent millions of steps stalling on).
+   - The deep `[W,M,C,A]` (4-unit, *with* Cleric) runs reached
+     `beginner_advanced` (12 stages).
+   Reduced rosters are the *best* configs on record. v22 failed
+   because it dropped Cleric and stacked the v16 economy on top, not
+   because it had fewer units.
+
+2. **"turn_penalty=-0.5 alone introduced the random_15 wall" is
+   INCOMPLETE.** v16 changed *three* things at once: roster
+   (restricted → all-8), `turn_penalty` (0 → -0.5), and engine
+   economy (Knight defence 5→7, HQ income 150→100). Every
+   all-8 + tp=-0.5 run stalled; every deep run was restricted-roster
+   + tp≤0 + pre-v16 economy. The wall correlates with the *triple*
+   change, not turn_penalty in isolation.
+
+Caveat preserved for honesty: roster + tp are not *sufficient* —
+`20260513_033055` (v15) used `[W,M,C,A,K]` + `tp=0.0` and still
+stalled at random_10 (its v15 entropy-floor change is the
+differentiator). And the deep runs *stopped* at 6–17 stages (Colab
+disconnects / short sessions), so we cannot prove they wouldn't have
+stalled later. But "every run since v17 stalled at random_15" is a
+statement about the all-8 + tp=-0.5 branch only — a branch the
+corrected data says was a regression off a working configuration.
+
+**v24 (`v24_reproduce_deep_config.yaml`) reproduces the 17-stage
+config**: roster `[W,M,C,A,K]`, `turn_penalty=-0.2`, engine reverted
+to Knight def=5 / HQ income=150 (constants.py, committed alongside),
+on the v18 base (standard curriculum + the proven patience=2 fix, no
+consolidate experiment). If v24 progresses deep, the entire v17–v23
+entropy/patience/threshold detour was treating a self-inflicted
+regression.
+
+The original sweep section is kept below **unedited** because its
+*mechanistic* observations (the draw-with-shaping attractor, the
+drift-vs-plateau diagnostic, GPU non-determinism, warm-start
+non-reproducibility) remain valid and useful — only the
+roster-blind comparative conclusions are superseded by this
+correction.
+
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 
 After the original 6-stage layout shipped, a long sweep

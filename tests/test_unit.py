@@ -60,7 +60,7 @@ class TestAttackDamage:
         """Test warrior deals damage only at adjacent range."""
         # Adjacent target (distance = 1)
         damage = warrior.get_attack_damage(6, 5)
-        assert damage == 8
+        assert damage == 10
 
         # Non-adjacent target (distance = 2)
         damage = warrior.get_attack_damage(7, 5)

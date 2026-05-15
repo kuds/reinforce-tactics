@@ -1,14 +1,17 @@
 """Build and write a self-describing run config snapshot.
 
 Captures the resolved hyperparameters, env settings, git commit (with a
-dirty-tree flag), key library versions, and hardware info into a single
-``config.json`` next to a saved model. Shared across notebooks so
-bootstrap, PPO training, and future trainers all emit consistent
-metadata when YAML defaults or library versions drift.
+dirty-tree flag), key library versions, the non-YAML engine economy
+constants (starting gold, income rates, per-unit stat block), and
+hardware info into a single ``config.json`` next to a saved model.
+Shared across notebooks so bootstrap, PPO training, and future trainers
+all emit consistent metadata when YAML defaults, library versions, or
+engine constants drift.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -56,6 +59,79 @@ def _lib_versions() -> Dict[str, Optional[str]]:
         except ImportError:
             versions[name] = None
     return versions
+
+
+def _engine_economy() -> Dict[str, Any]:
+    """Snapshot the engine economy constants that are NOT YAML-settable.
+
+    STARTING_GOLD / *_INCOME and the per-unit stat block live in
+    constants.py and silently change across commits (e.g. f4dc50e
+    bumped Knight defence, 6f64745 cut HQ income, a596c15 nerfed
+    Warrior + cut starting gold). None of these were captured in any
+    run artifact, so historical runs had hidden economy confounds
+    only recoverable via ``git show <sha>:reinforcetactics/constants.py``.
+    Recording them here makes every future run's economy auditable
+    from its own config.json -- the same gap that was closed for
+    enabled_units.
+    """
+    try:
+        from reinforcetactics import constants as _c
+
+        return {
+            "starting_gold": getattr(_c, "STARTING_GOLD", None),
+            "headquarters_income": getattr(_c, "HEADQUARTERS_INCOME", None),
+            "building_income": getattr(_c, "BUILDING_INCOME", None),
+            "tower_income": getattr(_c, "TOWER_INCOME", None),
+            # Per-unit stat block: cost/health/attack/defence/movement
+            # for every unit code. Attack may be an int or a dict
+            # ({adjacent, range}) for ranged units -- stored as-is.
+            "unit_data": {
+                code: {k: spec.get(k) for k in ("cost", "health", "attack", "defence", "movement")}
+                for code, spec in (getattr(_c, "UNIT_DATA", {}) or {}).items()
+            },
+        }
+    except Exception:
+        # Metadata capture must never break a training run.
+        return {}
+
+
+def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
+    """Fingerprint the map CSV by content, not just path.
+
+    Maps are referenced by path; a silent terrain edit to e.g.
+    ``beginner.csv`` makes runs before/after incomparable and nothing
+    records it -- the same confound class as enabled_units. The
+    sha256 of the raw bytes is the load-bearing fingerprint; dims are
+    a convenience derived from the CSV grid (rows x first-row cols).
+    Missing/unreadable file -> null hash, never raises.
+    """
+    if not map_file:
+        return {"map_file": None, "map_sha256": None, "map_dims": None}
+    out: Dict[str, Any] = {"map_file": map_file, "map_sha256": None, "map_dims": None}
+    try:
+        raw = Path(map_file).read_bytes()
+        out["map_sha256"] = hashlib.sha256(raw).hexdigest()
+        rows = [ln for ln in raw.decode("utf-8", "replace").splitlines() if ln.strip()]
+        if rows:
+            out["map_dims"] = [len(rows), len(rows[0].split(","))]  # [h, w]
+    except Exception:
+        pass
+    return out
+
+
+def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> Optional[str]:
+    """Short stable hash of the engine economy, so runs can be grouped
+    by balance era in one column instead of diffing constants. Derived
+    from the already-captured engine_economy block (canonical JSON ->
+    sha1, first 12 hex). Empty economy -> None.
+    """
+    if not engine_economy:
+        return None
+    try:
+        canon = json.dumps(engine_economy, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+    except Exception:
+        return None
 
 
 def _hardware_meta() -> Dict[str, Any]:
@@ -106,6 +182,7 @@ def build_run_config(
     merge), so the snapshot is reproducible without re-deriving the
     merge logic.
     """
+    _econ = _engine_economy()
     return {
         "run_type": run_type,
         "map_file": map_file,
@@ -118,6 +195,9 @@ def build_run_config(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
+            "engine_economy": _econ,
+            "balance_profile_hash": _balance_profile_hash(_econ),
+            "map": _map_meta(map_file),
             "hardware": _hardware_meta(),
         },
     }

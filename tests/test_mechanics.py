@@ -306,16 +306,17 @@ class TestCombat:
         """Test attacker kills target."""
         attacker = Unit("W", 5, 5, 1)
         target = Unit("C", 6, 5, 2)  # Cleric with 10 HP, 4 defence
-        # Pre-damage so the warrior's 6 dmg one-shot is fatal - a
-        # full-health cleric (10 HP) would otherwise survive a single hit.
-        target.health = 6
+        # Pre-damage so the warrior's one-shot of 8 dmg is fatal - a
+        # full-health cleric (10 HP) would otherwise survive a single
+        # warrior hit at the post-buff stats.
+        target.health = 8
 
         result = GameMechanics.attack_unit(attacker, target)
 
         assert result["attacker_alive"] is True
         assert result["target_alive"] is False
-        # Warrior (8 attack) vs Cleric (4 defence) = int(8 * (1 - 0.20)) = 6 damage
-        assert result["damage"] == 6
+        # Warrior (10 attack) vs Cleric (4 defence) = 10 * (1 - 0.20) = 8 damage
+        assert result["damage"] == 8
         assert target.health == 0
 
     def test_attack_target_survives_and_counters(self):
@@ -327,11 +328,11 @@ class TestCombat:
         result = GameMechanics.attack_unit(attacker, target)
 
         assert result["target_alive"] is True
-        # Warrior (8 attack) vs Warrior (6 defence) = int(8 * (1 - 0.30)) = 5 damage
-        assert target.health == 10  # 15 - 5 damage
+        # Warrior (10 attack) vs Warrior (6 defence) = 10 * (1 - 0.30) = 7 damage
+        assert target.health == 8  # 15 - 7 damage
         # Counter attack should happen
         assert result["counter_damage"] > 0
-        # Attacker should take counter damage (8 * 0.8 counter mult * 0.7 defence = 4.48 → 4)
+        # Attacker should take counter damage (10 * 0.8 counter mult * 0.7 defence = 5.6 → 5)
         assert attacker.health < 15
 
     def test_paralyzed_target_no_counter(self):
@@ -572,8 +573,8 @@ class TestIncome:
         assert income["headquarters"] == 1
         assert income["towers"] == 0
         assert income["buildings"] == 0
-        # Total: 100 (HQ)
-        assert income["total"] == 100
+        # Total: 150 (HQ)
+        assert income["total"] == 150
 
 
 class TestParalysisDecrement:
@@ -644,7 +645,7 @@ class TestArcherCounterAttack:
         # Archer (5 attack) vs Barbarian (2 defence) = 5 * 0.9 = 4.5 → 4 damage
         assert result["damage"] == 4
         assert result["target_alive"] is True
-        assert barbarian.health == 20  # 24 - 4 damage
+        assert barbarian.health == 16  # 20 - 4 damage
 
         # Barbarian should not counter-attack (can't reach distance 2)
         assert result["counter_damage"] == 0
@@ -725,14 +726,14 @@ class TestDefenceSystem:
 
     def test_defence_reduces_damage(self, simple_grid):
         """Test that defence reduces incoming damage by 5% per point."""
-        # Warrior (8 attack) vs Warrior (6 defence)
-        # 6 defence = 30% reduction, so int(8 * 0.7) = 5 damage
+        # Warrior (10 attack) vs Warrior (6 defence)
+        # 6 defence = 30% reduction, so 10 * 0.7 = 7 damage
         attacker = Unit("W", 5, 5, 1)
         defender = Unit("W", 6, 5, 2)
 
         result = GameMechanics.attack_unit(attacker, defender, simple_grid)
 
-        assert result["damage"] == 5
+        assert result["damage"] == 7
 
     def test_defence_minimum_damage_is_one(self, simple_grid):
         """Test that minimum damage is always at least 1."""
@@ -1213,12 +1214,12 @@ class TestBuffDamageModifiers:
         attacker.attack_buff_turns = 3  # Has attack buff
         target = Unit("A", 6, 5, 2)  # Archer: 1 defence
 
-        # Warrior (8 attack) with attack buff (+50%) = int(8 * 1.50) = 12 attack
-        # vs Archer (1 defence, 5% reduction) = int(12 * 0.95) = 11 damage
+        # Warrior (10 attack) with attack buff (+50%) = int(10 * 1.50) = 15 attack
+        # vs Archer (1 defence, 5% reduction) = int(15 * 0.95) = 14 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result["attack_buff"] is True
-        assert result["damage"] == 11
+        assert result["damage"] == 14
 
     def test_defence_buff_reduces_damage(self, simple_grid):
         """Test Defence Buff reduces incoming damage by 50%."""
@@ -1226,12 +1227,12 @@ class TestBuffDamageModifiers:
         target = Unit("A", 6, 5, 2)  # Archer: 1 defence
         target.defence_buff_turns = 3  # Has defence buff
 
-        # Warrior (8 attack) vs Archer (1 defence, 5% reduction) = int(8 * 0.95) = 7 damage
-        # Then reduced by defence buff (-50%) = max(1, int(7 * 0.50)) = 3 damage
+        # Warrior (10 attack) vs Archer (1 defence, 5% reduction) = int(10 * 0.95) = 9 damage
+        # Then reduced by defence buff (-50%) = max(1, int(9 * 0.50)) = 4 damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
         assert result["defence_buff"] is True
-        assert result["damage"] == 3
+        assert result["damage"] == 4
 
     def test_attack_buff_applies_to_counter_attack(self, simple_grid):
         """Test Attack Buff increases counter-attack damage."""
@@ -1239,12 +1240,12 @@ class TestBuffDamageModifiers:
         target = Unit("W", 6, 5, 2)  # Warrior: will counter-attack
         target.attack_buff_turns = 3  # Counter-attacker has attack buff
 
-        # Normal counter: int(8 * 0.8) = 6 base, with attack buff: int(6 * 1.50) = 9
-        # vs Warrior (6 defence, 30% reduction) = int(9 * 0.7) = 6 counter damage
+        # Normal counter: 10 * 0.8 = 8 base, with attack buff: int(8 * 1.50) = 12
+        # vs Warrior (6 defence, 30% reduction) = int(12 * 0.7) = 8 counter damage
         result = GameMechanics.attack_unit(attacker, target, simple_grid)
 
-        # Counter damage should be higher than normal (without buff it would be ~4)
-        assert result["counter_damage"] == 6
+        # Counter damage should be higher than normal (without buff it would be ~5)
+        assert result["counter_damage"] == 8
 
     def test_defence_buff_applies_to_counter_attack_received(self, simple_grid):
         """Test Defence Buff reduces counter-attack damage received."""

@@ -180,7 +180,7 @@ UNIT_DATA = {
         "color": (139, 69, 19),
         "movement": 3,
         "health": 15,
-        "attack": 8,
+        "attack": 10,
         "defence": 6,
     },
     "M": {
@@ -212,8 +212,8 @@ UNIT_DATA = {
         "cost": 400,
         "color": (0, 215, 0),
         "movement": 5,
-        "health": 24,
-        "attack": 11,
+        "health": 20,
+        "attack": 10,
         "defence": 2,
     },
     "A": {
@@ -236,7 +236,7 @@ UNIT_DATA = {
         "movement": 4,
         "health": 18,
         "attack": 8,
-        "defence": 7,
+        "defence": 5,
     },
     "R": {
         "static_path": "rogue.png",
@@ -263,10 +263,10 @@ UNIT_DATA = {
 }
 
 # Starting gold for each player
-STARTING_GOLD = 200
+STARTING_GOLD = 250
 
 # Income rates
-HEADQUARTERS_INCOME = 100
+HEADQUARTERS_INCOME = 150
 BUILDING_INCOME = 100
 TOWER_INCOME = 50
 

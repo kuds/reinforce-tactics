@@ -75,9 +75,9 @@ class TestUnitEliminationWinCondition:
         # Create attacker for player 1 and a single target for player 2
         attacker = simple_game.create_unit("W", 5, 5, player=1)
         target = simple_game.create_unit("C", 6, 5, player=2)  # Cleric: 10 HP, 4 def
-        # Pre-damage so the warrior's 6 dmg (8 atk vs 4 def = int(8 * 0.8))
-        # one-shots; a full-HP cleric would otherwise survive.
-        target.health = 6
+        # Pre-damage so the warrior's 8 dmg one-shots. Post-buff cleric
+        # would otherwise survive a single warrior hit (10 - 8 = 2 HP).
+        target.health = 8
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -101,10 +101,10 @@ class TestUnitEliminationWinCondition:
         attacker = simple_game.create_unit("C", 5, 5, player=1)  # Cleric has 8 HP, 2 attack
         defender = simple_game.create_unit("W", 6, 5, player=2)  # Warrior has 15 HP, 10 attack
 
-        # Pre-damage the Cleric so it will die from counter-attack.
-        # Warrior counter: int(int(8 * 0.8 counter_mult) * (1 - 4*0.05)) =
-        # int(6 * 0.80) = 4 damage (Cleric has 4 defence, 20% reduction).
-        attacker.health = 4
+        # Pre-damage the Cleric so it will die from counter-attack
+        # Warrior counter does 6 damage (10 * 0.8 counter * 0.8 defense reduction)
+        # Cleric needs <= 6 HP to die from counter
+        attacker.health = 5
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -130,8 +130,8 @@ class TestUnitEliminationWinCondition:
         # Create attacker for player 1 and two units for player 2
         attacker = simple_game.create_unit("W", 5, 5, player=1)
         target = simple_game.create_unit("C", 6, 5, player=2)  # Will be killed
-        # Pre-damage cleric so warrior's 6 dmg one-shots (8 atk vs 4 def = int(8 * 0.8)).
-        target.health = 6
+        # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
+        target.health = 8
         _survivor = simple_game.create_unit("W", 7, 7, player=2)  # Will survive
 
         # Verify initial state
@@ -156,16 +156,15 @@ class TestUnitEliminationWinCondition:
         simple_game.player_gold[1] = 300
 
         # Create two units - a weak attacker and strong defender to ensure counter-kill
-        attacker = simple_game.create_unit("C", 5, 5, player=1)  # 8 HP, 2 attack, 4 defence
-        defender = simple_game.create_unit("W", 6, 5, player=2)  # 15 HP, 8 attack, 6 defence
+        attacker = simple_game.create_unit("C", 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
+        defender = simple_game.create_unit("W", 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
 
-        # Damage attacker so counter-attack will kill it.
-        # Warrior counter: int(int(8 * 0.8) * 0.80) = int(6 * 0.80) = 4 damage
-        # (Cleric has 4 defence, 20% reduction).
-        attacker.health = 4  # Will die from 4 counter damage
-        # Defender takes Cleric's 1 damage (apply_defence_reduction(2, 6) -> 1)
-        # and must survive to counter.
-        defender.health = 2  # 2 - 1 = 1 HP, counters and kills attacker
+        # Damage attacker so counter-attack will kill it
+        # Warrior counter: 10 attack - 3 defense = 7 damage * 0.9 = 6.3 -> 6 damage
+        attacker.health = 6  # Will die from 6 counter damage
+        # Defender needs to survive first attack to counter, then die from damage
+        # Cleric does 2 damage - defender needs 3 HP to survive and counter
+        defender.health = 3  # Survives 2 damage (3-2=1), then counter, but dies after
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -188,8 +187,8 @@ class TestUnitEliminationWinCondition:
         # Player 2 owns HQ at (9,9) but will lose their only unit
         attacker = simple_game.create_unit("W", 5, 5, player=1)
         target = simple_game.create_unit("C", 6, 5, player=2)
-        # Pre-damage cleric so warrior's 6 dmg one-shots (8 atk vs 4 def = int(8 * 0.8)).
-        target.health = 6
+        # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
+        target.health = 8
 
         # Verify player 2 owns HQ
         hq_tile = simple_game.grid.get_tile(9, 9)
