@@ -39,12 +39,31 @@
 #
 #   1. ``env.enabled_units: [W, M, C, A, K]`` (was: unset = all 8).
 #   2. ``reward_config.turn_penalty: -0.2`` (was v16's -0.5).
-#   3. Engine economy reverted in constants.py (committed alongside
-#      this config, global blast radius -- see that commit):
-#        - Knight defence 7 -> 5 (reverts f4dc50e)
+#   3. FULL engine economy reverted in constants.py to the rt-0.2.5
+#      deep-run values (committed alongside; global blast radius).
+#      Verified byte-identical to deep run 6eb0566's constants.py:
+#        - Knight defence    7  -> 5   (reverts f4dc50e)
 #        - HEADQUARTERS_INCOME 100 -> 150 (reverts 6f64745)
+#        - Warrior attack    8  -> 10  (reverts a596c15)
+#        - Barbarian health  24 -> 20  (reverts a596c15)
+#        - Barbarian attack  11 -> 10  (reverts a596c15)
+#        - STARTING_GOLD     200 -> 250 (reverts a596c15)
 #      These are NOT YAML-settable; they are constants.py values.
-#      The deep runs ran on rt 0.2.5 which had def=5 / HQ=150.
+#      a596c15 ("Rebalance Warrior, Barbarian, and starting gold")
+#      landed 2026-05-13, AFTER every deep run (all rt 0.2.5,
+#      May 10-11) -- so it is a THIRD silent economy confound on top
+#      of the v16 Knight/HQ changes. a596c15's matching test-file
+#      assertions were reverse-applied so the suite matches the
+#      restored constants.
+#
+#      BALANCE TENSION: a596c15 was a deliberate anti-Warrior-spam
+#      rebalance (Warrior atk 10->8, gold 250->200). Reverting it
+#      resurrects that imbalance. This is an accepted, conscious
+#      tradeoff: v24's purpose is a *faithful* reproduction of the
+#      17-stage config, which a partial revert cannot test. If v24
+#      progresses deep, the correct follow-up re-applies a596c15 as
+#      an isolated one-variable change to measure whether curriculum
+#      still works with the balanced Warrior.
 #
 # Everything else inherits from v18: full curriculum, patience=2 on
 # random stages / 4 on scripted, entropy schedules, network arch,

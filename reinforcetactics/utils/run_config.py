@@ -1,10 +1,12 @@
 """Build and write a self-describing run config snapshot.
 
 Captures the resolved hyperparameters, env settings, git commit (with a
-dirty-tree flag), key library versions, and hardware info into a single
-``config.json`` next to a saved model. Shared across notebooks so
-bootstrap, PPO training, and future trainers all emit consistent
-metadata when YAML defaults or library versions drift.
+dirty-tree flag), key library versions, the non-YAML engine economy
+constants (starting gold, income rates, per-unit stat block), and
+hardware info into a single ``config.json`` next to a saved model.
+Shared across notebooks so bootstrap, PPO training, and future trainers
+all emit consistent metadata when YAML defaults, library versions, or
+engine constants drift.
 """
 
 from __future__ import annotations
@@ -56,6 +58,43 @@ def _lib_versions() -> Dict[str, Optional[str]]:
         except ImportError:
             versions[name] = None
     return versions
+
+
+def _engine_economy() -> Dict[str, Any]:
+    """Snapshot the engine economy constants that are NOT YAML-settable.
+
+    STARTING_GOLD / *_INCOME and the per-unit stat block live in
+    constants.py and silently change across commits (e.g. f4dc50e
+    bumped Knight defence, 6f64745 cut HQ income, a596c15 nerfed
+    Warrior + cut starting gold). None of these were captured in any
+    run artifact, so historical runs had hidden economy confounds
+    only recoverable via ``git show <sha>:reinforcetactics/constants.py``.
+    Recording them here makes every future run's economy auditable
+    from its own config.json -- the same gap that was closed for
+    enabled_units.
+    """
+    try:
+        from reinforcetactics import constants as _c
+
+        return {
+            "starting_gold": getattr(_c, "STARTING_GOLD", None),
+            "headquarters_income": getattr(_c, "HEADQUARTERS_INCOME", None),
+            "building_income": getattr(_c, "BUILDING_INCOME", None),
+            "tower_income": getattr(_c, "TOWER_INCOME", None),
+            # Per-unit stat block: cost/health/attack/defence/movement
+            # for every unit code. Attack may be an int or a dict
+            # ({adjacent, range}) for ranged units -- stored as-is.
+            "unit_data": {
+                code: {
+                    k: spec.get(k)
+                    for k in ("cost", "health", "attack", "defence", "movement")
+                }
+                for code, spec in (getattr(_c, "UNIT_DATA", {}) or {}).items()
+            },
+        }
+    except Exception:
+        # Metadata capture must never break a training run.
+        return {}
 
 
 def _hardware_meta() -> Dict[str, Any]:
@@ -118,6 +157,7 @@ def build_run_config(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
+            "engine_economy": _engine_economy(),
             "hardware": _hardware_meta(),
         },
     }
