@@ -90,6 +90,40 @@ run died on). One of two outcomes, both decisive:
 Either way this closes the two-week reproduction thread with a
 definitive answer instead of another partial revert.
 
+## RESULT (run `20260515_213159`, 2026-05-15) — Outcome 1
+
+Ran exactly as specified: `6eb0566` checked out unedited,
+`ppo_bootstrap.ipynb` from that commit Run-All'd on Colab, economy
+verified at install (`STARTING_GOLD=250 HQ_INCOME=150
+Warrior_atk=10 Knight_def=5`).
+
+**It reproduced deep progression — Outcome 1, decisively.**
+
+| Stage | Result |
+|-------|--------|
+| starter_random/simple/medium | cleared (1–4 evals) |
+| beginner_balanced_random | cleared |
+| **beginner_random_10** | **WR 1.0, 1.0 — cleared on first two evals** |
+| beginner_random_15 | 0.99 / 1.0 — cleared |
+| beginner_random_20 | 0.89 / 0.90 — cleared |
+| beginner_simple/mixed/medium/mixed_med_adv/advanced | all cleared |
+| skirmish_balanced_random | cleared |
+| skirmish_random_10 | collapse→recover, cleared @ 2.05M |
+| skirmish_random_15 | unstable, cleared @ 3.55M |
+| skirmish_random_20 | collapse→recover, cleared @ 5.8M |
+| **skirmish_simple (17)** | **0.0 WR, 5.8M→8.8M, session ended here** |
+
+`beginner_random_10` — the exact stage every v16–v24 run dies on —
+was cleared on the **first two evaluations**. The run reached
+`skirmish_simple` (stage 17), matching the historical deep run's
+recovered signature exactly. Not a Colab-stop artifact; a faithful
+end-to-end reproduction.
+
+Per the decision criteria this is **outcome 1**: the deep config
+was real; the regression is in the **0.2.5 → 0.2.7 code path**
+(v24 already ruled out the economy). Proceed to the code bisect —
+see `docs/experiment_b_bisect_plan.md`.
+
 ## Why this wasn't run first
 
 We didn't know (until the corrected roster audit + git archaeology in

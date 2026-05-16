@@ -312,6 +312,59 @@ non-reproducibility) remain valid and useful — only the
 roster-blind comparative conclusions are superseded by this
 correction.
 
+## ✅ EXPERIMENT A RESULT — the deep config is REAL; the regression is in the code path
+
+Run `20260515_213159` was a faithful reproduction: commit
+`6eb0566` (rt 0.2.5) checked out unedited, `ppo_bootstrap.ipynb`
+from that commit Run-All'd, economy verified at install
+(`STARTING_GOLD=250 HQ_INCOME=150 Warrior_atk=10 Knight_def=5`),
+roster `[W,M,C,A,K]` via the active cell-11 override,
+`turn_penalty=-0.2`, 24-stage rt-0.2.5 curriculum. **It reproduced
+the deep progression and then some:**
+
+- `starter_random/simple/medium` → `beginner_balanced_random` →
+  **`beginner_random_10` cleared on the first two evals (WR
+  1.0, 1.0)** — the exact stage every v16–v24 run dies on.
+- `beginner_random_15` (0.99/1.0), `beginner_random_20`
+  (0.89/0.90), `beginner_simple/mixed/medium/advanced` — all
+  cleared.
+- `skirmish_balanced_random` → `skirmish_random_10/15/20` cleared
+  (each via a collapse→recover through the draw attractor — the
+  policy *escapes* it at this commit).
+- Stalled at **`skirmish_simple` (stage 17)**, 0.0 WR from 5.8M to
+  8.8M timesteps where the session ended — exactly matching the
+  historical deep run's recovered signature.
+
+This is **decisive**. It rules out the remaining hypotheses:
+
+1. **Not the economy.** v24 reverted the economy and still stalled
+   at stage 5. Confirmed by an independent axis here.
+2. **Not a phantom / not a curriculum-length artifact.** The deep
+   progression is real, end-to-end, and repeatable — 16 stages
+   cleared, not a Colab-stop count.
+3. **It IS the rt 0.2.5 → 0.2.7 code path.** The regression that
+   makes `beginner_random_10` unpassable on current code lives in
+   the engine/training code that drifted between `6eb0566` and
+   HEAD — *not* config, *not* economy, *not* roster.
+
+Mechanistic note: the skirmish stages all showed the
+draw-with-shaping collapse (1.0 → 0.0 draws for ~1M steps → snap
+back to 1.0). At `6eb0566` the agent **escapes** that attractor;
+on current code at `beginner_random_10` it never does. The
+regression likely didn't add a hard breakage — it made the
+draw-equilibrium attractor *inescapable*. Prime suspect:
+`c7001bf` ("Replace per-end_turn cost with terminal speed bonus")
+— a reward-landscape change directly over the draw/win incentive
+the deep config's `turn_penalty=-0.2` was shaping.
+
+Next step is a **code bisect** over `6eb0566..HEAD` on the
+`beginner_random_10` transition — see
+`docs/experiment_b_bisect_plan.md` and
+`configs/bootstrap_sweep/v25_bisect_random10_repro.yaml`. The
+entire v17–v23 entropy/patience/threshold sweep was treating a
+self-inflicted code regression; the correct fix is in the code,
+not the curriculum gates.
+
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 
 After the original 6-stage layout shipped, a long sweep
