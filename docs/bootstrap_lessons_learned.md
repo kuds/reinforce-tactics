@@ -357,13 +357,56 @@ draw-equilibrium attractor *inescapable*. Prime suspect:
 — a reward-landscape change directly over the draw/win incentive
 the deep config's `turn_penalty=-0.2` was shaping.
 
-Next step is a **code bisect** over `6eb0566..HEAD` on the
-`beginner_random_10` transition — see
-`docs/experiment_b_bisect_plan.md` and
-`configs/bootstrap_sweep/v25_bisect_random10_repro.yaml`. The
-entire v17–v23 entropy/patience/threshold sweep was treating a
-self-inflicted code regression; the correct fix is in the code,
-not the curriculum gates.
+Next step was a **code bisect** over `6eb0566..HEAD` — but it
+turned out **not** to be a code regression at all. See the
+RESOLVED section immediately below.
+
+## ✅ RESOLVED — the regression is the post-`6eb0566` reward additions (code exonerated)
+
+The "0.2.5 → 0.2.7 code path" framing above was **wrong**, and the
+reason it was wrong is instructive: v24 was assumed to be a faithful
+config port, but it silently carried **three reward terms the deep
+run never had** — `win_speed_bonus: 50` (added by `c7001bf`) and
+`enemy_neutral_capture: -8` / `enemy_owned_capture: -15` (added by
+`922aa29`). Every other reward key was byte-identical to `6eb0566`.
+
+`v26_faithful_deep_reward_on_head.yaml` settled it (run
+`20260516_194038`): **modern HEAD code** (rt 0.2.7, modern
+obs/extractor/masking) + the byte-faithful `6eb0566` reward shape
+(those 3 terms zeroed) + faithful economy via `engine_overrides` →
+**cleared `beginner_random_10`** (`promoted: true`,
+`best_win_rate 0.9625`, WR 96.25%/83.75%; `run_status:
+completed_curriculum 5/5`). Not bit-identical to Experiment A
+(reward/turns differ — the config genuinely landed, unlike the
+inert Experiment-B test #1), so it's a real, independent clear.
+
+| Run | Code | Reward shape | `beginner_random_10` |
+|-----|------|--------------|----------------------|
+| Experiment A | 6eb0566 | deep (faithful) | clears, 16 stages |
+| v24 | modern | deep economy **+ win_speed_bonus 50 + capture penalties** | **stalls @ stage 5** |
+| **v26** | **modern** | **deep, those 3 terms zeroed** | **clears** |
+
+The *only* delta between the v24 stall and the v26 clear is those
+three reward terms. **That is the regression.** It is **not** a
+code regression — modern obs slimming / CNN extractor / masking /
+RandomBot / curriculum all clear `random_10` fine once the reward
+shape is faithful. The fix is **config-only**: ship modern code
+with `win_speed_bonus` + the opponent-capture penalties removed (or
+re-tuned). The whole v17–v23 entropy/patience/threshold sweep, and
+the planned code bisect, were chasing a self-inflicted *reward*
+regression. `docs/experiment_b_bisect_plan.md` is superseded; no
+code bisect is needed.
+
+Final isolation in flight: `v27a/b/c` re-enable exactly **one** of
+the three terms each, to name the precise culprit (`win_speed_bonus`
+is the prime suspect — it sits on the draw/win incentive that
+`turn_penalty` was shaping). Whichever flips `random_10` back to a
+stall is the single term to drop from the shipping config.
+
+Lesson reinforced: "faithful repro" must be verified key-by-key
+against the original, not assumed from "same economy + roster." A
+config that differs by three additive reward terms is a different
+experiment — and cost two weeks of code-regression archaeology.
 
 ## ✅ ENGINE-CONSTANT CONFOUND CLASS — now closed via `env.engine_overrides`
 
