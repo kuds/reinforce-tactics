@@ -48,22 +48,33 @@ The first commit that flips GOOD → BAD is the regression.
 `constants.py` drifts inside `6eb0566..HEAD` (`a596c15`
 "Rebalance Warrior, Barbarian, and starting gold", plus the
 Knight-defence / HQ-income changes). A bisect that doesn't pin the
-economy measures code+economy jointly and is worthless. At **every**
-candidate commit:
+economy measures code+economy jointly and is worthless.
+
+**Preferred (current):** use the `env.engine_overrides` config
+overlay — it forces the deep economy/stats *in YAML* regardless of
+the checked-out `constants.py`, and `config.json` records the
+resolved `effective_engine_economy` + `engine_constants_hash` so
+each probe self-proves its economy. `v26_faithful_deep_reward_on_head.yaml`
+already carries the byte-faithful `[W,M,C,A,K]` block; reuse that
+overlay in the bisect config and **no git pin is needed at any
+candidate commit** (it only requires the `engine_overrides` feature,
+present from this branch onward — fine for the forward bisect, which
+runs on/near HEAD).
+
+**Legacy (pre-`engine_overrides` commits only):** if a candidate
+commit predates the feature, fall back to the whole-file pin:
 
 ```bash
 git checkout <candidate>
-git checkout 6eb0566 -- reinforcetactics/constants.py
+git checkout 6eb0566 -- reinforcetactics/constants.py   # WHOLE file
 pip install -q -e .
 python -c "from reinforcetactics import constants as c; \
-  assert (c.STARTING_GOLD, c.HEADQUARTERS_INCOME) == (250, 150), \
-  (c.STARTING_GOLD, c.HEADQUARTERS_INCOME)"
-# then train with configs/bootstrap_sweep/v25_bisect_random10_repro.yaml
+  assert (c.STARTING_GOLD, c.HEADQUARTERS_INCOME) == (250, 150)"
 ```
 
-This holds the economy at the Experiment-A-verified
-`(STARTING_GOLD=250, HEADQUARTERS_INCOME=150, Warrior atk 10,
-Knight def 5)` for all candidates.
+Either way the economy is held at the Experiment-A-verified
+`6eb0566` values for all candidates; the overlay is preferred
+because it is auditable from the run's own `config.json`.
 
 ## Candidate commits (`6eb0566..HEAD`, behavioral only)
 
@@ -115,9 +126,11 @@ git bisect start
 git bisect good 6eb0566
 git bisect bad HEAD
 # at each step: checkout is automatic, then:
-#   git checkout 6eb0566 -- reinforcetactics/constants.py
 #   pip install -q -e .
-#   <train v25; eval beginner_random_10>
+#   <train v25 — but with the v26 env.engine_overrides block so the
+#    economy/stats are pinned in-config; no constants.py pin needed.
+#    Pre-feature commits only: git checkout 6eb0566 -- .../constants.py>
+#   <eval beginner_random_10>
 #   git bisect good   # if random_10 promoted
 #   git bisect bad    # if it stalled
 # restrict to behavioral commits only:

@@ -41,6 +41,23 @@ env:
   # enabled_units roster) without clipping legitimate play.
   max_actions_per_turn: null
   action_space_type: flat_discrete
+  # engine_overrides: optional sparse overlay over the non-YAML engine
+  # constants (constants.py) so balance is a first-class, swept,
+  # auto-recorded config axis instead of an invisible module constant.
+  # Absent/unset = use constants.py (today's behaviour). GameState
+  # deep-merges this over the module defaults; config.json records the
+  # resolved effective_engine_economy + engine_constants_hash. Unknown
+  # unit code / stat field fails loud. Example (commented; uncomment to
+  # pin a balance era, e.g. the 6eb0566 deep-run economy):
+  #
+  # engine_overrides:
+  #   starting_gold: 250
+  #   headquarters_income: 150
+  #   building_income: 100
+  #   tower_income: 50
+  #   unit_data:               # sparse: only the deltas you want
+  #     K: {defence: 5}
+  #     W: {attack: 10}
   reward_config:
     # All reward magnitudes that were calibrated *relative to* the old
     # ~5000-scale terminal rewards are scaled to 1/100 of their original

@@ -35,29 +35,17 @@
 #   * turn_penalty: -0.2
 #   * enabled_units: [W, M, C, A, K]
 #   * seed: 42 (notebook default)
-#   * economy + FULL per-unit stat block: PIN the WHOLE
-#     constants.py to 6eb0566 before training (NOT YAML-settable).
-#     constants.py is the single source of truth for STARTING_GOLD,
-#     HEADQUARTERS_INCOME, *and the complete UNIT_DATA block*
-#     (every unit's cost/health/attack/defence/movement). Unit
-#     stats drifted post-6eb0566 -- a596c15 (Warrior atk, Barbarian
-#     health/atk, starting gold), f4dc50e (Knight defence 5->7),
-#     6f64745 (HQ income 150->100) -- so a whole-file checkout is
-#     required; spot-checking gold/income alone is NOT sufficient.
-#     In the Colab setup cell, on current HEAD:
-#         git checkout 6eb0566 -- reinforcetactics/constants.py
-#         pip install -q -e .
-#         # verify the FULL roster stat block, not just 2 scalars:
-#         python - <<'PY'
-#         import json,hashlib
-#         from reinforcetactics import constants as K
-#         snap={u:{k:K.UNIT_DATA[u].get(k) for k in
-#               ("cost","health","attack","defence","movement")}
-#               for u in ["W","M","C","A","K"]}
-#         print(json.dumps(snap,sort_keys=True,indent=1))
-#         assert (K.STARTING_GOLD,K.HEADQUARTERS_INCOME)==(250,150)
-#         assert snap["W"]["attack"]==10 and snap["K"]["defence"]==5
-#         PY
+#   * economy + FULL per-unit stat block: pinned IN THIS YAML via
+#     ``env.engine_overrides`` (see the block below). No git
+#     checkout, no constants.py pin -- the overlay forces the
+#     6eb0566 values regardless of what the checked-out
+#     constants.py contains, and config.json records the resolved
+#     ``effective_engine_economy`` + ``engine_constants_hash`` so the
+#     run self-proves it. Unit stats drifted post-6eb0566 -- a596c15
+#     (Warrior atk, Barbarian health/atk, starting gold), f4dc50e
+#     (Knight defence 5->7), 6f64745 (HQ income 150->100) -- so the
+#     overlay pins the WHOLE [W,M,C,A,K] stat block + all four
+#     economy scalars, byte-faithful to 6eb0566.
 #     NOTE: this pins stat VALUES. How the modern engine *uses*
 #     them (combat formula, ability resolution) is CODE = HEAD, and
 #     is part of what this experiment tests if it stalls.
@@ -81,7 +69,10 @@
 # HOW TO RUN
 # ----------
 # Current HEAD notebook, unedited except point CONFIG_PATH at this
-# file. Pin economy as above. Run All.
+# file. Run All. NO constants.py pin needed -- the
+# env.engine_overrides block below forces the deep economy/stats
+# and config.json records the resolved values for audit. (Requires
+# the engine_overrides feature; present on this branch / HEAD.)
 #
 # DECISION (binary, decisive either way)
 # --------------------------------------
@@ -143,6 +134,23 @@ env:
   # showed no deep run ever used the full 8-unit set, and every ALL-8
   # run stalled at random_10/15.
   enabled_units: [W, M, C, A, K]
+  # Deep-run economy + unit stats, pinned in-config (no constants.py
+  # git pin). Byte-faithful to commit 6eb0566's constants.py. The
+  # full [W,M,C,A,K] stat block is pinned (not just drifted fields)
+  # so this stays faithful even if constants.py drifts further;
+  # GameState resolves this overlay and config.json records the
+  # effective values + engine_constants_hash for audit.
+  engine_overrides:
+    starting_gold: 250
+    headquarters_income: 150
+    building_income: 100
+    tower_income: 50
+    unit_data:
+      W: {cost: 200, health: 15, attack: 10, defence: 6, movement: 3}
+      M: {cost: 300, health: 10, attack: {adjacent: 8, range: 12}, defence: 4, movement: 2}
+      C: {cost: 200, health: 10, attack: 2, defence: 4, movement: 3}
+      A: {cost: 250, health: 15, attack: 5, defence: 1, movement: 3}
+      K: {cost: 350, health: 18, attack: 8, defence: 5, movement: 4}
   reward_config:
     # All reward magnitudes that were calibrated *relative to* the old
     # ~5000-scale terminal rewards are scaled to 1/100 of their original

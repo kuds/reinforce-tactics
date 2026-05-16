@@ -124,6 +124,21 @@ was real; the regression is in the **0.2.5 → 0.2.7 code path**
 (v24 already ruled out the economy). Proceed to the code bisect —
 see `docs/experiment_b_bisect_plan.md`.
 
+## Update: faithful repro no longer needs git archaeology
+
+This experiment required checking out `6eb0566` because the
+economy/stats lived in `constants.py`, off the config surface. That
+confound class is now closed by `env.engine_overrides` (see
+`docs/bootstrap_lessons_learned.md` → "ENGINE-CONSTANT CONFOUND
+CLASS"). The faithful deep economy/stats are pinnable in pure YAML;
+`configs/bootstrap_sweep/v26_faithful_deep_reward_on_head.yaml`
+carries the byte-faithful `6eb0566` `[W,M,C,A,K]` block and runs on
+modern HEAD with no `constants.py` pin and no notebook edits, while
+`config.json` records the resolved economy + `engine_constants_hash`
+for self-audit. Future "reproduce historical run X" tasks should
+express X's economy as an `engine_overrides` block, not a detached
+checkout.
+
 ## Why this wasn't run first
 
 We didn't know (until the corrected roster audit + git archaeology in
