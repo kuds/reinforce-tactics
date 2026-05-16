@@ -130,6 +130,7 @@ def make_maskable_env(
     gold_scale: Optional[float] = None,
     turn_scale: Optional[float] = None,
     unit_count_scale: Optional[float] = None,
+    engine_overrides: Optional[Dict[str, Any]] = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -183,6 +184,7 @@ def make_maskable_env(
         opponent_kwargs=opponent_kwargs,
         gamma=gamma,
         pad_to_size=pad_to_size,
+        engine_overrides=engine_overrides,
         **scale_kwargs,
     )
     if seed is not None:
@@ -208,6 +210,7 @@ def _make_env_fn(
     turn_scale: Optional[float] = None,
     unit_count_scale: Optional[float] = None,
     max_actions_per_turn: Optional[int] = None,
+    engine_overrides: Optional[Dict[str, Any]] = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -238,6 +241,7 @@ def _make_env_fn(
             opponent_kwargs=opponent_kwargs,
             gamma=gamma,
             pad_to_size=pad_to_size,
+            engine_overrides=engine_overrides,
             **scale_kwargs,
         )
         env.reset(seed=seed + rank)
@@ -266,6 +270,7 @@ def make_maskable_vec_env(
     gold_scale: Optional[float] = None,
     turn_scale: Optional[float] = None,
     unit_count_scale: Optional[float] = None,
+    engine_overrides: Optional[Dict[str, Any]] = None,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -321,6 +326,7 @@ def make_maskable_vec_env(
             turn_scale,
             unit_count_scale,
             max_actions_per_turn,
+            engine_overrides,
         )
         for i in range(n_envs)
     ]

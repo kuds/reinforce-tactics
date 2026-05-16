@@ -139,6 +139,7 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         gold_scale=cfg.env.gold_scale,
         turn_scale=cfg.env.turn_scale,
         unit_count_scale=cfg.env.unit_count_scale,
+        engine_overrides=cfg.env.engine_overrides,
     )
 
 
@@ -168,6 +169,7 @@ def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
         gold_scale=cfg.env.gold_scale,
         turn_scale=cfg.env.turn_scale,
         unit_count_scale=cfg.env.unit_count_scale,
+        engine_overrides=cfg.env.engine_overrides,
     )
 
 
@@ -460,6 +462,7 @@ def _write_stage_config(
         "max_actions_per_turn": cfg.env.max_actions_per_turn,
         "reward_config": stage.resolve_reward_config(cfg.env),
         "opponent_kwargs": dict(stage.opponent_kwargs) if stage.opponent_kwargs else None,
+        "engine_overrides": dict(cfg.env.engine_overrides) if cfg.env.engine_overrides else None,
     }
 
     run_config = build_run_config(

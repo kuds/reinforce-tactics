@@ -271,6 +271,7 @@ class StrategyGameEnv(gym.Env):
         gold_scale: float = GOLD_SCALE,  # tanh divisor for own_gold/opp_gold in global_features
         turn_scale: float = TURN_SCALE,  # tanh divisor for turn_number in global_features
         unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
+        engine_overrides: Optional[Dict[str, Any]] = None,  # sparse overlay over constants.py (balance sweeps)
     ):
         """
         Initialize environment.
@@ -341,6 +342,10 @@ class StrategyGameEnv(gym.Env):
         # Fog of war setting
         self.fog_of_war = fog_of_war
         self.max_turns = max_turns
+        # Sparse engine-constant overlay (balance sweeps). Resolved by
+        # GameState; forwarded again on every reset() so re-created games
+        # keep the same overlay.
+        self.engine_overrides = engine_overrides
         # 1v1 only. The PPO/MaskablePPO observation contract (self/opp owner
         # channels, ``opp = 3 - perspective_player``, single opp_gold scalar)
         # is hard-coded to two players. Pygame 1v1v1-vs-bots still works
@@ -352,6 +357,7 @@ class StrategyGameEnv(gym.Env):
             max_turns=max_turns,
             enabled_units=self.enabled_units,
             fog_of_war=fog_of_war,
+            engine_overrides=self.engine_overrides,
         )
         if self.game_state.num_players != 2:
             raise ValueError(
@@ -1269,8 +1275,8 @@ class StrategyGameEnv(gym.Env):
         opp = 3 - ap
 
         if self.reward_config.get("income_diff", 0) > 0:
-            income_agent = self.game_state.mechanics.calculate_income(ap, self.game_state.grid)
-            income_opp = self.game_state.mechanics.calculate_income(opp, self.game_state.grid)
+            income_agent = self.game_state.mechanics.calculate_income(ap, self.game_state.grid, self.game_state.income_rates)
+            income_opp = self.game_state.mechanics.calculate_income(opp, self.game_state.grid, self.game_state.income_rates)
             potential += (income_agent["total"] - income_opp["total"]) * self.reward_config["income_diff"]
 
         if self.reward_config.get("unit_diff", 0) > 0:
@@ -1495,13 +1501,15 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
-        # Reset game state (preserving enabled_units, fog_of_war and max_turns)
+        # Reset game state (preserving enabled_units, fog_of_war, max_turns
+        # and the engine-constant overlay)
         self.game_state = GameState(
             self.initial_map_data,
             num_players=2,
             max_turns=self.max_turns,
             enabled_units=self.enabled_units,
             fog_of_war=self.fog_of_war,
+            engine_overrides=self.engine_overrides,
         )
         self.current_step = 0
         self._actions_this_turn = 0

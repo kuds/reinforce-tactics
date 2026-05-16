@@ -5,6 +5,7 @@ Fixed version: removed duplicate methods, added type hints, controlled logging.
 
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,7 +13,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, STARTING_GOLD, UNIT_DATA, TileType
+from reinforcetactics.constants import (
+    ALL_UNIT_TYPES,
+    BUILDING_INCOME,
+    HEADQUARTERS_INCOME,
+    STARTING_GOLD,
+    TOWER_INCOME,
+    UNIT_DATA,
+    TileType,
+)
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
@@ -27,6 +36,52 @@ class GameState:
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
+    @staticmethod
+    def _resolve_engine_overrides(
+        overrides: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, int], int]:
+        """Merge a sparse override overlay over the module engine constants.
+
+        Returns ``(unit_data, income_rates, starting_gold)`` fully resolved.
+        ``unit_data`` is a deep copy of :data:`UNIT_DATA` with per-unit,
+        per-field deltas applied (so the shared module dict is never
+        mutated). Unknown unit codes / stat fields raise ``KeyError`` /
+        ``ValueError`` early -- a typo in a balance sweep should fail loud,
+        not silently train on the wrong stats.
+        """
+        unit_data = copy.deepcopy(UNIT_DATA)
+        income_rates = {
+            "headquarters": HEADQUARTERS_INCOME,
+            "building": BUILDING_INCOME,
+            "tower": TOWER_INCOME,
+        }
+        starting_gold = STARTING_GOLD
+        if not overrides:
+            return unit_data, income_rates, starting_gold
+
+        if "starting_gold" in overrides:
+            starting_gold = int(overrides["starting_gold"])
+        for ov_key, rate_key in (
+            ("headquarters_income", "headquarters"),
+            ("building_income", "building"),
+            ("tower_income", "tower"),
+        ):
+            if ov_key in overrides:
+                income_rates[rate_key] = int(overrides[ov_key])
+
+        unit_overrides = overrides.get("unit_data") or {}
+        for code, fields in unit_overrides.items():
+            if code not in unit_data:
+                raise KeyError(f"engine_overrides.unit_data: unknown unit code '{code}'")
+            for field, value in fields.items():
+                if field not in unit_data[code]:
+                    raise ValueError(
+                        f"engine_overrides.unit_data['{code}']: unknown stat field "
+                        f"'{field}' (valid: {sorted(unit_data[code])})"
+                    )
+                unit_data[code][field] = value
+        return unit_data, income_rates, starting_gold
+
     def __init__(
         self,
         map_data,
@@ -34,6 +89,7 @@ class GameState:
         max_turns: Optional[int] = None,
         enabled_units: Optional[List[str]] = None,
         fog_of_war: bool = False,
+        engine_overrides: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Initialize the game state.
@@ -44,12 +100,36 @@ class GameState:
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
             fog_of_war: Enable fog of war (default False for backward compatibility)
+            engine_overrides: Optional sparse overlay over the non-YAML
+                engine constants (``constants.py``), so balance can be
+                varied/recorded as config instead of a code edit. Shape::
+
+                    {
+                      "starting_gold": int,
+                      "headquarters_income": int,
+                      "building_income": int,
+                      "tower_income": int,
+                      "unit_data": {CODE: {field: value}},  # sparse deltas
+                    }
+
+                Every key is optional; absent keys fall back to the module
+                constant, so ``None`` / ``{}`` is byte-identical to today.
+                The resolved tables (``self.unit_data``, ``self.income_rates``,
+                ``self.starting_gold``) are this game's single source of
+                truth -- units and income read them, never the global
+                constant -- so an override can't leak or be half-applied.
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
         self.current_player: int = 1
         self.num_players: int = num_players
-        self.player_gold: Dict[int, int] = {i: STARTING_GOLD for i in range(1, num_players + 1)}
+        self.engine_overrides: Dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
+        (
+            self.unit_data,
+            self.income_rates,
+            self.starting_gold,
+        ) = self._resolve_engine_overrides(self.engine_overrides)
+        self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: Optional[int] = None
         self.turn_number: int = 0
@@ -416,18 +496,18 @@ class GameState:
             return None
 
         # Check if player can afford
-        if unit_type not in UNIT_DATA:
+        if unit_type not in self.unit_data:
             logger.warning(f"Unknown unit type: {unit_type}")
             return None
 
-        cost = UNIT_DATA[unit_type]["cost"]
+        cost = self.unit_data[unit_type]["cost"]
         if self.player_gold[player] < cost:
             logger.debug(f"Cannot create unit: insufficient gold ({self.player_gold[player]} < {cost})")
             return None
 
         # Create the unit
         self.player_gold[player] -= cost
-        unit = Unit(unit_type, x, y, player)
+        unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
         self.units.append(unit)
         self._invalidate_cache()
 
@@ -753,7 +833,7 @@ class GameState:
             max_possible_heal = unit.max_health - unit.health
             desired_heal = min(requested_heal, max_possible_heal)
 
-            unit_cost = UNIT_DATA[unit.type]["cost"]
+            unit_cost = self.unit_data[unit.type]["cost"]
             cost_per_hp = unit_cost / unit.max_health
 
             actual_heal = 0
@@ -862,7 +942,7 @@ class GameState:
             unit.selected = False
 
         # Calculate and apply income
-        income_data = self.mechanics.calculate_income(self.current_player, self.grid)
+        income_data = self.mechanics.calculate_income(self.current_player, self.grid, self.income_rates)
         self.player_gold[self.current_player] += income_data["total"]
 
         # Heal units on structures after income collection
@@ -927,7 +1007,7 @@ class GameState:
         for tile in self.grid.get_capturable_tiles(player):
             if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
                 for unit_type in self.enabled_units:
-                    if self.player_gold[player] >= UNIT_DATA[unit_type]["cost"]:
+                    if self.player_gold[player] >= self.unit_data[unit_type]["cost"]:
                         legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
 
         # Unit actions

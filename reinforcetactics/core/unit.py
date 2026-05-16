@@ -10,7 +10,7 @@ from reinforcetactics.constants import UNIT_DATA
 class Unit:
     """Represents a unit on the map."""
 
-    def __init__(self, unit_type, x, y, player):
+    def __init__(self, unit_type, x, y, player, stats=None):
         """
         Initialize a unit.
 
@@ -20,7 +20,16 @@ class Unit:
             x: X coordinate on grid
             y: Y coordinate on grid
             player: Player number who owns this unit
+            stats: Optional resolved stat block (cost/health/attack/defence/
+                movement) for this unit type. When ``None`` the global
+                :data:`reinforcetactics.constants.UNIT_DATA` entry is used,
+                preserving behaviour for direct/legacy callers. ``GameState``
+                passes its per-game resolved table so engine-override sweeps
+                (balance experiments) flow through here without mutating the
+                shared module constant.
         """
+        if stats is None:
+            stats = UNIT_DATA[unit_type]
         self.type = unit_type
         self.x = x
         self.y = y
@@ -31,11 +40,11 @@ class Unit:
         self.can_attack = False
         self.selected = False
         self.has_moved = False
-        self.movement_range = UNIT_DATA[unit_type]["movement"]
-        self.max_health = UNIT_DATA[unit_type]["health"]
+        self.movement_range = stats["movement"]
+        self.max_health = stats["health"]
         self.health = self.max_health
-        self.attack_data = UNIT_DATA[unit_type]["attack"]
-        self.defence = UNIT_DATA[unit_type]["defence"]
+        self.attack_data = stats["attack"]
+        self.defence = stats["defence"]
         self.paralyzed_turns = 0
 
         # Knight charge tracking
