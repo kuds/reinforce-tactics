@@ -365,6 +365,48 @@ entire v17–v23 entropy/patience/threshold sweep was treating a
 self-inflicted code regression; the correct fix is in the code,
 not the curriculum gates.
 
+## ✅ ENGINE-CONSTANT CONFOUND CLASS — now closed via `env.engine_overrides`
+
+The root cause of the two-week reproduction thread was not any one
+config: it was that **balance lived in `constants.py`
+(`UNIT_DATA`, `STARTING_GOLD`, `*_INCOME`) — outside the config
+surface entirely.** No YAML edit and no `apply_overrides` call
+could reach it; it silently drifted across commits (`a596c15`
+Warrior/Barbarian/gold, `f4dc50e` Knight defence 5→7, `6f64745`
+HQ income 150→100) and was unrecorded in any run artifact. Every
+historical comparison was confounded by an invisible variable only
+recoverable via `git show <sha>:constants.py`.
+
+This is now structurally closed:
+
+1. **`env.engine_overrides`** — a sparse, optional YAML overlay
+   (`starting_gold`, `*_income`, `unit_data: {CODE: {field: val}}`).
+   `GameState` deep-merges it over the module constants into
+   `self.unit_data` / `self.income_rates` / `self.starting_gold`;
+   units and income read those resolved tables, never the globals,
+   so an override can't leak or be half-applied (module constants
+   stay pristine; unknown code/field fails loud). Absent ⇒
+   byte-identical to before.
+2. **Auto-recorded** — `config.json` now logs `engine_overrides`,
+   the resolved `effective_engine_economy`, an
+   `effective_balance_profile_hash`, and a verbatim
+   `engine_constants_hash` over the *full* `UNIT_DATA` (catches
+   drift in fields the 5-key projection misses).
+3. **Faithful repro is now pure config.** `v26_faithful_deep_reward_on_head.yaml`
+   carries the byte-faithful `6eb0566` `[W,M,C,A,K]` stat block +
+   economy as an `engine_overrides` block — no `git checkout
+   constants.py` pin, no notebook surgery, runs on modern HEAD.
+
+Lesson: **anything that affects outcomes must live on the config
+surface and be snapshotted into `config.json`.** `enabled_units`,
+`reward_config`, and now the engine economy/stats are all closed.
+The remaining members of this class to stay alert to: map content
+(closed via `map_sha256`), curriculum structure (`curriculum_hash`),
+and library/code drift (`git.commit` + `libraries`). If a future
+result-affecting knob is added, it goes in the dataclass and the
+`config.json` meta block in the same change — not in a module
+constant.
+
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 
 After the original 6-stage layout shipped, a long sweep
