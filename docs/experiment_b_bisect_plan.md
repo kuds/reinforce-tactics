@@ -1,5 +1,22 @@
 # Experiment B — bisect the rt 0.2.5 → 0.2.7 code regression
 
+> **⚠️ SUPERSEDED — DO NOT RUN THIS BISECT.** The premise (a
+> *code* regression in `6eb0566..HEAD`) was disproven.
+> `v26_faithful_deep_reward_on_head.yaml` (run `20260516_194038`)
+> ran **modern HEAD code** with the byte-faithful `6eb0566` reward
+> shape + `engine_overrides` economy and **cleared
+> `beginner_random_10`** (`completed_curriculum 5/5`, promoted
+> @96.25%/83.75%). The regression is **three post-`6eb0566` reward
+> terms** (`win_speed_bonus: 50` from `c7001bf`;
+> `enemy_neutral_capture: -8` / `enemy_owned_capture: -15` from
+> `922aa29`) that v24/v25 silently carried — *not* a code change.
+> Modern code clears `random_10` once the reward shape is faithful.
+> Fix is **config-only**. See
+> `docs/bootstrap_lessons_learned.md` → "✅ RESOLVED". The exact
+> culprit term is being isolated by the `v27a/b/c` ablations
+> (re-enable one term each on the v26 baseline). The historical
+> bisect design below is retained only for the record.
+
 ## Why we're here
 
 Experiment A (run `20260515_213159`) ran commit `6eb0566`
