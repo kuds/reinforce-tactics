@@ -57,6 +57,16 @@ class EnvConfig:
     # :class:`reinforcetactics.rl.gym_env.StrategyGameEnv` for details.
     max_actions_per_turn: Optional[int] = None
     reward_config: Optional[Dict[str, float]] = None
+    # Optional sparse overlay over the non-YAML engine constants
+    # (``constants.py``): ``starting_gold``, ``headquarters_income``,
+    # ``building_income``, ``tower_income``, and ``unit_data``
+    # (``{CODE: {field: value}}`` per-unit, per-field deltas). Absent /
+    # ``None`` = use the module constants (today's behaviour). Makes
+    # balance a first-class, swept, auto-recorded config axis instead of
+    # an invisible engine constant that only a git checkout could change.
+    # Resolved by ``GameState`` (its tables are the per-game source of
+    # truth) and snapshotted into ``config.json``.
+    engine_overrides: Optional[Dict[str, Any]] = None
     n_envs: int = 4
     use_subprocess: bool = True
     # Optional ``(pad_h, pad_w)`` for cross-stage observation-shape unification.

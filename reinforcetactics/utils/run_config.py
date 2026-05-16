@@ -119,6 +119,59 @@ def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
     return out
 
 
+def _full_engine_constants_hash() -> Optional[str]:
+    """Verbatim hash of the *entire* engine constant surface.
+
+    ``_engine_economy`` only enumerates 5 unit fields + 4 economy
+    scalars; an ability magnitude or any other ``constants.py`` value
+    could still drift unrecorded. This hashes the COMPLETE ``UNIT_DATA``
+    (every key, not the projection) plus the economy scalars, so *any*
+    engine-constant change flips one auditable field with zero
+    enumeration to maintain. sha256, first 16 hex; None on failure.
+    """
+    try:
+        from reinforcetactics import constants as _c
+
+        blob = {
+            "STARTING_GOLD": getattr(_c, "STARTING_GOLD", None),
+            "HEADQUARTERS_INCOME": getattr(_c, "HEADQUARTERS_INCOME", None),
+            "BUILDING_INCOME": getattr(_c, "BUILDING_INCOME", None),
+            "TOWER_INCOME": getattr(_c, "TOWER_INCOME", None),
+            "UNIT_DATA": getattr(_c, "UNIT_DATA", {}),
+        }
+        canon = json.dumps(blob, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return None
+
+
+def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Return the *effective* economy = captured defaults + overlay.
+
+    Mirrors ``GameState._resolve_engine_overrides`` so config.json
+    records exactly what the env played with, not just the engine
+    defaults. Pure dict math (no engine import); unknown keys are
+    ignored here since GameState already validated them.
+    """
+    eff: Dict[str, Any] = json.loads(json.dumps(economy, default=str)) if economy else {}
+    if not overrides:
+        return eff
+    for k_ov, k_econ in (
+        ("starting_gold", "starting_gold"),
+        ("headquarters_income", "headquarters_income"),
+        ("building_income", "building_income"),
+        ("tower_income", "tower_income"),
+    ):
+        if k_ov in overrides:
+            eff[k_econ] = overrides[k_ov]
+    unit_ov = overrides.get("unit_data") or {}
+    if unit_ov and isinstance(eff.get("unit_data"), dict):
+        for code, fields in unit_ov.items():
+            if code in eff["unit_data"] and isinstance(fields, Mapping):
+                eff["unit_data"][code].update(fields)
+    return eff
+
+
 def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> Optional[str]:
     """Short stable hash of the engine economy, so runs can be grouped
     by balance era in one column instead of diffing constants. Derived
@@ -183,6 +236,8 @@ def build_run_config(
     merge logic.
     """
     _econ = _engine_economy()
+    _overrides = env_config.get("engine_overrides")
+    _eff_econ = _apply_engine_overrides(_econ, _overrides)
     return {
         "run_type": run_type,
         "map_file": map_file,
@@ -195,8 +250,19 @@ def build_run_config(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
+            # Engine *defaults* (constants.py as imported).
             "engine_economy": _econ,
             "balance_profile_hash": _balance_profile_hash(_econ),
+            # Sparse overlay from config + the resolved economy the env
+            # actually played with (defaults + overlay). When no overlay
+            # is set these are None / equal to engine_economy.
+            "engine_overrides": dict(_overrides) if _overrides else None,
+            "effective_engine_economy": _eff_econ,
+            "effective_balance_profile_hash": _balance_profile_hash(_eff_econ),
+            # Verbatim hash of the ENTIRE constant surface (full
+            # UNIT_DATA, not the 5-field projection) -- catches drift
+            # in fields engine_economy doesn't enumerate.
+            "engine_constants_hash": _full_engine_constants_hash(),
             "map": _map_meta(map_file),
             "hardware": _hardware_meta(),
         },

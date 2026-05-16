@@ -814,8 +814,25 @@ class GameMechanics:
         return regenerated
 
     @staticmethod
-    def calculate_income(player, grid):
-        """Calculate income for a player based on controlled structures."""
+    def calculate_income(player, grid, income_rates=None):
+        """Calculate income for a player based on controlled structures.
+
+        Args:
+            player: Player number to compute income for.
+            grid: The tile grid.
+            income_rates: Optional ``{"headquarters", "building", "tower"}``
+                per-structure rate overrides. When ``None`` the module
+                constants are used, preserving behaviour for every legacy
+                caller. ``GameState`` passes its per-game resolved rates so
+                engine-override (economy) sweeps flow through here without
+                mutating the shared module constants.
+        """
+        if income_rates is None:
+            income_rates = {
+                "headquarters": HEADQUARTERS_INCOME,
+                "building": BUILDING_INCOME,
+                "tower": TOWER_INCOME,
+            }
         headquarters_count = 0
         building_count = 0
         tower_count = 0
@@ -830,7 +847,11 @@ class GameMechanics:
                     elif tile.type == "t":
                         tower_count += 1
 
-        total_income = headquarters_count * HEADQUARTERS_INCOME + building_count * BUILDING_INCOME + tower_count * TOWER_INCOME
+        total_income = (
+            headquarters_count * income_rates["headquarters"]
+            + building_count * income_rates["building"]
+            + tower_count * income_rates["tower"]
+        )
 
         return {"total": total_income, "headquarters": headquarters_count, "buildings": building_count, "towers": tower_count}
 
