@@ -36,28 +36,35 @@
 #     production values (unchanged) -- v26/v27 proved modern code
 #     trains fine once the reward is fixed.
 #   * economy / starting gold / unit stats: the MODERN INTENDED
-#     BALANCE -- i.e. NO engine_overrides. STARTING_GOLD/income and
-#     UNIT_DATA come from constants.py as shipped (the deliberate
-#     a596c15/f4dc50e/6f64745 rebalance: Warrior atk 8, gold 200,
-#     Knight def 7, HQ income 100). A production agent must learn
-#     the game AS BALANCED AND SHIPPED; pinning the old rt-0.2.5
-#     economy would train an agent that exploits the Warrior-spam
-#     imbalance that rebalance deliberately removed.
+#     BALANCE, pinned EXPLICITLY via env.engine_overrides (see the
+#     block in the env section). It is NOT left to constants.py:
+#     this dev branch has constants.py reverted to the rt-0.2.5
+#     deep economy (commit d4c5d0c), so "no engine_overrides" here
+#     would silently train the OLD economy -- exactly what bit the
+#     first v28 run (20260517_010431: config.json effective economy
+#     showed starting_gold=250 / W atk 10, i.e. deep, NOT modern).
+#     Pinning makes "what the header says" == "what runs" on any
+#     checkout, and config.json records effective_engine_economy.
+#     The modern intended balance (constants.py at d4c5d0c^, the
+#     deliberate a596c15 Warrior nerf) differs from the deep economy
+#     in exactly two values: STARTING_GOLD 250->200 and Warrior
+#     attack 10->8. A production agent must learn the game AS
+#     BALANCED AND SHIPPED; the deep economy would train a
+#     Warrior-spam exploit the rebalance deliberately removed.
 #
-# ONE VALIDATION CAVEAT (read before trusting a full run):
-#   Empirically proven so far = reward-fix + the *deep* rt-0.2.5
-#   economy (v26/v27, via engine_overrides). reward-fix + the
-#   *modern* balance is the ONE combination not yet run. v28's
-#   first full run therefore doubles as the modern-balance
-#   validation. If it stalls at beginner_random_10, the economy is
-#   also implicated; the fallback is a one-block paste of the
-#   proven deep economy as an engine_overrides overlay (see
-#   v26_faithful_deep_reward_on_head.yaml for the exact block) plus
-#   an explicit balance-vs-trainability decision. With the modern
-#   economy this is expected to clear -- v26/v27 showed the modern
-#   code/curriculum are not the problem -- but it is a real,
-#   unconfirmed axis, called out here so the run is interpreted
-#   correctly rather than assumed.
+# VALIDATION STATUS (read before trusting a full run):
+#   Proven: reward-fix + DEEP economy clears beginner_random_10
+#   (v26/v27) and 6 stages on the full curriculum, then stalls at
+#   beginner_random_15 (run 20260517_010431 -- which, per the
+#   provenance catch above, was actually DEEP economy). The
+#   random_15 stall is being isolated separately
+#   (v29_random15_maxturns_probe: max_turns 75->100 hypothesis).
+#   reward-fix + MODERN balance (this config) is still unrun. Do
+#   NOT launch the full v28 until v29 resolves the random_15 wall;
+#   otherwise v28 will stall at random_15 too and waste ~6 GPU
+#   hours. Sequence: v29 (cheap, names the random_15 fix) -> fold
+#   that fix into v28 -> run v28 as the production/modern-balance
+#   validation.
 # =================================================================
 #
 # PPO bootstrap curriculum, hardware-tuned for Google Colab on an L4 GPU
@@ -107,23 +114,25 @@ env:
   # run used exactly this set). Explicit here so v28 is
   # self-contained -- no notebook cell-11 override required.
   enabled_units: [W, M, C, A, K]
-  # engine_overrides: optional sparse overlay over the non-YAML engine
-  # constants (constants.py) so balance is a first-class, swept,
-  # auto-recorded config axis instead of an invisible module constant.
-  # Absent/unset = use constants.py (today's behaviour). GameState
-  # deep-merges this over the module defaults; config.json records the
-  # resolved effective_engine_economy + engine_constants_hash. Unknown
-  # unit code / stat field fails loud. Example (commented; uncomment to
-  # pin a balance era, e.g. the 6eb0566 deep-run economy):
-  #
-  # engine_overrides:
-  #   starting_gold: 250
-  #   headquarters_income: 150
-  #   building_income: 100
-  #   tower_income: 50
-  #   unit_data:               # sparse: only the deltas you want
-  #     K: {defence: 5}
-  #     W: {attack: 10}
+  # MODERN INTENDED BALANCE, pinned explicitly (NOT left to
+  # constants.py -- this branch's constants.py is the reverted deep
+  # economy, so an absent overlay would silently train the wrong
+  # balance; the first v28 run hit exactly that). Byte-faithful to
+  # constants.py at d4c5d0c^ (the deliberate a596c15 Warrior nerf).
+  # vs the deep economy this differs in only two values:
+  # STARTING_GOLD 250->200 and Warrior attack 10->8. config.json
+  # records effective_engine_economy so the run self-proves it.
+  engine_overrides:
+    starting_gold: 200
+    headquarters_income: 150
+    building_income: 100
+    tower_income: 50
+    unit_data:
+      W: {cost: 200, health: 15, attack: 8, defence: 6, movement: 3}
+      M: {cost: 300, health: 10, attack: {adjacent: 8, range: 12}, defence: 4, movement: 2}
+      C: {cost: 200, health: 10, attack: 2, defence: 4, movement: 3}
+      A: {cost: 250, health: 15, attack: 5, defence: 1, movement: 3}
+      K: {cost: 350, health: 18, attack: 8, defence: 5, movement: 4}
   reward_config:
     # All reward magnitudes that were calibrated *relative to* the old
     # ~5000-scale terminal rewards are scaled to 1/100 of their original
