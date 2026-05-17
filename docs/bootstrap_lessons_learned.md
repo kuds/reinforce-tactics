@@ -390,18 +390,45 @@ The *only* delta between the v24 stall and the v26 clear is those
 three reward terms. **That is the regression.** It is **not** a
 code regression — modern obs slimming / CNN extractor / masking /
 RandomBot / curriculum all clear `random_10` fine once the reward
-shape is faithful. The fix is **config-only**: ship modern code
-with `win_speed_bonus` + the opponent-capture penalties removed (or
-re-tuned). The whole v17–v23 entropy/patience/threshold sweep, and
-the planned code bisect, were chasing a self-inflicted *reward*
-regression. `docs/experiment_b_bisect_plan.md` is superseded; no
-code bisect is needed.
+shape is faithful. The fix is **config-only**. The whole v17–v23
+entropy/patience/threshold sweep, and the planned code bisect, were
+chasing a self-inflicted *reward* regression — no code bisect was
+ever needed.
 
-Final isolation in flight: `v27a/b/c` re-enable exactly **one** of
-the three terms each, to name the precise culprit (`win_speed_bonus`
-is the prime suspect — it sits on the draw/win incentive that
-`turn_penalty` was shaping). Whichever flips `random_10` back to a
-stall is the single term to drop from the shipping config.
+### Final isolation — TWO independent culprit terms (`v27a/b/c`)
+
+`v27a/b/c` re-enabled exactly **one** of the three terms each on
+the proven v26 baseline (modern code, faithful economy via
+`engine_overrides`, only the one reward term varying — all three
+runs verified `git b1926c2`, rt 0.2.7):
+
+| Run | Term re-enabled | `beginner_random_10` | best WR |
+|-----|-----------------|----------------------|---------|
+| `20260516_202350` v27a | `win_speed_bonus: 50` | **stalled** (`curriculum_stalled`) | 0.80 |
+| `20260516_222009` v27b | `enemy_neutral_capture: -8` | **cleared** (`completed_curriculum 5/5`) | 0.9875 |
+| `20260516_230751` v27c | `enemy_owned_capture: -15` | **stalled** (`curriculum_stalled`) | 0.90 |
+
+**Two terms independently re-create the wall: `win_speed_bonus`
+(`c7001bf`) and `enemy_owned_capture` (`922aa29`).**
+`enemy_neutral_capture` is **benign** (v27b cleared at 98.75%).
+
+Mechanistic note: v27a/c did not hard-collapse to 0% — they peaked
+*above* the 0.75 gate (0.80 / 0.90) but couldn't hold two
+consecutive evals within budget. This is the draw-with-shaping
+**policy-drift instability** documented above: each term perturbs
+the reward landscape enough to prevent *stable* convergence at
+`random_10`, even when the policy transiently reaches competence.
+Consistent with v26 (all three zeroed → stable clear) and v24 (all
+three present → hard 0% stall).
+
+**Shipping fix:** on modern code, the production reward config must
+set `win_speed_bonus: 0` and `enemy_owned_capture: 0` and
+`turn_penalty: -0.2` (the deep-run value, which works);
+`enemy_neutral_capture` may stay at `-8` if it has design value on
+neutral-contested maps, or be zeroed for minimalism. This is the
+basis for `configs/bootstrap_sweep/v28_production_reward_fixed.yaml`
+(full 33-stage production curriculum, modern intended balance — see
+its header for the balance-vs-trainability note).
 
 Lesson reinforced: "faithful repro" must be verified key-by-key
 against the original, not assumed from "same economy + roster." A
