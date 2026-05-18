@@ -885,6 +885,28 @@ def run_curriculum(
                 metrics_callback=metrics_callback,
             )
 
+        # Stage promoted (the stall branch above raises). PPO drifts
+        # off the winning attractor *within* a stage after it first
+        # clears the bar, so the in-memory model is the possibly-
+        # drifted end-of-stage policy. Restore this stage's best-by-WR
+        # checkpoint before the next stage inherits it -- this is the
+        # fix for the ``*_random_N`` drift-propagation wall (v29
+        # stalled carrying the drifted post-random_10 policy into
+        # random_15; v30 warm-started random_15 from the peak
+        # random_10 snapshot and cleared it trivially).
+        # ``set_parameters`` swaps only policy + optimizer tensors,
+        # leaving the env / schedules / callbacks intact -- identical
+        # semantics to ``warm_start_path``. Also improves the final
+        # stage: ``final_model.zip`` becomes the best policy, not the
+        # drifted end-of-run one.
+        if cfg.curriculum.restore_best_checkpoint_between_stages:
+            best_ckpt = stage_dir / "best_model.zip"
+            if best_ckpt.exists():
+                print(f"  restoring best checkpoint of '{stage.name}' (WR={eval_cb.best_win_rate:.1%}) before next stage")
+                model.set_parameters(str(best_ckpt), exact_match=True)
+            else:
+                print(f"  [warn] no best_model.zip for '{stage.name}'; carrying end-of-stage policy forward")
+
     final_path = output_dir / "final_model.zip"
     assert model is not None  # validate() guarantees stages is non-empty
     model.save(str(final_path))

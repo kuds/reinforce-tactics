@@ -601,10 +601,39 @@ class _FakeModel:
         # No early exit -> stage exhausted its budget without promoting.
         self.learn_calls.append({"stage": stage_name, "total_timesteps": total_timesteps, "exited_early": False})
 
+    set_parameters_calls: List[str] = field(default_factory=list)
+
     def save(self, path: str) -> None:
         self.save_calls.append(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text("fake-checkpoint", encoding="utf-8")
+
+    def set_parameters(self, path: str, exact_match: bool = True) -> None:
+        # Mirrors SB3: swap policy/optimizer tensors only. The runner
+        # uses this for warm_start_path and the between-stage best-
+        # checkpoint restore; record the path + order for assertions.
+        self.set_parameters_calls.append(str(path))
+
+
+class _FakeModelSavesBest(_FakeModel):
+    """Like _FakeModel but also drops ``best_model.zip`` into the eval
+    callback's ``save_dir`` during ``learn()`` -- mirroring the real
+    ``PeriodicEvalCallback`` best-by-WR save that the base fake
+    deliberately skips -- so the runner's between-stage best-checkpoint
+    restore path is actually exercised."""
+
+    def learn(
+        self,
+        total_timesteps: int,
+        callback: List[Any],
+        reset_num_timesteps: bool = True,
+        progress_bar: bool = False,
+    ) -> None:
+        for cb in callback:
+            if isinstance(cb, PeriodicEvalCallback) and cb.save_dir is not None:
+                Path(cb.save_dir).mkdir(parents=True, exist_ok=True)
+                (Path(cb.save_dir) / "best_model.zip").write_text("best", encoding="utf-8")
+        super().learn(total_timesteps, callback, reset_num_timesteps, progress_bar)
 
 
 def _make_cfg(stages: List[CurriculumStage]) -> TrainingConfig:
@@ -694,6 +723,50 @@ class TestRunCurriculum:
         # All envs were closed.
         assert all(e.closed for e in train_envs)
         assert all(e.closed for e in eval_envs)
+
+    def _run_with_best_saving_model(self, cfg, tmp_path):
+        program = {"a": [0.95, 0.95], "b": [0.92, 0.93]}
+        holder: Dict[str, Any] = {}
+
+        def model_factory(vec_env, cfg_arg, output_dir):
+            m = _FakeModelSavesBest(
+                win_rate_program=program,
+                _stage_names=[s.name for s in cfg_arg.curriculum.stages],
+            )
+            holder["m"] = m
+            return m
+
+        run_curriculum(
+            cfg,
+            output_dir=tmp_path,
+            train_env_factory=lambda s, c: _FakeEnv(),
+            eval_env_factory=lambda s, c: _FakeEnv(),
+            model_factory=model_factory,
+        )
+        return holder["m"]
+
+    def test_restores_best_checkpoint_between_stages_by_default(self, tmp_path):
+        # Default behaviour: after each promoted stage the runner reloads
+        # that stage's best_model.zip into the in-memory model (so the
+        # next stage inherits the peak policy, not the drifted end-of-
+        # stage one). Both stages promote, so there are two restores --
+        # the second also makes final_model.zip the best of the last
+        # stage.
+        cfg = _make_cfg([_stage("a", patience=2), _stage("b", "simple", patience=2)])
+        assert cfg.curriculum.restore_best_checkpoint_between_stages is True
+        m = self._run_with_best_saving_model(cfg, tmp_path)
+        assert m.set_parameters_calls == [
+            str(tmp_path / "a" / "best_model.zip"),
+            str(tmp_path / "b" / "best_model.zip"),
+        ]
+
+    def test_restore_between_stages_can_be_disabled(self, tmp_path):
+        # Legacy behaviour: carry the end-of-stage policy forward, no
+        # best-checkpoint restore.
+        cfg = _make_cfg([_stage("a", patience=2), _stage("b", "simple", patience=2)])
+        cfg.curriculum.restore_best_checkpoint_between_stages = False
+        m = self._run_with_best_saving_model(cfg, tmp_path)
+        assert m.set_parameters_calls == []
 
     def test_applies_per_stage_ent_coef_and_env_overrides(self, tmp_path):
         # First stage inherits everything from cfg defaults; second stage
