@@ -410,6 +410,18 @@ class CurriculumConfig:
     """Curriculum-bootstrap configuration: an ordered list of stages."""
 
     stages: List[CurriculumStage] = field(default_factory=list)
+    # When True (default), after a stage promotes its best-by-WR
+    # checkpoint (``<stage>/best_model.zip``) is reloaded into the
+    # in-memory model before the next stage starts, instead of
+    # carrying the possibly-drifted end-of-stage policy forward. PPO
+    # drifts off the winning attractor *within* a stage after it first
+    # clears the bar (the documented draw-with-shaping policy drift);
+    # propagating that drifted policy is what made later ``*_random_N``
+    # stages unrecoverable (v29 entered random_15 from a drifted
+    # post-random_10 policy and stalled; warm-starting random_15 from
+    # the peak random_10 snapshot cleared it trivially -- v30). Set
+    # False to reproduce the legacy carry-end-of-stage behaviour.
+    restore_best_checkpoint_between_stages: bool = True
 
     def validate(self) -> None:
         seen: set = set()
@@ -546,7 +558,10 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
                 f"Unknown keys for CurriculumStage at index {i}: {sorted(unknown_stage)}. Valid keys: {sorted(stage_fields)}"
             )
         stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
-    return CurriculumConfig(stages=stages)
+    kwargs: Dict[str, Any] = {"stages": stages}
+    if "restore_best_checkpoint_between_stages" in raw:
+        kwargs["restore_best_checkpoint_between_stages"] = bool(raw["restore_best_checkpoint_between_stages"])
+    return CurriculumConfig(**kwargs)
 
 
 def _build_section(section_name: str, raw: Any):
