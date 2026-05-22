@@ -717,6 +717,7 @@ def run_curriculum(
             eval_callback=eval_cb,
             threshold=stage.promotion_win_rate,
             patience=stage.patience,
+            min_timesteps=stage.min_timesteps_before_promotion,
         )
         callbacks: List[Any] = [metrics_callback, eval_cb, promote_cb]
         if ent_schedule is not None:

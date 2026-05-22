@@ -137,6 +137,71 @@ class TestPromotionCallback:
         assert result is False
         assert cb.promoted is True
 
+    def test_min_timesteps_validates_non_negative(self):
+        eval_cb = _make_eval_stub()
+        with pytest.raises(ValueError):
+            PromotionCallback(eval_cb, threshold=0.9, patience=2, min_timesteps=-1)
+
+    def test_min_timesteps_default_zero_preserves_legacy_behaviour(self):
+        # No min set -> behaves exactly as before (promote on first
+        # eligible streak regardless of num_timesteps).
+        eval_cb = _make_eval_stub()
+        cb = PromotionCallback(eval_cb, threshold=0.9, patience=2, verbose=0)
+        _append_eval(eval_cb, 0.95)
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=8) is False
+        assert cb.promoted is True
+
+    def test_min_timesteps_blocks_promotion_in_pre_window(self):
+        # Two passing evals during the pre-window must NOT promote -- the
+        # whole point is to guarantee stage-specific training before
+        # handoff, even from a strong carry-in policy.
+        eval_cb = _make_eval_stub()
+        cb = PromotionCallback(eval_cb, threshold=0.9, patience=2, min_timesteps=500_000, verbose=0)
+        _append_eval(eval_cb, 0.95)
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=8) is True  # pre-window eval @8 ignored
+        assert _step_promote(cb, num_timesteps=100_000) is True  # still pre-window
+        assert cb.promoted is False
+        assert cb._streak == 0
+
+    def test_min_timesteps_does_not_count_pre_window_evals_toward_streak(self):
+        # Pre-window evals are discarded entirely; the streak must build
+        # from post-min evals only. Otherwise a strong carry-in would
+        # promote immediately on crossing the min boundary, defeating
+        # the purpose.
+        eval_cb = _make_eval_stub()
+        cb = PromotionCallback(eval_cb, threshold=0.9, patience=2, min_timesteps=500_000, verbose=0)
+        # Two passing pre-window evals (would normally trigger promotion).
+        _append_eval(eval_cb, 0.95)
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=200_000) is True
+        assert cb.promoted is False
+        # Cross into the window; existing pre-window results were discarded
+        # at the boundary tick, so a single new eval is NOT enough yet.
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=550_000) is True
+        assert cb.promoted is False
+        assert cb._streak == 1
+        # A second post-window passing eval completes the streak.
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=600_000) is False
+        assert cb.promoted is True
+
+    def test_min_timesteps_promotes_normally_after_window_opens(self):
+        # After crossing min_timesteps with no prior evals, behaviour is
+        # identical to the no-min case.
+        eval_cb = _make_eval_stub()
+        cb = PromotionCallback(eval_cb, threshold=0.9, patience=2, min_timesteps=500_000, verbose=0)
+        # No pre-window evals. First post-window eval is single -> not enough.
+        assert _step_promote(cb, num_timesteps=600_000) is True
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=650_000) is True
+        assert cb.promoted is False
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=700_000) is False
+        assert cb.promoted is True
+
 
 # ---------------------------------------------------------------------------
 # Curriculum loading and validation via TrainingConfig
@@ -246,6 +311,31 @@ class TestCurriculumLoading:
         stage = {**VALID_DICT["curriculum"]["stages"][0], "opponent": "balanced_random"}
         cfg = config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
         assert cfg.curriculum.stages[0].opponent == "balanced_random"
+
+    def test_min_timesteps_before_promotion_default_and_round_trip(self):
+        # Default is 0 (legacy behaviour).
+        cfg = config_from_dict(VALID_DICT)
+        assert cfg.curriculum.stages[0].min_timesteps_before_promotion == 0
+        # Setting it round-trips through the loader. Use a value under
+        # VALID_DICT's stage max_timesteps so validation doesn't reject.
+        stage = {**VALID_DICT["curriculum"]["stages"][0], "min_timesteps_before_promotion": 2_000}
+        cfg = config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
+        assert cfg.curriculum.stages[0].min_timesteps_before_promotion == 2_000
+
+    def test_min_timesteps_before_promotion_rejects_negative(self):
+        stage = {**VALID_DICT["curriculum"]["stages"][0], "min_timesteps_before_promotion": -1}
+        with pytest.raises(ValueError, match="min_timesteps_before_promotion"):
+            config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
+
+    def test_min_timesteps_before_promotion_rejects_exceeding_max(self):
+        # min > max would mean the stage can never promote -> fail loud.
+        stage = {
+            **VALID_DICT["curriculum"]["stages"][0],
+            "max_timesteps": 100_000,
+            "min_timesteps_before_promotion": 200_000,
+        }
+        with pytest.raises(ValueError, match="must be <= max_timesteps"):
+            config_from_dict({**VALID_DICT, "curriculum": {"stages": [stage]}})
 
     def test_shipped_config_resolves_features_extractor_class(self):
         """``policy_kwargs.features_extractor_class`` in bootstrap.yaml is

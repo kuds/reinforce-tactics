@@ -233,20 +233,35 @@ class PromotionCallback(BaseCallback):
         threshold: float,
         patience: int = 2,
         verbose: int = 1,
+        min_timesteps: int = 0,
     ) -> None:
         super().__init__(verbose=verbose)
         if patience < 1:
             raise ValueError(f"patience must be >= 1, got {patience}")
         if not 0.0 <= threshold <= 1.0:
             raise ValueError(f"threshold must be in [0, 1], got {threshold}")
+        if min_timesteps < 0:
+            raise ValueError(f"min_timesteps must be >= 0, got {min_timesteps}")
         self.eval_callback = eval_callback
         self.threshold = float(threshold)
         self.patience = int(patience)
+        self.min_timesteps = int(min_timesteps)
         self._consumed: int = 0
         self._streak: int = 0
         self.promoted: bool = False
 
     def _on_step(self) -> bool:
+        # Pre-window: stage hasn't trained enough yet for promotion to
+        # fire. Advance the consumed pointer past any pre-window evals
+        # (they don't contribute to the post-window streak) and reset
+        # the streak so post-window counting starts fresh. Guards against
+        # the "skip-ahead" failure where a strong carry-in policy passes
+        # threshold on the first eval and promotes a stage with ~0
+        # stage-specific learning.
+        if self.min_timesteps > 0 and self.num_timesteps < self.min_timesteps:
+            self._consumed = len(self.eval_callback.results)
+            self._streak = 0
+            return True
         # Consume any results the eval callback has appended since we last
         # looked. Iterating handles the unusual case of multiple new results
         # in a single step (shouldn't happen in practice but is cheap to

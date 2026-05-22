@@ -29,6 +29,14 @@ easier are actively harder for PPO.
 5. **Watch `std=0.0` on eval episodes.** It's the single most diagnostic
    signal — it almost always means the policy is locked, not that the
    environment is deterministic by nature.
+6. **Curriculum handoffs need to carry the peak, and each stage needs to
+   actually train.** PPO drifts within a stage; the in-memory end-of-stage
+   policy is often weaker than the stage's `best_model.zip`. Restore the
+   best between stages (`restore_best_checkpoint_between_stages`). And a
+   strong handoff can promote a stage on its first eval with ~0 stage-
+   specific learning — the next harder stage then collapses. Gate
+   promotion with `min_timesteps_before_promotion` on noisy stochastic
+   stages so each stage actually learns before its handoff fires.
 
 ## The cold-start problem on this env
 
@@ -476,6 +484,110 @@ and library/code drift (`git.commit` + `libraries`). If a future
 result-affecting knob is added, it goes in the dataclass and the
 `config.json` meta block in the same change — not in a module
 constant.
+
+## ✅ CURRICULUM HANDOFF + SKIP-AHEAD — two coupled curriculum bugs, both fixed
+
+After the reward and economy classes were closed, v28 (the full
+33-stage production config: modern intended balance via
+`engine_overrides`, byte-faithful 6eb0566 reward, roster
+`[W,M,C,A,K]`) still stalled at `beginner_random_15`. Two further
+mechanistic bugs in the curriculum runner itself surfaced — neither
+about config, both about *how the runner moves a policy between
+stages*. Both are now fixed (defaults preserve legacy behaviour).
+
+### Bug 1 — within-stage drift was propagating to the next stage
+
+The curriculum loop carried the **in-memory end-of-stage** model
+across stages via `model.set_env(...)`. PPO drifts off the winning
+attractor *within* a stage after it first clears the threshold (the
+documented draw-with-shaping policy drift); by the time the stage
+promotes (patience-2) or exhausts its budget, the in-memory policy
+is often the drifted post-peak version, not the peak itself.
+Meanwhile `<stage>/best_model.zip` *was* being saved by the eval
+callback but **never reloaded** between stages.
+
+v29 (deep economy + reward-fixed + `max_turns=100` + modern code,
+all confounds controlled) entered `random_15` from a drifted
+post-`random_10` policy and stalled identically to v28. v30
+(single-stage `random_15` warm-started from v29's *peak*
+`random_10` checkpoint via `set_parameters`) cleared `random_15`
+in ~50k steps. Same code, same stage, same opponent — the only
+difference was which `random_10` policy entered. Conclusive
+evidence that drifted-handoff was the bug, not the stage.
+
+**Fix:** `CurriculumConfig.restore_best_checkpoint_between_stages`
+(default `True`). After a stage promotes, the runner reloads
+`<stage>/best_model.zip` into the in-memory model
+(`set_parameters(..., exact_match=True)`) before the next stage.
+Hands forward the peak, not the drift. Also improves the final
+stage: `final_model.zip` becomes the best of the last stage rather
+than the drifted end-of-run policy.
+
+### Bug 2 — strong handoffs cause stages to "skip ahead" past their own learning
+
+The handoff fix was necessary but not sufficient. v28 run
+`20260522_163958` (handoff fix live + modern balance + reward
+fix, all verified via `config.json`) still stalled at
+`beginner_random_15`. The CSV revealed the mechanism:
+
+| stage | timesteps | WR | note |
+|--|--|--|--|
+| `beginner_balanced_random` | end | promoted | best handed to next stage |
+| **`beginner_random_10`** | **@250,008** (first eval, ~8 steps into the stage) | **1.0** | random_10 trivially won by the carry-in policy |
+| `beginner_random_10` | 300,000 | 0.01 | PPO updates drifted the policy |
+| `beginner_random_10` | 350,000 / 400,000 | 0.925 / 0.84 | recovered → promoted |
+| `beginner_random_15` | first eval | 0.91 | inherited *the @250,008 snapshot* (best ever in the stage) |
+| `beginner_random_15` | next eval | 0.0 → 3M-step chaos | collapse |
+
+`best_model.zip` for `random_10` was the *@250,008* snapshot — the
+moment random_10 began, before any random_10-specific learning. So
+the handoff into `random_15` was effectively `balanced_random`'s
+best policy with ~0 random_10 refinement. A policy strong enough
+to beat random_10 by transfer isn't necessarily strong enough for
+the harder `random_15` opponent, and PPO updates against
+random_15's reward signal destabilized it immediately.
+
+**Stages can "skip ahead" past their own learning when the carry-in
+policy is already strong.** The promotion gate (patience=2) doesn't
+guard against this — it only requires sustained competence, which
+a strong handoff can produce instantly without any stage-specific
+training.
+
+**Fix:** `CurriculumStage.min_timesteps_before_promotion: int = 0`
+(default 0; legacy behaviour). When `> 0`, `PromotionCallback`
+ignores eval results — and refuses to promote — until
+`model.num_timesteps >= min_timesteps_before_promotion`. The
+streak counter is reset and pre-window evals are discarded
+entirely, so promotion can only build from post-gate evals. Set
+to `500_000` on the noisy stochastic `*_random_N` stages in
+`v31_production_minsteps_gate.yaml` (the successor to v28; v28
+left untouched as the historical record of the bug that motivated
+the gate).
+
+### Lessons
+
+1. **Handoff ≠ progress.** Carrying a peak policy forward only
+   helps if each stage has *actually trained* before the
+   handoff. The promotion gate measures sustained competence,
+   not amount of learning — those are different things and the
+   curriculum's correctness depends on both.
+2. **Inspect the *content* of `best_model.zip`, not just its
+   existence.** The handoff fix appeared to work (the next stage
+   started at 91% — looked great). It only failed under sustained
+   training on the harder stage, where the under-trained-for-this-
+   opponent policy couldn't hold up. Don't trust early-eval WR
+   transfer as evidence of robust learning.
+3. **Strong carry-in is a double-edged sword.** A great handoff
+   makes the *current* stage trivially passable on first eval,
+   which short-circuits learning *for the next stage*. The
+   `min_timesteps_before_promotion` gate makes "amount of stage-
+   specific learning" a first-class, configurable curriculum
+   property — alongside threshold and patience.
+4. **One v-number per isolated variable.** v28 (handoff only, no
+   gate) and v31 (handoff + gate) are kept as separate sweep
+   configs so the experimental narrative is legible: each
+   v-number corresponds to one set of run records and one
+   variable change vs its predecessor.
 
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 

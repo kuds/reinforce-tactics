@@ -234,6 +234,20 @@ class CurriculumStage:
     promotion_win_rate: float = 0.9
     patience: int = 2
     max_timesteps: int = 1_000_000
+    # Minimum env-steps the stage MUST train before promotion can fire.
+    # Defends against the "skip-ahead" failure where a strong carry-in
+    # policy (e.g. from the prior stage's best-checkpoint handoff) passes
+    # the WR threshold on the very first eval -- so the stage promotes
+    # immediately, contributing ~0 stage-specific learning, and the next
+    # harder stage inherits an under-trained policy that collapses (the
+    # v28 20260522_163958 random_15 stall: random_10 promoted from a
+    # @250k snapshot that was essentially balanced_random's best with
+    # no random_10 refinement). When > 0, the promotion callback resets
+    # its streak counter and ignores eval results until
+    # ``model.num_timesteps >= min_timesteps_before_promotion``. Default
+    # 0 preserves legacy behaviour; set on the noisy ``*_random_N``
+    # stages where it matters most.
+    min_timesteps_before_promotion: int = 0
     n_eval_episodes: int = 30
     # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
     max_steps: Optional[int] = None
@@ -263,6 +277,14 @@ class CurriculumStage:
             raise ValueError(f"stage '{self.name}': patience must be >= 1")
         if self.max_timesteps <= 0:
             raise ValueError(f"stage '{self.name}': max_timesteps must be > 0")
+        if self.min_timesteps_before_promotion < 0:
+            raise ValueError(f"stage '{self.name}': min_timesteps_before_promotion must be >= 0")
+        if self.min_timesteps_before_promotion > self.max_timesteps:
+            raise ValueError(
+                f"stage '{self.name}': min_timesteps_before_promotion "
+                f"({self.min_timesteps_before_promotion}) must be <= max_timesteps "
+                f"({self.max_timesteps}); otherwise the stage can never promote."
+            )
         if self.n_eval_episodes <= 0:
             raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
         if self.max_steps is not None and self.max_steps <= 0:
