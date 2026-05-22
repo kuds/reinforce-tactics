@@ -14,7 +14,7 @@
 #   present) hard-stalled. Mechanism: each term destabilizes the
 #   draw-with-shaping policy attractor at random_10.
 #
-# THE FIX (this file = configs/bootstrap.yaml with EXACTLY four
+# THE FIX (this file = configs/ppo/bootstrap.yaml with EXACTLY four
 # reward lines changed; every other reward key already matched the
 # proven 6eb0566/v26 shape):
 #     turn_penalty:          0.0  -> -0.2   (deep-run value; works)
@@ -28,7 +28,7 @@
 #
 # NON-REWARD SETTINGS
 #   * curriculum: full 33-stage production curriculum + production
-#     budgets (unchanged from configs/bootstrap.yaml).
+#     budgets (unchanged from configs/ppo/bootstrap.yaml).
 #   * roster: enabled_units [W, M, C, A, K] (set explicitly; the
 #     proven set from every deep/v26/v27 run).
 #   * seed: 42 (notebook default).

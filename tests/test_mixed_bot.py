@@ -2,7 +2,7 @@
 
 MixedBot is a per-episode bridge between two scripted bots for the
 ``simple`` -> ``medium`` and ``medium`` -> ``advanced`` curriculum jumps in
-configs/bootstrap.yaml. On construction it samples one of (``easy``,
+configs/ppo/bootstrap.yaml. On construction it samples one of (``easy``,
 ``hard``) using ``p_hard`` and delegates ``take_turn()`` to that
 instance for its lifetime. The env reconstructs its opponent on every
 ``reset()``, so the choice is effectively resampled per episode without

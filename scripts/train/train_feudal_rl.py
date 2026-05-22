@@ -27,29 +27,83 @@ from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 # Local imports
+from reinforcetactics.rl.config import EnvConfig
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.rl.masking import ActionMaskedEnv, make_maskable_env, make_maskable_vec_env
 
 
-def make_env(rank: int, seed: int = 0, opponent: str = "bot", use_masking: bool = False):
-    """
-    Utility function for multiprocessed env.
+def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: bool = True) -> dict:
+    """Resolve env constructor kwargs from argparse + a loaded ``cfg.env``.
 
-    Args:
-        rank: Index of the subprocess
-        seed: Random seed
-        opponent: Opponent type
-        use_masking: Whether to wrap env for action masking
+    Scalar kwargs (``opponent``, ``max_steps``, ``map_file``, ``max_turns``)
+    come from ``args`` so the bootstrap-style precedence holds — argparse
+    defaults are seeded from YAML via ``config_to_argparse_defaults`` and
+    CLI flags override. Non-scalar / dict-shaped kwargs (``reward_config``,
+    ``engine_overrides``, ``enabled_units``, ``opponent_kwargs``, the
+    observation-scale knobs, ``pad_to_size``) come from ``cfg_env`` because
+    they can't be passed cleanly through argparse.
+
+    ``include_render`` toggles fields that ``StrategyGameEnv`` accepts but
+    the maskable factories don't (``render_mode``, ``fog_of_war``).
+    """
+    kwargs: dict = {
+        "opponent": args.opponent,
+        "max_steps": args.max_steps,
+        "map_file": getattr(args, "map_file", None),
+        "max_turns": getattr(args, "max_turns", None),
+    }
+    if include_render:
+        kwargs["render_mode"] = None
+    if cfg_env is not None:
+        kwargs.update(
+            {
+                "reward_config": cfg_env.reward_config,
+                "enabled_units": cfg_env.enabled_units,
+                "action_space_type": cfg_env.action_space_type,
+                "max_flat_actions": cfg_env.max_flat_actions,
+                "max_actions_per_turn": cfg_env.max_actions_per_turn,
+                "engine_overrides": cfg_env.engine_overrides,
+                "gold_scale": cfg_env.gold_scale,
+                "turn_scale": cfg_env.turn_scale,
+                "unit_count_scale": cfg_env.unit_count_scale,
+                "opponent_kwargs": cfg_env.opponent_kwargs,
+                "pad_to_size": cfg_env.pad_to_size,
+            }
+        )
+        if include_render:
+            kwargs["fog_of_war"] = cfg_env.fog_of_war
+    return kwargs
+
+
+def _make_strategy_env(args, *, seed: int | None = None):
+    """Build a plain :class:`StrategyGameEnv` honoring ``args._cfg.env``.
+
+    Bridges the bare ``StrategyGameEnv(map_file=None, opponent=..., max_steps=...)``
+    construction that the feudal trainer used to do with the full env
+    schema in :class:`reinforcetactics.rl.config.EnvConfig`. Mirrors the
+    factory pattern in :func:`reinforcetactics.rl.bootstrap._default_train_env_factory`
+    so balance overrides (``engine_overrides``), reward shaping, unit
+    rosters, and observation scales are first-class for feudal runs too.
+    """
+    cfg = getattr(args, "_cfg", None)
+    cfg_env = cfg.env if cfg is not None else None
+    env = StrategyGameEnv(**_env_kwargs_from_cfg(cfg_env, args, include_render=True))
+    if seed is not None:
+        env.reset(seed=seed)
+    return env
+
+
+def make_env(rank: int, seed: int = 0, args=None, use_masking: bool = False):
+    """Utility function for multiprocessed env.
+
+    Honors ``args._cfg.env`` (set by ``main()`` when ``--config`` is
+    supplied) so reward shaping, engine overrides, enabled units, and
+    the other :class:`EnvConfig` fields propagate into the SubprocVecEnv
+    workers used by the flat baseline.
     """
 
     def _init():
-        env = StrategyGameEnv(
-            map_file=None,  # Random maps
-            opponent=opponent,
-            render_mode=None,
-            max_steps=500,
-        )
-        env.reset(seed=seed + rank)
+        env = _make_strategy_env(args, seed=seed + rank)
         if use_masking:
             env = ActionMaskedEnv(env)
         return env
@@ -77,21 +131,27 @@ def train_flat_baseline(args):
     checkpoint_dir = log_dir / "checkpoints"
     checkpoint_dir.mkdir(exist_ok=True)
 
-    # Create vectorized environments
+    # Create vectorized environments. ``_maskable_env_kwargs_from_cfg`` /
+    # ``_env_kwargs_from_cfg`` forward every field on ``cfg.env`` (when
+    # ``--config`` was supplied), so reward_config / engine_overrides /
+    # enabled_units land in the flat-baseline envs the same way they
+    # land in the bootstrap curriculum factories.
+    cfg = getattr(args, "_cfg", None)
+    cfg_env = cfg.env if cfg is not None else None
     if use_masking:
-        # Use masking-compatible vectorized environments
         env = make_maskable_vec_env(
-            n_envs=args.n_envs, opponent=args.opponent, seed=args.seed, use_subprocess=(args.n_envs > 1)
+            n_envs=args.n_envs,
+            seed=args.seed,
+            use_subprocess=(args.n_envs > 1),
+            **_env_kwargs_from_cfg(cfg_env, args, include_render=False),
         )
-        # Create eval environment with masking
-        eval_env = make_maskable_env(opponent=args.opponent, render_mode=None)
+        eval_env = make_maskable_env(render_mode=None, **_env_kwargs_from_cfg(cfg_env, args, include_render=False))
     else:
-        # Standard environments without masking
         if args.n_envs > 1:
-            env = SubprocVecEnv([make_env(i, args.seed, args.opponent, use_masking=False) for i in range(args.n_envs)])
+            env = SubprocVecEnv([make_env(i, args.seed, args, use_masking=False) for i in range(args.n_envs)])
         else:
-            env = DummyVecEnv([make_env(0, args.seed, args.opponent, use_masking=False)])
-        eval_env = StrategyGameEnv(opponent=args.opponent, render_mode=None)
+            env = DummyVecEnv([make_env(0, args.seed, args, use_masking=False)])
+        eval_env = _make_strategy_env(args)
 
     # Create model - use MaskablePPO if action masking is enabled
     if use_masking:
@@ -242,17 +302,15 @@ def train_feudal_rl(args):
     # Create environments. ``--n-envs > 1`` activates vectorized rollouts via
     # ``FeudalRLAgent.collect_rollout_vec``; per-env state lives inside the
     # agent so the envs themselves can be plain StrategyGameEnv instances.
-    env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
-    eval_env = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
-    env.reset(seed=args.seed)
-    eval_env.reset(seed=args.seed + 10_000)
+    # ``_make_strategy_env`` honours every field on ``cfg.env`` (reward_config,
+    # engine_overrides, enabled_units, ...) when ``--config`` was supplied.
+    env = _make_strategy_env(args, seed=args.seed)
+    eval_env = _make_strategy_env(args, seed=args.seed + 10_000)
     vec_envs: list = []
     if args.n_envs > 1:
         # Each env gets a distinct seed so rollouts aren't perfectly correlated.
         for i in range(args.n_envs):
-            ev = StrategyGameEnv(map_file=None, opponent=args.opponent, render_mode=None, max_steps=args.max_steps)
-            ev.reset(seed=args.seed + i + 1)
-            vec_envs.append(ev)
+            vec_envs.append(_make_strategy_env(args, seed=args.seed + i + 1))
 
     # Create agent
     agent = FeudalRLAgent(
@@ -345,9 +403,16 @@ def train_feudal_rl(args):
         if args.eval_opponent != "self":
             eval_env_opp = args.eval_opponent
             # Recreate eval env so it tracks the requested fixed opponent.
-            eval_env_new = StrategyGameEnv(map_file=None, opponent=eval_env_opp, render_mode=None, max_steps=args.max_steps)
-            eval_env_new.reset(seed=args.seed + 10_000)
-            eval_env = eval_env_new  # noqa: F841 — overrides outer eval_env
+            # Mutate the opponent locally so _make_strategy_env picks it up,
+            # then restore so downstream training keeps the requested
+            # training-time opponent. ``args.opponent`` is the only knob the
+            # helper reads from args for opponent selection.
+            orig_opp = args.opponent
+            args.opponent = eval_env_opp
+            try:
+                eval_env = _make_strategy_env(args, seed=args.seed + 10_000)  # noqa: F841 — overrides outer eval_env
+            finally:
+                args.opponent = orig_opp
         print(f"Self-play enabled: snapshot every {args.opponent_snapshot_freq:,} steps, pool={args.opponent_pool_size}")
 
     writer = SummaryWriter(str(log_dir / "tensorboard"))
@@ -565,6 +630,8 @@ def train_feudal_rl(args):
 _ARG_TO_CONFIG_PATH = {
     "opponent": "env.opponent",
     "n_envs": "env.n_envs",
+    "map_file": "env.map_file",
+    "max_turns": "env.max_turns",
     "total_timesteps": "total_timesteps",
     "seed": "seed",
     "device": "ppo.device",
@@ -621,6 +688,18 @@ def main():
 
     # Environment args
     parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random", "self"], help="Opponent type")
+    parser.add_argument(
+        "--map-file",
+        type=str,
+        default=None,
+        help="Path to map CSV. None = random map. YAML ``env.map_file`` is the more flexible knob.",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        help="Max game turns before auto-draw. None = unlimited. YAML ``env.max_turns`` is the more flexible knob.",
+    )
     parser.add_argument("--n-envs", type=int, default=4, help="Number of parallel environments")
     parser.add_argument(
         "--use-action-masking",
@@ -718,13 +797,19 @@ def main():
     parser.add_argument("--wandb-project", type=str, default="reinforcetactics", help="W&B project name")
     parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
 
+    loaded_cfg = None
     if pre_args.config:
         from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
 
-        cfg = load_config(pre_args.config)
-        parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
+        loaded_cfg = load_config(pre_args.config)
+        parser.set_defaults(**config_to_argparse_defaults(loaded_cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args()
+    # Carry the typed cfg through so env constructors can read non-scalar
+    # fields (reward_config, engine_overrides, enabled_units, opponent_kwargs)
+    # that argparse can't easily express. ``_make_strategy_env`` and the
+    # maskable factories both consult ``args._cfg.env`` when present.
+    args._cfg = loaded_cfg
 
     # Set device
     if args.device == "auto":

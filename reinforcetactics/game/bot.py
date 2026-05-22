@@ -356,7 +356,7 @@ class BalancedRandomBot(RandomBot):
 
     Use as a curriculum stepping stone between ``NoopBot`` (zero actions
     per turn) and ``RandomBot`` (up to ``max_actions=20`` actions per
-    turn) -- see configs/bootstrap.yaml.
+    turn) -- see configs/ppo/bootstrap.yaml.
     """
 
     # Map action_key -> attribute on the action dict that identifies the
@@ -1395,7 +1395,7 @@ class MixedBot(BotUnitMixin):
     ``advanced`` (AdvancedBot). Defaults bridge ``simple`` -> ``medium``.
 
     Use as a curriculum stepping stone via ``opponent_kwargs`` in
-    configs/bootstrap.yaml, e.g.
+    configs/ppo/bootstrap.yaml, e.g.
     ``{easy: simple, hard: medium, p_hard: 0.5}`` for the simple->medium
     bridge or ``{easy: medium, hard: advanced, p_hard: 0.5}`` for the
     medium->advanced bridge.

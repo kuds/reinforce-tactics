@@ -67,7 +67,7 @@ class StructuredActionMasks:
 # BalancedRandomBot, whose action throughput scales with army size (one
 # build attempt + one random action per owned unit per turn) -- a lighter,
 # more resilient stepping stone between ``"noop"`` and ``"random"``;
-# see configs/bootstrap.yaml.
+# see configs/ppo/bootstrap.yaml.
 # ``"self"`` is included so ``_opponent_turn`` calls ``self.opponent.take_turn()``
 # in self-play training. The training script provides the opponent bot itself
 # (a snapshot of the agent under training, typically wrapped by ModelBot)
@@ -311,7 +311,7 @@ class StrategyGameEnv(gym.Env):
             turn_scale: ``tanh`` divisor applied to ``turn_number``.
                 Default :data:`~reinforcetactics.rl.observation.TURN_SCALE`
                 (60) sits in the linear regime for the early-curriculum
-                ``max_turns`` range in ``configs/bootstrap.yaml`` (20-75)
+                ``max_turns`` range in ``configs/ppo/bootstrap.yaml`` (20-75)
                 and saturates gracefully on the longer late stages
                 (120-200).
             unit_count_scale: ``tanh`` divisor applied to per-side unit
@@ -449,7 +449,7 @@ class StrategyGameEnv(gym.Env):
             # (the failure mode that collapsed skirmish_simple), owned
             # captures punish letting the opponent take ground we already
             # held. Defaults are 0.0 so old reward_configs are unaffected;
-            # configs/bootstrap.yaml sets the active magnitudes.
+            # configs/ppo/bootstrap.yaml sets the active magnitudes.
             "enemy_neutral_capture": 0.0,
             "enemy_owned_capture": 0.0,
         }

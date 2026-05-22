@@ -417,9 +417,9 @@ Bigger efforts that grow the project's reach and research utility.
 - Track and visualize progress across stages.
 
 > **Status:** Implemented as the bootstrap stage runner
-> (`reinforcetactics/rl/bootstrap.py` + `configs/bootstrap.yaml`).
+> (`reinforcetactics/rl/bootstrap.py` + `configs/ppo/bootstrap.yaml`).
 > Win-rate-gated auto-advancement is live; sweep variants live under
-> `configs/bootstrap_sweep/`. The previous `make_curriculum_env()`
+> `configs/ppo/bootstrap_sweep/`. The previous `make_curriculum_env()`
 > three-preset API was removed in favour of this richer pipeline.
 >
 > **Dependency:** The 10×14 and 20×20 map stages require Phase 3.2 (Auto-Regressive

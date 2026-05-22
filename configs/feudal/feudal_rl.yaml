@@ -1,0 +1,86 @@
+# Feudal RL (Manager-Worker) training config.
+#
+# As of the env-passthrough refactor, ``env:`` honours the same schema the
+# PPO bootstrap uses (``reinforcetactics.rl.config.EnvConfig``). Reward
+# shaping, engine_overrides (unit-stat / economy deltas), enabled_units,
+# observation scales, and opponent_kwargs are all first-class here — no
+# more silently-dropped fields on the feudal path.
+algorithm: feudal
+total_timesteps: 10000000
+seed: 0
+
+env:
+  # Map / opponent selection.
+  map_file: null              # null = random maps; set to e.g. maps/1v1/beginner.csv to pin
+  opponent: bot
+  opponent_kwargs: null       # e.g. {max_actions: 10} for RandomBot, {easy: simple, hard: medium, p_hard: 0.5} for MixedBot
+  # Episode limits.
+  max_steps: 500
+  max_turns: null             # game-turn cap (null = unlimited)
+  max_actions_per_turn: null  # per-game-turn action cap before mask narrows to end_turn
+  # Rollout layout. Feudal's stateful rollout uses one env; raise n_envs to
+  # activate ``collect_rollout_vec`` (per-env goal/horizon state lives in
+  # the agent so envs can be plain StrategyGameEnv).
+  n_envs: 1
+  # Action / observation shape.
+  action_space_type: multi_discrete
+  max_flat_actions: 512
+  fog_of_war: false
+  enabled_units: null         # null = all unit types; list of codes (e.g. ["W", "A"]) to restrict
+  # Sparse engine overrides — first-class balance sweeps without editing
+  # constants.py. Same shape as configs/ppo/bootstrap.yaml: starting_gold,
+  # *_income scalars, and unit_data: {CODE: {field: delta, ...}}.
+  # Example (commented):
+  # engine_overrides:
+  #   starting_gold: 250
+  #   building_income: 100
+  #   unit_data:
+  #     K: {defence: 5}
+  #     W: {attack: 10}
+  engine_overrides: null
+  # Reward shaping. Empty / omitted = StrategyGameEnv defaults.
+  reward_config: null
+  # ``global_features`` tanh divisors — override if your engine_overrides
+  # push gold / unit counts out of the default linear regime.
+  gold_scale: 1000.0
+  turn_scale: 60.0
+  unit_count_scale: 20.0
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  device: auto
+  # LR schedule across the total budget. ``constant`` keeps base LR; ``linear``
+  # anneals to zero at total_timesteps.
+  lr_schedule: constant
+
+feudal:
+  manager_horizon: 10
+  worker_reward_alpha: 0.5
+  manager_lr_scale: 1.0
+  worker_lr_scale: 1.0
+  # AlphaStar-style autoregressive worker head with stage-conditional masking.
+  # Requires the env to expose structured_action_masks() (StrategyGameEnv does);
+  # falls back to unmasked sampling otherwise.
+  autoregressive_worker: false
+  # Multiplier on extrinsic rewards before they enter the rollout buffer.
+  # Default 1.0 keeps the env's reward shape; set to e.g. 0.001 when terminal
+  # win/loss magnitudes (±5000) blow up the value-function MSE.
+  reward_scale: 1.0
+
+eval:
+  eval_freq: 10000
+  n_eval_episodes: 10
+  checkpoint_freq: 50000
+
+logging:
+  log_dir: ./logs
+  tensorboard: true

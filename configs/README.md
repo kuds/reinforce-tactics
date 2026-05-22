@@ -3,25 +3,28 @@
 YAML configs for the training scripts in `train/`. Replaces previous
 hardcoded hyperparameter dicts.
 
-## Files
+## Layout
 
-| File | Algorithm | Notes |
+Configs are grouped by algorithm:
+
+| Path | Algorithm | Notes |
 |------|-----------|-------|
-| `maskable_ppo.yaml` | MaskablePPO | Default recommended setup |
-| `ppo_baseline.yaml` | PPO | Vanilla baseline, no masking |
-| `feudal_rl.yaml` | Feudal RL | Manager-Worker hierarchy |
-| `self_play.yaml` | Self-play | With opponent pool |
-| `alphazero.yaml` | AlphaZero | MCTS + policy/value network |
-| `bootstrap.yaml` | MaskablePPO | Full multi-stage curriculum (entry point for production training) |
-| `bootstrap_sweep/v*.yaml` | MaskablePPO | Per-axis sweep variants of `bootstrap.yaml` (entropy schedule, etc.) |
+| `ppo/maskable_ppo.yaml` | MaskablePPO | Default recommended setup |
+| `ppo/ppo_baseline.yaml` | PPO | Vanilla baseline, no masking |
+| `ppo/bootstrap.yaml` | MaskablePPO | Full multi-stage curriculum (entry point for production training) |
+| `ppo/bootstrap_sweep/v*.yaml` | MaskablePPO | Per-axis sweep variants of `ppo/bootstrap.yaml` (entropy schedule, etc.) |
+| `feudal/feudal_rl.yaml` | Feudal RL | Manager-Worker hierarchy |
+| `self_play/self_play.yaml` | Self-play | With opponent pool |
+| `alphazero/alphazero.yaml` | AlphaZero | MCTS + policy/value network |
+| `imitation/bc_scenarios.yaml` | Behavior cloning | Demonstration scenario mix for BC warm-start |
 
 ## Usage
 
 Training scripts accept `--config` and any CLI flag overrides:
 
 ```bash
-python scripts/train/train_feudal_rl.py --config configs/maskable_ppo.yaml
-python scripts/train/train_feudal_rl.py --config configs/maskable_ppo.yaml \
+python scripts/train/train_feudal_rl.py --config configs/ppo/maskable_ppo.yaml
+python scripts/train/train_feudal_rl.py --config configs/ppo/maskable_ppo.yaml \
     --total-timesteps 50000 --seed 42
 ```
 
@@ -30,7 +33,7 @@ Load programmatically:
 ```python
 from reinforcetactics.rl.config import load_config, apply_overrides
 
-cfg = load_config("configs/maskable_ppo.yaml")
+cfg = load_config("configs/ppo/maskable_ppo.yaml")
 cfg = apply_overrides(cfg, {"ppo.learning_rate": 1e-4})
 cfg.validate()
 ```

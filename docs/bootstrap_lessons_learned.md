@@ -426,7 +426,7 @@ set `win_speed_bonus: 0` and `enemy_owned_capture: 0` and
 `turn_penalty: -0.2` (the deep-run value, which works);
 `enemy_neutral_capture` may stay at `-8` if it has design value on
 neutral-contested maps, or be zeroed for minimalism. This is the
-basis for `configs/bootstrap_sweep/v28_production_reward_fixed.yaml`
+basis for `configs/ppo/bootstrap_sweep/v28_production_reward_fixed.yaml`
 (full 33-stage production curriculum, modern intended balance — see
 its header for the balance-vs-trainability note).
 
@@ -480,7 +480,7 @@ constant.
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 
 After the original 6-stage layout shipped, a long sweep
-(`configs/bootstrap_sweep/v15…v23`) tried to push the agent past the
+(`configs/ppo/bootstrap_sweep/v15…v23`) tried to push the agent past the
 `beginner_random_*` stages on a longer curriculum that adds
 `balanced_random` stepping stones, a `consolidate` stage, and a tail
 of intermediate / skirmish / corner_points maps. **Every run since v17

@@ -254,7 +254,7 @@ class TestCurriculumLoading:
         from reinforcetactics.rl.extractors import SpatialFeatureExtractor
 
         repo_root = Path(__file__).resolve().parents[1]
-        cfg = load_config(repo_root / "configs" / "bootstrap.yaml")
+        cfg = load_config(repo_root / "configs" / "ppo" / "bootstrap.yaml")
         kwargs = cfg.ppo.as_sb3_kwargs().get("policy_kwargs") or {}
         # As loaded, the value is still a string (YAML can't carry classes).
         assert isinstance(kwargs.get("features_extractor_class"), str)
@@ -277,7 +277,7 @@ class TestCurriculumLoading:
 
     def test_shipped_config_loads(self):
         repo_root = Path(__file__).resolve().parents[1]
-        cfg = load_config(repo_root / "configs" / "bootstrap.yaml")
+        cfg = load_config(repo_root / "configs" / "ppo" / "bootstrap.yaml")
         names = [s.name for s in cfg.curriculum.stages]
         # Earlier iterations included `noop` stages on each map as a
         # stage-0 sanity check; they actively prevented PPO from

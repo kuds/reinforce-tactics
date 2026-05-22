@@ -118,7 +118,7 @@ class TestEnvironmentCreation:
         Curriculum stepping stone between ``noop`` (zero opponent actions)
         and ``random`` (RandomBot's default 20 actions/turn). Action
         throughput scales with the bot's army size: one build attempt plus
-        one random action per owned unit per turn -- see configs/bootstrap.yaml.
+        one random action per owned unit per turn -- see configs/ppo/bootstrap.yaml.
         """
         from reinforcetactics.game.bot import BalancedRandomBot
 

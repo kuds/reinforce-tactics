@@ -14,7 +14,7 @@ reproducible without editing source. Supports:
 Usage:
     from reinforcetactics.rl.config import load_config, apply_overrides
 
-    cfg = load_config("configs/maskable_ppo.yaml")
+    cfg = load_config("configs/ppo/maskable_ppo.yaml")
     cfg = apply_overrides(cfg, {"ppo.learning_rate": 1e-4})
     model = MaskablePPO(**cfg.ppo.as_sb3_kwargs(), env=env)
 """
@@ -85,6 +85,12 @@ class EnvConfig:
     gold_scale: float = 1000.0
     turn_scale: float = 60.0
     unit_count_scale: float = 20.0
+    # Extra kwargs forwarded to the opponent bot's constructor (e.g.
+    # ``{max_actions: 10}`` for ``RandomBot``, ``{easy: simple, hard: medium,
+    # p_hard: 0.5}`` for ``MixedBot``). For the curriculum bootstrap path the
+    # per-stage :attr:`CurriculumStage.opponent_kwargs` takes precedence; for
+    # non-curriculum runs (feudal, flat baseline) this is the only knob.
+    opponent_kwargs: Optional[Dict[str, Any]] = None
 
 
 @dataclass
