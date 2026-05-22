@@ -29,14 +29,17 @@ easier are actively harder for PPO.
 5. **Watch `std=0.0` on eval episodes.** It's the single most diagnostic
    signal — it almost always means the policy is locked, not that the
    environment is deterministic by nature.
-6. **Curriculum handoffs need to carry the peak, and each stage needs to
-   actually train.** PPO drifts within a stage; the in-memory end-of-stage
-   policy is often weaker than the stage's `best_model.zip`. Restore the
-   best between stages (`restore_best_checkpoint_between_stages`). And a
-   strong handoff can promote a stage on its first eval with ~0 stage-
-   specific learning — the next harder stage then collapses. Gate
-   promotion with `min_timesteps_before_promotion` on noisy stochastic
-   stages so each stage actually learns before its handoff fires.
+6. **Carry the peak forward, but don't force overtraining.** PPO drifts
+   within a stage; the in-memory end-of-stage policy is often weaker than
+   the stage's `best_model.zip` — so restore the best between stages
+   (`restore_best_checkpoint_between_stages`, default on). But on
+   stochastic stages with the draw-with-shaping attractor, *additional
+   training past the policy's natural peak erodes the winning behaviour*.
+   v31 tested forcing more training via `min_timesteps_before_promotion`
+   and stalled one stage earlier than v28. The gate is kept in the code
+   as an opt-in feature but is **not** set on `*_random_N` stages in
+   production; PPO's natural promotion rhythm beats forced overtraining
+   on drift-attractor stages.
 
 ## The cold-start problem on this env
 
@@ -588,6 +591,82 @@ the gate).
    configs so the experimental narrative is legible: each
    v-number corresponds to one set of run records and one
    variable change vs its predecessor.
+
+### ⚠️ CORRECTION TO THE SKIP-AHEAD DIAGNOSIS — the gate hurt more than it helped
+
+The "Bug 2" section above is preserved as the *hypothesis we
+tested*. v31 (`min_timesteps_before_promotion: 500_000` on
+`beginner_random_{10,15,20}`) was run on 2026-05-23 to validate it
+and **stalled one stage earlier than v28 — at `beginner_random_10`
+itself.** The skip-ahead premise was wrong.
+
+**The data (run `20260523_042220`, `beginner_random_10`):**
+
+| timesteps | WR | note |
+|--|--|--|
+| 250,008 | **1.00** | pre-gate (discarded by callback) |
+| 300,000 | 0.01 | pre-gate (discarded) |
+| 350,000 | **0.925** | pre-gate (would-have-promoted with v28) |
+| 400,000 | **0.8375** | pre-gate (would-have-promoted with v28) |
+| 450,000 | 0.0375 | pre-gate; policy starting to drift |
+| 500,000 | 0.5875 | gate opens; policy already degraded |
+| → 1.75M | 0.0 – 0.5, never two ≥ 0.75 | post-gate chaos |
+
+Under v28's natural rhythm (no gate), `random_10` promoted on the
+`@350k / @400k` pair (0.925 + 0.8375). v31 discarded that pair as
+pre-gate and **kept training past the policy's peak**, which
+**degraded** the working policy via the draw-with-shaping
+attractor — the same mechanism the doc has warned about all along,
+but happening *within* `random_10` itself rather than at the
+handoff. The policy peaked early, additional training erased it.
+
+**Reconciling with v30 (the diagnostic that worked):** v30
+warm-started from **v29's** `random_10` best, which sat at
+cumulative ~600k env-steps (v29's longer probe prefix). v28's
+`random_10` best was at cumulative ~250k. The difference between
+"holds `random_15`" and "collapses on `random_15`" was **total
+cumulative training over the curriculum**, not stage-specific
+`random_10` training. The skip-ahead diagnosis aimed the gate at
+the wrong axis.
+
+**Also revealed: an implementation flaw, kept for the record.**
+`PromotionCallback.min_timesteps` is compared against
+`model.num_timesteps`, which is cumulative (since
+`reset_num_timesteps=False`). So a 500k value on `random_10` only
+forced ~250k of stage-specific training, not the 500k intended.
+Fixing this to be stage-relative would not help (and would in
+fact hurt more — the empirical signal is that *less* post-peak
+training is better, not more).
+
+**Updated lessons (supersede points 3–4 above):**
+
+3. **PPO's natural promotion rhythm beats forced additional
+   training on stages with the drift attractor.** Once a policy
+   crosses the competence threshold on a `*_random_N` stage,
+   continued PPO updates tend to erode the winning behaviour
+   rather than improve it. Don't lengthen these stages
+   artificially.
+4. **The amount-of-training-needed axis is *cumulative*, not
+   per-stage.** v30 cleared `random_15` not because it had more
+   `random_10` training, but because the policy entering
+   `random_15` had more total experience across the curriculum.
+   If a later stage needs a more robust entry policy, the lever
+   is the *earlier* stages or a separate BC warm-start — not
+   forcing the immediately-prior stage to overtrain past its
+   peak.
+5. **`min_timesteps_before_promotion` is kept in the code as an
+   opt-in feature, default 0, NOT set by any production config.**
+   It may be useful for non-stochastic stages where overtraining
+   doesn't risk the drift attractor — but `*_random_N` stages
+   should not use it.
+
+**Current production target (`v32_drop_gate_higher_eval.yaml`):**
+v28 with no gate, plus the long-deferred eval-noise lever applied
+to `beginner_random_15` (`n_eval_episodes: 80 → 160`, per-stage
+override). σ on the WR estimate halves, so a competent-but-noisy
+random_15 policy can sustain the patience-2 streak. v28 and v31
+are both retained as historical records ("no gate" and
+"with gate" experiments respectively).
 
 ## The curriculum-tuning sweep (v15–v23): what 9 variants taught us
 
