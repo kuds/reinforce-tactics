@@ -28,7 +28,7 @@ env:
   fog_of_war: false
   enabled_units: null         # null = all unit types; list of codes (e.g. ["W", "A"]) to restrict
   # Sparse engine overrides — first-class balance sweeps without editing
-  # constants.py. Same shape as configs/bootstrap.yaml: starting_gold,
+  # constants.py. Same shape as configs/ppo/bootstrap.yaml: starting_gold,
   # *_income scalars, and unit_data: {CODE: {field: delta, ...}}.
   # Example (commented):
   # engine_overrides:

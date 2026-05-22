@@ -5,7 +5,7 @@
 # exploration sweep on both ends. Flat stages unchanged.
 #
 # Sweep dimension: entropy schedule (per-stage ent_coef). Every other field is
-# identical to configs/bootstrap.yaml so result deltas can be attributed
+# identical to configs/ppo/bootstrap.yaml so result deltas can be attributed
 # cleanly to the entropy change.
 
 algorithm: maskable_ppo

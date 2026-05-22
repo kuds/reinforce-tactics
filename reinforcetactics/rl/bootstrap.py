@@ -25,7 +25,7 @@ Usage:
     from reinforcetactics.rl.bootstrap import run_curriculum
     from reinforcetactics.rl.config import load_config
 
-    cfg = load_config("configs/bootstrap.yaml")
+    cfg = load_config("configs/ppo/bootstrap.yaml")
     result = run_curriculum(cfg, output_dir="benchmarks/bootstrap")
     # result["final_model_path"] -> ready for self-play warm start
 """
@@ -787,7 +787,7 @@ def run_curriculum(
         # the PPO hyperparams used for this stage (with the resolved
         # ent_coef / schedule), the seed, and run metadata (git commit
         # + dirty flag, key library versions, hardware) -- enough to
-        # reproduce the stage even if configs/bootstrap.yaml drifts.
+        # reproduce the stage even if configs/ppo/bootstrap.yaml drifts.
         try:
             _write_stage_config(
                 stage=stage,

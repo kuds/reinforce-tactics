@@ -14,7 +14,7 @@ reproducible without editing source. Supports:
 Usage:
     from reinforcetactics.rl.config import load_config, apply_overrides
 
-    cfg = load_config("configs/maskable_ppo.yaml")
+    cfg = load_config("configs/ppo/maskable_ppo.yaml")
     cfg = apply_overrides(cfg, {"ppo.learning_rate": 1e-4})
     model = MaskablePPO(**cfg.ppo.as_sb3_kwargs(), env=env)
 """

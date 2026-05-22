@@ -40,10 +40,10 @@ grep -E '^STARTING_GOLD|^HEADQUARTERS_INCOME' "$WORKTREE/reinforcetactics/consta
 awk '/"W": \{/{f=1} f&&/"attack"/{print "  Warrior "$0; f=0}' "$WORKTREE/reinforcetactics/constants.py"
 awk '/"K": \{/{f=1} f&&/"defence"/{print "  Knight  "$0; f=0}' "$WORKTREE/reinforcetactics/constants.py"
 echo
-echo "config (configs/bootstrap.yaml):"
-grep -nE 'turn_penalty:' "$WORKTREE/configs/bootstrap.yaml" | head -1 | sed 's/^/  /'
-echo "  curriculum stages: $(grep -cE '^\s+- name:' "$WORKTREE/configs/bootstrap.yaml")"
-echo "  enabled_units in YAML: $(grep -c 'enabled_units' "$WORKTREE/configs/bootstrap.yaml" || true) (expected 0 -- roster is a notebook override)"
+echo "config (configs/ppo/bootstrap.yaml):"
+grep -nE 'turn_penalty:' "$WORKTREE/configs/ppo/bootstrap.yaml" | head -1 | sed 's/^/  /'
+echo "  curriculum stages: $(grep -cE '^\s+- name:' "$WORKTREE/configs/ppo/bootstrap.yaml")"
+echo "  enabled_units in YAML: $(grep -c 'enabled_units' "$WORKTREE/configs/ppo/bootstrap.yaml" || true) (expected 0 -- roster is a notebook override)"
 echo
 echo "roster override (notebooks/ppo_bootstrap.ipynb cell 11):"
 python3 - "$WORKTREE/notebooks/ppo_bootstrap.ipynb" <<'PY'

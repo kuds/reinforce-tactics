@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional YAML file describing a curated mix of demonstration scenarios "
-            "(see configs/bc_scenarios.yaml). When provided, --demonstrator / "
+            "(see configs/imitation/bc_scenarios.yaml). When provided, --demonstrator / "
             "--opponent / --map-file / --n-episodes are ignored for the BC phase; "
             "the env used for PPO fine-tuning still respects --opponent / --map-file."
         ),

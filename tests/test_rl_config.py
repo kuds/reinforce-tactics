@@ -370,11 +370,11 @@ class TestShippedConfigs:
     @pytest.mark.parametrize(
         "path",
         [
-            "configs/maskable_ppo.yaml",
-            "configs/ppo_baseline.yaml",
-            "configs/feudal_rl.yaml",
-            "configs/self_play.yaml",
-            "configs/alphazero.yaml",
+            "configs/ppo/maskable_ppo.yaml",
+            "configs/ppo/ppo_baseline.yaml",
+            "configs/feudal/feudal_rl.yaml",
+            "configs/self_play/self_play.yaml",
+            "configs/alphazero/alphazero.yaml",
         ],
     )
     def test_shipped_config_loads(self, path: str):

@@ -25,7 +25,7 @@
 #     noise and locked onto a draw-shaping equilibrium.
 #
 # Sweep dimension: per-stage ent_coef. All other fields match
-# configs/bootstrap.yaml so the entropy delta is attributable.
+# configs/ppo/bootstrap.yaml so the entropy delta is attributable.
 #
 # Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
 # Stages live under curriculum.stages; if a stage exhausts its

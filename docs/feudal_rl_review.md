@@ -25,7 +25,7 @@ remaining work.
 | Wasted per-dim mask capture in AR mode | `feudal_rl.py:1248` | `env_supports_masks` is now AND-ed with `not use_ar_masks`. |
 | Checkpoints lost runtime config (`manager_horizon`, `agent_player`) | `feudal_rl.py:1525` | `save_checkpoint` writes a `hyperparams` dict; `load_checkpoint` restores `manager_horizon`/`agent_player` and refuses to load if grid dims mismatch. |
 | Stale backward-compat branch in `load_checkpoint` | `feudal_rl.py` | Dead `optimizer` fallback removed. |
-| `autoregressive_worker` unreachable from training script | `train_feudal_rl.py:401`, `configs/feudal_rl.yaml:30` | New `--autoregressive-worker` CLI flag and `feudal.autoregressive_worker` YAML key, plumbed into `FeudalRLAgent(...)`. |
+| `autoregressive_worker` unreachable from training script | `train_feudal_rl.py:401`, `configs/feudal/feudal_rl.yaml:30` | New `--autoregressive-worker` CLI flag and `feudal.autoregressive_worker` YAML key, plumbed into `FeudalRLAgent(...)`. |
 | Missing seeding in feudal training path | `train_feudal_rl.py:198-205` | Seeds python `random`, numpy, torch, CUDA, and both env resets. |
 | W&B logged-but-unused in feudal mode | `train_feudal_rl.py:255-265` | New `_log()` helper writes every metric to TensorBoard *and* W&B (when enabled). |
 | `reward_breakdown` / `end_reasons` not surfaced | `train_feudal_rl.py:282-291` | Per-component reward sums and per-rollout end-reason counters logged each update. |
@@ -79,7 +79,7 @@ schedule, no grad-norm visibility).
 | Value-loss explosion from raw reward magnitudes | `feudal_rl.py:1278`, `train_feudal_rl.py:401` | `collect_rollout` accepts `reward_scale`; new `--reward-scale` CLI flag (and `feudal.reward_scale` YAML key). With Direction-A `±5000` terminals, `reward_scale=0.001` keeps `vf_coef * value_loss` in the same ballpark as the policy/entropy terms. |
 | Resume-from-checkpoint not wired | `train_feudal_rl.py:248-256`, `feudal_rl.py:1525,1583` | `save_checkpoint` accepts a `training_state` dict; `load_checkpoint` returns it. Training script's `--resume PATH` restores weights, optimizer state, `total_timesteps`, `best_eval_*`, and the eval/checkpoint high-watermarks so cadence picks up cleanly. |
 | Brittle eval/checkpoint scheduling (`% eval_freq < n_steps`) | `train_feudal_rl.py:354,392` | Replaced with high-watermark gating (`total_timesteps - last_eval_step >= eval_freq`), plus a forced eval on the final update. Robust to any `n_steps` that doesn't divide `eval_freq` evenly. |
-| No LR scheduling | `train_feudal_rl.py:268-289`, `configs/feudal_rl.yaml:24` | New `--lr-schedule {constant,linear}` with linear-anneal-to-zero across `total_timesteps`. Multiplier is logged as `train/lr_mult`. |
+| No LR scheduling | `train_feudal_rl.py:268-289`, `configs/feudal/feudal_rl.yaml:24` | New `--lr-schedule {constant,linear}` with linear-anneal-to-zero across `total_timesteps`. Multiplier is logged as `train/lr_mult`. |
 | No per-network gradient-norm visibility | `feudal_rl.py:1479,1503` | `update()` now returns `worker_grad_norm` and `manager_grad_norm` (the pre-clip total norms returned by `clip_grad_norm_`). Surfaced to TensorBoard / W&B and printed in the per-update progress line. |
 | Best-checkpoint criterion was reward-only | `train_feudal_rl.py:367-385` | Best model now picked on `(win_rate, mean_reward)` tuple — wins are dominant in this env's reward shape; mean-reward is a tiebreak. |
 
