@@ -168,8 +168,6 @@ class TestMasterBotHasteFollowthrough:
         # Mark some tiles as capturable enemy structures within move
         # range of the warrior. Place warrior at (5, 5); towers at
         # (5, 4) and (5, 3) -- both reachable (movement=3).
-        from reinforcetactics.core.tile import Tile
-
         # Replace tiles with enemy-owned towers.
         for tx, ty in [(5, 4), (5, 3)]:
             tile = simple_game.grid.get_tile(tx, ty)
@@ -225,7 +223,6 @@ class TestMasterBotSorcererHasteTargeting:
         simple_game.create_unit("S", 6, 5, 2)
         simple_game.create_unit("W", 5, 5, 2)
         sorcerer = next(u for u in simple_game.units if u.type == "S")
-        warrior = next(u for u in simple_game.units if u.type == "W" and u.player == 2)
         # Disable existing haste cooldowns so the test setup matches a
         # fresh-Sorcerer scenario.
         sorcerer.haste_cooldown = 0
