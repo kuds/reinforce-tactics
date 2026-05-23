@@ -1,0 +1,79 @@
+# Behavior-cloning warm-start scenarios for v33_production_bc_warmstart.
+#
+# Tailored to the curriculum wall: a strong policy on beginner.csv with the
+# proven [W, M, C, A, K] roster, ready to slot into the production curriculum
+# via warm_start_path. The mix prioritises *diversity of opponent behaviour*
+# over teacher strength — a policy that's only seen MediumBot vs MediumBot
+# overfits to deterministic play and collapses against random opponents
+# (which is the wall we're trying to escape, so the lesson applies pre-emptively).
+#
+# Constraints (current imitation.py infrastructure):
+#   * All scenarios must share map dimensions (DemonstrationDataset stacks
+#     observations into one tensor). Locked to beginner.csv (6x6).
+#   * enabled_units must be the same across scenarios. Locked to [W,M,C,A,K].
+#   * max_turns matches the curriculum's beginner-stage cap (75).
+#   * Demonstrations are NOT padded to the curriculum-wide (10,12) shape;
+#     v33 must use a beginner-only curriculum to match shapes. Extending to
+#     multi-size maps requires threading pad_to_size through
+#     collect_demonstrations -- deferred until the BC hypothesis is validated.
+#
+# Total demos: ~250 episodes (with weighting). Each ~50-100 demonstrator
+# actions => ~15-25k (obs, action, mask) tuples -- substantial supervised
+# dataset.
+scenarios:
+  # Anchor: balanced bot vs balanced bot. Teaches the basics -- build, advance,
+  # attack -- on the proven roster the curriculum uses.
+  - name: medium_vs_medium
+    map_file: maps/1v1/beginner.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: medium
+    n_episodes: 60
+    max_turns: 75
+    weight: 1.0
+
+  # AdvancedBot demonstrator vs MediumBot. Slightly higher-quality
+  # demonstrations; AdvancedBot uses map analysis and ability heuristics
+  # the curriculum's reward shape rewards.
+  - name: advanced_vs_medium
+    map_file: maps/1v1/beginner.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 40
+    max_turns: 75
+    weight: 1.0
+
+  # Exposure to stochastic opponents -- the exact failure mode the
+  # curriculum stalls on. MediumBot vs RandomBot teaches the policy that
+  # opponents play unpredictably; the demonstrator state distribution
+  # covers the random_N stages the curriculum has been collapsing on.
+  - name: medium_vs_random
+    map_file: maps/1v1/beginner.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: random
+    n_episodes: 60
+    max_turns: 75
+    weight: 1.5
+
+  - name: advanced_vs_random
+    map_file: maps/1v1/beginner.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: random
+    n_episodes: 60
+    max_turns: 75
+    weight: 1.5
+
+  # Balanced-random opponent: a deterministic bot with random tie-breaks.
+  # The curriculum's first beginner stage uses this opponent class; give
+  # the BC policy direct exposure to its play patterns.
+  - name: medium_vs_balanced_random
+    map_file: maps/1v1/beginner.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: balanced_random
+    n_episodes: 30
+    max_turns: 75
+    weight: 1.0
