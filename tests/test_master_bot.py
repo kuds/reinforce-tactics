@@ -62,9 +62,7 @@ class TestMasterBotThreatMap:
         # The archer's own tile is not threatened by itself (it's the
         # archer that's attacking, not standing on a danger zone).
         # But adjacent tiles or 2 away should be threatened.
-        archer_threats = [
-            v for (x, y), v in threat.items() if abs(x - 5) + abs(y - 3) in (2, 3)
-        ]
+        archer_threats = [v for (x, y), v in threat.items() if abs(x - 5) + abs(y - 3) in (2, 3)]
         assert any(v > 0 for v in archer_threats)
 
     def test_threat_at_excludes_specific_enemy(self, simple_game):

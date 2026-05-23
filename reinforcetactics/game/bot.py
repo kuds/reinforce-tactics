@@ -2432,11 +2432,7 @@ class MasterBot(AdvancedBot):
         width = self.game_state.grid.width
         height = self.game_state.grid.height
 
-        enemies = [
-            u
-            for u in self.game_state.units
-            if u.player != self.bot_player and u.health > 0 and not u.is_paralyzed()
-        ]
+        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0 and not u.is_paralyzed()]
 
         for enemy in enemies:
             base_damage = self._enemy_base_damage(enemy)
@@ -2582,9 +2578,7 @@ class MasterBot(AdvancedBot):
             for attacker in ordered:
                 if not (attacker.can_move or attacker.can_attack) or enemy.health <= 0:
                     continue
-                attackable = self.game_state.mechanics.get_attackable_enemies(
-                    attacker, [enemy], self.game_state.grid
-                )
+                attackable = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
                 if enemy in attackable:
                     self.game_state.attack(attacker, enemy)
                     continue
@@ -2592,9 +2586,7 @@ class MasterBot(AdvancedBot):
                 if target_pos is None:
                     continue
                 self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
-                attackable_after = self.game_state.mechanics.get_attackable_enemies(
-                    attacker, [enemy], self.game_state.grid
-                )
+                attackable_after = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
                 if enemy in attackable_after and enemy.health > 0:
                     self.game_state.attack(attacker, enemy)
 
