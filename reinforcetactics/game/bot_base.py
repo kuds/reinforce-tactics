@@ -221,6 +221,8 @@ class BotUnitMixin:
         capture progress.
         """
         for unit in units:
+            if self.game_state.game_over:
+                return
             if not (unit.can_move or unit.can_attack):
                 continue
             if self.is_actively_capturing(unit):

@@ -132,6 +132,17 @@ class GameState:
         self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: Optional[int] = None
+        # Why the game ended. Populated alongside ``game_over`` by
+        # ``_set_game_over``. Values: ``hq_capture``, ``elimination``,
+        # ``max_turns_draw``, ``resign``. Replays surface this so videos
+        # and the load-game UI can explain *how* a game finished without
+        # re-deriving it from actions[].
+        self.end_reason: Optional[str] = None
+        # Index into ``action_history`` of the action that flipped
+        # ``game_over``. None until the game ends. Lets replay viewers
+        # jump to the decisive moment and lets analysis count any
+        # post-victory actions a bot may have queued.
+        self.game_over_action_index: Optional[int] = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
 
@@ -254,6 +265,23 @@ class GameState:
         self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
+    def _set_game_over(self, winner: Optional[int], end_reason: str) -> None:
+        """Single chokepoint for flipping ``game_over``.
+
+        Records the winner, end reason, and the index of the action that
+        caused the game to end (or -1 if no action was recorded yet,
+        e.g. a max-turns draw that triggers before any new action is
+        appended). Idempotent: first call wins; later attempts to set a
+        different reason are ignored so a post-game action can't
+        overwrite the real cause.
+        """
+        if self.game_over:
+            return
+        self.game_over = True
+        self.winner = winner
+        self.end_reason = end_reason
+        self.game_over_action_index = len(self.action_history) - 1 if self.action_history else -1
+
     def _check_player_eliminated(self, defeated_player: int) -> None:
         """Check if a player has been eliminated and determine winner if appropriate.
 
@@ -263,13 +291,11 @@ class GameState:
         remaining_units = [u for u in self.units if u.player == defeated_player]
         if len(remaining_units) == 0:
             if self.num_players == 2:
-                self.game_over = True
-                self.winner = 2 if defeated_player == 1 else 1
+                self._set_game_over(winner=2 if defeated_player == 1 else 1, end_reason="elimination")
             else:
                 active_players = set(u.player for u in self.units)
                 if len(active_players) == 1:
-                    self.game_over = True
-                    self.winner = active_players.pop()
+                    self._set_game_over(winner=active_players.pop(), end_reason="elimination")
 
     def update_visibility(self, player: Optional[int] = None) -> None:
         """
@@ -757,8 +783,7 @@ class GameState:
         )
 
         if result["game_over"]:
-            self.game_over = True
-            self.winner = unit.player
+            self._set_game_over(winner=unit.player, end_reason="hq_capture")
 
         unit.can_move = False
         unit.can_attack = False
@@ -911,9 +936,7 @@ class GameState:
 
             # Check max_turns limit (checked once per full round, after all players have gone)
             if self.max_turns is not None and self.turn_number >= self.max_turns:
-                self.game_over = True
-                # No winner on max_turns draw
-                self.winner = None
+                self._set_game_over(winner=None, end_reason="max_turns_draw")
                 return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
 
         # Handle paralysis and enable units
@@ -975,13 +998,14 @@ class GameState:
         self._invalidate_cache()
 
         if self.num_players == 2:
-            self.game_over = True
-            self.winner = 2 if player == 1 else 1
+            self._set_game_over(winner=2 if player == 1 else 1, end_reason="resign")
         else:
             active_players = set(u.player for u in self.units)
             if len(active_players) <= 1:
-                self.game_over = True
-                self.winner = active_players.pop() if active_players else None
+                self._set_game_over(
+                    winner=active_players.pop() if active_players else None,
+                    end_reason="resign",
+                )
 
     def get_legal_actions(self, player: Optional[int] = None) -> Dict[str, List[Any]]:
         """
@@ -1318,6 +1342,8 @@ class GameState:
             "total_turns": self.turn_number,
             "winner": self.winner,
             "game_over": self.game_over,
+            "end_reason": self.end_reason,
+            "winning_action_index": self.game_over_action_index,
             "start_time": self.game_start_time.isoformat(),
             "end_time": datetime.now().isoformat(),
             "map_file": self.map_file_used,
@@ -1363,6 +1389,8 @@ class GameState:
         game.turn_number = save_data.get("turn_number", 0)
         game.game_over = save_data.get("game_over", False)
         game.winner = save_data.get("winner")
+        game.end_reason = save_data.get("end_reason")
+        game.game_over_action_index = save_data.get("winning_action_index")
 
         # Fix player_gold dictionary key type (JSON serializes as strings)
         saved_gold = save_data.get("player_gold", {})

@@ -192,9 +192,19 @@ def record_evaluation_to_video(
             last_frame = renderer.get_rgb_array()
             writer.write(last_frame)
 
-        # Hold last frame for 1 second so viewer can see final state
-        for _ in range(fps):
-            writer.write(last_frame)
+        # Hold last frame with a game-over caption so viewers can see who
+        # won (or why the episode ended) instead of staring at an unmarked
+        # mid-board freeze.
+        gs_final = _get_gs()
+        eval_game_info = {
+            "winner": info.get("winner") or (gs_final.winner if gs_final.game_over else None),
+            "total_turns": gs_final.turn_number,
+            "max_turns": gs_final.max_turns,
+            "end_reason": info.get("end_reason"),
+        }
+        final_frame = _overlay_game_over(last_frame, eval_game_info, gs_final)
+        for _ in range(3 * fps):
+            writer.write(final_frame)
 
     video_path = output_path
 
@@ -317,18 +327,104 @@ def record_replay_to_video(
         last_frame = renderer.get_rgb_array()
         writer.write(last_frame)
 
-        # Execute each action and capture frame
+        # Execute each action and capture frame. Stop the moment the game
+        # ends so we don't replay post-victory "cosmetic" actions that some
+        # older replays accumulated (bots that didn't break out of their
+        # per-unit loop on game_over -- now fixed, but old saved replays
+        # still carry the trailing actions). This also keeps end_turn()
+        # from advancing current_player/turn_number past the actual end,
+        # which would otherwise make the closing-frame overlay misreport
+        # the final turn number.
         for action in actions:
             _execute_replay_action(game_state, action, _translate)
             renderer.render()
             last_frame = renderer.get_rgb_array()
             writer.write(last_frame)
+            if game_state.game_over:
+                break
 
-        # Hold last frame
-        for _ in range(fps):
-            writer.write(last_frame)
+        # Hold last frame with a "Game Over -- Winner: X" overlay so viewers
+        # can see how the game ended. Tournament replays don't record an
+        # explicit end_reason, so we synthesise one from game_info + final
+        # state.
+        final_frame = _overlay_game_over(last_frame, game_info, game_state)
+        for _ in range(3 * fps):
+            writer.write(final_frame)
 
     return output_path
+
+
+def _overlay_game_over(frame, game_info: Dict[str, Any], game_state) -> np.ndarray:
+    """Stamp a "Game Over -- Winner: X" caption onto the final frame.
+
+    Used to give the held closing frame a visible end-state caption -- the
+    bare renderer has no game-over UI of its own, so without this the video
+    just freezes on an ordinary mid-board frame and looks truncated.
+    """
+    import pygame
+
+    winner = game_info.get("winner")
+    winner_name = game_info.get("winner_name")
+    if not winner_name:
+        if winner in (1, 2):
+            winner_name = f"Player {winner}"
+        elif winner == 0 or winner is None:
+            winner_name = "Draw"
+
+    turns = game_info.get("total_turns") or game_info.get("turns") or game_state.turn_number
+    max_turns = game_info.get("max_turns") or game_state.max_turns
+    end_reason = game_info.get("end_reason") or getattr(game_state, "end_reason", None)
+
+    reason_label = {
+        "hq_capture": "HQ Captured",
+        "elimination": "Elimination",
+        "resign": "Resignation",
+        "max_turns_draw": "Turn Limit",
+        "max_steps_truncate": "Step Limit",
+    }.get(end_reason or "", None)
+
+    if winner in (1, 2):
+        headline = "Game Over"
+        subline = f"Winner: {winner_name}  (Turn {turns})"
+        if reason_label:
+            subline += f"  --  {reason_label}"
+    else:
+        # Distinguish max-turns draw from any other draw. Prefer engine-
+        # reported end_reason; fall back to a turn-count heuristic for old
+        # replays that don't carry end_reason.
+        if end_reason == "max_turns_draw" or (not end_reason and max_turns and turns and turns >= max_turns):
+            headline = "Draw -- Turn Limit"
+        else:
+            headline = "Draw"
+        subline = f"Turn {turns}" + (f" / {max_turns}" if max_turns else "")
+
+    h, w = frame.shape[:2]
+    surface = pygame.image.frombuffer(np.ascontiguousarray(frame).tobytes(), (w, h), "RGB").convert()
+
+    # Translucent backdrop so text reads on any underlying tile.
+    band_h = max(48, int(h * 0.22))
+    band_y = (h - band_h) // 2
+    band = pygame.Surface((w, band_h), pygame.SRCALPHA)
+    band.fill((0, 0, 0, 180))
+    surface.blit(band, (0, band_y))
+
+    from reinforcetactics.utils.fonts import get_font
+
+    head_size = max(18, min(48, w // 12))
+    sub_size = max(12, min(28, w // 20))
+    head_font = get_font(head_size)
+    sub_font = get_font(sub_size)
+
+    head_surf = head_font.render(headline, True, (255, 235, 120))
+    sub_surf = sub_font.render(subline, True, (235, 235, 235))
+
+    spacing = 6
+    total_h = head_surf.get_height() + spacing + sub_surf.get_height()
+    top = band_y + (band_h - total_h) // 2
+    surface.blit(head_surf, head_surf.get_rect(midtop=(w // 2, top)))
+    surface.blit(sub_surf, sub_surf.get_rect(midtop=(w // 2, top + head_surf.get_height() + spacing)))
+
+    return np.frombuffer(pygame.image.tostring(surface, "RGB"), dtype=np.uint8).reshape((h, w, 3))
 
 
 def _execute_replay_action(game_state, action, translate_fn):
