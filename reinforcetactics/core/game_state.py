@@ -805,13 +805,23 @@ class GameState:
         tile = self.grid.get_tile(unit.x, unit.y)
         result = self.mechanics.seize_structure(unit, tile)
 
-        # Record action
+        # Record action. tile_hp_after / tile_owner_after let the v2
+        # replay player set tile state directly instead of re-calling
+        # mechanics.seize_structure -- which would decrement by
+        # unit.health and only match the original if every prior
+        # action's HP-mutation reproduced exactly. Without this,
+        # any replay that starts from a partially-damaged tile (e.g.
+        # a unit-test that pokes tile.health) desyncs immediately.
+        # mechanics.seize_structure also clears tile.regenerating on
+        # any successful call, so we don't need to record it separately.
         self.record_action(
             "seize",
             unit_type=unit.type,
             position=(unit.x, unit.y),
             structure_type=tile.type,
             captured=result["captured"],
+            tile_hp_after=tile.health,
+            tile_owner_after=tile.player,
             player=unit.player,
         )
 

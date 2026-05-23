@@ -15,6 +15,7 @@ import numpy as np
 from reinforcetactics.utils.replay_actions import (
     apply_recorded_attack,
     apply_recorded_heal,
+    apply_recorded_seize,
     get_schema_version,
 )
 
@@ -471,10 +472,13 @@ def _execute_replay_action(game_state, action, translate_fn, schema_version: int
                 if attacker and target:
                     game_state.attack(attacker, target)
         elif action_type == "seize":
-            pos = translate_fn(*action["position"])
-            unit = game_state.get_unit_at_position(*pos)
-            if unit:
-                game_state.seize(unit)
+            if schema_version >= 2:
+                apply_recorded_seize(game_state, action, translate_fn)
+            else:
+                pos = translate_fn(*action["position"])
+                unit = game_state.get_unit_at_position(*pos)
+                if unit:
+                    game_state.seize(unit)
         elif action_type == "paralyze":
             pp = translate_fn(*action["paralyzer_pos"])
             tp = translate_fn(*action["target_pos"])

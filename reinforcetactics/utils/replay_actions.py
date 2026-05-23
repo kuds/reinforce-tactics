@@ -82,6 +82,39 @@ def apply_recorded_attack(game_state, action: Dict[str, Any], translate_fn: Call
     game_state._invalidate_cache()
 
 
+def apply_recorded_seize(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+    """Apply a v2 ``seize`` action by mutating tile state directly.
+
+    Mirrors the post-mechanics work in ``GameState.seize``: set tile
+    health and owner from the record, clear ``regenerating`` (which
+    ``mechanics.seize_structure`` always does on a successful call),
+    fire ``hq_capture`` end-game on a captured HQ, and lock out the
+    seizer for the rest of the turn.
+    """
+    position = translate_fn(*action["position"])
+    unit = game_state.get_unit_at_position(*position)
+    if unit is None:
+        return
+
+    tile = game_state.grid.get_tile(*position)
+
+    # Record-driven tile state. Fall back to the live tile values if
+    # the record was written by a pre-v2 engine (the dispatcher only
+    # routes us here when schema >= 2, but be defensive).
+    if "tile_hp_after" in action:
+        tile.health = action["tile_hp_after"]
+    if "tile_owner_after" in action:
+        tile.player = action["tile_owner_after"]
+    tile.regenerating = False
+
+    if action.get("captured") and action.get("structure_type") == "h":
+        game_state._set_game_over(winner=unit.player, end_reason="hq_capture")
+
+    unit.can_move = False
+    unit.can_attack = False
+    game_state._invalidate_cache()
+
+
 def apply_recorded_heal(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
     """Apply a v2 ``heal`` action by setting target HP directly.
 

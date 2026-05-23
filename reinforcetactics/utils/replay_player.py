@@ -14,6 +14,7 @@ from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
 from reinforcetactics.utils.replay_actions import (
     apply_recorded_attack,
     apply_recorded_heal,
+    apply_recorded_seize,
     get_schema_version,
 )
 from reinforcetactics.ui.icons import (
@@ -279,12 +280,14 @@ class ReplayPlayer:
                         self.game_state.attack(attacker, target)
 
             elif action_type == "seize":
-                # Translate coordinates from original to padded
-                orig_position = action["position"]
-                position = self._translate_coords(*orig_position)
-                unit = self.game_state.get_unit_at_position(*position)
-                if unit:
-                    self.game_state.seize(unit)
+                if self.schema_version >= 2:
+                    apply_recorded_seize(self.game_state, action, self._translate_coords)
+                else:
+                    orig_position = action["position"]
+                    position = self._translate_coords(*orig_position)
+                    unit = self.game_state.get_unit_at_position(*position)
+                    if unit:
+                        self.game_state.seize(unit)
 
             elif action_type == "paralyze":
                 # Translate coordinates from original to padded

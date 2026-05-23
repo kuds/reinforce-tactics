@@ -223,36 +223,29 @@ def test_elimination_via_counter_kill(tmp_path):
 def test_hq_capture(tmp_path):
     """A unit captures the enemy HQ -- ``hq_capture`` end_reason.
 
-    Seizes naturally across many turns rather than manipulating
-    ``tile.health`` directly: the seize action record currently
-    carries only ``captured: bool`` (no ``tile_hp_after`` yet), so
-    the replay must produce the same tile-HP decrement trajectory
-    organically. Phase 4 should extend the seize record so manual
-    tile-state setup doesn't desync replays.
+    Manipulates ``tile.health`` directly so a single seize finishes
+    it. Pre-phase-4 the seize record didn't carry tile state, so the
+    replay's ``mechanics.seize_structure`` started from full HQ
+    health and the structure never flipped -- replay diverged. The
+    v2 seize record (``tile_hp_after`` + ``tile_owner_after``) makes
+    this case self-contained.
     """
-    g = _make_game(max_turns=200)
+    g = _make_game()
     seizer = g.create_unit("W", 4, 4, player=1)
     _enable(seizer)
+    hq_tile = g.grid.get_tile(4, 4)  # h_2 location
+    hq_tile.health = 1
 
-    # Seize -> end P1 turn -> end P2 turn -> repeat. Keeps the same
-    # unit pinned on the HQ tile until the structure flips. Bounded
-    # by a generous turn limit so a balance change to seize damage
-    # can't hang the test.
-    max_iters = 100
-    for _ in range(max_iters):
-        if g.game_over:
-            break
-        seizer.can_move = True
-        seizer.can_attack = True
-        g.seize(seizer)
-        if g.game_over:
-            break
-        g.end_turn()  # P1 -> P2
-        g.end_turn()  # P2 -> P1 (next round)
+    g.seize(seizer)
 
-    assert g.game_over, "expected game_over from HQ capture within iteration budget"
+    assert g.game_over, "expected game_over from HQ capture"
     assert g.end_reason == "hq_capture"
     assert g.winner == 1
+
+    # Sanity-check the new v2 seize fields.
+    seize_record = next(a for a in g.action_history if a["type"] == "seize")
+    assert seize_record["tile_owner_after"] == 1
+    assert seize_record["captured"] is True
 
     path = _save_replay(g, tmp_path)
     _assert_replay_matches(g, path)
@@ -281,6 +274,47 @@ def test_resign(tmp_path):
     assert g.game_over and g.end_reason == "resign" and g.winner == 2
 
     path = _save_replay(g, tmp_path)
+    _assert_replay_matches(g, path)
+
+
+def test_rogue_forest_evade_outcome_is_captured(tmp_path):
+    """Force a Rogue to attack from a forest tile (where the counter-evade
+    probability is 15% + 15% = 30%). The recorded ``evade`` flag must
+    reflect what actually happened, and the v2 replay must reproduce
+    the same outcome under a different RNG seed.
+
+    The user's phase 4 ask: "capture that outcome when there are aspects
+    of RNG (like if the rogue evaded the attack when on a forest) so
+    that they are entirely self contained".
+    """
+    random.seed(0)  # pin the original roll so the recorded outcome is reproducible
+
+    g = _make_game()
+    # The SMALL_MAP has an 'f' forest tile at (3, 2). Spawn a Rogue
+    # there and a Warrior next to it so the attack provokes a counter
+    # which then exercises the evade roll.
+    forest_tile = g.grid.get_tile(3, 2)
+    assert forest_tile.type == "f", f"expected forest at (3,2), got {forest_tile.type}"
+
+    rogue = g.create_unit("R", 3, 2, player=1)
+    target = g.create_unit("W", 3, 3, player=2)
+    _enable(rogue)
+    _enable(target)
+    # Keep both well above one-shot range so the counter actually
+    # gets a chance to fire (or evade).
+    rogue.health = rogue.max_health
+    target.health = max(rogue.health + 5, target.max_health)
+
+    g.attack(rogue, target)
+
+    attack_record = next(a for a in g.action_history if a["type"] == "attack")
+    # The evade field is the captured RNG outcome; it must be a bool.
+    assert isinstance(attack_record["evade"], bool)
+    assert attack_record["attacker_pos"] == (3, 2), "attacker should still be on forest"
+
+    path = _save_replay(g, tmp_path)
+    # _replay re-seeds RNG to 12345 -- different from 0 above. The v2
+    # path never re-rolls evade, so the recorded outcome must hold.
     _assert_replay_matches(g, path)
 
 
