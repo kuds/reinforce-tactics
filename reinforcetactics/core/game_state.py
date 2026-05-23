@@ -1336,6 +1336,8 @@ class GameState:
 
                 enhanced_player_configs.append(enhanced_config)
 
+        from reinforcetactics import __version__ as _rt_version
+
         game_info = {
             "num_players": self.num_players,
             "max_turns": self.max_turns,
@@ -1352,6 +1354,7 @@ class GameState:
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
+            "library_version": _rt_version,
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)

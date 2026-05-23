@@ -407,6 +407,8 @@ class TournamentRunner:
         if end_reason is None and game_state.game_over and winner == 0:
             end_reason = "max_turns_draw"
 
+        from reinforcetactics import __version__ as _rt_version
+
         game_info = {
             "bot1": bot1_desc.name,
             "bot2": bot2_desc.name,
@@ -421,6 +423,7 @@ class TournamentRunner:
             "game_over": game_state.game_over,
             "end_reason": end_reason,
             "winning_action_index": game_state.game_over_action_index,
+            "library_version": _rt_version,
             "player_configs": [
                 GameState.build_player_config(
                     player_no=1,

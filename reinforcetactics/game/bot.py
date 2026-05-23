@@ -895,6 +895,14 @@ class MediumBot(BotUnitMixin, BaseBot):
                 continue
 
             for attacker in attackers:
+                # Skip attackers killed by an earlier counterattack in this
+                # focus-fire group. The engine doesn't gate ``attack()`` on
+                # ``attacker.health > 0``, so a dead reference here would
+                # still deal damage live -- but the replay re-execution
+                # looks up the attacker by position and finds nothing,
+                # diverging the rebuilt state from the original.
+                if attacker.health <= 0:
+                    continue
                 if not (attacker.can_move or attacker.can_attack):
                     continue
 
@@ -2399,12 +2407,17 @@ class MasterBot(AdvancedBot):
                 return
             if enemy.health <= 0:
                 continue
-            still_alive = [a for a in attackers if (a.can_move or a.can_attack)]
+            # Filter on health here too: an earlier killable group's
+            # counterattack can have killed one of these attackers, and
+            # the engine doesn't refuse to call attack() on a dead unit.
+            still_alive = [a for a in attackers if a.health > 0 and (a.can_move or a.can_attack)]
             if not still_alive:
                 continue
             # Hp-asc execution order: chipped units swing first.
             ordered = sorted(still_alive, key=lambda a: a.health)
             for attacker in ordered:
+                if attacker.health <= 0:
+                    continue
                 if not (attacker.can_move or attacker.can_attack) or enemy.health <= 0:
                     continue
                 attackable = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
