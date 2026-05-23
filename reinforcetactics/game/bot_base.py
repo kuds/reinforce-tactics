@@ -19,7 +19,7 @@ Provides:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 from reinforcetactics.constants import UNIT_DATA
 
@@ -294,9 +294,15 @@ class BotUnitMixin:
         if not in_range:
             return False
 
+        # UNIT_DATA values are heterogeneous (the ``attack`` field is a
+        # dict for ranged casters) so mypy widens the lookup to ``object``;
+        # cast to int for the cost field, which is always int.
+        def _unit_cost(e: Any) -> int:
+            return cast(int, UNIT_DATA[e.type]["cost"])
+
         capturing = [e for e in in_range if self._is_capturing_us(e)]
         if capturing:
-            target = max(capturing, key=lambda e: UNIT_DATA[e.type]["cost"])
+            target = max(capturing, key=_unit_cost)
             self.game_state.paralyze(unit, target)
             return True
 
@@ -311,6 +317,6 @@ class BotUnitMixin:
         if not worth_paralyzing:
             return False
 
-        target = max(worth_paralyzing, key=lambda e: UNIT_DATA[e.type]["cost"])
+        target = max(worth_paralyzing, key=_unit_cost)
         self.game_state.paralyze(unit, target)
         return True
