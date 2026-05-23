@@ -3,7 +3,7 @@ Reinforce Tactics Tournament Library.
 
 This package provides a unified tournament system for running round-robin
 tournaments between bots. It supports:
-- Built-in bots (SimpleBot, MediumBot, AdvancedBot)
+- Built-in bots (SimpleBot, MediumBot, AdvancedBot, MasterBot)
 - LLM bots (OpenAI, Anthropic, Google)
 - Trained model bots
 - Elo rating tracking
