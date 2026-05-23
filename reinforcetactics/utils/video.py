@@ -54,14 +54,14 @@ def record_game_to_video(
     if not game_states:
         raise ValueError("No game states to record")
 
-    frames = []
-    for state_dict in game_states:
-        gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
-        renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
-        renderer.render()
-        frames.append(renderer.get_rgb_array())
+    def _frames():
+        for state_dict in game_states:
+            gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
+            renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
+            renderer.render()
+            yield renderer.get_rgb_array()
 
-    return _write_frames_to_video(frames, output_path, fps, scale=scale)
+    return _write_frames_to_video(_frames(), output_path, fps, scale=scale)
 
 
 def record_evaluation_to_video(
@@ -154,47 +154,49 @@ def record_evaluation_to_video(
     # Create headless renderer after reset so game_state is fresh
     renderer = Renderer(_get_gs(), replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
-    frames = []
     step_stats: List[Dict[str, Any]] = [_snapshot()]
-
-    # Capture initial state
-    renderer.render()
-    frames.append(renderer.get_rgb_array())
 
     total_reward = 0.0
     steps = 0
     done = False
 
-    while not done and steps < max_steps:
-        predict_kwargs = dict(deterministic=deterministic)
-        if _has_masks:
-            predict_kwargs["action_masks"] = env.action_masks()
-        action, _ = model.predict(obs, **predict_kwargs)
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        steps += 1
-        done = terminated or truncated
-
-        step_stats.append(
-            _snapshot(
-                action_type=info.get("action_type"),
-                unit_type=info.get("unit_type"),
-                reward=float(reward),
-                reward_breakdown=info.get("reward_breakdown"),
-                valid_action=info.get("valid_action"),
-            )
-        )
-
-        # Capture frame after each action
-        renderer.game_state = _get_gs()
+    with _VideoWriter(output_path, fps, scale=scale) as writer:
+        # Capture initial state
         renderer.render()
-        frames.append(renderer.get_rgb_array())
+        last_frame = renderer.get_rgb_array()
+        writer.write(last_frame)
 
-    # Hold last frame for 1 second so viewer can see final state
-    for _ in range(fps):
-        frames.append(frames[-1])
+        while not done and steps < max_steps:
+            predict_kwargs = dict(deterministic=deterministic)
+            if _has_masks:
+                predict_kwargs["action_masks"] = env.action_masks()
+            action, _ = model.predict(obs, **predict_kwargs)
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+            steps += 1
+            done = terminated or truncated
 
-    video_path = _write_frames_to_video(frames, output_path, fps, scale=scale)
+            step_stats.append(
+                _snapshot(
+                    action_type=info.get("action_type"),
+                    unit_type=info.get("unit_type"),
+                    reward=float(reward),
+                    reward_breakdown=info.get("reward_breakdown"),
+                    valid_action=info.get("valid_action"),
+                )
+            )
+
+            # Capture frame after each action
+            renderer.game_state = _get_gs()
+            renderer.render()
+            last_frame = renderer.get_rgb_array()
+            writer.write(last_frame)
+
+        # Hold last frame for 1 second so viewer can see final state
+        for _ in range(fps):
+            writer.write(last_frame)
+
+    video_path = output_path
 
     gs = _get_gs()
     winner = info.get("winner") or (gs.winner if gs.game_over else None)
@@ -305,27 +307,28 @@ def record_replay_to_video(
     game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
     renderer = Renderer(game_state, replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
-    frames = []
-
-    # Capture initial state
-    renderer.render()
-    frames.append(renderer.get_rgb_array())
-
     # Helper to translate coordinates
     def _translate(x, y):
         return x + offset_x, y + offset_y
 
-    # Execute each action and capture frame
-    for action in actions:
-        _execute_replay_action(game_state, action, _translate)
+    with _VideoWriter(output_path, fps, scale=scale) as writer:
+        # Capture initial state
         renderer.render()
-        frames.append(renderer.get_rgb_array())
+        last_frame = renderer.get_rgb_array()
+        writer.write(last_frame)
 
-    # Hold last frame
-    for _ in range(fps):
-        frames.append(frames[-1])
+        # Execute each action and capture frame
+        for action in actions:
+            _execute_replay_action(game_state, action, _translate)
+            renderer.render()
+            last_frame = renderer.get_rgb_array()
+            writer.write(last_frame)
 
-    return _write_frames_to_video(frames, output_path, fps, scale=scale)
+        # Hold last frame
+        for _ in range(fps):
+            writer.write(last_frame)
+
+    return output_path
 
 
 def _execute_replay_action(game_state, action, translate_fn):
@@ -406,89 +409,129 @@ def _execute_replay_action(game_state, action, translate_fn):
         logger.warning("Error executing replay action %s: %s", action_type, e)
 
 
-def _write_frames_to_video(frames: list, output_path: str, fps: int, scale: int = 1) -> str:
-    """Write a list of RGB numpy arrays to an MP4 video file.
+class _VideoWriter:
+    """Streaming MP4 writer: encodes one frame at a time so the full video
+    is never held in memory at once. Dozens of long games can be rendered
+    back-to-back without OOMing.
 
     ``scale`` upscales each frame with nearest-neighbour interpolation
     before encoding so small grids (a 6x6 map renders at 192x192 px)
     produce crisp, readable video.
 
-    Prefers ``imageio`` with the bundled ffmpeg backend (produces H.264
-    MP4s that play in QuickTime / browsers / VLC). Falls back to
-    ``cv2.VideoWriter`` with the legacy ``mp4v`` codec when the ffmpeg
-    backend is unavailable — that codec is readable by ``cv2`` but
-    is rejected or shows decode artefacts in many mainstream players.
+    Prefers ``imageio`` with the bundled ffmpeg backend (H.264 MP4s that
+    play in QuickTime / browsers / VLC). Falls back to ``cv2.VideoWriter``
+    with the legacy ``mp4v`` codec when the ffmpeg backend is unavailable.
+    Backend is chosen on the first ``write`` call so the source frame size
+    is known and we can correct odd dimensions (yuv420p needs even width
+    and height).
     """
-    if not frames:
-        raise ValueError("No frames to write")
 
-    # Ensure output directory exists
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, output_path: str, fps: int, scale: int = 1):
+        self.output_path = str(output_path)
+        self.fps = fps
+        self.scale = max(1, int(scale))
+        self._writer: Any = None
+        self._cv2_writer: Any = None
+        self._target_wh: Optional[tuple] = None
+        self._need_resize = False
+        self._n_frames = 0
+        self._backend = "unknown"
+        self._closed = False
 
-    src_h, src_w = frames[0].shape[:2]
-    scale = max(1, int(scale))
-    width, height = src_w * scale, src_h * scale
+    def __enter__(self):
+        return self
 
-    if scale != 1:
-        import cv2
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
-        upscaled = [cv2.resize(f, (width, height), interpolation=cv2.INTER_NEAREST) for f in frames]
-    else:
-        upscaled = list(frames)
-
-    try:
-        import imageio.v3 as iio
-        import imageio_ffmpeg  # noqa: F401
-
-        # yuv420p requires even width/height — INTER_NEAREST upscaling at
-        # any positive integer scale preserves divisibility from an even
-        # source, but defend if the source itself is odd-sized.
-        if width % 2 or height % 2:
+    def write(self, frame) -> None:
+        if self._closed:
+            raise RuntimeError("VideoWriter already closed")
+        if self._writer is None and self._cv2_writer is None:
+            self._lazy_init(frame)
+        conformed = self._conform(frame)
+        if self._writer is not None:
+            self._writer.append_data(conformed)
+        else:
             import cv2
 
-            width += width % 2
-            height += height % 2
-            upscaled = [cv2.resize(f, (width, height), interpolation=cv2.INTER_NEAREST) for f in upscaled]
+            self._cv2_writer.write(cv2.cvtColor(conformed, cv2.COLOR_RGB2BGR))
+        self._n_frames += 1
 
-        iio.imwrite(
-            output_path,
-            np.stack(upscaled),
-            fps=fps,
-            codec="libx264",
-            pixelformat="yuv420p",
-            macro_block_size=1,
-        )
-        logger.info(
-            "Video saved to %s (%d frames, %.1fs at %d fps, h264)",
-            output_path,
-            len(upscaled),
-            len(upscaled) / fps,
-            fps,
-        )
-        return output_path
-    except (ImportError, Exception) as exc:  # noqa: BLE001
-        logger.warning(
-            "imageio/ffmpeg unavailable (%s); falling back to cv2 mp4v (may not play in QuickTime/Preview)",
-            exc,
-        )
+    def _lazy_init(self, first_frame) -> None:
+        Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
+        src_h, src_w = first_frame.shape[:2]
+        width = src_w * self.scale
+        height = src_h * self.scale
+        # yuv420p requires even width/height
+        width += width % 2
+        height += height % 2
+        self._target_wh = (width, height)
+        self._need_resize = (width, height) != (src_w, src_h)
 
-    import cv2
+        try:
+            import imageio
+            import imageio_ffmpeg  # noqa: F401
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
-    writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            self._writer = imageio.get_writer(
+                self.output_path,
+                fps=self.fps,
+                codec="libx264",
+                pixelformat="yuv420p",
+                macro_block_size=1,
+            )
+            self._backend = "h264"
+            return
+        except (ImportError, Exception) as exc:  # noqa: BLE001
+            logger.warning(
+                "imageio/ffmpeg unavailable (%s); falling back to cv2 mp4v (may not play in QuickTime/Preview)",
+                exc,
+            )
 
-    for frame in upscaled:
-        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        writer.write(bgr)
+        import cv2
 
-    writer.release()
-    logger.info(
-        "Video saved to %s (%d frames, %.1fs at %d fps, mp4v fallback)",
-        output_path,
-        len(upscaled),
-        len(upscaled) / fps,
-        fps,
-    )
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
+        self._cv2_writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, (width, height))
+        self._backend = "mp4v"
+
+    def _conform(self, frame):
+        if not self._need_resize:
+            return frame
+        import cv2
+
+        return cv2.resize(frame, self._target_wh, interpolation=cv2.INTER_NEAREST)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._writer is not None:
+            self._writer.close()
+        if self._cv2_writer is not None:
+            self._cv2_writer.release()
+        if self._n_frames > 0:
+            logger.info(
+                "Video saved to %s (%d frames, %.1fs at %d fps, %s)",
+                self.output_path,
+                self._n_frames,
+                self._n_frames / self.fps,
+                self.fps,
+                self._backend,
+            )
+
+
+def _write_frames_to_video(frames, output_path: str, fps: int, scale: int = 1) -> str:
+    """Stream an iterable of RGB ndarrays to an MP4. Memory stays bounded
+    at ~one frame regardless of total length.
+    """
+    n = 0
+    with _VideoWriter(output_path, fps, scale=scale) as writer:
+        for frame in frames:
+            writer.write(frame)
+            n += 1
+    if n == 0:
+        raise ValueError("No frames to write")
     return output_path
 
 
