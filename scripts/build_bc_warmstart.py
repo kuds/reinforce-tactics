@@ -108,7 +108,7 @@ def main() -> int:
     if not scenarios_path.is_file():
         print(f"Error: scenarios file not found: {scenarios_path}", file=sys.stderr)
         return 1
-    scenarios = load_scenarios_from_yaml(scenarios_path)
+    scenarios = load_scenarios_from_yaml(str(scenarios_path))
 
     # Template env: the policy network shapes are built around this env's
     # spaces, so it must match the curriculum env v33 will use. Action space
@@ -128,8 +128,10 @@ def main() -> int:
     print(f"  scenarios: {scenarios_path} ({len(scenarios)} entries)")
     total_eps = sum(int(s.n_episodes * s.weight) for s in scenarios)
     print(f"  total weighted episodes: ~{total_eps}")
-    print(f"  template env: map={args.map_file} units={args.enabled_units} "
-          f"max_turns={args.max_turns} action_space=multi_discrete")
+    print(
+        f"  template env: map={args.map_file} units={args.enabled_units} "
+        f"max_turns={args.max_turns} action_space=multi_discrete"
+    )
     print(f"  BC: {args.epochs} epochs, batch={args.batch_size}, lr={args.learning_rate}")
     print(f"  output: {output_path}")
     print("=" * 64)
@@ -161,7 +163,7 @@ def main() -> int:
     print()
     print("Next step: set this path in v33's warm_start_path and run the")
     print("production curriculum:")
-    print(f'  warm_start_path: {output_path}')
+    print(f"  warm_start_path: {output_path}")
     return 0
 
 
