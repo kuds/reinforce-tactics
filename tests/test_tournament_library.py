@@ -319,6 +319,68 @@ class TestSchedulingLibrary:
         assert len(schedule[0]) == 2
         assert len(schedule[1]) == 2
 
+    def test_all_mode_interleaves_matchups(self):
+        """In 'all' mode with multiple maps, each map's round should play one
+        game per matchup before any matchup gets its second game. This is the
+        Elo-accuracy fix: incremental Elo is order-dependent, and interleaving
+        prevents a bot's rating from getting locked in by a back-to-back block
+        of games against the same opponent.
+        """
+        bots = [
+            BotDescriptor.simple_bot("A"),
+            BotDescriptor.simple_bot("B"),
+            BotDescriptor.simple_bot("C"),
+            BotDescriptor.simple_bot("D"),
+        ]
+        maps = [
+            MapConfig(path="maps/m1.csv", max_turns=500),
+            MapConfig(path="maps/m2.csv", max_turns=500),
+        ]
+        schedule, _ = generate_round_robin_schedule(
+            bots=bots,
+            map_configs=maps,
+            games_per_side=2,
+            map_pool_mode="all",
+        )
+
+        # 4 bots = 6 matchups; games_per_side=2 means 2 P1-games each side
+        # per matchup = 4 games per matchup. Across 2 maps that's 48 games
+        # in 2 rounds (one per map). Sanity-check the total first.
+        assert sum(len(r) for r in schedule) == 48
+
+        # Within each map round, the FIRST 6 games should cover all 6
+        # matchups exactly once (each bot1-as-P1). The next 6 should be
+        # the bot2-as-P1 sweep. The OLD back-to-back layout would have put
+        # all 4 games of matchup (A, B) first instead.
+        for round_games in schedule:
+            first_six = round_games[:6]
+            pairs = {tuple(sorted([g.bot1.name, g.bot2.name])) for g in first_six}
+            assert len(pairs) == 6, f"expected 6 distinct matchups in the first sweep, got {pairs}"
+
+    def test_all_mode_alternates_sides_across_passes(self):
+        """The interleave should alternate which side plays P1 between
+        passes within a map, so a bot's rating against a given opponent
+        gets calibrated from both sides before further games.
+        """
+        bots = [BotDescriptor.simple_bot("A"), BotDescriptor.simple_bot("B")]
+        maps = [
+            MapConfig(path="maps/m1.csv", max_turns=500),
+            MapConfig(path="maps/m2.csv", max_turns=500),
+        ]
+        schedule, _ = generate_round_robin_schedule(
+            bots=bots,
+            map_configs=maps,
+            games_per_side=2,
+            map_pool_mode="all",
+        )
+
+        # Single matchup, 2 games-per-side -> 4 games per map.
+        # Expected pass order: (A-P1, B-P1, A-P1, B-P1)
+        for round_games in schedule:
+            assert len(round_games) == 4
+            p1_names = [g.bot1.name for g in round_games]
+            assert p1_names == ["A", "B", "A", "B"], p1_names
+
     def test_scheduled_game_properties(self):
         """Test ScheduledGame properties."""
         bot1 = BotDescriptor.simple_bot("Bot1")

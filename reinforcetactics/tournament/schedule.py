@@ -170,13 +170,24 @@ def generate_round_robin_schedule(
     skipped_games = 0
 
     if map_pool_mode == "all" and len(map_configs) > 1:
-        # Play each map for all matchups before moving to next map
+        # Within each map's round, interleave matchups so each bot's first
+        # game against every opponent is scheduled before any second
+        # game. This is the key fix for order-dependent incremental Elo:
+        # the old loop played all N games of a matchup back-to-back, so
+        # whichever bot's hard pairings came first finished its block at
+        # a depressed rating, and the later wins against weaker
+        # opponents over-credited that bot. Interleaving lets each bot's
+        # rating update against a calibrated mix at each "level".
         for round_idx, map_config in enumerate(map_configs):
             round_games: list[ScheduledGame] = []
             map_name = map_config.name
 
+            # Compute per-matchup pending counts up front so we know how
+            # many interleave passes are needed. Resume support stays the
+            # same -- a fully-completed matchup just contributes zero
+            # games to each pass.
+            needs: list[tuple] = []
             for bot1, bot2 in matchups:
-                # Check how many games still need to be played
                 if completed_matches:
                     bot1_needed, bot2_needed = _get_pending_games(
                         bot1.name,
@@ -188,13 +199,20 @@ def generate_round_robin_schedule(
                 else:
                     bot1_needed = games_per_side
                     bot2_needed = games_per_side
-
-                # Track skipped games
                 skipped_games += games_per_side - bot1_needed
                 skipped_games += games_per_side - bot2_needed
+                needs.append((bot1, bot2, bot1_needed, bot2_needed))
 
-                # Add games with bot1 as player 1
-                for _ in range(bot1_needed):
+            # Each ``pass`` schedules one bot1-as-P1 game and one
+            # bot2-as-P1 game for every matchup that still has games left
+            # in that slot. games_per_side passes = games_per_side games
+            # per side per matchup, matching the previous total.
+            max_passes = max((max(n1, n2) for _, _, n1, n2 in needs), default=0)
+            for pass_idx in range(max_passes):
+                # bot1-as-P1 sweep across all matchups
+                for bot1, bot2, n1, _ in needs:
+                    if pass_idx >= n1:
+                        continue
                     round_games.append(
                         ScheduledGame(
                             game_id=game_id,
@@ -206,9 +224,10 @@ def generate_round_robin_schedule(
                         )
                     )
                     game_id += 1
-
-                # Add games with bot2 as player 1
-                for _ in range(bot2_needed):
+                # bot2-as-P1 sweep across all matchups
+                for bot1, bot2, _, n2 in needs:
+                    if pass_idx >= n2:
+                        continue
                     round_games.append(
                         ScheduledGame(
                             game_id=game_id,
