@@ -22,6 +22,12 @@ from reinforcetactics.ui.icons import (
     get_x_icon,
 )
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.replay_actions import (
+    apply_recorded_attack,
+    apply_recorded_heal,
+    apply_recorded_seize,
+    get_schema_version,
+)
 
 # Optional OpenCV import for video export
 try:
@@ -59,6 +65,11 @@ class ReplayPlayer:
         self.current_action_index = 0
         self.playing = False
         self.paused = True
+
+        # v2 replays carry per-action outcome data so we can apply
+        # recorded effects directly instead of re-calling the engine.
+        # v1 (legacy) replays fall through to the recompute path.
+        self.schema_version = get_schema_version(self.game_info)
         self.playback_speed = 1.0  # 1x speed
         self.last_action_time = time.time()
 
@@ -222,6 +233,13 @@ class ReplayPlayer:
         """
         action_type = action.get("type")
 
+        # Defensive: don't apply post-victory actions if any survive in
+        # an older replay. Newly-saved (v2) replays can't contain them
+        # because record_action early-returns on game_over, but we still
+        # get v1 files in saves/ and tournament_results/.
+        if self.game_state.game_over:
+            return
+
         try:
             if action_type == "create_unit":
                 # Translate coordinates from original to padded
@@ -243,24 +261,33 @@ class ReplayPlayer:
                     self.game_state.move_unit(unit, to_x, to_y)
 
             elif action_type == "attack":
-                # Translate coordinates from original to padded
-                orig_attacker_pos = action["attacker_pos"]
-                orig_target_pos = action["target_pos"]
-                attacker_pos = self._translate_coords(*orig_attacker_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                attacker = self.game_state.get_unit_at_position(*attacker_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
+                if self.schema_version >= 2:
+                    # v2: apply recorded outcome directly. No RNG re-roll,
+                    # no damage recomputation -- the only path that's
+                    # immune to mechanics drift and Rogue evade variance.
+                    apply_recorded_attack(self.game_state, action, self._translate_coords)
+                else:
+                    # v1 legacy: re-run the engine. Vulnerable to RNG
+                    # divergence and missing counter-kill information.
+                    orig_attacker_pos = action["attacker_pos"]
+                    orig_target_pos = action["target_pos"]
+                    attacker_pos = self._translate_coords(*orig_attacker_pos)
+                    target_pos = self._translate_coords(*orig_target_pos)
+                    attacker = self.game_state.get_unit_at_position(*attacker_pos)
+                    target = self.game_state.get_unit_at_position(*target_pos)
 
-                if attacker and target:
-                    self.game_state.attack(attacker, target)
+                    if attacker and target:
+                        self.game_state.attack(attacker, target)
 
             elif action_type == "seize":
-                # Translate coordinates from original to padded
-                orig_position = action["position"]
-                position = self._translate_coords(*orig_position)
-                unit = self.game_state.get_unit_at_position(*position)
-                if unit:
-                    self.game_state.seize(unit)
+                if self.schema_version >= 2:
+                    apply_recorded_seize(self.game_state, action, self._translate_coords)
+                else:
+                    orig_position = action["position"]
+                    position = self._translate_coords(*orig_position)
+                    unit = self.game_state.get_unit_at_position(*position)
+                    if unit:
+                        self.game_state.seize(unit)
 
             elif action_type == "paralyze":
                 # Translate coordinates from original to padded
@@ -274,15 +301,17 @@ class ReplayPlayer:
                     self.game_state.paralyze(paralyzer, target)
 
             elif action_type == "heal":
-                # Translate coordinates from original to padded
-                orig_healer_pos = action["healer_pos"]
-                orig_target_pos = action["target_pos"]
-                healer_pos = self._translate_coords(*orig_healer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                healer = self.game_state.get_unit_at_position(*healer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if healer and target:
-                    self.game_state.heal(healer, target)
+                if self.schema_version >= 2:
+                    apply_recorded_heal(self.game_state, action, self._translate_coords)
+                else:
+                    orig_healer_pos = action["healer_pos"]
+                    orig_target_pos = action["target_pos"]
+                    healer_pos = self._translate_coords(*orig_healer_pos)
+                    target_pos = self._translate_coords(*orig_target_pos)
+                    healer = self.game_state.get_unit_at_position(*healer_pos)
+                    target = self.game_state.get_unit_at_position(*target_pos)
+                    if healer and target:
+                        self.game_state.heal(healer, target)
 
             elif action_type == "cure":
                 # Translate coordinates from original to padded

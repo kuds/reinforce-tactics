@@ -409,6 +409,13 @@ class TournamentRunner:
 
         from reinforcetactics import __version__ as _rt_version
 
+        # Final-state snapshot. Used by the replay-determinism test as a
+        # checksum -- after running the action log through the replay
+        # player, the simulated game_state.units must match these counts
+        # and HP totals or the replay diverged.
+        final_units_p1 = [u for u in game_state.units if u.player == 1]
+        final_units_p2 = [u for u in game_state.units if u.player == 2]
+
         game_info = {
             "bot1": bot1_desc.name,
             "bot2": bot2_desc.name,
@@ -424,6 +431,11 @@ class TournamentRunner:
             "end_reason": end_reason,
             "winning_action_index": game_state.game_over_action_index,
             "library_version": _rt_version,
+            "replay_schema_version": 2,
+            "final_units_p1": len(final_units_p1),
+            "final_units_p2": len(final_units_p2),
+            "final_hp_total_p1": sum(u.health for u in final_units_p1),
+            "final_hp_total_p2": sum(u.health for u in final_units_p2),
             "player_configs": [
                 GameState.build_player_config(
                     player_no=1,

@@ -452,6 +452,15 @@ class GameState:
             action_type: Type of action (move, attack, create_unit, etc.)
             **kwargs: Action-specific parameters (coordinates will be converted)
         """
+        # Don't log anything once the game has been decided. Without this,
+        # bots that don't break their per-unit loop on game_over append
+        # cosmetic moves (and end_turn) after the winning action, which
+        # makes len(actions) > winning_action_index + 1 and inflates
+        # turn_number past the real end of the game. The single-chokepoint
+        # guard here covers all 12 record_action sites in one place.
+        if self.game_over:
+            return
+
         # Convert coordinate parameters from padded to original
         converted_kwargs = {}
         for key, value in kwargs.items():
@@ -618,7 +627,13 @@ class GameState:
         """
         result = self.mechanics.attack_unit(attacker, target, self.grid, self.units)
 
-        # Record action
+        # Record action. The extra fields (attacker_killed, counter_damage,
+        # *_hp_after, evade, *_bonus) are what makes the replay
+        # self-describing -- without them the replay player would have
+        # to re-call mechanics.attack_unit, which re-rolls Rogue evade
+        # RNG (mechanics.py: ``random.random() < evade_chance``) and
+        # recomputes damage against the replay's potentially-diverged
+        # unit HP. Recording the outcome lets replay apply it directly.
         self.record_action(
             "attack",
             attacker_type=attacker.type,
@@ -627,6 +642,15 @@ class GameState:
             target_pos=(target.x, target.y),
             damage=result["damage"],
             target_killed=not result["target_alive"],
+            attacker_killed=not result["attacker_alive"],
+            counter_damage=result["counter_damage"],
+            attacker_hp_after=attacker.health if result["attacker_alive"] else 0,
+            target_hp_after=target.health if result["target_alive"] else 0,
+            evade=result["evade"],
+            charge_bonus=result["charge_bonus"],
+            flank_bonus=result["flank_bonus"],
+            attack_buff=result["attack_buff"],
+            defence_buff=result["defence_buff"],
             player=attacker.player,
         )
 
@@ -676,8 +700,17 @@ class GameState:
         if amount > 0:
             healer.can_move = False
             healer.can_attack = False
+            # target_hp_after lets the replay player set HP directly
+            # instead of re-calling mechanics.heal_unit (the only path
+            # today that could observe HEAL_AMOUNT drift between save
+            # and replay).
             self.record_action(
-                "heal", healer_pos=(healer.x, healer.y), target_pos=(target.x, target.y), amount=amount, player=healer.player
+                "heal",
+                healer_pos=(healer.x, healer.y),
+                target_pos=(target.x, target.y),
+                amount=amount,
+                target_hp_after=target.health,
+                player=healer.player,
             )
             self._invalidate_cache()
         return amount
@@ -772,13 +805,23 @@ class GameState:
         tile = self.grid.get_tile(unit.x, unit.y)
         result = self.mechanics.seize_structure(unit, tile)
 
-        # Record action
+        # Record action. tile_hp_after / tile_owner_after let the v2
+        # replay player set tile state directly instead of re-calling
+        # mechanics.seize_structure -- which would decrement by
+        # unit.health and only match the original if every prior
+        # action's HP-mutation reproduced exactly. Without this,
+        # any replay that starts from a partially-damaged tile (e.g.
+        # a unit-test that pokes tile.health) desyncs immediately.
+        # mechanics.seize_structure also clears tile.regenerating on
+        # any successful call, so we don't need to record it separately.
         self.record_action(
             "seize",
             unit_type=unit.type,
             position=(unit.x, unit.y),
             structure_type=tile.type,
             captured=result["captured"],
+            tile_hp_after=tile.health,
+            tile_owner_after=tile.player,
             player=unit.player,
         )
 
@@ -915,6 +958,14 @@ class GameState:
 
     def end_turn(self) -> Dict[str, Any]:
         """End the current player's turn and pass to the next player."""
+        # No-op once the game has ended. Prevents turn_number from being
+        # bumped past the winning turn (which would otherwise make
+        # game_info.turns disagree with max(action.turn) in the replay)
+        # and avoids running structure regen / paralysis decrement /
+        # max_turns checks on a finished game.
+        if self.game_over:
+            return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
+
         # Record action
         self.record_action("end_turn", player=self.current_player)
 
@@ -1338,6 +1389,14 @@ class GameState:
 
         from reinforcetactics import __version__ as _rt_version
 
+        # Final-state snapshot doubles as a replay-integrity checksum;
+        # see runner._save_replay for the same fields.
+        final_units_by_player: Dict[int, list] = {}
+        for u in self.units:
+            final_units_by_player.setdefault(u.player, []).append(u)
+        final_counts = {p: len(us) for p, us in final_units_by_player.items()}
+        final_hp = {p: sum(u.health for u in us) for p, us in final_units_by_player.items()}
+
         game_info = {
             "num_players": self.num_players,
             "max_turns": self.max_turns,
@@ -1355,6 +1414,9 @@ class GameState:
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
             "library_version": _rt_version,
+            "replay_schema_version": 2,
+            "final_unit_counts": final_counts,
+            "final_hp_totals": final_hp,
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
