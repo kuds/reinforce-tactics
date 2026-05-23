@@ -33,7 +33,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 def parse_args() -> argparse.Namespace:
@@ -169,7 +169,7 @@ def main() -> int:
     print(f"  output: {output_path}")
     print("=" * 64)
 
-    ppo_kwargs = {"verbose": 0}
+    ppo_kwargs: dict[str, Any] = {"verbose": 0}
     if policy_kwargs:
         ppo_kwargs["policy_kwargs"] = policy_kwargs
 
