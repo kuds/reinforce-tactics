@@ -430,8 +430,8 @@ class _VideoWriter:
         self.output_path = str(output_path)
         self.fps = fps
         self.scale = max(1, int(scale))
-        self._writer = None
-        self._cv2_writer = None
+        self._writer: Any = None
+        self._cv2_writer: Any = None
         self._target_wh: Optional[tuple] = None
         self._need_resize = False
         self._n_frames = 0
