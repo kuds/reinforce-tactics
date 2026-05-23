@@ -11,12 +11,6 @@ import pandas as pd
 import pygame
 
 from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
-from reinforcetactics.utils.replay_actions import (
-    apply_recorded_attack,
-    apply_recorded_heal,
-    apply_recorded_seize,
-    get_schema_version,
-)
 from reinforcetactics.ui.icons import (
     get_arrow_left_icon,
     get_arrow_right_icon,
@@ -28,6 +22,12 @@ from reinforcetactics.ui.icons import (
     get_x_icon,
 )
 from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.replay_actions import (
+    apply_recorded_attack,
+    apply_recorded_heal,
+    apply_recorded_seize,
+    get_schema_version,
+)
 
 # Optional OpenCV import for video export
 try:

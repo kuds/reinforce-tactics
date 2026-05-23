@@ -22,21 +22,24 @@ record and playback must not change the outcome.
 
 import os
 import random
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
-import pytest
 
 # ``video.py`` initialises pygame, but ``_execute_replay_action``
 # itself never renders, so we just need a headless SDL driver.
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from reinforcetactics.core.game_state import GameState
-from reinforcetactics.utils.file_io import FileIO
-from reinforcetactics.utils.replay_actions import get_schema_version
-from reinforcetactics.utils.video import _execute_replay_action
+from reinforcetactics.core.game_state import GameState  # noqa: E402
+from reinforcetactics.utils.file_io import FileIO  # noqa: E402
+from reinforcetactics.utils.replay_actions import get_schema_version  # noqa: E402
+from reinforcetactics.utils.video import _execute_replay_action  # noqa: E402
+
+
+def _translate(x: int, y: int) -> Tuple[int, int]:
+    """Identity coord translator (tests use unpadded maps directly)."""
+    return (x, y)
 
 
 # ----------------------------------------------------------------- map
@@ -110,9 +113,8 @@ def _replay(path: str) -> Tuple[GameState, Dict[str, Any]]:
     # outcomes directly.
     random.seed(12345)
 
-    translate = lambda x, y: (x, y)
     for action in actions:
-        _execute_replay_action(replay_game, action, translate, schema)
+        _execute_replay_action(replay_game, action, _translate, schema)
         if replay_game.game_over:
             break
 
