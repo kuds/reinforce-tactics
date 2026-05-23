@@ -235,6 +235,11 @@ class ReplayPlayer:
                 # Find the unit at the translated position
                 unit = self.game_state.get_unit_at_position(from_x, from_y)
                 if unit and unit.player == action["player"]:
+                    # Trust the recorded action: enable the move so the engine's
+                    # ``can_move`` guard doesn't block replay of legal actions
+                    # (e.g. a unit created earlier in this same turn whose
+                    # ``can_move`` flips to True only at next turn start).
+                    unit.can_move = True
                     self.game_state.move_unit(unit, to_x, to_y)
 
             elif action_type == "attack":

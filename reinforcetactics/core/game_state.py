@@ -531,6 +531,15 @@ class GameState:
         """
         from_x, from_y = unit.x, unit.y
 
+        # Reject duplicate moves: bot/RL/LLM call sites don't all gate on
+        # ``unit.can_move`` before calling, and ``get_reachable_positions``
+        # ignores it too, so without this check a unit could be moved more
+        # than once per turn (producing duplicate "move" events in replays
+        # and illegal positioning in-game).
+        if not unit.can_move:
+            logger.debug(f"Cannot move {unit.type} at ({unit.x}, {unit.y}): can_move is False")
+            return False
+
         # Check if move is valid
         reachable = unit.get_reachable_positions(
             self.grid.width,
