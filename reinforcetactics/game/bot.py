@@ -298,6 +298,12 @@ class SimpleBot(BotUnitMixin, BaseBot):
         """Determine and execute best action for a single unit."""
         if _depth >= MAX_RECURSION_DEPTH:
             return
+        # Stop issuing actions once a prior action (typically a kill or HQ
+        # capture) flipped game_over -- otherwise we keep appending cosmetic
+        # moves to action_history, which makes replays look like the game
+        # was truncated mid-turn.
+        if self.game_state.game_over:
+            return
 
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
@@ -879,6 +885,11 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         # Execute coordinated attacks
         for enemy, attackers in killable_targets:
+            # A previous focus-fire kill may have ended the game; stop
+            # before queueing more attacks that would extend the replay
+            # past the actual end of the game.
+            if self.game_state.game_over:
+                return
             # Check if enemy is still alive and attackers are still available
             if enemy.health <= 0:
                 continue
@@ -1039,6 +1050,10 @@ class MediumBot(BotUnitMixin, BaseBot):
     def act_with_unit(self, unit, _depth=0):
         """Execute actions for a single unit based on strategic priorities."""
         if _depth >= MAX_RECURSION_DEPTH:
+            return
+        # Game already won/lost (typically by a focus-fire kill earlier this
+        # turn) -- don't queue extra cosmetic actions on top.
+        if self.game_state.game_over:
             return
 
         # Check if already seizing a structure
@@ -1626,6 +1641,8 @@ class AdvancedBot(MediumBot):
         """Enhanced version of MediumBot's act_with_unit with superior tactics."""
         if _depth >= MAX_RECURSION_DEPTH:
             return
+        if self.game_state.game_over:
+            return
 
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
@@ -1857,6 +1874,8 @@ class AdvancedBot(MediumBot):
     def _try_knight_charge(self, unit) -> bool:
         """Attempt Knight charge attack for +50% damage (requires 3+ tile move)."""
         if unit.type != "K" or not self.has_charge_units():
+            return False
+        if self.game_state.game_over:
             return False
 
         enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
@@ -2376,6 +2395,8 @@ class MasterBot(AdvancedBot):
         killable.sort(key=target_priority)
 
         for enemy, attackers in killable:
+            if self.game_state.game_over:
+                return
             if enemy.health <= 0:
                 continue
             still_alive = [a for a in attackers if (a.can_move or a.can_attack)]
@@ -2458,10 +2479,14 @@ class MasterBot(AdvancedBot):
     # ------------------------------------------------------------------
     def move_and_act_units_enhanced(self):
         super().move_and_act_units_enhanced()
+        if self.game_state.game_over:
+            return
         # ``list(...)`` because act_with_unit_enhanced may invoke seize()
         # which mutates the tile state read by other passes; the unit list
         # itself is stable mid-turn but we snapshot for safety.
         for unit in list(self.game_state.units):
+            if self.game_state.game_over:
+                return
             if unit.player != self.bot_player:
                 continue
             if not unit.is_hasted:

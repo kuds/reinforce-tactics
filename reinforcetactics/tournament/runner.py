@@ -387,6 +387,26 @@ class TournamentRunner:
             BotType.MODEL: "rl",
         }
 
+        # Inline the unpadded map data so the replay is self-contained --
+        # video rendering and the replay viewer no longer need the source
+        # CSV to still exist at ``map_config.path`` and the
+        # balance_analysis notebook's special-case "load map from path"
+        # workaround can be retired for replays produced from here on.
+        initial_map = None
+        try:
+            initial_map = FileIO.load_map_with_metadata(map_config.path)["original_map_data"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not inline initial_map from %s: %s", map_config.path, exc)
+
+        # Prefer the engine's classification (set by _set_game_over). Fall
+        # back to max_turns_draw when the tournament loop exited on the
+        # turn check without the engine recording a reason (rare -- end_turn
+        # normally sets it, but the loop's redundant turn-limit check at
+        # runner.py:316 covers paths that don't go through end_turn).
+        end_reason = game_state.end_reason
+        if end_reason is None and game_state.game_over and winner == 0:
+            end_reason = "max_turns_draw"
+
         game_info = {
             "bot1": bot1_desc.name,
             "bot2": bot2_desc.name,
@@ -397,6 +417,10 @@ class TournamentRunner:
             "turns": game_state.turn_number,
             "max_turns": map_config.max_turns or self.config.max_turns,
             "map": map_config.path,
+            "initial_map": initial_map,
+            "game_over": game_state.game_over,
+            "end_reason": end_reason,
+            "winning_action_index": game_state.game_over_action_index,
             "player_configs": [
                 GameState.build_player_config(
                     player_no=1,
