@@ -860,70 +860,77 @@ class MediumBot(BotUnitMixin, BaseBot):
         """
         Plan and execute multi-unit attacks on single targets.
 
+        Re-plans after every kill attempt: ``find_killable_targets`` builds
+        each (enemy, attackers) group independently, so the same attacker
+        can appear in multiple groups -- and when a counterattack kills or
+        exhausts an attacker mid-turn, later groups silently lose it and
+        deal only partial damage. The replan loop fixes that: pick the
+        single highest-priority killable target on the *current* state,
+        execute the kill, then recompute against whatever is still alive
+        and still able to act. ``attempted`` keeps us from spinning on
+        targets we tried but couldn't finish.
+
         Args:
             bot_units: List of bot units that can act
         """
-        # Find killable targets
-        killable_targets = self.find_killable_targets(bot_units)
 
-        if not killable_targets:
-            return
-
-        # Prioritize targets: enemies on structures, high-value units, etc.
         def target_priority(item):
             enemy, attackers = item
-            # Check if enemy is capturing a structure
             tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
             if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
-                return (0,)  # Highest priority - tuple for consistent sorting
-            # Otherwise, prioritize by unit cost (kill expensive units first)
+                return (0,)
             cost = UNIT_DATA[enemy.type]["cost"]
-            # Also consider minimizing overkill (fewer attackers needed = better)
             return (1, -cost, len(attackers))
 
-        killable_targets.sort(key=target_priority)
-
-        # Execute coordinated attacks
-        for enemy, attackers in killable_targets:
-            # A previous focus-fire kill may have ended the game; stop
-            # before queueing more attacks that would extend the replay
-            # past the actual end of the game.
+        attempted: set = set()
+        while True:
             if self.game_state.game_over:
                 return
-            # Check if enemy is still alive and attackers are still available
+            available = [u for u in bot_units if u.health > 0 and (u.can_move or u.can_attack)]
+            if not available:
+                return
+            killable = self.find_killable_targets(available)
+            killable = [(e, a) for e, a in killable if e.health > 0 and id(e) not in attempted]
+            if not killable:
+                return
+            killable.sort(key=target_priority)
+            enemy, attackers = killable[0]
+            attempted.add(id(enemy))
+            self._execute_focus_fire(enemy, attackers)
+
+    def _execute_focus_fire(self, enemy, attackers):
+        """Run one focus-fire group: each attacker swings at ``enemy`` until
+        the enemy drops or the attackers are spent. Caller is responsible
+        for filtering enemies/attackers freshly between calls."""
+        for attacker in attackers:
+            if self.game_state.game_over:
+                return
+            # Skip attackers killed by an earlier counterattack -- the
+            # engine doesn't refuse ``attack()`` on a dead unit, so a
+            # stale reference here would land a phantom hit live but
+            # no-op on replay (replay looks up the attacker by position
+            # and finds nothing), making the rebuilt state diverge.
+            if attacker.health <= 0:
+                continue
+            if not (attacker.can_move or attacker.can_attack):
+                continue
             if enemy.health <= 0:
+                return
+
+            attackable = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
+            if enemy in attackable:
+                self.game_state.attack(attacker, enemy)
                 continue
 
-            for attacker in attackers:
-                # Skip attackers killed by an earlier counterattack in this
-                # focus-fire group. The engine doesn't gate ``attack()`` on
-                # ``attacker.health > 0``, so a dead reference here would
-                # still deal damage live -- but the replay re-execution
-                # looks up the attacker by position and finds nothing,
-                # diverging the rebuilt state from the original.
-                if attacker.health <= 0:
-                    continue
-                if not (attacker.can_move or attacker.can_attack):
-                    continue
-
-                # Check if can attack directly
-                attackable = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
-
-                if enemy in attackable and enemy.health > 0:
-                    self.game_state.attack(attacker, enemy)
-                else:
-                    # Move towards enemy and attack if possible. The engine
-                    # applies the Knight charge bonus automatically based on
-                    # distance_moved set by move_unit.
-                    target_pos = self.find_best_move_position(attacker, enemy.x, enemy.y)
-                    if target_pos:
-                        self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
-
-                        attackable_after_move = self.game_state.mechanics.get_attackable_enemies(
-                            attacker, [enemy], self.game_state.grid
-                        )
-                        if enemy in attackable_after_move and enemy.health > 0:
-                            self.game_state.attack(attacker, enemy)
+            # Move-then-attack. The engine applies the Knight charge bonus
+            # automatically based on distance_moved set by move_unit.
+            target_pos = self.find_best_move_position(attacker, enemy.x, enemy.y)
+            if target_pos is None:
+                continue
+            self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
+            attackable_after = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
+            if enemy in attackable_after and enemy.health > 0:
+                self.game_state.attack(attacker, enemy)
 
     def find_contested_structures(self):
         """
@@ -2378,20 +2385,13 @@ class MasterBot(AdvancedBot):
     def coordinate_attacks(self, bot_units):
         """Confirm kills, then send the squishiest attacker in first.
 
-        AdvancedBot picks ``attackers_needed`` biggest-hitter-first inside
-        ``find_killable_targets`` (which both confirms killability and
-        chooses the minimal set). Master keeps that selection but reorders
-        execution so the *lowest current HP* attacker strikes first. The
-        first attacker eats the target's counter at full strength; a
-        wounded unit that still has enough HP for one hit can use it now
-        before a counter would have killed it on a later swing.
+        Same replan-after-each-kill loop as MediumBot.coordinate_attacks
+        (see that method for why), but executes each focus-fire group
+        with attackers sorted ascending by current HP so a chipped unit
+        spends its remaining HP on a hit rather than absorbing the first
+        counter-attack.
         """
-        killable = self.find_killable_targets(bot_units)
-        if not killable:
-            return
 
-        # Same target prioritisation as MediumBot (interrupts > expensive
-        # > overkill avoidance).
         def target_priority(item):
             enemy, attackers = item
             tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
@@ -2400,37 +2400,23 @@ class MasterBot(AdvancedBot):
             cost = UNIT_DATA[enemy.type]["cost"]
             return (1, -cost, len(attackers))
 
-        killable.sort(key=target_priority)
-
-        for enemy, attackers in killable:
+        attempted: set = set()
+        while True:
             if self.game_state.game_over:
                 return
-            if enemy.health <= 0:
-                continue
-            # Filter on health here too: an earlier killable group's
-            # counterattack can have killed one of these attackers, and
-            # the engine doesn't refuse to call attack() on a dead unit.
-            still_alive = [a for a in attackers if a.health > 0 and (a.can_move or a.can_attack)]
-            if not still_alive:
-                continue
-            # Hp-asc execution order: chipped units swing first.
-            ordered = sorted(still_alive, key=lambda a: a.health)
-            for attacker in ordered:
-                if attacker.health <= 0:
-                    continue
-                if not (attacker.can_move or attacker.can_attack) or enemy.health <= 0:
-                    continue
-                attackable = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
-                if enemy in attackable:
-                    self.game_state.attack(attacker, enemy)
-                    continue
-                target_pos = self.find_best_move_position(attacker, enemy.x, enemy.y)
-                if target_pos is None:
-                    continue
-                self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
-                attackable_after = self.game_state.mechanics.get_attackable_enemies(attacker, [enemy], self.game_state.grid)
-                if enemy in attackable_after and enemy.health > 0:
-                    self.game_state.attack(attacker, enemy)
+            available = [u for u in bot_units if u.health > 0 and (u.can_move or u.can_attack)]
+            if not available:
+                return
+            killable = self.find_killable_targets(available)
+            killable = [(e, a) for e, a in killable if e.health > 0 and id(e) not in attempted]
+            if not killable:
+                return
+            killable.sort(key=target_priority)
+            enemy, attackers = killable[0]
+            attempted.add(id(enemy))
+            # Hp-asc execution: chipped attackers swing first.
+            ordered = sorted([a for a in attackers if a.health > 0], key=lambda a: a.health)
+            self._execute_focus_fire(enemy, ordered)
 
     # ------------------------------------------------------------------
     # HQ-snipe / capture targeting refinement
