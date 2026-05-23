@@ -12,7 +12,7 @@
 
 A turn-based strategy game built with Pygame and Gymnasium for reinforcement learning research. Train RL agents, play against AI opponents (rule-based or LLM-powered), and experiment with tactical decision-making.
 
-> **Requires Python 3.10+**
+> **Requires Python 3.10+** (3.10 support will be dropped in July 2026 ahead of its October 2026 EOL.)
 
 ## Features
 
