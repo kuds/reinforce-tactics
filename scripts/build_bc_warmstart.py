@@ -47,6 +47,17 @@ def parse_args() -> argparse.Namespace:
         help="YAML describing the demonstration scenario mix.",
     )
     parser.add_argument(
+        "--curriculum-config",
+        default="configs/ppo/bootstrap_sweep/v33_production_bc_warmstart.yaml",
+        help=(
+            "Curriculum YAML the BC checkpoint will be loaded into. The "
+            "script reads ppo.policy_kwargs from this config so the BC "
+            "model is built with the same features extractor and net_arch "
+            "as the downstream curriculum -- otherwise set_parameters "
+            "(exact_match=True) fails with a state_dict mismatch."
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help=(
@@ -100,6 +111,8 @@ def main() -> int:
         make_maskable_env,
         make_warm_started_model,
     )
+    from reinforcetactics.rl.bootstrap import _resolve_policy_kwargs
+    from reinforcetactics.rl.config import load_config
 
     output_path = _resolve_output_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +122,20 @@ def main() -> int:
         print(f"Error: scenarios file not found: {scenarios_path}", file=sys.stderr)
         return 1
     scenarios = load_scenarios_from_yaml(str(scenarios_path))
+
+    # Pull policy_kwargs from the curriculum config the BC checkpoint will
+    # feed into. The downstream load uses set_parameters(exact_match=True),
+    # so the BC MaskablePPO must be built with the same features extractor
+    # class and net_arch as the curriculum's model. Without this the BC ckpt
+    # has SB3 defaults (CombinedExtractor + [64, 64] MLP) and the load fails
+    # with "Missing keys ... features_extractor.cnn.*" and a 64-vs-256
+    # size mismatch on the MLP heads.
+    curriculum_config_path = Path(args.curriculum_config)
+    if not curriculum_config_path.is_file():
+        print(f"Error: curriculum config not found: {curriculum_config_path}", file=sys.stderr)
+        return 1
+    curriculum_cfg = load_config(str(curriculum_config_path))
+    policy_kwargs = _resolve_policy_kwargs(curriculum_cfg.ppo.policy_kwargs)
 
     # Template env: the policy network shapes are built around this env's
     # spaces, so it must match the curriculum env v33 will use. Action space
@@ -132,9 +159,19 @@ def main() -> int:
         f"  template env: map={args.map_file} units={args.enabled_units} "
         f"max_turns={args.max_turns} action_space=multi_discrete"
     )
+    print(f"  curriculum config (policy_kwargs source): {curriculum_config_path}")
+    if policy_kwargs:
+        fe_class = policy_kwargs.get("features_extractor_class")
+        fe_name = getattr(fe_class, "__name__", str(fe_class)) if fe_class else "(SB3 default)"
+        print(f"    features_extractor: {fe_name}")
+        print(f"    net_arch: {policy_kwargs.get('net_arch')}")
     print(f"  BC: {args.epochs} epochs, batch={args.batch_size}, lr={args.learning_rate}")
     print(f"  output: {output_path}")
     print("=" * 64)
+
+    ppo_kwargs = {"verbose": 0}
+    if policy_kwargs:
+        ppo_kwargs["policy_kwargs"] = policy_kwargs
 
     t0 = time.time()
     model, dataset, bc_stats = make_warm_started_model(
@@ -143,7 +180,7 @@ def main() -> int:
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         seed=args.seed,
-        ppo_kwargs={"verbose": 0},
+        ppo_kwargs=ppo_kwargs,
         scenarios=scenarios,
     )
     elapsed = time.time() - t0
