@@ -12,6 +12,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from reinforcetactics.utils.replay_actions import (
+    apply_recorded_attack,
+    apply_recorded_heal,
+    get_schema_version,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -335,8 +341,9 @@ def record_replay_to_video(
         # from advancing current_player/turn_number past the actual end,
         # which would otherwise make the closing-frame overlay misreport
         # the final turn number.
+        schema_version = get_schema_version(game_info)
         for action in actions:
-            _execute_replay_action(game_state, action, _translate)
+            _execute_replay_action(game_state, action, _translate, schema_version)
             renderer.render()
             last_frame = renderer.get_rgb_array()
             writer.write(last_frame)
@@ -427,9 +434,22 @@ def _overlay_game_over(frame, game_info: Dict[str, Any], game_state) -> np.ndarr
     return np.frombuffer(pygame.image.tostring(surface, "RGB"), dtype=np.uint8).reshape((h, w, 3))
 
 
-def _execute_replay_action(game_state, action, translate_fn):
-    """Execute a single replay action on the game state."""
+def _execute_replay_action(game_state, action, translate_fn, schema_version: int = 1):
+    """Execute a single replay action on the game state.
+
+    ``schema_version`` selects between v2 (apply recorded outcome) and
+    v1 (re-run engine). v2 is the only path that's safe against the
+    Rogue-evade RNG and missing counter-kill info in v1 attack records.
+    """
     action_type = action.get("type")
+
+    # Defensive guard: v1 replays may have trailing post-victory
+    # actions (bot.py:302 tried to prevent this and didn't always
+    # succeed). Skipping them keeps the video from rendering frames
+    # after the game's already over.
+    if game_state.game_over:
+        return
+
     try:
         if action_type == "create_unit":
             px, py = translate_fn(action["x"], action["y"])
@@ -441,12 +461,15 @@ def _execute_replay_action(game_state, action, translate_fn):
             if unit and unit.player == action["player"]:
                 game_state.move_unit(unit, tx, ty)
         elif action_type == "attack":
-            ap = translate_fn(*action["attacker_pos"])
-            tp = translate_fn(*action["target_pos"])
-            attacker = game_state.get_unit_at_position(*ap)
-            target = game_state.get_unit_at_position(*tp)
-            if attacker and target:
-                game_state.attack(attacker, target)
+            if schema_version >= 2:
+                apply_recorded_attack(game_state, action, translate_fn)
+            else:
+                ap = translate_fn(*action["attacker_pos"])
+                tp = translate_fn(*action["target_pos"])
+                attacker = game_state.get_unit_at_position(*ap)
+                target = game_state.get_unit_at_position(*tp)
+                if attacker and target:
+                    game_state.attack(attacker, target)
         elif action_type == "seize":
             pos = translate_fn(*action["position"])
             unit = game_state.get_unit_at_position(*pos)
@@ -460,12 +483,15 @@ def _execute_replay_action(game_state, action, translate_fn):
             if paralyzer and target:
                 game_state.paralyze(paralyzer, target)
         elif action_type == "heal":
-            hp = translate_fn(*action["healer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            healer = game_state.get_unit_at_position(*hp)
-            target = game_state.get_unit_at_position(*tp)
-            if healer and target:
-                game_state.heal(healer, target)
+            if schema_version >= 2:
+                apply_recorded_heal(game_state, action, translate_fn)
+            else:
+                hp = translate_fn(*action["healer_pos"])
+                tp = translate_fn(*action["target_pos"])
+                healer = game_state.get_unit_at_position(*hp)
+                target = game_state.get_unit_at_position(*tp)
+                if healer and target:
+                    game_state.heal(healer, target)
         elif action_type == "cure":
             cp = translate_fn(*action["curer_pos"])
             tp = translate_fn(*action["target_pos"])
