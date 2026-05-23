@@ -20,8 +20,8 @@ def get_player_name(bot, bot_type, model_path=None):
     Returns:
         String name for the player
     """
-    # For basic bots (SimpleBot, MediumBot, AdvancedBot), use the class name
-    if bot_type in ("SimpleBot", "MediumBot", "AdvancedBot"):
+    # For basic bots (SimpleBot, MediumBot, AdvancedBot, MasterBot), use the class name
+    if bot_type in ("SimpleBot", "MediumBot", "AdvancedBot", "MasterBot"):
         return bot_type
 
     # For LLM bots (OpenAIBot, ClaudeBot, GeminiBot), use the model name
@@ -54,7 +54,7 @@ def get_player_type(bot_type):
     if bot_type == "ModelBot":
         return "rl"
 
-    # Standard bots (SimpleBot, MediumBot, AdvancedBot)
+    # Standard bots (SimpleBot, MediumBot, AdvancedBot, MasterBot)
     return "bot"
 
 
@@ -76,7 +76,7 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         ValueError: If bot creation fails due to configuration issues
         ImportError: If required dependencies for bot type are missing
     """
-    from reinforcetactics.game.bot import AdvancedBot, MediumBot, SimpleBot
+    from reinforcetactics.game.bot import AdvancedBot, MasterBot, MediumBot, SimpleBot
     from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, OpenAIBot
 
     if bot_type == "SimpleBot":
@@ -85,6 +85,8 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         return MediumBot(game, player=player_num)
     if bot_type == "AdvancedBot":
         return AdvancedBot(game, player=player_num)
+    if bot_type == "MasterBot":
+        return MasterBot(game, player=player_num)
     if bot_type == "OpenAIBot":
         api_key = settings.get_api_key("openai") or None
         return OpenAIBot(game, player=player_num, api_key=api_key)

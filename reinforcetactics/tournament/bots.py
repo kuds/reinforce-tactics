@@ -23,6 +23,7 @@ class BotType(Enum):
     SIMPLE = "simple"
     MEDIUM = "medium"
     ADVANCED = "advanced"
+    MASTER = "master"
     LLM = "llm"
     MODEL = "model"
 
@@ -79,6 +80,11 @@ class BotDescriptor:
     def advanced_bot(cls, name: str = "AdvancedBot") -> "BotDescriptor":
         """Create an AdvancedBot descriptor."""
         return cls(name=name, bot_type=BotType.ADVANCED)
+
+    @classmethod
+    def master_bot(cls, name: str = "MasterBot") -> "BotDescriptor":
+        """Create a MasterBot descriptor."""
+        return cls(name=name, bot_type=BotType.MASTER)
 
     @classmethod
     def llm_bot(
@@ -229,6 +235,11 @@ def create_bot_instance(
 
         return AdvancedBot(game_state, player)
 
+    elif bot_type == BotType.MASTER:
+        from reinforcetactics.game.bot import MasterBot
+
+        return MasterBot(game_state, player)
+
     elif bot_type == BotType.LLM:
         return _create_llm_bot(
             descriptor,
@@ -311,12 +322,13 @@ def discover_builtin_bots() -> List[BotDescriptor]:
     Discover built-in rule-based bots.
 
     Returns:
-        List of BotDescriptors for SimpleBot, MediumBot, AdvancedBot
+        List of BotDescriptors for SimpleBot, MediumBot, AdvancedBot, MasterBot
     """
     return [
         BotDescriptor.simple_bot("SimpleBot"),
         BotDescriptor.medium_bot("MediumBot"),
         BotDescriptor.advanced_bot("AdvancedBot"),
+        BotDescriptor.master_bot("MasterBot"),
     ]
 
 

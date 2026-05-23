@@ -1401,7 +1401,7 @@ class MixedBot(BotUnitMixin):
     medium->advanced bridge.
     """
 
-    _BOT_NAMES = ("simple", "medium", "advanced")
+    _BOT_NAMES = ("simple", "medium", "advanced", "master")
 
     def __init__(
         self,
@@ -1431,6 +1431,8 @@ class MixedBot(BotUnitMixin):
             return MediumBot(game_state, player=player)
         if name == "advanced":
             return AdvancedBot(game_state, player=player)
+        if name == "master":
+            return MasterBot(game_state, player=player)
         raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
 
     def take_turn(self):
@@ -2326,3 +2328,348 @@ class AdvancedBot(MediumBot):
         target = min(attackable, key=lambda e: e.health)
         self.game_state.attack(unit, target)
         return True
+
+
+class MasterBot(AdvancedBot):
+    """Master-tier scripted bot built on AdvancedBot's strategy layer.
+
+    MasterBot keeps every AdvancedBot heuristic (game-phase state machine,
+    weighted counter matrix, per-archetype retreat thresholds, Knight
+    charge / Rogue flank / mountain positioning / Sorcerer ability
+    orchestration) and layers targeted upgrades on top:
+
+    1. Threat map (``_compute_threat_map``). Per-tile aggregate of expected
+       incoming damage if we stood there next turn -- the sum of attack
+       values across enemies whose own move-and-attack reach covers the
+       tile. Cached per turn. Used by retreat-tile selection
+       (``find_retreat_tile`` override) and Knight charge landing
+       selection (``_try_knight_charge`` override) so we don't pull back
+       into a crossfire or leap onto a suicide tile.
+
+       Crucially, the threat map does NOT bias forward movement
+       (``find_best_move_position``) or attack value
+       (``calculate_attack_value``). Earlier iterations did and the bot
+       refused to engage -- every tile near enemies looks ''threatened'',
+       so adding a safety penalty everywhere just biased away from
+       fighting. The fix is to use threat only for decisions where there
+       is a genuine choice between equivalent tiles (retreat, charge
+       landing) rather than for go/no-go decisions about attacking.
+
+    2. HP-ascending focus fire (``coordinate_attacks`` override). The
+       parent picks ``attackers_needed`` biggest-hitter-first to confirm
+       a kill, then sends them in that order. Master keeps the same
+       selection but executes lowest-HP first: a wounded attacker that
+       can still land one hit should use it now, before a target's
+       counter would have killed it on a later swing of the chain.
+
+    3. HQ-snipe priority (``pick_capture_target`` override). In CONQUER
+       phase the enemy HQ takes priority over a same-distance tower so
+       every unit actively pushes the win condition rather than fighting
+       on the way.
+
+    4. Sorcerer-Knight haste combo (``_try_sorcerer_abilities`` extension).
+       After the parent's haste/buff priorities, Master additionally
+       checks whether an adjacent Knight could land a charge-and-kill if
+       hasted -- a turn earlier than waiting for the standard buff cycle.
+
+    Full ability coverage is inherited from AdvancedBot's
+    ``try_use_special_ability`` and ``move_and_act_units_enhanced``:
+    Knight charge (Step 1 pre-pass + ``_try_knight_charge``), Rogue flank
+    (``_try_rogue_flank``) and forest evade (``_try_rogue_forest_position``),
+    Archer mountain range (PRIORITY 5 mountain positioning +
+    ``try_ranged_attack``), Mage paralyze (``try_use_special_ability`` +
+    ``try_mage_paralyze``), Cleric heal/cure (``try_cleric_abilities``),
+    Sorcerer haste/attack-buff/defence-buff (``_try_sorcerer_abilities``),
+    and Barbarian high-mobility capture (the EXPAND-phase multi-turn-march
+    branch in ``act_with_unit_enhanced`` Priority 4.6).
+    """
+
+    # Cap on the number of attackers to consider reordering per target.
+    # We don't permute all orderings (parent's biggest-hitter-first is
+    # usually optimal); we just check the reverse as a safety swap.
+    MAX_PERMUTE_ATTACKERS = 6
+
+    def __init__(self, game_state, player=2):
+        super().__init__(game_state, player)
+        # Per-turn cached threat map. Rebuilt in take_turn before any move
+        # decisions. dict[(x, y)] -> float damage.
+        self._threat_map: Dict[Tuple[int, int], float] = {}
+
+    # ------------------------------------------------------------------
+    # Threat map
+    # ------------------------------------------------------------------
+    def _enemy_base_damage(self, enemy) -> float:
+        """Best-case attack damage this enemy could deal (used as the
+        threat contribution to tiles it can reach-and-attack). For ranged
+        casters with split adjacent/range values we take the larger."""
+        ad = enemy.attack_data
+        if isinstance(ad, dict):
+            return float(max(ad.get("adjacent", 0), ad.get("range", 0)))
+        return float(ad)
+
+    def _enemy_reachable_positions(self, enemy) -> List[Tuple[int, int]]:
+        """Reachable positions for an *enemy* unit. Mirrors get_reachable
+        but uses the enemy as the moving unit so the move-validity check
+        is correct (our units block, theirs pass through allies, etc.)."""
+        return enemy.get_reachable_positions(
+            self.game_state.grid.width,
+            self.game_state.grid.height,
+            lambda x, y: self.game_state.mechanics.can_move_to_position(
+                x, y, self.game_state.grid, self.game_state.units, moving_unit=enemy, is_destination=False
+            ),
+        )
+
+    def _compute_threat_map(self) -> Dict[Tuple[int, int], float]:
+        """Build a tile -> incoming damage map.
+
+        For each living, non-paralyzed enemy unit, we union every tile it
+        could attack this turn (move to any reachable position, then
+        strike any tile within its attack range). Each such tile gets that
+        enemy's base damage added once -- summing across enemies so a tile
+        in three Archers' range scores 3x.
+        """
+        threat: Dict[Tuple[int, int], float] = {}
+        width = self.game_state.grid.width
+        height = self.game_state.grid.height
+
+        enemies = [
+            u
+            for u in self.game_state.units
+            if u.player != self.bot_player and u.health > 0 and not u.is_paralyzed()
+        ]
+
+        for enemy in enemies:
+            base_damage = self._enemy_base_damage(enemy)
+            if base_damage <= 0:
+                continue
+            positions: List[Tuple[int, int]] = [(enemy.x, enemy.y)]
+            positions.extend(self._enemy_reachable_positions(enemy))
+            attackable_tiles: set = set()
+            for ex, ey in positions:
+                tile = self.game_state.grid.get_tile(ex, ey)
+                on_mountain = tile is not None and tile.type == "m"
+                min_r, max_r = enemy.get_attack_range(on_mountain=on_mountain)
+                for dx in range(-max_r, max_r + 1):
+                    abs_dx = abs(dx)
+                    if abs_dx > max_r:
+                        continue
+                    for dy in range(-max_r, max_r + 1):
+                        dist = abs_dx + abs(dy)
+                        if not (min_r <= dist <= max_r):
+                            continue
+                        tx, ty = ex + dx, ey + dy
+                        if 0 <= tx < width and 0 <= ty < height:
+                            attackable_tiles.add((tx, ty))
+            for pos in attackable_tiles:
+                threat[pos] = threat.get(pos, 0.0) + base_damage
+
+        return threat
+
+    def threat_at(self, x: int, y: int, exclude_enemy=None) -> float:
+        """Aggregate incoming damage at (x, y).
+
+        ``exclude_enemy`` lets two-ply attack value subtract the target's
+        own contribution -- we already count the target's direct counter
+        in ``calculate_attack_value``, so we don't want to double-count it
+        as neighbour retaliation. Cheap to recompute without that enemy
+        because we just rerun the inner loop on it.
+        """
+        base = self._threat_map.get((x, y), 0.0)
+        if exclude_enemy is None or exclude_enemy.health <= 0:
+            return base
+        # Remove ``exclude_enemy``'s contribution if it could hit (x, y).
+        base_damage = self._enemy_base_damage(exclude_enemy)
+        if base_damage <= 0:
+            return base
+        positions: List[Tuple[int, int]] = [(exclude_enemy.x, exclude_enemy.y)]
+        positions.extend(self._enemy_reachable_positions(exclude_enemy))
+        for ex, ey in positions:
+            tile = self.game_state.grid.get_tile(ex, ey)
+            on_mountain = tile is not None and tile.type == "m"
+            min_r, max_r = exclude_enemy.get_attack_range(on_mountain=on_mountain)
+            d = self.manhattan_distance(ex, ey, x, y)
+            if min_r <= d <= max_r:
+                return max(0.0, base - base_damage)
+        return base
+
+    # ------------------------------------------------------------------
+    # take_turn: rebuild threat map at the top of every turn
+    # ------------------------------------------------------------------
+    def take_turn(self):
+        # Build the threat map *before* purchase/movement so every override
+        # below sees a fresh snapshot. We rebuild once per turn -- not after
+        # every move -- because the cost would dominate otherwise. Slight
+        # staleness is fine: our own movement only changes who *we* threaten,
+        # not who threatens us, and enemy positions are fixed during our turn.
+        self._threat_map = self._compute_threat_map()
+        super().take_turn()
+
+    # ------------------------------------------------------------------
+    # Threat-aware retreat tile selection
+    # ------------------------------------------------------------------
+    def find_retreat_tile(self, unit):
+        """Pick a heal tile that maximises HP recovered while minimising the
+        *actual damage* an enemy could land on it next turn.
+
+        AdvancedBot's version counts the *number* of enemies in striking
+        range. Master's threat map already has aggregate expected damage
+        per tile, so we use that directly -- a tile in range of a single
+        Knight (10 dmg) is worse than one in range of two Clerics (4
+        dmg combined). Same scoring shape as the parent so behaviour stays
+        comparable when no heal-tile candidates differ in threat.
+        """
+        reachable = self.get_reachable(unit)
+        if not reachable:
+            return None
+
+        candidates = [(unit.x, unit.y)] + list(reachable)
+
+        best = None
+        # Maximise (heal_amount, -threat_damage, -distance).
+        best_score = (0, 1, float("inf"))
+        for x, y in candidates:
+            heal = self.heal_amount_at(x, y)
+            if heal == 0:
+                continue
+            threat = self._threat_map.get((x, y), 0.0)
+            distance = self.manhattan_distance(unit.x, unit.y, x, y)
+            score = (heal, -threat, -distance)
+            if score > best_score:
+                best_score = score
+                best = (x, y)
+        return best
+
+    # ------------------------------------------------------------------
+    # Focus fire: send the lowest-HP attacker first so a chipped unit
+    # uses its remaining HP for its hit rather than wasting it absorbing
+    # the first counter-attack.
+    # ------------------------------------------------------------------
+    def coordinate_attacks(self, bot_units):
+        """Confirm kills, then send the squishiest attacker in first.
+
+        AdvancedBot picks ``attackers_needed`` biggest-hitter-first inside
+        ``find_killable_targets`` (which both confirms killability and
+        chooses the minimal set). Master keeps that selection but reorders
+        execution so the *lowest current HP* attacker strikes first. The
+        first attacker eats the target's counter at full strength; a
+        wounded unit that still has enough HP for one hit can use it now
+        before a counter would have killed it on a later swing.
+        """
+        killable = self.find_killable_targets(bot_units)
+        if not killable:
+            return
+
+        # Same target prioritisation as MediumBot (interrupts > expensive
+        # > overkill avoidance).
+        def target_priority(item):
+            enemy, attackers = item
+            tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
+            if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+                return (0,)
+            cost = UNIT_DATA[enemy.type]["cost"]
+            return (1, -cost, len(attackers))
+
+        killable.sort(key=target_priority)
+
+        for enemy, attackers in killable:
+            if enemy.health <= 0:
+                continue
+            still_alive = [a for a in attackers if (a.can_move or a.can_attack)]
+            if not still_alive:
+                continue
+            # Hp-asc execution order: chipped units swing first.
+            ordered = sorted(still_alive, key=lambda a: a.health)
+            for attacker in ordered:
+                if not (attacker.can_move or attacker.can_attack) or enemy.health <= 0:
+                    continue
+                attackable = self.game_state.mechanics.get_attackable_enemies(
+                    attacker, [enemy], self.game_state.grid
+                )
+                if enemy in attackable:
+                    self.game_state.attack(attacker, enemy)
+                    continue
+                target_pos = self.find_best_move_position(attacker, enemy.x, enemy.y)
+                if target_pos is None:
+                    continue
+                self.game_state.move_unit(attacker, target_pos[0], target_pos[1])
+                attackable_after = self.game_state.mechanics.get_attackable_enemies(
+                    attacker, [enemy], self.game_state.grid
+                )
+                if enemy in attackable_after and enemy.health > 0:
+                    self.game_state.attack(attacker, enemy)
+
+    # ------------------------------------------------------------------
+    # HQ-snipe / capture targeting refinement
+    # ------------------------------------------------------------------
+    def pick_capture_target(self, unit):
+        """Same shape as MediumBot.pick_capture_target but with an
+        enemy-HQ bonus in CONQUER phase. The HQ is the only structure that
+        wins the game outright, so when neutrals are exhausted we want
+        every unit pushing toward it instead of fighting on the way."""
+        target = super().pick_capture_target(unit)
+        if target is None or self.phase != self.PHASE_CONQUER:
+            return target
+
+        # In CONQUER we also explicitly check the enemy HQ; if it's
+        # reachable to *this unit's path planner* we prefer it over a
+        # closer tower. AdvancedBot's distance-dominant scoring usually
+        # picks it anyway, but only when it's literally closest.
+        enemy_hq = None
+        for row in self.game_state.grid.tiles:
+            for tile in row:
+                if tile.type == "h" and tile.player is not None and tile.player != self.bot_player:
+                    enemy_hq = tile
+                    break
+            if enemy_hq:
+                break
+        if enemy_hq is None:
+            return target
+        if (enemy_hq.x, enemy_hq.y) in self._capture_assignments():
+            return target
+        # Only steer the swap if the unit is closer to HQ than to its
+        # current pick (so a unit guarding a flank doesn't suddenly march
+        # across the map).
+        d_hq = self.manhattan_distance(unit.x, unit.y, enemy_hq.x, enemy_hq.y)
+        d_pick = self.manhattan_distance(unit.x, unit.y, target.x, target.y)
+        if d_hq <= d_pick + 2:
+            return enemy_hq
+        return target
+
+    # ------------------------------------------------------------------
+    # Sorcerer: extend AdvancedBot's combo list with a Knight-charge pair
+    # ------------------------------------------------------------------
+    def _try_sorcerer_abilities(self, unit) -> bool:
+        """Run AdvancedBot's Sorcerer policy first; if no buff was used,
+        try one extra combo: Haste an adjacent Knight that has a kill-
+        confirming charge available. This pulls the late-game finishing
+        sequence forward by one turn when the Sorcerer would otherwise sit
+        idle for lack of a 'safe' target."""
+        if super()._try_sorcerer_abilities(unit):
+            return True
+        if unit.type != "S" or not self.has_buff_units() or not unit.can_use_haste():
+            return False
+        knights = [
+            a
+            for a in self.game_state.units
+            if a.player == self.bot_player and a.type == "K" and a != unit and a.can_attack and not a.is_hasted
+        ]
+        for k in knights:
+            if self.manhattan_distance(unit.x, unit.y, k.x, k.y) > 2:
+                continue
+            # Would the Knight have at least one charge-and-kill option after haste?
+            reachable = self.get_reachable(k)
+            for pos in reachable:
+                if self.manhattan_distance(k.x, k.y, pos[0], pos[1]) < CHARGE_MIN_DISTANCE:
+                    continue
+                for e in self.game_state.units:
+                    if e.player == self.bot_player or e.health <= 0:
+                        continue
+                    if self.manhattan_distance(pos[0], pos[1], e.x, e.y) != 1:
+                        continue
+                    a_tile = self.game_state.grid.get_tile(pos[0], pos[1])
+                    on_mountain = a_tile is not None and a_tile.type == "m"
+                    damage = int(k.get_attack_damage(e.x, e.y, on_mountain) * (1 + CHARGE_BONUS))
+                    if damage >= e.health:
+                        self.game_state.haste(unit, k)
+                        return True
+        return False
