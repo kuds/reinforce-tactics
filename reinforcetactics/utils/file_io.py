@@ -95,7 +95,6 @@ class FileIO:
                 map_data = FileIO.add_water_border(map_data, border_size)
 
             height, width = map_data.shape
-            print(f"✅ Map loaded: {width}x{height}")
 
             return {
                 "map_data": map_data,
