@@ -2367,10 +2367,24 @@ class MasterBot(AdvancedBot):
        every unit actively pushes the win condition rather than fighting
        on the way.
 
-    4. Sorcerer-Knight haste combo (``_try_sorcerer_abilities`` extension).
-       After the parent's haste/buff priorities, Master additionally
-       checks whether an adjacent Knight could land a charge-and-kill if
-       hasted -- a turn earlier than waiting for the standard buff cycle.
+    4. Haste followthrough (``move_and_act_units_enhanced`` post-pass +
+       expanded ``_try_sorcerer_abilities``). The base flow leaves haste
+       *unused* whenever its target took action via an early-return
+       branch (seize, attack, charge, flank), because those branches
+       zero ``can_move``/``can_attack`` but don't consume ``is_hasted``
+       -- only the fallback ``end_unit_turn`` call site does. Master
+       explicitly re-runs ``act_with_unit_enhanced`` on still-hasted
+       allies after the main pass, enabling:
+        - **Double capture**: warrior seizes structure A, then the haste
+          refresh moves it to and seizes structure B in the same turn.
+        - **Cross-map mobility**: Barbarian (movement=5) hasted -> two
+          5-tile moves -> reaches a distant neutral that would
+          otherwise take two turns to claim.
+       ``_try_sorcerer_abilities`` is extended to deliberately set up
+       these patterns: it hastes (a) Knights with a kill-confirming
+       charge, (b) allies with two reachable capturables this turn, and
+       (c) high-mobility units with a capture target inside the
+       haste-doubled envelope.
 
     Full ability coverage is inherited from AdvancedBot's
     ``try_use_special_ability`` and ``move_and_act_units_enhanced``:
@@ -2628,27 +2642,80 @@ class MasterBot(AdvancedBot):
         return target
 
     # ------------------------------------------------------------------
-    # Sorcerer: extend AdvancedBot's combo list with a Knight-charge pair
+    # move_and_act post-pass: consume leftover haste.
+    #
+    # The base flow leaves haste *unused* when its target took action via
+    # any early-return branch (seize, attack, charge, flank ...). Each of
+    # those branches zeros ``can_move``/``can_attack`` but leaves
+    # ``is_hasted=True``; the fallback ``unit.end_unit_turn()`` is the
+    # only call site that consumes haste and refreshes action flags. So
+    # without intervention, a hasted unit that captured / killed / etc.
+    # silently loses its second action when the turn ends and the engine
+    # wipes ``is_hasted`` (see GameState.end_turn).
+    #
+    # We mop that up by re-running ``act_with_unit_enhanced`` on every
+    # still-hasted ally after the main pass. This enables two patterns
+    # that are otherwise impossible:
+    #   - **Double capture**: Warrior moves+seizes structure A on action
+    #     1; post-pass refreshes flags; action 2 moves+seizes structure B.
+    #   - **Cross-map mobility**: Barbarian (movement=5) hasted -> two
+    #     5-tile moves in one turn, e.g. reaching a distant neutral that
+    #     would otherwise take two turns to claim.
+    # ------------------------------------------------------------------
+    def move_and_act_units_enhanced(self):
+        super().move_and_act_units_enhanced()
+        # ``list(...)`` because act_with_unit_enhanced may invoke seize()
+        # which mutates the tile state read by other passes; the unit list
+        # itself is stable mid-turn but we snapshot for safety.
+        for unit in list(self.game_state.units):
+            if unit.player != self.bot_player:
+                continue
+            if not unit.is_hasted:
+                continue
+            # end_unit_turn(force_end=False) sees is_hasted=True, refreshes
+            # can_move/can_attack to True, sets is_hasted=False, and
+            # returns True. If the caller already consumed haste (e.g. a
+            # recursion path inside the parent), is_hasted is already
+            # False and we wouldn't have entered this branch.
+            if unit.end_unit_turn(force_end=False):
+                self.act_with_unit_enhanced(unit)
+
+    # ------------------------------------------------------------------
+    # Sorcerer: extend AdvancedBot's combo list with three more haste
+    # targets the parent policy misses entirely:
+    #
+    # 1. Knight charge-and-kill (existing, kept).
+    # 2. Double-capture chain: an ally that can reach two distinct
+    #    capturable structures this turn -- one to seize now (via the
+    #    parent priority ladder), one to seize after the haste refresh.
+    # 3. Long-range Barbarian (or other mover) -- a unit with a capture
+    #    target outside its one-turn reach but inside its haste-doubled
+    #    reach (~2 * movement_range tiles). Lets us snap distant
+    #    neutrals in one turn that would otherwise take two.
     # ------------------------------------------------------------------
     def _try_sorcerer_abilities(self, unit) -> bool:
-        """Run AdvancedBot's Sorcerer policy first; if no buff was used,
-        try one extra combo: Haste an adjacent Knight that has a kill-
-        confirming charge available. This pulls the late-game finishing
-        sequence forward by one turn when the Sorcerer would otherwise sit
-        idle for lack of a 'safe' target."""
         if super()._try_sorcerer_abilities(unit):
             return True
         if unit.type != "S" or not self.has_buff_units() or not unit.can_use_haste():
             return False
-        knights = [
+
+        # Candidates: living, controllable, unhasted allies in haste range.
+        candidates = [
             a
             for a in self.game_state.units
-            if a.player == self.bot_player and a.type == "K" and a != unit and a.can_attack and not a.is_hasted
+            if a.player == self.bot_player
+            and a is not unit
+            and a.health > 0
+            and a.can_move
+            and not a.is_hasted
+            and not a.is_paralyzed()
+            and self.manhattan_distance(unit.x, unit.y, a.x, a.y) <= 2
         ]
-        for k in knights:
-            if self.manhattan_distance(unit.x, unit.y, k.x, k.y) > 2:
-                continue
-            # Would the Knight have at least one charge-and-kill option after haste?
+        if not candidates:
+            return False
+
+        # Combo 1: Knight charge-and-kill (kept from previous version).
+        for k in [a for a in candidates if a.type == "K" and a.can_attack]:
             reachable = self.get_reachable(k)
             for pos in reachable:
                 if self.manhattan_distance(k.x, k.y, pos[0], pos[1]) < CHARGE_MIN_DISTANCE:
@@ -2664,4 +2731,62 @@ class MasterBot(AdvancedBot):
                     if damage >= e.health:
                         self.game_state.haste(unit, k)
                         return True
+
+        # Combo 2: double-capture. Find an ally that can move-and-seize
+        # one capturable now, and whose post-seize position has at least
+        # one *other* unclaimed capturable inside its movement range so
+        # the haste refresh enables a second seize on the same turn.
+        capturables = [
+            tile
+            for row in self.game_state.grid.tiles
+            for tile in row
+            if tile.is_capturable() and tile.player != self.bot_player
+        ]
+        if len(capturables) >= 2:
+            for ally in candidates:
+                reachable = set(self.get_reachable(ally))
+                reachable.add((ally.x, ally.y))
+                # First capture: pick the cheapest reachable capturable.
+                first_options = [c for c in capturables if (c.x, c.y) in reachable]
+                if not first_options:
+                    continue
+                first = min(
+                    first_options,
+                    key=lambda t: self.manhattan_distance(ally.x, ally.y, t.x, t.y),
+                )
+                # After seizing ``first``, the ally stands on ``first``'s
+                # tile with fresh movement. A second capture must be
+                # within the ally's movement_range from ``first``.
+                for second in capturables:
+                    if second is first:
+                        continue
+                    if self.manhattan_distance(first.x, first.y, second.x, second.y) <= ally.movement_range:
+                        self.game_state.haste(unit, ally)
+                        return True
+
+        # Combo 3: long-mobility ally with a distant capture. Pick a
+        # capturable that the ally can't reach this turn but CAN reach
+        # with a haste-doubled move. Prioritise high-movement units
+        # (Barbarian=5, Knight=4, Rogue=4) where the doubled reach is
+        # most game-changing.
+        if capturables:
+            high_mobility = sorted(
+                [a for a in candidates if a.movement_range >= 3],
+                key=lambda a: -a.movement_range,
+            )
+            for ally in high_mobility:
+                reachable_now = set(self.get_reachable(ally))
+                for tile in capturables:
+                    pos = (tile.x, tile.y)
+                    if pos in reachable_now:
+                        continue
+                    # Within the haste-doubled envelope (approximated as
+                    # 2x movement_range -- the actual reachable set after
+                    # one move would require simulating the move, which
+                    # is too expensive here; this is a conservative
+                    # upper bound that the post-pass will validate).
+                    if self.manhattan_distance(ally.x, ally.y, tile.x, tile.y) <= 2 * ally.movement_range:
+                        self.game_state.haste(unit, ally)
+                        return True
+
         return False
