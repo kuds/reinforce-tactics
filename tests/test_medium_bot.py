@@ -334,6 +334,7 @@ class TestMediumBotHealRetreat:
         heal_game.create_unit("W", 4, 4, 2)
         unit = heal_game.units[-1]
         unit.health = 1
+        unit.can_move = True  # Newly created units have can_move=False until next turn
 
         bot.act_with_unit(unit)
         assert bot.heal_amount_at(unit.x, unit.y) > 0

@@ -42,6 +42,7 @@ def game_with_actions(simple_map):
     _ = game.create_unit("W", 3, 3, player=2)  # Create unit but not used in test
 
     if unit1:
+        unit1.can_move = True  # Newly created units have can_move=False until next turn
         game.move_unit(unit1, 2, 1)
 
     game.end_turn()
@@ -499,6 +500,7 @@ class TestReplayPadding:
         game = GameState(simple_map, num_players=2)
         unit = game.create_unit("W", 1, 1, player=1)
         if unit:
+            unit.can_move = True  # Newly created units have can_move=False until next turn
             game.move_unit(unit, 2, 1)
         game.end_turn()
 
