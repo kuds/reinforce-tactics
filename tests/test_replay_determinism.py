@@ -129,9 +129,7 @@ def _assert_replay_matches(original: GameState, replay_path: str) -> None:
     assert replay_game.game_over == original.game_over, (
         f"game_over mismatch: original={original.game_over}, replay={replay_game.game_over}"
     )
-    assert replay_game.winner == original.winner, (
-        f"winner mismatch: original={original.winner}, replay={replay_game.winner}"
-    )
+    assert replay_game.winner == original.winner, f"winner mismatch: original={original.winner}, replay={replay_game.winner}"
     assert replay_game.end_reason == original.end_reason, (
         f"end_reason mismatch: original={original.end_reason}, replay={replay_game.end_reason}"
     )
@@ -147,9 +145,7 @@ def _assert_replay_matches(original: GameState, replay_path: str) -> None:
         )
         orig_hp = sum(u.health for u in orig_units)
         repl_hp = sum(u.health for u in repl_units)
-        assert orig_hp == repl_hp, (
-            f"P{player} HP total mismatch: original={orig_hp}, replay={repl_hp}"
-        )
+        assert orig_hp == repl_hp, f"P{player} HP total mismatch: original={orig_hp}, replay={repl_hp}"
 
     # v2 invariant: no actions logged past the winning action.
     if original.game_over:
@@ -214,9 +210,7 @@ def test_elimination_via_counter_kill(tmp_path):
     assert g.winner == 2, f"expected P2 to win, got winner={g.winner}"
     # Sanity-check the new field on the recorded attack.
     attack_record = next(a for a in g.action_history if a["type"] == "attack")
-    assert attack_record["attacker_killed"] is True, (
-        "phase 1 should have recorded attacker_killed=True for this counter-kill"
-    )
+    assert attack_record["attacker_killed"] is True, "phase 1 should have recorded attacker_killed=True for this counter-kill"
 
     path = _save_replay(g, tmp_path)
     _assert_replay_matches(g, path)
