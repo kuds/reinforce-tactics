@@ -11,13 +11,14 @@ from typing import Optional
 
 import torch
 
+from reinforcetactics.game.bot_base import BaseBot
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet
 from reinforcetactics.rl.mcts import MCTS, _execute_action_on_state
 
 logger = logging.getLogger(__name__)
 
 
-class AlphaZeroBot:
+class AlphaZeroBot(BaseBot):
     """
     Bot that uses a trained AlphaZero network with MCTS for decision-making.
 

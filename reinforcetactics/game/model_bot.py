@@ -9,12 +9,13 @@ from typing import Any, Optional
 import numpy as np
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
+from reinforcetactics.game.bot_base import BaseBot
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class ModelBot:  # pylint: disable=too-few-public-methods
+class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
     """Bot that uses a trained Stable-Baselines3 model for decision-making."""
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES

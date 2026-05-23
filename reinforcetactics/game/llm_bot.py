@@ -8,13 +8,14 @@ import os
 import random
 import re
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from reinforcetactics import __version__
 from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.game.bot_base import BaseBot
 from reinforcetactics.game.llm_prompts import (
     DEFAULT_PROMPT,
     PROMPT_TWO_PHASE_EXECUTE,
@@ -69,7 +70,7 @@ GEMINI_MODELS = [
 SYSTEM_PROMPT = DEFAULT_PROMPT
 
 
-class LLMBot(ABC):  # pylint: disable=too-few-public-methods
+class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
     """
     Abstract base class for LLM-powered bots.
 
