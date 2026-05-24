@@ -31,7 +31,7 @@ warm_start_path: benchmarks/bc/YYYYMMDD_HHMMSS/bc_warmstart.zip
 
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 10_000_000  # informational; stage budgets drive run length
+total_timesteps: 1_000_000  # PROBE-SIZED; raise to ~10M once setup is validated
 
 env:
   n_envs: 8
@@ -114,17 +114,22 @@ eval:
 
 curriculum:
   stages:
-    # Single stage: directly vs AdvancedBot on skirmish. The BC
-    # warm-start should put the policy at non-trivial WR from the
-    # first eval; PPO then closes the gap. Promotion gate is just a
-    # success criterion for this single-map track -- if cleared, the
-    # BC + PPO pipeline is validated and we move to self-play.
+    # PROBE-SIZED single stage (1M steps, ~20 eval points at
+    # eval_freq=50_000). Purpose: confirm the BC -> PPO pipeline shows
+    # *any* upward trend before committing to a multi-million-step run.
+    # The previous run held WR at 0.0% with std 0.0 for 750k steps --
+    # if this probe shows the same flat-zero signature, the setup
+    # needs structural changes (curriculum ramp, demonstrator mix,
+    # entropy schedule) rather than more compute. Promotion gate is
+    # almost certainly not hit at this budget; the gate is left at
+    # 0.60 so the YAML stays meaningful when ``max_timesteps`` is
+    # raised back to the production ~10M.
     - name: skirmish_advanced
       map_file: maps/1v1/skirmish.csv
       opponent: advanced
       promotion_win_rate: 0.60
       patience: 3
-      max_timesteps: 10_000_000
+      max_timesteps: 1_000_000
       n_eval_episodes: 80
       max_turns: 100
       ent_coef:
