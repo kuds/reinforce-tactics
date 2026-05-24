@@ -433,6 +433,7 @@ def _write_stage_config(
     output_dir: Path,
     promoted: bool,
     best_win_rate: float,
+    warm_start_info: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write ``stage_dir / config.json`` describing the stage's resolved settings.
 
@@ -485,6 +486,11 @@ def _write_stage_config(
             "output_dir": str(output_dir),
             "curriculum_hash": _curriculum_hash(cfg),
             "stage_count": len(cfg.curriculum.stages),
+            # BC / warm-start provenance: stamped on every stage so an
+            # aborted run still leaves a trail showing whether the policy
+            # started from a BC checkpoint (and which one). ``used: False``
+            # when warm_start_path was unset or the load was skipped.
+            "warm_start": warm_start_info or {"used": False, "path": None, "sha256": None},
         },
     )
     write_run_config(run_config, stage_dir / "config.json")
@@ -609,6 +615,14 @@ def run_curriculum(
     metrics_callback = TrainingMetricsCallback()
     history: List[Dict[str, Any]] = []
     model = None
+    # Provenance of the warm-start checkpoint, filled in the first time
+    # the model is built. Captured here (rather than re-derived at each
+    # _write_stage_config call) so the sha256 is computed once and the
+    # same dict is stamped onto every stage's config.json + the final
+    # run_status.json. ``used`` distinguishes "no warm_start_path set"
+    # from "warm_start_path set but load skipped" -- if either grows a
+    # branch, the metadata stays accurate without code changes here.
+    warm_start_info: Dict[str, Any] = {"used": False, "path": None, "sha256": None}
 
     for stage in cfg.curriculum.stages:
         stage_dir = output_dir / stage.name
@@ -638,8 +652,18 @@ def run_curriculum(
                         "Provide a valid SB3 .zip checkpoint or unset "
                         "warm_start_path for a cold start."
                     )
-                print(f"  warm-starting policy from {warm_path}")
+                # sha256 of the checkpoint bytes -- so per-stage config.json
+                # and run_status.json can distinguish two runs that loaded
+                # *different* BC builds from the same path (e.g. timestamped
+                # checkpoints rotated in place between runs).
+                warm_sha = hashlib.sha256(warm_path.read_bytes()).hexdigest()
+                print(f"  warm-starting policy from {warm_path}  sha256={warm_sha[:12]}")
                 model.set_parameters(str(warm_path), exact_match=True)
+                warm_start_info = {
+                    "used": True,
+                    "path": str(warm_path),
+                    "sha256": warm_sha,
+                }
             _print_policy_summary(model, output_dir)
             # Install the purchase-exploration hook once on the freshly
             # built policy. Wrapping is idempotent and the hook short-
@@ -797,6 +821,7 @@ def run_curriculum(
                 output_dir=output_dir,
                 promoted=promote_cb.promoted,
                 best_win_rate=eval_cb.best_win_rate,
+                warm_start_info=warm_start_info,
             )
         except Exception:  # noqa: BLE001
             # A metadata write failure must not mask the training
@@ -875,6 +900,7 @@ def run_curriculum(
                 threshold=stage.promotion_win_rate,
                 curriculum_hash=_curriculum_hash(cfg),
                 stage_count=len(cfg.curriculum.stages),
+                warm_start=warm_start_info,
             )
             raise CurriculumStalled(
                 stage_name=stage.name,
@@ -918,6 +944,7 @@ def run_curriculum(
         stages_completed=len(cfg.curriculum.stages),
         stage_count=len(cfg.curriculum.stages),
         curriculum_hash=_curriculum_hash(cfg),
+        warm_start=warm_start_info,
     )
 
     return {
