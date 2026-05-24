@@ -249,16 +249,24 @@ class SimpleBot(BotUnitMixin, BaseBot):
     WARRIOR_SHARE_CAP = 0.5
     WARRIOR_CAP_MIN_UNITS = 3
 
-    def __init__(self, game_state, player=2):
+    def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the bot.
 
         Args:
             game_state: GameState instance
             player: Player number for this bot
+            rng: Optional ``random.Random`` instance enabling stochastic
+                tiebreaking at every sort / best-tracking decision site.
+                ``None`` (default) keeps the bot fully deterministic --
+                identical starting states produce identical games. When
+                set, ties on the scoring heuristic resolve randomly,
+                giving distinct episode trajectories from the same
+                opponent while preserving strategic quality.
         """
         self.game_state = game_state
         self.bot_player = player
+        self._rng = rng
 
     def take_turn(self):
         """Execute the bot's turn."""
@@ -301,7 +309,11 @@ class SimpleBot(BotUnitMixin, BaseBot):
                         affordable = non_w
                         self._record("warrior_cap_hit")
 
-            # Sort by priority (lower = buy first), then by cost (cheaper first)
+            # Sort by priority (lower = buy first), then by cost (cheaper first).
+            # Shuffle first so equal-priority/equal-cost units (e.g. two
+            # affordable warriors on different spawn tiles) tiebreak randomly
+            # when stochastic mode is enabled.
+            self._maybe_shuffle(affordable)
             affordable.sort(key=lambda a: (self.UNIT_PRIORITIES.get(a["unit_type"], 99), UNIT_DATA[a["unit_type"]]["cost"]))
 
             action = affordable[0]
@@ -413,6 +425,10 @@ class SimpleBot(BotUnitMixin, BaseBot):
             priority = 0 if target_type in ["enemy_building", "enemy_tower", "enemy_hq"] else 1
             return (distance, priority)
 
+        # Shuffle pre-sort so equidistant equal-priority targets (very
+        # common on small maps) resolve to a random pick instead of
+        # whichever happened to be first in the source iteration order.
+        self._maybe_shuffle(all_targets)
         all_targets.sort(key=sort_key)
         return all_targets[0]
 
@@ -516,7 +532,9 @@ class SimpleBot(BotUnitMixin, BaseBot):
             # No valid attack position, move closer
             return self.find_best_move_position(unit, enemy.x, enemy.y)
 
-        # Prefer positions at max range (safer)
+        # Prefer positions at max range (safer). Shuffle so multiple
+        # tiles at the same max distance resolve to a random pick.
+        self._maybe_shuffle(valid_positions)
         valid_positions.sort(key=lambda x: -x[1])
         return valid_positions[0][0]
 
@@ -562,16 +580,19 @@ class MediumBot(BotUnitMixin, BaseBot):
         "S": (7, "buff"),  # Sorcerer - buff support
     }
 
-    def __init__(self, game_state, player=2):
+    def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the bot.
 
         Args:
             game_state: GameState instance
             player: Player number for this bot
+            rng: Optional ``random.Random`` enabling stochastic
+                tiebreaking. See SimpleBot.__init__ for details.
         """
         self.game_state = game_state
         self.bot_player = player
+        self._rng = rng
 
     def take_turn(self):
         """Execute the bot's turn with improved strategy."""
@@ -624,6 +645,9 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         best = None
         best_score = (0, float("inf"))  # (heal_amount, -distance) maximised
+        # Shuffle candidates so multiple equally-good heal tiles
+        # resolve to a random pick instead of the first-visited one.
+        self._maybe_shuffle(candidates)
         for x, y in candidates:
             heal = self.heal_amount_at(x, y)
             if heal == 0:
@@ -715,6 +739,9 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         if not candidates:
             return None
+        # Shuffle so equal-priority structures (e.g. two same-distance
+        # neutral towers) resolve to a random pick across episodes.
+        self._maybe_shuffle(candidates)
         candidates.sort(key=lambda x: x[1])
         return candidates[0][0]
 
@@ -784,6 +811,9 @@ class MediumBot(BotUnitMixin, BaseBot):
                     priority = -1
                 return (priority, cost)
 
+            # Shuffle so multiple affordable units at the same priority
+            # tiebreak randomly across episodes.
+            self._maybe_shuffle(affordable_actions)
             affordable_actions.sort(key=unit_priority)
 
             # Buy the top priority affordable unit
@@ -869,7 +899,23 @@ class MediumBot(BotUnitMixin, BaseBot):
             if not potential:
                 continue
 
-            # Pick minimal kill set: biggest hitters first.
+            # Pick minimal kill set: biggest hitters first. Shuffle
+            # so attackers with equal projected damage queue up in
+            # random order across episodes.
+            #
+            # NOTE: this is more than cosmetic tiebreaking -- the loop
+            # below stops accumulating once damage_so_far >= enemy.health,
+            # so when two equal-damage attackers tie, the shuffle
+            # decides which one is COMMITTED to the kill and which is
+            # left free to act elsewhere this turn. That cascades into
+            # who takes the counterattack damage, who is spent vs.
+            # available, and (for MasterBot.coordinate_attacks) the
+            # HP-asc swing order. The bot still only picks among
+            # equally-good options, but the *set* of committed
+            # attackers changes per episode -- intended for diversity,
+            # but worth flagging for readers expecting a strictly-
+            # cosmetic shuffle.
+            self._maybe_shuffle(potential)
             potential.sort(key=lambda ad: ad[1], reverse=True)
             total_damage = sum(d for _, d in potential)
             if total_damage < enemy.health:
@@ -924,6 +970,10 @@ class MediumBot(BotUnitMixin, BaseBot):
             killable = [(e, a) for e, a in killable if e.health > 0 and id(e) not in attempted]
             if not killable:
                 return
+            # Equal-priority killable targets (e.g. two enemies with the
+            # same value-tier and equal HP) tiebreak randomly under
+            # stochastic mode.
+            self._maybe_shuffle(killable)
             killable.sort(key=target_priority)
             enemy, attackers = killable[0]
             attempted.add(id(enemy))
@@ -1142,7 +1192,10 @@ class MediumBot(BotUnitMixin, BaseBot):
         # already committed to interrupt this turn).
         contested = self.find_contested_structures()
         if contested:
-            # Sort by capture progress (higher progress = higher priority)
+            # Sort by capture progress (higher progress = higher priority).
+            # Shuffle first so multiple contests at the same progress
+            # level resolve in random order across episodes.
+            self._maybe_shuffle(contested)
             contested.sort(key=lambda x: x[2], reverse=True)
 
             for _, enemy_unit, __ in contested:
@@ -1290,18 +1343,26 @@ class MixedBot(BotUnitMixin, BaseBot):
         self._rng = rng if rng is not None else random
         self.use_hard = self._rng.random() < p_hard
         chosen = hard if self.use_hard else easy
-        self._inner = self._build_inner(chosen, game_state, player)
+        # Forward the rng into the chosen inner bot so its stochastic
+        # tiebreaking activates. Without this the inner bot's _rng is
+        # None and every MixedBot episode that lands on the same inner
+        # choice plays the byte-identical game -- defeating the purpose
+        # of passing rng to MixedBot in the first place. The inner bot
+        # consumes the same rng as the coin flip above; that's fine
+        # because the coin flip happens once at construction and the
+        # inner then takes over for the rest of the episode.
+        self._inner = self._build_inner(chosen, game_state, player, rng=self._rng)
 
     @classmethod
-    def _build_inner(cls, name: str, game_state, player: int):
+    def _build_inner(cls, name: str, game_state, player: int, rng=None):
         if name == "simple":
-            return SimpleBot(game_state, player=player)
+            return SimpleBot(game_state, player=player, rng=rng)
         if name == "medium":
-            return MediumBot(game_state, player=player)
+            return MediumBot(game_state, player=player, rng=rng)
         if name == "advanced":
-            return AdvancedBot(game_state, player=player)
+            return AdvancedBot(game_state, player=player, rng=rng)
         if name == "master":
-            return MasterBot(game_state, player=player)
+            return MasterBot(game_state, player=player, rng=rng)
         raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
 
     def take_turn(self):
@@ -1393,15 +1454,17 @@ class AdvancedBot(MediumBot):
     CONSOLIDATE_ATTACK_THRESHOLD = -500
     CONQUER_ATTACK_THRESHOLD = -1000
 
-    def __init__(self, game_state, player=2):
+    def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the AdvancedBot.
 
         Args:
             game_state: GameState instance
             player: Player number for this bot
+            rng: Optional ``random.Random`` enabling stochastic
+                tiebreaking. Forwarded to MediumBot via super().
         """
-        super().__init__(game_state, player)
+        super().__init__(game_state, player, rng=rng)
 
         # Map analysis cache
         self.map_analyzed = False
@@ -1578,6 +1641,9 @@ class AdvancedBot(MediumBot):
         best = None
         # Maximise (heal_amount, -threats_in_range, -distance).
         best_score = (0, 1, float("inf"))
+        # Shuffle so equally-good heal positions (same heal, threats,
+        # distance) tiebreak randomly under stochastic mode.
+        self._maybe_shuffle(candidates)
         for x, y in candidates:
             heal = self.heal_amount_at(x, y)
             if heal == 0:
@@ -1658,7 +1724,9 @@ class AdvancedBot(MediumBot):
             else:
                 # Fallback: buy any affordable unit
                 if affordable_actions:
-                    # Prefer cheaper units for economy
+                    # Prefer cheaper units for economy. Shuffle so units
+                    # at the same cost tier tiebreak randomly.
+                    self._maybe_shuffle(affordable_actions)
                     affordable_actions.sort(key=lambda a: UNIT_DATA[a["unit_type"]]["cost"])
                     action = affordable_actions[0]
                     self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
@@ -1745,6 +1813,9 @@ class AdvancedBot(MediumBot):
         interrupt_assigned = self._interrupt_assigned
         contested = self.find_contested_structures()
         if contested:
+            # Shuffle pre-sort so equal-progress interrupts tiebreak
+            # randomly across episodes.
+            self._maybe_shuffle(contested)
             contested.sort(key=lambda x: x[2], reverse=True)
             for _, enemy_unit, __ in contested:
                 if id(enemy_unit) in interrupt_assigned:
@@ -1862,7 +1933,22 @@ class AdvancedBot(MediumBot):
         enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
 
         if enemy_units:
-            # Find closest attackable enemy
+            # Find closest attackable enemy. Shuffle the candidate
+            # iteration order so equal-scoring targets tiebreak
+            # randomly across episodes (the strict > below means the
+            # first-visited equal-value enemy would otherwise always
+            # win the tie).
+            #
+            # NOTE: the rebound ``enemy_units`` propagates further than
+            # the strict-> loop -- the ``min(enemy_units, ...)`` call
+            # below for the move-toward-nearest fallback also iterates
+            # the shuffled list (Python min() returns the first item
+            # on ties, so equidistant enemies tiebreak randomly too),
+            # and the ``get_attackable_enemies(unit, enemy_units, ...)``
+            # call after a move receives a shuffle-ordered input. Both
+            # are consistent with the stochastic-tiebreak philosophy
+            # but broader than the immediate sort below.
+            enemy_units = self._maybe_shuffle(list(enemy_units))
             best_target = None
             best_score = -float("inf")
 
@@ -1900,7 +1986,13 @@ class AdvancedBot(MediumBot):
                 self.game_state.move_unit(unit, target_pos[0], target_pos[1])
                 attackable_after = self.game_state.mechanics.get_attackable_enemies(unit, enemy_units, self.game_state.grid)
                 if attackable_after:
-                    best_after_move = max(attackable_after, key=lambda e: self.calculate_attack_value(unit, e))
+                    # Python's max() returns the first item on ties --
+                    # shuffle the candidate list so equal-value enemies
+                    # tiebreak randomly across episodes.
+                    best_after_move = max(
+                        self._maybe_shuffle(list(attackable_after)),
+                        key=lambda e: self.calculate_attack_value(unit, e),
+                    )
                     self.game_state.attack(unit, best_after_move)
                     if unit.can_move or unit.can_attack:
                         self.act_with_unit_enhanced(unit, _depth + 1)
@@ -1991,8 +2083,13 @@ class AdvancedBot(MediumBot):
         attackable = self.game_state.mechanics.get_attackable_enemies(unit, flankable, self.game_state.grid)
 
         if attackable:
-            # Attack the highest value flankable target
-            best_target = max(attackable, key=lambda e: self.calculate_attack_value(unit, e))
+            # Attack the highest value flankable target. Shuffle so
+            # equal-value flank candidates tiebreak randomly under
+            # stochastic mode (max() picks the first on ties).
+            best_target = max(
+                self._maybe_shuffle(list(attackable)),
+                key=lambda e: self.calculate_attack_value(unit, e),
+            )
             self.game_state.attack(unit, best_target)
             self._record("rogue_flank")
             return True
@@ -2065,10 +2162,14 @@ class AdvancedBot(MediumBot):
         if best_forest:
             self.game_state.move_unit(unit, best_forest[0], best_forest[1])
             self._record("rogue_forest_position")
-            # Try to attack after moving to forest
+            # Try to attack after moving to forest. Shuffle so
+            # equal-value attackable enemies tiebreak randomly.
             attackable = self.game_state.mechanics.get_attackable_enemies(unit, enemies, self.game_state.grid)
             if attackable:
-                best_target = max(attackable, key=lambda e: self.calculate_attack_value(unit, e))
+                best_target = max(
+                    self._maybe_shuffle(list(attackable)),
+                    key=lambda e: self.calculate_attack_value(unit, e),
+                )
                 self.game_state.attack(unit, best_target)
             return True
 
@@ -2292,8 +2393,8 @@ class MasterBot(AdvancedBot):
     # usually optimal); we just check the reverse as a safety swap.
     MAX_PERMUTE_ATTACKERS = 6
 
-    def __init__(self, game_state, player=2):
-        super().__init__(game_state, player)
+    def __init__(self, game_state, player=2, rng=None):
+        super().__init__(game_state, player, rng=rng)
         # Per-turn cached threat map. Rebuilt in take_turn before any move
         # decisions. dict[(x, y)] -> float damage.
         self._threat_map: Dict[Tuple[int, int], float] = {}
@@ -2426,6 +2527,10 @@ class MasterBot(AdvancedBot):
         best = None
         # Maximise (heal_amount, -threat_damage, -distance).
         best_score = (0, 1, float("inf"))
+        # Shuffle so equally-good heal tiles tiebreak randomly under
+        # stochastic mode (strict > below otherwise hard-prefers the
+        # first-visited candidate).
+        self._maybe_shuffle(candidates)
         for x, y in candidates:
             heal = self.heal_amount_at(x, y)
             if heal == 0:
@@ -2472,11 +2577,18 @@ class MasterBot(AdvancedBot):
             killable = [(e, a) for e, a in killable if e.health > 0 and id(e) not in attempted]
             if not killable:
                 return
+            # Equal-priority killable targets tiebreak randomly under
+            # stochastic mode.
+            self._maybe_shuffle(killable)
             killable.sort(key=target_priority)
             enemy, attackers = killable[0]
             attempted.add(id(enemy))
             # Hp-asc execution: chipped attackers swing first.
-            ordered = sorted([a for a in attackers if a.health > 0], key=lambda a: a.health)
+            # Shuffle so equal-HP attackers queue up in random order
+            # across episodes.
+            live_attackers = [a for a in attackers if a.health > 0]
+            self._maybe_shuffle(live_attackers)
+            ordered = sorted(live_attackers, key=lambda a: a.health)
             self._execute_focus_fire(enemy, ordered)
 
     # ------------------------------------------------------------------
@@ -2655,8 +2767,12 @@ class MasterBot(AdvancedBot):
         # (Barbarian=5, Knight=4, Rogue=4) where the doubled reach is
         # most game-changing.
         if capturables:
+            # Shuffle pre-sort so allies with the same movement_range
+            # tiebreak randomly across episodes.
+            mobility_candidates = [a for a in candidates if a.movement_range >= 3]
+            self._maybe_shuffle(mobility_candidates)
             high_mobility = sorted(
-                [a for a in candidates if a.movement_range >= 3],
+                mobility_candidates,
                 key=lambda a: -a.movement_range,
             )
             for ally in high_mobility:
