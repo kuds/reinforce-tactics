@@ -31,11 +31,24 @@ scenarios:
   # full ability roster (heal, paralyze, buffs) and the capture-race
   # behaviour around neutral towers / neutral buildings that scripted
   # MediumBot may underuse.
+  #
+  # demonstrator_player=2 because run 20260524_190214 showed this
+  # matchup is 0/60/0 from player 1's perspective on skirmish.csv --
+  # i.e. AdvancedBot-vs-AdvancedBot has a hard structural asymmetry
+  # where player 2 always wins (likely map geometry or first-move
+  # disadvantage in AdvancedBot's heuristics). Recording from player 1
+  # fed BC 6,840 pure losing-trajectory labels; flipping to player 2
+  # records from the *winning* side instead, so the BC labels for
+  # this scenario become "what winning AdvancedBot play looks like
+  # against AdvancedBot" -- the actual signal we wanted from this
+  # matchup. The map's player-side asymmetry itself is worth a
+  # follow-up investigation but doesn't block BC.
   - name: advanced_vs_advanced
     map_file: maps/1v1/skirmish.csv
     enabled_units: [W, M, C, A, K]
     demonstrator: advanced
     opponent: advanced
+    demonstrator_player: 2
     n_episodes: 60
     max_turns: 100
     weight: 1.0
