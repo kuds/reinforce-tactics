@@ -731,8 +731,7 @@ def collect_demonstrations(
         stats.record(outcome)
         if progress:
             logger.info(
-                "imitation episode %d/%d collected %d demos (total %d) "
-                "winner=%s turns=%d",
+                "imitation episode %d/%d collected %d demos (total %d) winner=%s turns=%d",
                 ep + 1,
                 n_episodes,
                 len(ep_demos),
@@ -957,8 +956,7 @@ def collect_demonstrations_multi(
             s = ds.scenario_stats[0] if ds.scenario_stats else None
             if s is not None:
                 logger.info(
-                    "  -> %d demos | demonstrator W/L/D %d/%d/%d (WR=%.1f%%) | "
-                    "avg_turns=%.1f | action_type histogram: %s",
+                    "  -> %d demos | demonstrator W/L/D %d/%d/%d (WR=%.1f%%) | avg_turns=%.1f | action_type histogram: %s",
                     len(ds),
                     s.demo_wins,
                     s.demo_losses,
