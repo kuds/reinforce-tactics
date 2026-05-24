@@ -19,7 +19,7 @@ Provides:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from reinforcetactics.constants import UNIT_DATA
 
@@ -69,6 +69,38 @@ class BaseBot(ABC):
     def take_turn(self) -> None:
         """Execute one full turn for ``self.bot_player`` and end it."""
 
+    # ------------------------------------------------------------------
+    # Capability telemetry
+    #
+    # Per-game tally of how often each scripted capability fired (e.g.
+    # ``knight_charge``, ``sorcerer_haste``, ``suicide_blocked``,
+    # ``buy_W``). Lazily created so subclasses that bypass
+    # ``BaseBot.__init__`` (most of the scripted hierarchy sets fields
+    # directly) still work. Tournament runner snapshots this into the
+    # replay's ``game_info`` so the balance notebook can correlate
+    # decision frequency with outcome -- the missing link in
+    # ``endstate_per_game.csv``, which records *what happened in the
+    # game state* but not *which heuristic the bot fired*.
+    # ------------------------------------------------------------------
+    def _record(self, name: str, n: int = 1) -> None:
+        """Increment ``capabilities_fired[name]`` by ``n``.
+
+        Lazy-creates the counter so subclasses that don't call
+        ``super().__init__`` still get telemetry. Safe to call from
+        anywhere on the bot; no-op if ``n == 0``.
+        """
+        if n == 0:
+            return
+        counters: Optional[Dict[str, int]] = getattr(self, "capabilities_fired", None)
+        if counters is None:
+            counters = {}
+            self.capabilities_fired = counters
+        counters[name] = counters.get(name, 0) + n
+
+    def get_capabilities_fired(self) -> Dict[str, int]:
+        """Return per-game capability counters (empty if nothing recorded)."""
+        return dict(getattr(self, "capabilities_fired", {}) or {})
+
 
 class BotUnitMixin:
     """Shared helpers for bots that reason about enabled unit types,
@@ -81,7 +113,9 @@ class BotUnitMixin:
     """
 
     # Attribute promises -- supplied by BaseBot (or whichever class composes
-    # this mixin).
+    # this mixin). ``_record`` is provided by BaseBot via MRO; the mixin
+    # methods below call ``self._record(...)`` and rely on every concrete
+    # bot subclassing BaseBot as well.
     game_state: Any
     bot_player: int
 
@@ -267,6 +301,7 @@ class BotUnitMixin:
         curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
         if curable:
             self.game_state.cure(unit, curable[0])
+            self._record("cleric_cure")
             return True
 
         healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
@@ -276,6 +311,7 @@ class BotUnitMixin:
         frontline = [a for a in healable if a.type in ("W", "B", "K")]
         target = min(frontline or healable, key=lambda a: a.health)
         self.game_state.heal(unit, target)
+        self._record("cleric_heal")
         return True
 
     def try_mage_paralyze(self, unit) -> bool:
@@ -306,6 +342,7 @@ class BotUnitMixin:
         if capturing:
             target = max(capturing, key=_unit_cost)
             self.game_state.paralyze(unit, target)
+            self._record("mage_paralyze")
             return True
 
         # Skip paralyze if a normal attack would already kill the best target.
@@ -321,4 +358,5 @@ class BotUnitMixin:
 
         target = max(worth_paralyzing, key=_unit_cost)
         self.game_state.paralyze(unit, target)
+        self._record("mage_paralyze")
         return True

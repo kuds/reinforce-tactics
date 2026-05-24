@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
@@ -331,6 +331,8 @@ class TournamentRunner:
                     winner_name,
                     map_config,
                     scheduled_game.game_id,
+                    bot1=bot1,
+                    bot2=bot2,
                 )
 
             # Apply LLM API delay
@@ -370,6 +372,8 @@ class TournamentRunner:
         winner_name: str,
         map_config: MapConfig,
         game_id: int,
+        bot1: Optional[Any] = None,
+        bot2: Optional[Any] = None,
     ) -> str:
         """Save game replay and return path."""
         replay_filename = (
@@ -416,6 +420,25 @@ class TournamentRunner:
         final_units_p1 = [u for u in game_state.units if u.player == 1]
         final_units_p2 = [u for u in game_state.units if u.player == 2]
 
+        # Capability telemetry (Step 1): scripted bots tally how often each
+        # decision heuristic fired. Stored per-player in game_info so the
+        # balance notebook can correlate decision frequency with outcome.
+        # Bots without the BaseBot hook (or LLM/RL bots that don't record)
+        # contribute an empty dict.
+        def _capabilities_for(b: Optional[Any]) -> Dict[str, int]:
+            if b is None:
+                return {}
+            getter = getattr(b, "get_capabilities_fired", None)
+            if callable(getter):
+                try:
+                    return dict(getter())
+                except Exception:  # noqa: BLE001
+                    return {}
+            return dict(getattr(b, "capabilities_fired", {}) or {})
+
+        capabilities_p1 = _capabilities_for(bot1)
+        capabilities_p2 = _capabilities_for(bot2)
+
         game_info = {
             "bot1": bot1_desc.name,
             "bot2": bot2_desc.name,
@@ -423,6 +446,8 @@ class TournamentRunner:
             "bot2_player": 2,
             "winner": winner,
             "winner_name": winner_name,
+            "capabilities_p1": capabilities_p1,
+            "capabilities_p2": capabilities_p2,
             "turns": game_state.turn_number,
             "max_turns": map_config.max_turns or self.config.max_turns,
             "map": map_config.path,
