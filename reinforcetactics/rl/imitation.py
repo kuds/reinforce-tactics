@@ -118,6 +118,91 @@ class Demonstration:
 
 
 @dataclass
+class EpisodeOutcome:
+    """Outcome of one demonstration episode.
+
+    Captured so callers can assess *demonstrator quality* per scenario --
+    a scenario where the demonstrator loses most games yields BC labels
+    biased toward losing trajectories, which downgrades the BC ceiling.
+    """
+
+    demonstrator_player: int
+    winner: Optional[int]  # 1, 2, or None for draw / unresolved
+    end_reason: Optional[str]
+    n_turns: int
+    n_demos: int
+
+    @property
+    def demonstrator_won(self) -> bool:
+        return self.winner == self.demonstrator_player
+
+    @property
+    def demonstrator_lost(self) -> bool:
+        return self.winner is not None and self.winner != self.demonstrator_player
+
+    @property
+    def is_draw(self) -> bool:
+        return self.winner is None
+
+
+@dataclass
+class ScenarioStats:
+    """Aggregated demonstrator outcomes for one scenario.
+
+    Surfaces the BC ceiling per (demonstrator, opponent, map) triple: if
+    AdvancedBot only beats RandomBot in 40% of games on this map, BC
+    labels from that scenario teach the policy losing patterns at a 60%
+    rate. Surfacing this *before* PPO fine-tuning lets the user adjust
+    scenario weights / demonstrator choice rather than discover the
+    ceiling after a long training run.
+    """
+
+    name: str
+    demonstrator: str
+    opponent: str
+    map_file: Optional[str] = None
+    n_episodes: int = 0
+    demo_wins: int = 0
+    demo_losses: int = 0
+    draws: int = 0
+    total_demos: int = 0
+    total_turns: int = 0
+    end_reasons: Dict[str, int] = field(default_factory=dict)
+
+    @property
+    def total_games(self) -> int:
+        return self.demo_wins + self.demo_losses + self.draws
+
+    @property
+    def demo_win_rate(self) -> float:
+        return self.demo_wins / self.total_games if self.total_games else 0.0
+
+    @property
+    def draw_rate(self) -> float:
+        return self.draws / self.total_games if self.total_games else 0.0
+
+    @property
+    def avg_turns(self) -> float:
+        return self.total_turns / self.total_games if self.total_games else 0.0
+
+    @property
+    def avg_demos_per_game(self) -> float:
+        return self.total_demos / self.total_games if self.total_games else 0.0
+
+    def record(self, outcome: EpisodeOutcome) -> None:
+        if outcome.demonstrator_won:
+            self.demo_wins += 1
+        elif outcome.demonstrator_lost:
+            self.demo_losses += 1
+        else:
+            self.draws += 1
+        self.total_demos += outcome.n_demos
+        self.total_turns += outcome.n_turns
+        reason = outcome.end_reason or "unknown"
+        self.end_reasons[reason] = self.end_reasons.get(reason, 0) + 1
+
+
+@dataclass
 class DemonstrationDataset:
     """Stacked demonstrations as numpy arrays ready for batched BC training."""
 
@@ -126,6 +211,11 @@ class DemonstrationDataset:
     masks_concat: np.ndarray  # (N, 10+8+W+H+W+H), bool
     # Dimension sizes used to split ``masks_concat`` back per-dim if needed.
     dim_sizes: Tuple[int, ...] = field(default_factory=tuple)
+    # Per-scenario outcomes. Empty when the dataset is built by
+    # ``from_list`` alone; populated by ``collect_demonstrations`` /
+    # ``collect_demonstrations_multi`` so callers can plot demonstrator
+    # win-rates alongside BC training curves.
+    scenario_stats: List[ScenarioStats] = field(default_factory=list)
 
     def __len__(self) -> int:
         return int(self.actions.shape[0])
@@ -483,21 +573,21 @@ class _ActionRecorder:
 # ---------------------------------------------------------------------------
 
 
-def record_episode(
-    demonstrator: str = "medium",
-    opponent: str = "medium",
-    map_file: Optional[str] = None,
-    enabled_units: Optional[List[str]] = None,
-    max_turns: int = 200,
-    fog_of_war: bool = False,
-    seed: Optional[int] = None,
-    demonstrator_player: int = 1,
-) -> List[Demonstration]:
-    """Play one bot-vs-bot game and return demos from ``demonstrator_player``.
+def _play_episode(
+    demonstrator: str,
+    opponent: str,
+    map_file: Optional[str],
+    enabled_units: Optional[List[str]],
+    max_turns: int,
+    fog_of_war: bool,
+    seed: Optional[int],
+    demonstrator_player: int,
+) -> Tuple[List[Demonstration], EpisodeOutcome]:
+    """Internal driver. Plays one game, returns demos plus end-state outcome.
 
-    The demonstrator and opponent share the same ``GameState``. The
-    demonstrator's mutator calls are intercepted and recorded; the
-    opponent's calls flow through untouched.
+    ``record_episode`` is the public façade that returns only the demos
+    (kept stable for callers); ``collect_demonstrations`` uses this
+    function directly so it can aggregate scenario-level outcome stats.
     """
     if demonstrator_player not in (1, 2):
         raise ValueError(f"demonstrator_player must be 1 or 2, got {demonstrator_player}")
@@ -556,7 +646,43 @@ def record_episode(
     finally:
         recorder.uninstall()
 
-    return recorder.demos
+    outcome = EpisodeOutcome(
+        demonstrator_player=demonstrator_player,
+        winner=game_state.winner,
+        end_reason=game_state.end_reason,
+        n_turns=game_state.turn_number,
+        n_demos=len(recorder.demos),
+    )
+    return recorder.demos, outcome
+
+
+def record_episode(
+    demonstrator: str = "medium",
+    opponent: str = "medium",
+    map_file: Optional[str] = None,
+    enabled_units: Optional[List[str]] = None,
+    max_turns: int = 200,
+    fog_of_war: bool = False,
+    seed: Optional[int] = None,
+    demonstrator_player: int = 1,
+) -> List[Demonstration]:
+    """Play one bot-vs-bot game and return demos from ``demonstrator_player``.
+
+    The demonstrator and opponent share the same ``GameState``. The
+    demonstrator's mutator calls are intercepted and recorded; the
+    opponent's calls flow through untouched.
+    """
+    demos, _ = _play_episode(
+        demonstrator=demonstrator,
+        opponent=opponent,
+        map_file=map_file,
+        enabled_units=enabled_units,
+        max_turns=max_turns,
+        fog_of_war=fog_of_war,
+        seed=seed,
+        demonstrator_player=demonstrator_player,
+    )
+    return demos
 
 
 def collect_demonstrations(
@@ -570,13 +696,28 @@ def collect_demonstrations(
     seed: Optional[int] = None,
     demonstrator_player: int = 1,
     progress: bool = False,
+    scenario_name: Optional[str] = None,
 ) -> DemonstrationDataset:
-    """Collect demonstrations from ``n_episodes`` bot-vs-bot games."""
+    """Collect demonstrations from ``n_episodes`` bot-vs-bot games.
+
+    The returned dataset's ``scenario_stats`` is populated with a single
+    :class:`ScenarioStats` summarising demonstrator W/L/D, average turn
+    count, and end-reason histogram across the ``n_episodes`` games --
+    surfaces demonstrator quality so callers can sanity-check BC label
+    quality before training.
+    """
     all_demos: List[Demonstration] = []
+    stats = ScenarioStats(
+        name=scenario_name or f"{demonstrator}_vs_{opponent}",
+        demonstrator=demonstrator,
+        opponent=opponent,
+        map_file=map_file,
+        n_episodes=n_episodes,
+    )
 
     for ep in range(n_episodes):
         ep_seed = None if seed is None else seed + ep
-        ep_demos = record_episode(
+        ep_demos, outcome = _play_episode(
             demonstrator=demonstrator,
             opponent=opponent,
             map_file=map_file,
@@ -587,13 +728,17 @@ def collect_demonstrations(
             demonstrator_player=demonstrator_player,
         )
         all_demos.extend(ep_demos)
+        stats.record(outcome)
         if progress:
             logger.info(
-                "imitation episode %d/%d collected %d demos (total %d)",
+                "imitation episode %d/%d collected %d demos (total %d) "
+                "winner=%s turns=%d",
                 ep + 1,
                 n_episodes,
                 len(ep_demos),
                 len(all_demos),
+                outcome.winner if outcome.winner is not None else "draw",
+                outcome.n_turns,
             )
 
     if not all_demos:
@@ -602,7 +747,9 @@ def collect_demonstrations(
             "any recordable actions — check bot/opponent compatibility with the map."
         )
 
-    return DemonstrationDataset.from_list(all_demos)
+    dataset = DemonstrationDataset.from_list(all_demos)
+    dataset.scenario_stats = [stats]
+    return dataset
 
 
 # ---------------------------------------------------------------------------
@@ -680,11 +827,16 @@ def _resample_dataset(
         extra = rng.choice(n, size=target - n, replace=True)
         idx = np.concatenate([np.arange(n), extra])
     obs = {k: v[idx] for k, v in dataset.obs.items()}
+    # ``scenario_stats`` describes the ORIGINAL demonstrator outcomes for
+    # this scenario, independent of any down/up-sampling applied to the
+    # demo rows -- carry it through unchanged so the user sees the real
+    # game-level WR / turn counts even after resampling.
     return DemonstrationDataset(
         obs=obs,
         actions=dataset.actions[idx],
         masks_concat=dataset.masks_concat[idx],
         dim_sizes=dataset.dim_sizes,
+        scenario_stats=list(dataset.scenario_stats),
     )
 
 
@@ -715,11 +867,15 @@ def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
     obs = {k: np.concatenate([p.obs[k] for p in parts], axis=0) for k in ref.obs}
     actions = np.concatenate([p.actions for p in parts], axis=0)
     masks_concat = np.concatenate([p.masks_concat for p in parts], axis=0)
+    merged_stats: List[ScenarioStats] = []
+    for p in parts:
+        merged_stats.extend(p.scenario_stats)
     return DemonstrationDataset(
         obs=obs,
         actions=actions,
         masks_concat=masks_concat,
         dim_sizes=ref.dim_sizes,
+        scenario_stats=merged_stats,
     )
 
 
@@ -793,15 +949,30 @@ def collect_demonstrations_multi(
             seed=scenario_seed,
             demonstrator_player=sc.demonstrator_player,
             progress=False,
+            scenario_name=sc.name or sc.map_file or f"scenario_{i}",
         )
         if sc.weight != 1.0:
             ds = _resample_dataset(ds, sc.weight, rng)
         if progress:
-            logger.info(
-                "  -> %d demos (action_type histogram: %s)",
-                len(ds),
-                np.bincount(ds.actions[:, 0], minlength=NUM_ACTION_TYPES).tolist(),
-            )
+            s = ds.scenario_stats[0] if ds.scenario_stats else None
+            if s is not None:
+                logger.info(
+                    "  -> %d demos | demonstrator W/L/D %d/%d/%d (WR=%.1f%%) | "
+                    "avg_turns=%.1f | action_type histogram: %s",
+                    len(ds),
+                    s.demo_wins,
+                    s.demo_losses,
+                    s.draws,
+                    100.0 * s.demo_win_rate,
+                    s.avg_turns,
+                    np.bincount(ds.actions[:, 0], minlength=NUM_ACTION_TYPES).tolist(),
+                )
+            else:
+                logger.info(
+                    "  -> %d demos (action_type histogram: %s)",
+                    len(ds),
+                    np.bincount(ds.actions[:, 0], minlength=NUM_ACTION_TYPES).tolist(),
+                )
         parts.append(ds)
 
     combined = _concat_datasets(parts)
@@ -813,9 +984,54 @@ def collect_demonstrations_multi(
             actions=combined.actions[order],
             masks_concat=combined.masks_concat[order],
             dim_sizes=combined.dim_sizes,
+            scenario_stats=combined.scenario_stats,
         )
 
     return combined
+
+
+def format_scenario_stats_table(stats: List[ScenarioStats]) -> str:
+    """Render a per-scenario W/L/D + avg_turns table as plain text.
+
+    Designed for direct ``print()`` in notebooks. Columns: scenario name,
+    demonstrator vs opponent, games, demonstrator W/L/D, win-rate %,
+    average game length in turns, average demos collected per game.
+    """
+    if not stats:
+        return "(no scenario stats collected)"
+
+    header = (
+        f"{'scenario':<32s}  {'matchup':<28s}  {'games':>5s}  "
+        f"{'W':>4s} {'L':>4s} {'D':>4s}  {'WR':>6s}  {'turns':>6s}  {'demos/g':>8s}"
+    )
+    sep = "-" * len(header)
+    lines = [header, sep]
+    tot_w = tot_l = tot_d = tot_demos = 0
+    tot_turns = 0
+    for s in stats:
+        matchup = f"{s.demonstrator} vs {s.opponent}"
+        lines.append(
+            f"{s.name:<32s}  {matchup:<28s}  {s.total_games:>5d}  "
+            f"{s.demo_wins:>4d} {s.demo_losses:>4d} {s.draws:>4d}  "
+            f"{100.0 * s.demo_win_rate:>5.1f}%  {s.avg_turns:>6.1f}  "
+            f"{s.avg_demos_per_game:>8.1f}"
+        )
+        tot_w += s.demo_wins
+        tot_l += s.demo_losses
+        tot_d += s.draws
+        tot_demos += s.total_demos
+        tot_turns += s.total_turns
+    tot_games = tot_w + tot_l + tot_d
+    tot_wr = (tot_w / tot_games) if tot_games else 0.0
+    tot_avg_turns = (tot_turns / tot_games) if tot_games else 0.0
+    tot_avg_demos = (tot_demos / tot_games) if tot_games else 0.0
+    lines.append(sep)
+    lines.append(
+        f"{'TOTAL':<32s}  {'':<28s}  {tot_games:>5d}  "
+        f"{tot_w:>4d} {tot_l:>4d} {tot_d:>4d}  "
+        f"{100.0 * tot_wr:>5.1f}%  {tot_avg_turns:>6.1f}  {tot_avg_demos:>8.1f}"
+    )
+    return "\n".join(lines)
 
 
 def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
