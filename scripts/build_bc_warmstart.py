@@ -87,6 +87,19 @@ def parse_args() -> argparse.Namespace:
         default=75,
         help="max_turns on the template env (matches v33's beginner stages).",
     )
+    parser.add_argument(
+        "--end-turn-weight",
+        type=float,
+        default=None,
+        help=(
+            "Per-sample loss weight for end_turn demonstrations during BC. "
+            "Default (unset) auto-balances to n_non_end/n_end so the "
+            "aggregate end_turn gradient matches all other action_types "
+            "combined -- corrects the ~10:1 demo imbalance that produces "
+            "the never-end-turn attractor at eval time. Pass 1.0 to "
+            "disable; pass a larger float (e.g. 20.0) to over-emphasise."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -166,6 +179,10 @@ def main() -> int:
         print(f"    features_extractor: {fe_name}")
         print(f"    net_arch: {policy_kwargs.get('net_arch')}")
     print(f"  BC: {args.epochs} epochs, batch={args.batch_size}, lr={args.learning_rate}")
+    if args.end_turn_weight is None:
+        print("  end_turn_weight: auto (n_non_end / n_end)")
+    else:
+        print(f"  end_turn_weight: {args.end_turn_weight}")
     print(f"  output: {output_path}")
     print("=" * 64)
 
@@ -182,6 +199,7 @@ def main() -> int:
         seed=args.seed,
         ppo_kwargs=ppo_kwargs,
         scenarios=scenarios,
+        end_turn_weight=args.end_turn_weight,
     )
     elapsed = time.time() - t0
 

@@ -56,6 +56,16 @@ logger = logging.getLogger(__name__)
 NUM_ACTION_TYPES = 10
 NUM_UNIT_TYPES = 8
 
+# Action-type index for end_turn (matches _wrap_end_turn's snapshot and
+# StrategyGameEnv._ACTION_KEY_MAP). Scripted bots emit exactly one end_turn
+# per game-turn vs. many move / build / attack actions per turn, so the raw
+# demonstration mix is ~10:1 against end_turn. The cross-entropy loss then
+# suppresses the end_turn logit in ~90% of gradient updates, producing the
+# never-end-turn attractor observed when the BC checkpoint is loaded into
+# the curriculum. The class-balancing path in ``behavior_clone`` upweights
+# this single class to neutralise the imbalance.
+END_TURN_ACTION_IDX = 5
+
 
 # Ordered list of per-dimension sizes for the MaskablePPO MultiDiscrete head.
 def _per_dim_sizes(width: int, height: int) -> Tuple[int, ...]:
@@ -884,6 +894,7 @@ def behavior_clone(
     learning_rate: float = 3e-4,
     seed: int = 0,
     log_every: int = 1,
+    end_turn_weight: Optional[float] = None,
 ) -> List[BCStats]:
     """Behavior-clone ``model.policy`` on ``dataset`` via masked cross-entropy.
 
@@ -901,6 +912,14 @@ def behavior_clone(
         learning_rate: Adam learning rate for the BC phase.
         seed: RNG seed for batch shuffling.
         log_every: Emit a log message every N epochs.
+        end_turn_weight: Per-sample loss weight applied to demonstrations
+            whose action_type is ``end_turn`` (index 5). ``None`` (default)
+            auto-computes ``n_non_end / n_end`` so the aggregate gradient
+            contribution from end_turn samples matches that of all other
+            classes combined -- corrects the ~10:1 demonstration imbalance
+            that otherwise drives the policy into the never-end-turn
+            attractor. Pass ``1.0`` to disable weighting. ``0.0`` would
+            drop end_turn entirely (don't).
 
     Returns:
         Per-epoch ``BCStats`` list. The final entry is also useful as a
@@ -922,6 +941,24 @@ def behavior_clone(
     if n == 0:
         raise ValueError("Empty demonstration dataset")
 
+    # Auto-balance the end_turn class when no explicit weight was passed.
+    # The ratio is computed once over the whole dataset (not per-batch) so
+    # mini-batches that happen to contain zero end_turn samples don't
+    # destabilise the gradient scale.
+    action_types = dataset.actions[:, 0]
+    n_end = int((action_types == END_TURN_ACTION_IDX).sum())
+    n_non_end = int(action_types.shape[0] - n_end)
+    if end_turn_weight is None:
+        resolved_end_turn_weight = float(n_non_end) / max(n_end, 1) if n_end > 0 else 1.0
+    else:
+        resolved_end_turn_weight = float(end_turn_weight)
+    logger.info(
+        "BC class balance: %d end_turn / %d non_end demos -> end_turn_weight=%.3f",
+        n_end,
+        n_non_end,
+        resolved_end_turn_weight,
+    )
+
     # Pre-convert obs to torch tensors per epoch's batches lazily.
     def _to_tensor(arr: np.ndarray) -> th.Tensor:
         return th.as_tensor(arr, device=device)
@@ -939,7 +976,17 @@ def behavior_clone(
             masks = _to_tensor(dataset.masks_concat[batch_idx])
 
             _values, log_prob, _entropy = policy.evaluate_actions(obs_batch, actions, action_masks=masks)
-            loss = -log_prob.mean()
+            # Weighted NLL: end_turn samples get ``resolved_end_turn_weight``,
+            # everything else stays at 1.0. Normalised by the per-batch
+            # weight sum so the effective learning-rate scale is preserved
+            # regardless of how many end_turn samples land in this batch.
+            sample_w = th.ones_like(log_prob)
+            sample_w = th.where(
+                actions[:, 0] == END_TURN_ACTION_IDX,
+                th.full_like(log_prob, resolved_end_turn_weight),
+                sample_w,
+            )
+            loss = -(log_prob * sample_w).sum() / sample_w.sum().clamp(min=1.0)
 
             optimizer.zero_grad()
             loss.backward()
@@ -1005,6 +1052,7 @@ def make_warm_started_model(
     seed: int = 0,
     ppo_kwargs: Optional[Dict[str, Any]] = None,
     scenarios: Optional[List[DemonstrationScenario]] = None,
+    end_turn_weight: Optional[float] = None,
 ) -> Tuple[Any, DemonstrationDataset, List[BCStats]]:
     """Build a MaskablePPO model and warm-start it via behavior cloning.
 
@@ -1064,6 +1112,7 @@ def make_warm_started_model(
         batch_size=batch_size,
         learning_rate=learning_rate,
         seed=seed,
+        end_turn_weight=end_turn_weight,
     )
 
     return model, dataset, bc_stats
