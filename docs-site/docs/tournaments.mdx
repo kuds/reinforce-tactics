@@ -48,6 +48,20 @@ A highly sophisticated AI extending MediumBot with enhanced strategic capabiliti
 - **Aggressive tactics**: More aggressive attack prioritization and pursuit of enemies
 - Included in tournaments by default alongside SimpleBot and MediumBot
 
+### MasterBot
+A master-tier scripted bot that extends AdvancedBot with targeted upgrades:
+- **Inherits from AdvancedBot**: Keeps the full game-phase state machine, counter matrix, retreat thresholds, and special-ability orchestration
+- **Threat map**: Per-tile expected incoming damage is computed once per turn and consulted for retreat-tile selection and Knight charge landing — avoids walking into crossfires without biasing forward engagement
+- **HP-ascending focus fire**: When chaining attackers, lowest-HP allies swing first so a wounded attacker uses its last hit before a counter would kill it
+- **HQ-snipe priority**: In the conquer phase the enemy HQ outranks equidistant towers so every unit pushes the win condition
+- **Haste follow-through**: Hasted units that already seized/attacked/charged still get their second action — enabling double captures, double-charges, and Barbarian cross-map mobility
+
+### MixedBot
+A curriculum bridge bot, not a standalone strategy:
+- **Samples one of two bots** on construction (e.g. `easy=simple`, `hard=medium`) with probability `p_hard`
+- **Per-episode**: each episode plays entirely as the sampled bot (no mid-episode switching), so the harder bot's multi-turn strategy is preserved on the episodes where it is selected
+- Used as a stepping stone in the bootstrap curriculum (`configs/ppo/bootstrap.yaml`) — e.g. the `simple → medium` and `medium → advanced` bridges
+
 ### LLM Bots
 AI-powered by Large Language Models:
 - **OpenAIBot**: Powered by GPT models
@@ -441,6 +455,8 @@ Each bot type has different characteristics:
 - **SimpleBot**: Predictable but consistent; makes basic strategic errors
 - **MediumBot**: More strategic than SimpleBot; uses coordinated tactics and better unit purchasing
 - **AdvancedBot**: Extends MediumBot with enhanced unit composition, mountain positioning, ranged combat prioritization, and special ability usage
+- **MasterBot**: Extends AdvancedBot with threat maps, HP-ascending focus fire, HQ-snipe priority, and Haste follow-through
+- **MixedBot**: Curriculum-only — samples easy/hard inner bot per episode for bootstrap training
 - **LLM Bots**: Creative but sometimes unpredictable
 - **Model Bots**: Optimized but may overfit to training conditions
 

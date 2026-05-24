@@ -18,6 +18,8 @@ The tournament system automatically discovers and runs competitions between:
 - **SimpleBot**: Built-in basic rule-based bot (always included)
 - **MediumBot**: Built-in improved rule-based bot with advanced strategies (always included)
 - **AdvancedBot**: Built-in sophisticated bot extending MediumBot with map analysis, enhanced unit composition, mountain positioning, ranged combat prioritization, and special ability usage (always included)
+- **MasterBot**: Master-tier bot extending AdvancedBot with threat maps, HP-ascending focus fire, HQ-snipe priority, and Haste follow-through
+- **MixedBot**: Curriculum-only bot that samples one of two inner bots per episode (used for bootstrap training, not for standings)
 - **LLM Bots**: OpenAI, Claude, and Gemini bots (if API keys configured)
 - **Model Bots**: Trained Stable-Baselines3 models (from `models/` directory)
 
@@ -97,12 +99,21 @@ python3 scripts/tournament.py --test --games-per-side 1
 
 ## Bot Discovery
 
-### SimpleBot, MediumBot & AdvancedBot
-All three built-in bots are always included. No configuration needed.
+### SimpleBot, MediumBot, AdvancedBot & MasterBot
+The built-in scripted bots are always available. No configuration needed.
 
 - **SimpleBot**: Basic strategy with single-unit purchases and simple targeting
 - **MediumBot**: Advanced strategy with coordinated attacks and maximized unit production
 - **AdvancedBot**: Extends MediumBot with map analysis, optimized unit composition (Warriors 25%, Archers 20%, Mages 15%, Knights 10%, Rogues 10%, Barbarians 8%, Clerics 7%, Sorcerers 5%), mountain positioning for archers, ranged combat prioritization, and special ability usage (Mage Paralyze, Cleric Heal)
+- **MasterBot**: Extends AdvancedBot with a per-turn threat map (used for retreat tiles and Knight charge landings), HP-ascending focus fire, HQ-snipe priority in the conquer phase, and Haste follow-through (a hasted unit that seizes/attacks/charges still gets its second action)
+
+### Stochastic Tiebreak
+
+All scripted bots accept an optional `rng` (a `random.Random` instance). When provided, the bot uses it to tiebreak at every sort / max / best-tracking site so two runs of the same scenario don't produce byte-identical games. Without an `rng`, the bots remain deterministic. This is plumbed through `MixedBot` to its inner bot so the curriculum-bridge bot's stochastic tiebreaking actually engages.
+
+### Curriculum Bridge (MixedBot)
+
+`MixedBot` is not a standalone strategy — it is a training-time curriculum bridge. On construction it samples one of two inner bots with probability `p_hard` and delegates `take_turn()` to that instance for the lifetime of the episode (the environment reconstructs the opponent on every `reset()`, so the choice effectively resamples per episode). Configure it via `opponent_kwargs` in `configs/ppo/bootstrap.yaml`, e.g. `{easy: simple, hard: medium, p_hard: 0.5}` for the simple→medium bridge.
 
 ### LLM Bots
 Automatically included if:
@@ -313,7 +324,7 @@ scripts/
   tournament.py              # Main tournament CLI script
 reinforcetactics/
   game/
-    bot.py                   # SimpleBot, MediumBot, AdvancedBot
+    bot.py                   # SimpleBot, MediumBot, AdvancedBot, MasterBot, MixedBot
     llm_bot.py               # LLM bot implementations (OpenAI, Claude, Gemini)
     model_bot.py             # ModelBot for trained models
   tournament/

@@ -16,14 +16,14 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 
 | Unit | Code | Cost | Health | Movement | Attack | Defence | Special Abilities |
 |------|------|------|--------|----------|--------|---------|-------------------|
-| **Warrior** | W | 200 | 15 | 3 | 8 | 6 | Melee only (range 1) |
+| **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
 | **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns (2-turn cooldown) |
-| **Cleric** | C | 200 | 8 | 2 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
+| **Cleric** | C | 200 | 10 | 3 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
 | **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
-| **Sorcerer** | S | 400 | 10 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE: Grant ally extra action, ATTACK/DEFENCE BUFF: +35% damage/reduction for 3 turns |
-| **Barbarian** | B | 400 | 24 | 5 | 11 | 2 | High HP glass cannon with excellent mobility |
+| **Sorcerer** | S | 350 | 12 | 2 | 6 (adjacent) / 8 (range) | 3 | Can attack at range 1-2, HASTE: Grant ally extra action, ATTACK/DEFENCE BUFF: +50% damage/reduction for 3 turns (2-turn cooldown) |
+| **Barbarian** | B | 400 | 20 | 5 | 10 | 2 | High HP glass cannon with excellent mobility |
 
 ### Unit Details
 
@@ -47,7 +47,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 #### Cleric (C)
 - **Role**: Support and healing
 - **Cost**: $200
-- **Stats**: 8 HP, 2 Movement, 2 Attack, 4 Defence
+- **Stats**: 10 HP, 3 Movement, 2 Attack, 4 Defence
 - **Abilities**:
   - Can HEAL allies for 5 HP per action (range 1-2)
   - Can CURE paralyzed units (range 1-2)
@@ -73,14 +73,14 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 
 #### Sorcerer (S)
 - **Role**: Support caster with buffs
-- **Cost**: $400
-- **Stats**: 10 HP, 2 Movement, 6/8 Attack, 3 Defence
+- **Cost**: $350
+- **Stats**: 12 HP, 2 Movement, 6/8 Attack, 3 Defence
 - **Abilities**:
   - Attacks at distance 1 (adjacent): 6 damage
   - Attacks at distance 2 (range): 8 damage
-  - HASTE: Grant an ally an extra action this turn (3-turn cooldown)
-  - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
-  - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
+  - HASTE: Grant an ally an extra action this turn (2-turn cooldown)
+  - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (2-turn cooldown)
+  - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (2-turn cooldown)
 - **Best for**: Amplifying ally effectiveness and providing tactical flexibility
 
 #### Barbarian (B)
@@ -130,7 +130,7 @@ Structures provide income and serve as strategic objectives. They can be capture
   - Headquarters: $150 per turn
   - Buildings: $100 per turn
   - Towers: $50 per turn
-- Players start with **$200** in gold (`STARTING_GOLD = 200`)
+- Players start with **$250** in gold (`STARTING_GOLD = 250`)
 
 ## Combat System
 
@@ -160,18 +160,18 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 #### Haste
 - Sorcerers can grant Haste to friendly units within range 1-2
-- Hasted units can take an additional action this turn
-- After using Haste, the Sorcerer has a **3 turn cooldown** (`HASTE_COOLDOWN = 3`)
+- Hasted units can take an additional action this turn (can move, act, then move and act again)
+- After using Haste, the Sorcerer has a **2 turn cooldown** (`HASTE_COOLDOWN = 2`)
 
 #### Defence Buff
 - Sorcerers can grant Defence Buff to friendly units within range 1-2
-- Buffed units take **35% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.35`)
-- After using Defence Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
+- Buffed units take **50% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.50`)
+- After using Defence Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
 #### Attack Buff
 - Sorcerers can grant Attack Buff to friendly units within range 1-2
-- Buffed units deal **35% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.35`)
-- After using Attack Buff, the Sorcerer has a **3 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 3`)
+- Buffed units deal **50% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.50`)
+- After using Attack Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
 ### Combat Abilities
 
