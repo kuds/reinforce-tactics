@@ -393,3 +393,152 @@ def test_no_trailing_actions_after_game_over(tmp_path):
 
     assert len(g.action_history) == actions_after_game_over
     assert g.game_over_action_index == len(g.action_history) - 1
+
+
+# ===================================================================
+# Engine stale-reference guards (ghost-action prevention)
+# ===================================================================
+
+
+def test_dead_unit_cannot_move(tmp_path):
+    """After a unit dies (counter-killed), passing its stale reference
+    to ``move_unit`` must be a silent no-op -- no engine mutation, no
+    log entry. This is the engine bug that produced the v2 replay
+    divergence we found in the balance_analysis baseline (PR #360
+    audit: 90% of replays affected).
+    """
+    g = _make_game()
+    attacker = g.create_unit("W", 2, 1, player=1)
+    defender = g.create_unit("W", 2, 2, player=2)
+    _enable(attacker)
+    _enable(defender)
+    attacker.health = 1  # guarantees counter-kill
+
+    g.attack(attacker, defender)
+    assert attacker not in g.units, "expected attacker to be counter-killed"
+
+    log_len_before = len(g.action_history)
+    moved = g.move_unit(attacker, 3, 1)  # bot still holds stale ref
+
+    assert moved is False, "dead unit must not move"
+    assert len(g.action_history) == log_len_before, "dead unit must not log"
+    assert attacker.x == 2 and attacker.y == 1, "dead unit position must not change"
+
+
+def test_dead_unit_cannot_attack_seize_or_buff(tmp_path):
+    """The same stale-reference guard must apply across the whole
+    action surface, not just move_unit."""
+    g = _make_game()
+    a = g.create_unit("W", 2, 1, player=1)
+    d = g.create_unit("W", 2, 2, player=2)
+    other = g.create_unit("W", 3, 1, player=1)
+    _enable(a)
+    _enable(d)
+    _enable(other)
+    a.health = 1
+
+    g.attack(a, d)
+    assert a not in g.units
+
+    log_len = len(g.action_history)
+
+    # Each of these should silently no-op.
+    g.attack(a, other)  # dead attacker
+    g.attack(other, a)  # dead target
+    g.seize(a)
+    g.heal(a, other)
+    g.cure(a, other)
+    g.paralyze(a, other)
+    g.haste(a, other)
+    g.defence_buff(a, other)
+    g.attack_buff(a, other)
+
+    assert len(g.action_history) == log_len, f"dead unit produced {len(g.action_history) - log_len} ghost actions"
+
+
+# ===================================================================
+# v2 helper resiliency for older replays with ghost actions
+# ===================================================================
+
+
+def test_v2_attack_helper_terminates_even_with_missing_units(tmp_path):
+    """A pre-fix replay can contain a recorded eliminating attack whose
+    target unit is missing in the replay state (because earlier ghost
+    actions moved it elsewhere or removed it). The v2 helper must
+    still trigger ``_check_player_eliminated`` on the recorded
+    outcome so the replay reaches game_over on the recorded winning
+    action index.
+    """
+    # Build a state where P2 has zero units and P1 has one. Synthesise
+    # an attack action that records target_killed=True against a
+    # non-existent target. The replay must terminate.
+    g = _make_game()
+    p1_only = g.create_unit("W", 2, 1, player=1)
+    _enable(p1_only)
+    # No P2 units exist. Game isn't over yet because no kill ran.
+    assert not g.game_over
+
+    from reinforcetactics.utils.replay_actions import apply_recorded_attack
+
+    fake_killing_attack = {
+        "type": "attack",
+        "player": 1,
+        "attacker_pos": [2, 1],
+        "target_pos": [9, 9],  # nothing here
+        "attacker_type": "W",
+        "target_type": "W",
+        "damage": 7,
+        "target_killed": True,
+        "attacker_killed": False,
+        "counter_damage": 0,
+        "attacker_hp_after": 15,
+        "target_hp_after": 0,
+        "evade": False,
+        "charge_bonus": False,
+        "flank_bonus": False,
+        "attack_buff": False,
+        "defence_buff": False,
+    }
+    apply_recorded_attack(g, fake_killing_attack, _translate)
+
+    assert g.game_over, "v2 helper must still fire game_over even with missing target"
+    assert g.end_reason == "elimination"
+    assert g.winner == 1
+
+
+def test_v2_seize_helper_applies_tile_state_even_without_seizer(tmp_path):
+    """Pre-fix replays can record a seize whose unit is missing in the
+    replay state. Tile mutations are fully described by tile_hp_after
+    / tile_owner_after, so the helper must apply them regardless of
+    whether the seizer is present, and fire ``hq_capture`` end-game
+    on a recorded captured HQ.
+    """
+    g = _make_game()
+    p1_unit = g.create_unit("W", 2, 1, player=1)
+    _enable(p1_unit)
+
+    from reinforcetactics.utils.replay_actions import apply_recorded_seize
+
+    # Synthesise an HQ-capture seize with no unit at the target tile.
+    hq_pos = [4, 4]  # h_2 location
+    fake_hq_capture = {
+        "type": "seize",
+        "player": 1,
+        "unit_type": "W",
+        "position": hq_pos,
+        "structure_type": "h",
+        "captured": True,
+        "tile_hp_after": 30,
+        "tile_owner_after": 1,
+    }
+    hq_tile = g.grid.get_tile(*hq_pos)
+    original_owner = hq_tile.player
+
+    apply_recorded_seize(g, fake_hq_capture, _translate)
+
+    assert hq_tile.player == 1, "tile owner must reflect recorded outcome"
+    assert hq_tile.player != original_owner, "tile must have actually flipped"
+    assert hq_tile.health == 30
+    assert g.game_over, "captured HQ must trigger hq_capture end-game"
+    assert g.end_reason == "hq_capture"
+    assert g.winner == 1

@@ -575,6 +575,16 @@ class GameState:
             logger.debug(f"Cannot move {unit.type} at ({unit.x}, {unit.y}): can_move is False")
             return False
 
+        # Stale-reference guard: bots iterate over their own units once
+        # per turn, but a unit can die mid-loop from a counter-attack on
+        # an earlier action. The bot still holds the Python reference and
+        # will keep calling APIs on the dead unit; without this guard
+        # the engine moves it, logs the event, and the replay player
+        # (which only sees self.units) can't reproduce it -- the action
+        # silently no-ops and state diverges. See PR #360 audit.
+        if unit not in self.units:
+            return False
+
         # Check if move is valid
         reachable = unit.get_reachable_positions(
             self.grid.width,
@@ -625,6 +635,22 @@ class GameState:
         Returns:
             dict: Attack results
         """
+        # Stale-reference guard (see move_unit for full rationale).
+        # Returns the same shape as a clean no-op attack so callers
+        # that index into the result dict don't KeyError.
+        if attacker not in self.units or target not in self.units:
+            return {
+                "attacker_alive": True,
+                "target_alive": True,
+                "damage": 0,
+                "counter_damage": 0,
+                "charge_bonus": False,
+                "flank_bonus": False,
+                "evade": False,
+                "attack_buff": False,
+                "defence_buff": False,
+            }
+
         result = self.mechanics.attack_unit(attacker, target, self.grid, self.units)
 
         # Record action. The extra fields (attacker_killed, counter_damage,
@@ -684,6 +710,8 @@ class GameState:
 
     def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
         """Paralyze a target unit."""
+        if paralyzer not in self.units or target not in self.units:
+            return False
         result = self.mechanics.paralyze_unit(paralyzer, target)
         if result:
             paralyzer.can_move = False
@@ -696,6 +724,8 @@ class GameState:
 
     def heal(self, healer: Unit, target: Unit) -> int:
         """Heal a target unit."""
+        if healer not in self.units or target not in self.units:
+            return 0
         amount = self.mechanics.heal_unit(healer, target)
         if amount > 0:
             healer.can_move = False
@@ -717,6 +747,8 @@ class GameState:
 
     def cure(self, curer: Unit, target: Unit) -> bool:
         """Cure a target unit's paralysis."""
+        if curer not in self.units or target not in self.units:
+            return False
         result = self.mechanics.cure_unit(curer, target)
         if result:
             curer.can_move = False
@@ -736,6 +768,8 @@ class GameState:
         Returns:
             bool: True if Haste was successfully applied
         """
+        if sorcerer not in self.units or target not in self.units:
+            return False
         result = self.mechanics.haste_unit(sorcerer, target)
         if result:
             sorcerer.can_move = False
@@ -761,6 +795,8 @@ class GameState:
         Returns:
             bool: True if Defence Buff was successfully applied
         """
+        if sorcerer not in self.units or target not in self.units:
+            return False
         result = self.mechanics.defence_buff_unit(sorcerer, target)
         if result:
             sorcerer.can_move = False
@@ -786,6 +822,8 @@ class GameState:
         Returns:
             bool: True if Attack Buff was successfully applied
         """
+        if sorcerer not in self.units or target not in self.units:
+            return False
         result = self.mechanics.attack_buff_unit(sorcerer, target)
         if result:
             sorcerer.can_move = False
@@ -802,6 +840,9 @@ class GameState:
 
     def seize(self, unit: Unit) -> Dict[str, Any]:
         """Seize the structure the unit is on."""
+        if unit not in self.units:
+            tile = self.grid.get_tile(unit.x, unit.y)
+            return {"captured": False, "game_over": False, "structure_type": tile.type}
         tile = self.grid.get_tile(unit.x, unit.y)
         result = self.mechanics.seize_structure(unit, tile)
 
