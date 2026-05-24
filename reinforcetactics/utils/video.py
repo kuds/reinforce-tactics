@@ -460,6 +460,14 @@ def _execute_replay_action(game_state, action, translate_fn, schema_version: int
             tx, ty = translate_fn(action["to_x"], action["to_y"])
             unit = game_state.get_unit_at_position(fx, fy)
             if unit and unit.player == action["player"]:
+                # Trust the recorded action: a unit that legitimately moved
+                # a second time in the original turn (Sorcerer Haste resets
+                # can_move/can_attack) was rejected here without this
+                # override -- silent failure that diverged downstream state
+                # and produced the ghost-action symptoms in MasterBot games.
+                # Mirrors the same trust-the-recording stance in
+                # replay_player.py's ReplayPlayer.execute_action.
+                unit.can_move = True
                 game_state.move_unit(unit, tx, ty)
         elif action_type == "attack":
             if schema_version >= 2:
