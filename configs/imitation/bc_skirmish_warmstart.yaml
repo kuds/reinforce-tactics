@@ -1,0 +1,90 @@
+# BC warm-start scenarios for the skirmish single-map validation track.
+#
+# Goal: build a MaskablePPO checkpoint that already knows the basics of
+# skirmish.csv (8x8, HQs at opposite corners, neutral towers + neutral
+# buildings + team buildings, terrain mix), so the downstream self-play
+# phase starts from "competent generalist on this map" rather than from
+# a near-uniform policy. The target benchmark is beating AdvancedBot on
+# this same map.
+#
+# Single-map intentionally: this track validates the BC + self-play
+# pipeline on one map before generalising. All scenarios share
+# map_file=maps/1v1/skirmish.csv so DemonstrationDataset stacks cleanly
+# without pad_to_size.
+#
+# Roster: [W, M, C, A, K] -- same proven set used by the beginner
+# warmstart. Skirmish supports all of them (no spawn constraints that
+# rule any out).
+#
+# Demonstrator mix: prioritises AdvancedBot as the demonstrator because
+# we're aiming to *beat* AdvancedBot. BC ceiling is roughly the
+# demonstrator's skill, so MediumBot demos give a lower starting point
+# than necessary. AdvancedBot vs RandomBot / balanced_random scenarios
+# also give the policy state-distribution coverage of stochastic
+# opponents -- important for self-play stability where the opponent
+# distribution shifts every update.
+#
+# max_turns=100 is a soft ceiling for skirmish-sized games; the bot
+# rollouts typically resolve well under that.
+scenarios:
+  # Highest-quality anchor: AdvancedBot vs AdvancedBot. Teaches the
+  # full ability roster (heal, paralyze, buffs) and the capture-race
+  # behaviour around neutral towers / neutral buildings that scripted
+  # MediumBot may underuse.
+  - name: advanced_vs_advanced
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: advanced
+    n_episodes: 60
+    max_turns: 100
+    weight: 1.0
+
+  # AdvancedBot vs MediumBot. Asymmetric quality: demonstrator state
+  # distribution skews toward winning positions, giving the BC policy
+  # a strong prior for "what a winning trajectory looks like" on this
+  # map.
+  - name: advanced_vs_medium
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: medium
+    n_episodes: 60
+    max_turns: 100
+    weight: 1.0
+
+  # AdvancedBot vs RandomBot. Stochastic opponents force exposure to
+  # off-distribution states the self-play phase will encounter when
+  # the opponent pool is mid-quality. Without this scenario the BC
+  # policy overfits to deterministic medium/advanced play.
+  - name: advanced_vs_random
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: random
+    n_episodes: 50
+    max_turns: 100
+    weight: 1.5
+
+  - name: advanced_vs_balanced_random
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: balanced_random
+    n_episodes: 40
+    max_turns: 100
+    weight: 1.0
+
+  # MediumBot demos add behavioural diversity -- MediumBot picks
+  # different unit compositions and ability targets than AdvancedBot,
+  # so this widens the action distribution rather than collapsing it
+  # onto a single bot's heuristics. Lower weight because MediumBot is
+  # a weaker teacher.
+  - name: medium_vs_medium
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: medium
+    n_episodes: 40
+    max_turns: 100
+    weight: 0.75

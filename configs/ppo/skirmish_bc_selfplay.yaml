@@ -1,0 +1,133 @@
+# Skirmish single-map BC + (eventually) self-play track.
+# =================================================================
+# Purpose: validate the BC -> PPO/self-play pipeline on ONE map
+# (skirmish.csv, 8x8) before generalising. Target benchmark: beat
+# AdvancedBot on this map.
+#
+# Two roles:
+#
+#  1. ``scripts/build_bc_warmstart.py`` reads ppo.policy_kwargs from
+#     this file so the BC checkpoint is built with the same features
+#     extractor / net_arch as the downstream model. Without this the
+#     BC ckpt has SB3 defaults and set_parameters(exact_match=True)
+#     fails on state_dict mismatch.
+#
+#  2. The post-BC PPO fine-tune (vs AdvancedBot, or vs self-play
+#     once wired in) loads this config: warm_start_path points at
+#     the BC checkpoint, curriculum is a single skirmish_advanced
+#     stage. Self-play replaces the curriculum opponent in a
+#     follow-up config once BC vs AdvancedBot is validated.
+#
+# Constraints (mirror v33, accepted as simplifications):
+#   * action_space_type: multi_discrete (BC infra requirement).
+#   * Single map_file = maps/1v1/skirmish.csv (single-map track).
+#   * No engine_overrides -- BC and PPO share whatever constants.py
+#     ships on this branch.
+# =================================================================
+#
+# Placeholder -- update to the path printed by build_bc_warmstart.py
+# after the BC build completes.
+warm_start_path: benchmarks/bc/YYYYMMDD_HHMMSS/bc_warmstart.zip
+
+algorithm: maskable_ppo
+seed: 42
+total_timesteps: 10_000_000  # informational; stage budgets drive run length
+
+env:
+  n_envs: 8
+  use_subprocess: true
+  max_steps: 3000
+  max_turns: 100
+  # Hard cap on agent actions within a single game-turn before the
+  # mask narrows to end_turn-only. Same defense against the
+  # never-end-turn attractor that v33 hit; 60 is comfortably above a
+  # healthy skirmish turn's legal-action count.
+  max_actions_per_turn: 60
+  action_space_type: multi_discrete
+  enabled_units: [W, M, C, A, K]
+  reward_config:
+    # Reward shape lifted from v33 -- same scaling rationale (value
+    # head capacity, potential-shaping bias, capture differentiation).
+    # All comments in v33_production_bc_warmstart.yaml explaining
+    # individual magnitudes apply unchanged here.
+    win_by_hq_capture: 50.0
+    win_by_elimination: 50.0
+    win: 50.0
+    loss: -50.0
+    draw: -50.0
+    income_diff: 0.05
+    unit_diff: 0.3
+    structure_control: 1.0
+    create_unit: 0.0
+    move: 0.0
+    damage_scale: 0.0
+    kill: 0.0
+    seize_progress: 3.0
+    capture: 10.0
+    tower_capture: 15.0
+    building_capture: 40.0
+    hq_capture: 25.0
+    cure: 0.0
+    heal_scale: 0.0
+    paralyze: 0.0
+    haste: 0.0
+    defence_buff: 0.0
+    attack_buff: 0.0
+    invalid_action: -0.1
+    turn_penalty: -0.2
+    win_speed_bonus: 0.0
+    enemy_neutral_capture: 0.0
+    enemy_owned_capture: 0.0
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
+    # Same CNN trunk as v33. Skirmish is 8x8 so the masked_avg pool
+    # is operating on a fully-non-padded grid (no pad_to_size in this
+    # track), but keeping pool=masked_avg means a future multi-map
+    # extension can drop in pad_to_size without touching the
+    # extractor config. coord_conv prepends normalised (y, x) so the
+    # policy can encode HQ-corner priors. extra_conv lifts the
+    # receptive field past 8x8 in one CNN pass.
+    features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
+    features_extractor_kwargs:
+      features_dim: 256
+      pool: masked_avg
+      coord_conv: true
+      extra_conv: true
+
+eval:
+  eval_freq: 50_000
+  n_eval_episodes: 80
+
+curriculum:
+  stages:
+    # Single stage: directly vs AdvancedBot on skirmish. The BC
+    # warm-start should put the policy at non-trivial WR from the
+    # first eval; PPO then closes the gap. Promotion gate is just a
+    # success criterion for this single-map track -- if cleared, the
+    # BC + PPO pipeline is validated and we move to self-play.
+    - name: skirmish_advanced
+      map_file: maps/1v1/skirmish.csv
+      opponent: advanced
+      promotion_win_rate: 0.60
+      patience: 3
+      max_timesteps: 10_000_000
+      n_eval_episodes: 80
+      max_turns: 100
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
