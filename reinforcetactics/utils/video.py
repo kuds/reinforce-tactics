@@ -14,8 +14,12 @@ import numpy as np
 
 from reinforcetactics.utils.replay_actions import (
     apply_recorded_attack,
+    apply_recorded_attack_v3,
     apply_recorded_heal,
+    apply_recorded_heal_v3,
+    apply_recorded_move_v3,
     apply_recorded_seize,
+    apply_recorded_seize_v3,
     get_schema_version,
 )
 
@@ -454,15 +458,34 @@ def _execute_replay_action(game_state, action, translate_fn, schema_version: int
     try:
         if action_type == "create_unit":
             px, py = translate_fn(action["x"], action["y"])
-            game_state.create_unit(action["unit_type"], px, py, action["player"])
+            unit = game_state.create_unit(action["unit_type"], px, py, action["player"])
+            if unit is not None and schema_version >= 3 and "unit_id" in action:
+                # Pin the unit's id to the recorded value so later actions
+                # can look it up. See replay_player.execute_action for the
+                # mirror of this logic and rationale.
+                unit.unit_id = action["unit_id"]
+                game_state._next_unit_id = max(game_state._next_unit_id, unit.unit_id + 1)
         elif action_type == "move":
-            fx, fy = translate_fn(action["from_x"], action["from_y"])
-            tx, ty = translate_fn(action["to_x"], action["to_y"])
-            unit = game_state.get_unit_at_position(fx, fy)
-            if unit and unit.player == action["player"]:
-                game_state.move_unit(unit, tx, ty)
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_move_v3(game_state, action, translate_fn)
+            else:
+                fx, fy = translate_fn(action["from_x"], action["from_y"])
+                tx, ty = translate_fn(action["to_x"], action["to_y"])
+                unit = game_state.get_unit_at_position(fx, fy)
+                if unit and unit.player == action["player"]:
+                    # Trust the recorded action: a unit that legitimately moved
+                    # a second time in the original turn (Sorcerer Haste resets
+                    # can_move/can_attack) was rejected here without this
+                    # override -- silent failure that diverged downstream state
+                    # and produced the ghost-action symptoms in MasterBot games.
+                    # Mirrors the same trust-the-recording stance in
+                    # replay_player.py's ReplayPlayer.execute_action.
+                    unit.can_move = True
+                    game_state.move_unit(unit, tx, ty)
         elif action_type == "attack":
-            if schema_version >= 2:
+            if schema_version >= 3 and "attacker_unit_id" in action:
+                apply_recorded_attack_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
                 apply_recorded_attack(game_state, action, translate_fn)
             else:
                 ap = translate_fn(*action["attacker_pos"])
@@ -472,7 +495,9 @@ def _execute_replay_action(game_state, action, translate_fn, schema_version: int
                 if attacker and target:
                     game_state.attack(attacker, target)
         elif action_type == "seize":
-            if schema_version >= 2:
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_seize_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
                 apply_recorded_seize(game_state, action, translate_fn)
             else:
                 pos = translate_fn(*action["position"])
@@ -487,7 +512,9 @@ def _execute_replay_action(game_state, action, translate_fn, schema_version: int
             if paralyzer and target:
                 game_state.paralyze(paralyzer, target)
         elif action_type == "heal":
-            if schema_version >= 2:
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_heal_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
                 apply_recorded_heal(game_state, action, translate_fn)
             else:
                 hp = translate_fn(*action["healer_pos"])
