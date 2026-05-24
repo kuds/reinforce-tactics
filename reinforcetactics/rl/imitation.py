@@ -83,32 +83,38 @@ def _make_bot(
     name: str,
     rng: Optional[random.Random] = None,
     stochastic_tiebreak: bool = False,
+    tiebreak_rng: Optional[random.Random] = None,
 ) -> BotFactory:
     """Return a factory that builds the named bot for a (gs, player) pair.
 
     Args:
         name: Bot type (simple / medium / advanced / mixed / random / etc.).
-        rng: Optional ``random.Random`` used by stochastic bots (random,
-            balanced_random, mixed) and -- when ``stochastic_tiebreak``
-            is True -- also threaded into the deterministic bots so
-            their sort / best-tracking ties resolve randomly. Without
-            this, repeated episodes with deterministic bots on both
-            sides produce byte-identical games.
-        stochastic_tiebreak: If True, pass ``rng`` to Simple/Medium/
-            Advanced as well. The bots use it only to shuffle
-            iteration order before sorts and best-tracking loops --
-            scoring logic is unchanged -- so the bot's strategic
-            quality is preserved while equal-scoring decisions
-            randomise across episodes.
+        rng: Optional ``random.Random`` consumed by stochastic bots
+            (random, balanced_random, mixed). Existing behaviour --
+            stochastic bots draw actions from this stream.
+        stochastic_tiebreak: If True, the deterministic bots
+            (simple/medium/advanced/master) also receive a per-episode
+            rng for shuffle-before-sort tiebreaking. Without this,
+            repeated episodes against deterministic bots produce
+            byte-identical games. Scoring logic is unchanged.
+        tiebreak_rng: Optional dedicated rng for deterministic-bot
+            tiebreaking. When provided AND ``stochastic_tiebreak`` is
+            True, this is used instead of ``rng`` so tiebreak shuffles
+            do not consume the same rng state that stochastic bots
+            draw from. Decouples the two rng streams: toggling
+            ``stochastic_tiebreak`` on the same seed leaves
+            random-bot action traces byte-identical (only the
+            tiebreak choices of the deterministic bot change).
+            Falls back to ``rng`` for backwards compatibility when
+            unset.
     """
     name = name.lower()
 
-    # Deterministic bots only receive an rng when the caller opts into
-    # stochastic tiebreaking. Default off preserves the pre-existing
-    # contract (bots are fully deterministic) so existing tests,
-    # tournaments, and curriculum eval continue producing identical
-    # numbers byte-for-byte.
-    det_rng = rng if stochastic_tiebreak else None
+    # Pick the rng deterministic bots will use for tiebreaks. Prefer
+    # the dedicated tiebreak_rng (decoupled streams) and fall back to
+    # the shared rng (legacy path) when not provided. ``None`` when
+    # stochastic_tiebreak is False -- bots stay fully deterministic.
+    det_rng = (tiebreak_rng if tiebreak_rng is not None else rng) if stochastic_tiebreak else None
 
     def factory(game_state: GameState, player: int) -> Any:
         if name in ("simple", "bot"):
@@ -635,6 +641,17 @@ def _play_episode(
         raise ValueError(f"demonstrator_player must be 1 or 2, got {demonstrator_player}")
 
     rng = random.Random(seed) if seed is not None else None
+    # Dedicated rng for deterministic-bot tiebreaks. Derived from the
+    # same seed via a fixed XOR offset so the run is reproducible, but
+    # the stream is INDEPENDENT of ``rng`` -- toggling
+    # ``stochastic_tiebreak`` on a given seed leaves the stochastic
+    # bots' (random / balanced_random / mixed) action traces
+    # byte-identical. Without this split, a deterministic-bot shuffle
+    # consumes the shared rng and silently shifts RandomBot's next
+    # .choice() draw, making the two modes incomparable on the same
+    # seed. The 0xC0FFEEBAD constant is arbitrary; just needs to be
+    # stable across runs.
+    tiebreak_rng = random.Random(seed ^ 0xC0FFEEBAD) if (seed is not None and stochastic_tiebreak) else None
     if map_file:
         map_data = FileIO.load_map(map_file)
     else:
@@ -666,14 +683,28 @@ def _play_episode(
     recorder.install()
 
     try:
-        # Both factories share the per-episode rng. When
-        # ``stochastic_tiebreak`` is True, _make_bot also threads it into
-        # the deterministic bots so equal-scoring decisions resolve
-        # randomly per episode -- the only way to get distinct
-        # trajectories from N episodes of a fully-deterministic matchup
-        # (e.g. AdvancedBot vs AdvancedBot) on the same map.
-        demo_factory = _make_bot(demonstrator, rng=rng, stochastic_tiebreak=stochastic_tiebreak)
-        opp_factory = _make_bot(opponent, rng=rng, stochastic_tiebreak=stochastic_tiebreak)
+        # Both factories share the per-episode rng for stochastic-bot
+        # action draws (random / balanced_random / mixed). When
+        # ``stochastic_tiebreak`` is True, _make_bot threads
+        # ``tiebreak_rng`` into the deterministic bots so equal-scoring
+        # decisions resolve randomly per episode -- the only way to get
+        # distinct trajectories from a fully-deterministic matchup
+        # (e.g. AdvancedBot vs AdvancedBot) on the same map. ``rng``
+        # and ``tiebreak_rng`` are independent streams so toggling
+        # ``stochastic_tiebreak`` on the same seed only affects the
+        # deterministic-bot tiebreaks.
+        demo_factory = _make_bot(
+            demonstrator,
+            rng=rng,
+            stochastic_tiebreak=stochastic_tiebreak,
+            tiebreak_rng=tiebreak_rng,
+        )
+        opp_factory = _make_bot(
+            opponent,
+            rng=rng,
+            stochastic_tiebreak=stochastic_tiebreak,
+            tiebreak_rng=tiebreak_rng,
+        )
 
         opponent_player = 3 - demonstrator_player
         bots = {
@@ -1359,6 +1390,7 @@ def make_warm_started_model(
     ppo_kwargs: Optional[Dict[str, Any]] = None,
     scenarios: Optional[List[DemonstrationScenario]] = None,
     end_turn_weight: Optional[float] = None,
+    stochastic_tiebreak: bool = False,
 ) -> Tuple[Any, DemonstrationDataset, List[BCStats]]:
     """Build a MaskablePPO model and warm-start it via behavior cloning.
 
@@ -1371,9 +1403,17 @@ def make_warm_started_model(
 
     When ``scenarios`` is provided, the single-source ``demonstrator`` /
     ``opponent`` / ``map_file`` / ``enabled_units`` / ``max_turns`` /
-    ``fog_of_war`` arguments are ignored and demonstrations are collected
-    via :func:`collect_demonstrations_multi` instead — useful for ability
-    curricula where each scenario targets a specific behaviour.
+    ``fog_of_war`` / ``stochastic_tiebreak`` arguments are ignored and
+    demonstrations are collected via :func:`collect_demonstrations_multi`
+    instead -- each scenario's own ``stochastic_tiebreak`` field then
+    controls the behaviour per scenario.
+
+    ``stochastic_tiebreak`` only applies to the single-source path. When
+    True, the deterministic-bot demonstrator/opponent receive a
+    per-episode rng so equal-scoring decisions resolve randomly --
+    required to get distinct trajectories from an all-deterministic
+    matchup (e.g. ``demonstrator='advanced', opponent='advanced'``)
+    which otherwise produces N byte-identical copies of one game.
 
     Returns:
         Tuple of (model, dataset, bc_stats). Call ``model.learn(...)`` next.
@@ -1397,6 +1437,7 @@ def make_warm_started_model(
             fog_of_war=fog_of_war,
             seed=seed,
             progress=True,
+            stochastic_tiebreak=stochastic_tiebreak,
         )
         logger.info("Collected %d demonstrations across %d episodes", len(dataset), n_episodes)
 
