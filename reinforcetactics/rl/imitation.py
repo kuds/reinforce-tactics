@@ -78,19 +78,46 @@ def _per_dim_sizes(width: int, height: int) -> Tuple[int, ...]:
 BotFactory = Callable[[GameState, int], Any]
 
 
-def _make_bot(name: str, rng: Optional[random.Random] = None) -> BotFactory:
-    """Return a factory that builds the named bot for a (gs, player) pair."""
+def _make_bot(
+    name: str,
+    rng: Optional[random.Random] = None,
+    stochastic_tiebreak: bool = False,
+) -> BotFactory:
+    """Return a factory that builds the named bot for a (gs, player) pair.
+
+    Args:
+        name: Bot type (simple / medium / advanced / mixed / random / etc.).
+        rng: Optional ``random.Random`` used by stochastic bots (random,
+            balanced_random, mixed) and -- when ``stochastic_tiebreak``
+            is True -- also threaded into the deterministic bots so
+            their sort / best-tracking ties resolve randomly. Without
+            this, repeated episodes with deterministic bots on both
+            sides produce byte-identical games.
+        stochastic_tiebreak: If True, pass ``rng`` to Simple/Medium/
+            Advanced as well. The bots use it only to shuffle
+            iteration order before sorts and best-tracking loops --
+            scoring logic is unchanged -- so the bot's strategic
+            quality is preserved while equal-scoring decisions
+            randomise across episodes.
+    """
     name = name.lower()
+
+    # Deterministic bots only receive an rng when the caller opts into
+    # stochastic tiebreaking. Default off preserves the pre-existing
+    # contract (bots are fully deterministic) so existing tests,
+    # tournaments, and curriculum eval continue producing identical
+    # numbers byte-for-byte.
+    det_rng = rng if stochastic_tiebreak else None
 
     def factory(game_state: GameState, player: int) -> Any:
         if name in ("simple", "bot"):
-            return SimpleBot(game_state, player=player)
+            return SimpleBot(game_state, player=player, rng=det_rng)
         if name == "medium":
-            return MediumBot(game_state, player=player)
+            return MediumBot(game_state, player=player, rng=det_rng)
         if name == "mixed":
             return MixedBot(game_state, player=player, rng=rng)
         if name == "advanced":
-            return AdvancedBot(game_state, player=player)
+            return AdvancedBot(game_state, player=player, rng=det_rng)
         if name == "noop":
             return NoopBot(game_state, player=player)
         if name == "random":
@@ -582,6 +609,7 @@ def _play_episode(
     fog_of_war: bool,
     seed: Optional[int],
     demonstrator_player: int,
+    stochastic_tiebreak: bool = False,
 ) -> Tuple[List[Demonstration], EpisodeOutcome]:
     """Internal driver. Plays one game, returns demos plus end-state outcome.
 
@@ -624,8 +652,14 @@ def _play_episode(
     recorder.install()
 
     try:
-        demo_factory = _make_bot(demonstrator, rng=rng)
-        opp_factory = _make_bot(opponent, rng=rng)
+        # Both factories share the per-episode rng. When
+        # ``stochastic_tiebreak`` is True, _make_bot also threads it into
+        # the deterministic bots so equal-scoring decisions resolve
+        # randomly per episode -- the only way to get distinct
+        # trajectories from N episodes of a fully-deterministic matchup
+        # (e.g. AdvancedBot vs AdvancedBot) on the same map.
+        demo_factory = _make_bot(demonstrator, rng=rng, stochastic_tiebreak=stochastic_tiebreak)
+        opp_factory = _make_bot(opponent, rng=rng, stochastic_tiebreak=stochastic_tiebreak)
 
         opponent_player = 3 - demonstrator_player
         bots = {
@@ -665,12 +699,19 @@ def record_episode(
     fog_of_war: bool = False,
     seed: Optional[int] = None,
     demonstrator_player: int = 1,
+    stochastic_tiebreak: bool = False,
 ) -> List[Demonstration]:
     """Play one bot-vs-bot game and return demos from ``demonstrator_player``.
 
     The demonstrator and opponent share the same ``GameState``. The
     demonstrator's mutator calls are intercepted and recorded; the
     opponent's calls flow through untouched.
+
+    ``stochastic_tiebreak=True`` resolves equal-scoring bot decisions
+    randomly per episode -- required to get distinct trajectories from
+    N runs of a fully-deterministic matchup like
+    ``demonstrator='advanced', opponent='advanced'`` (which otherwise
+    produces N byte-identical games).
     """
     demos, _ = _play_episode(
         demonstrator=demonstrator,
@@ -681,6 +722,7 @@ def record_episode(
         fog_of_war=fog_of_war,
         seed=seed,
         demonstrator_player=demonstrator_player,
+        stochastic_tiebreak=stochastic_tiebreak,
     )
     return demos
 
@@ -697,6 +739,7 @@ def collect_demonstrations(
     demonstrator_player: int = 1,
     progress: bool = False,
     scenario_name: Optional[str] = None,
+    stochastic_tiebreak: bool = False,
 ) -> DemonstrationDataset:
     """Collect demonstrations from ``n_episodes`` bot-vs-bot games.
 
@@ -705,6 +748,11 @@ def collect_demonstrations(
     count, and end-reason histogram across the ``n_episodes`` games --
     surfaces demonstrator quality so callers can sanity-check BC label
     quality before training.
+
+    When ``stochastic_tiebreak=True``, deterministic bots receive the
+    per-episode rng so equal-scoring decisions resolve randomly. Each
+    episode gets a different ``seed + ep`` rng, so N episodes produce
+    N distinct trajectories instead of N copies of the same game.
     """
     all_demos: List[Demonstration] = []
     stats = ScenarioStats(
@@ -726,6 +774,7 @@ def collect_demonstrations(
             fog_of_war=fog_of_war,
             seed=ep_seed,
             demonstrator_player=demonstrator_player,
+            stochastic_tiebreak=stochastic_tiebreak,
         )
         all_demos.extend(ep_demos)
         stats.record(outcome)
@@ -782,6 +831,14 @@ class DemonstrationScenario:
         weight: Optional sampling weight applied at concat time. Values >1
             duplicate demos from this scenario; <1 subsamples. Use sparingly
             — duplication grows memory linearly.
+        stochastic_tiebreak: When True, the deterministic bots
+            (simple/medium/advanced/master) receive a per-episode rng
+            that shuffles equal-scoring decisions before they sort.
+            Required for any scenario whose demonstrator AND opponent
+            are both deterministic -- without it, every episode plays
+            the byte-identical same game and N episodes give 1 unique
+            trajectory. Default ``False`` preserves backward
+            compatibility (existing tests / tournaments unchanged).
     """
 
     map_file: Optional[str] = None
@@ -794,6 +851,7 @@ class DemonstrationScenario:
     demonstrator_player: int = 1
     weight: float = 1.0
     name: Optional[str] = None  # Free-form label used in logs only
+    stochastic_tiebreak: bool = False
 
 
 def _grid_dims_from_map(map_file: Optional[str]) -> Tuple[int, int]:
@@ -949,6 +1007,7 @@ def collect_demonstrations_multi(
             demonstrator_player=sc.demonstrator_player,
             progress=False,
             scenario_name=sc.name or sc.map_file or f"scenario_{i}",
+            stochastic_tiebreak=sc.stochastic_tiebreak,
         )
         if sc.weight != 1.0:
             ds = _resample_dataset(ds, sc.weight, rng)

@@ -26,6 +26,18 @@
 #
 # max_turns=100 is a soft ceiling for skirmish-sized games; the bot
 # rollouts typically resolve well under that.
+#
+# ``stochastic_tiebreak: true`` on every scenario: run 20260524_190214
+# confirmed avg_turns came back as exact integers for every
+# all-deterministic-bot scenario (advanced_vs_advanced=18.0,
+# advanced_vs_medium=21.0, medium_vs_medium=14.0) -- i.e. those 60+60+40
+# episodes produced 1+1+1=3 unique trajectories, the rest were
+# byte-identical replays. With stochastic_tiebreak the bots receive a
+# per-episode rng that randomises equal-scoring decisions (their
+# scoring logic is unchanged), so N episodes now produce ~N unique
+# games. Required to get real BC dataset diversity from the
+# deterministic-bot scenarios. Set ``false`` to revert to the original
+# deterministic behaviour.
 scenarios:
   # Highest-quality anchor: AdvancedBot vs AdvancedBot. Teaches the
   # full ability roster (heal, paralyze, buffs) and the capture-race
@@ -34,15 +46,14 @@ scenarios:
   #
   # demonstrator_player=2 because run 20260524_190214 showed this
   # matchup is 0/60/0 from player 1's perspective on skirmish.csv --
-  # i.e. AdvancedBot-vs-AdvancedBot has a hard structural asymmetry
-  # where player 2 always wins (likely map geometry or first-move
-  # disadvantage in AdvancedBot's heuristics). Recording from player 1
-  # fed BC 6,840 pure losing-trajectory labels; flipping to player 2
-  # records from the *winning* side instead, so the BC labels for
-  # this scenario become "what winning AdvancedBot play looks like
-  # against AdvancedBot" -- the actual signal we wanted from this
-  # matchup. The map's player-side asymmetry itself is worth a
-  # follow-up investigation but doesn't block BC.
+  # AdvancedBot as player 2 wins every single game against AdvancedBot
+  # as player 1 (structural map asymmetry or first-move disadvantage
+  # in AdvancedBot's heuristics). Recording from player 1 fed BC
+  # ~6,840 pure losing-trajectory labels; flipping to player 2 records
+  # from the winning side, so the BC labels for this scenario become
+  # "what winning AdvancedBot play looks like against AdvancedBot" --
+  # the actual signal we wanted. The map's player-side asymmetry
+  # itself is worth a follow-up investigation but doesn't block BC.
   - name: advanced_vs_advanced
     map_file: maps/1v1/skirmish.csv
     enabled_units: [W, M, C, A, K]
@@ -52,6 +63,7 @@ scenarios:
     n_episodes: 60
     max_turns: 100
     weight: 1.0
+    stochastic_tiebreak: true
 
   # AdvancedBot vs MediumBot. Asymmetric quality: demonstrator state
   # distribution skews toward winning positions, giving the BC policy
@@ -65,6 +77,7 @@ scenarios:
     n_episodes: 60
     max_turns: 100
     weight: 1.0
+    stochastic_tiebreak: true
 
   # AdvancedBot vs RandomBot. Stochastic opponents force exposure to
   # off-distribution states the self-play phase will encounter when
@@ -78,6 +91,7 @@ scenarios:
     n_episodes: 50
     max_turns: 100
     weight: 1.5
+    stochastic_tiebreak: true
 
   - name: advanced_vs_balanced_random
     map_file: maps/1v1/skirmish.csv
@@ -87,6 +101,7 @@ scenarios:
     n_episodes: 40
     max_turns: 100
     weight: 1.0
+    stochastic_tiebreak: true
 
   # MediumBot demos add behavioural diversity -- MediumBot picks
   # different unit compositions and ability targets than AdvancedBot,
@@ -101,3 +116,4 @@ scenarios:
     n_episodes: 40
     max_turns: 100
     weight: 0.75
+    stochastic_tiebreak: true
