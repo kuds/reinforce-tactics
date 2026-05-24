@@ -40,6 +40,7 @@ from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import (
     AdvancedBot,
     BalancedRandomBot,
+    MasterBot,
     MediumBot,
     MixedBot,
     NoopBot,
@@ -78,19 +79,54 @@ def _per_dim_sizes(width: int, height: int) -> Tuple[int, ...]:
 BotFactory = Callable[[GameState, int], Any]
 
 
-def _make_bot(name: str, rng: Optional[random.Random] = None) -> BotFactory:
-    """Return a factory that builds the named bot for a (gs, player) pair."""
+def _make_bot(
+    name: str,
+    rng: Optional[random.Random] = None,
+    stochastic_tiebreak: bool = False,
+    tiebreak_rng: Optional[random.Random] = None,
+) -> BotFactory:
+    """Return a factory that builds the named bot for a (gs, player) pair.
+
+    Args:
+        name: Bot type (simple / medium / advanced / mixed / random / etc.).
+        rng: Optional ``random.Random`` consumed by stochastic bots
+            (random, balanced_random, mixed). Existing behaviour --
+            stochastic bots draw actions from this stream.
+        stochastic_tiebreak: If True, the deterministic bots
+            (simple/medium/advanced/master) also receive a per-episode
+            rng for shuffle-before-sort tiebreaking. Without this,
+            repeated episodes against deterministic bots produce
+            byte-identical games. Scoring logic is unchanged.
+        tiebreak_rng: Optional dedicated rng for deterministic-bot
+            tiebreaking. When provided AND ``stochastic_tiebreak`` is
+            True, this is used instead of ``rng`` so tiebreak shuffles
+            do not consume the same rng state that stochastic bots
+            draw from. Decouples the two rng streams: toggling
+            ``stochastic_tiebreak`` on the same seed leaves
+            random-bot action traces byte-identical (only the
+            tiebreak choices of the deterministic bot change).
+            Falls back to ``rng`` for backwards compatibility when
+            unset.
+    """
     name = name.lower()
+
+    # Pick the rng deterministic bots will use for tiebreaks. Prefer
+    # the dedicated tiebreak_rng (decoupled streams) and fall back to
+    # the shared rng (legacy path) when not provided. ``None`` when
+    # stochastic_tiebreak is False -- bots stay fully deterministic.
+    det_rng = (tiebreak_rng if tiebreak_rng is not None else rng) if stochastic_tiebreak else None
 
     def factory(game_state: GameState, player: int) -> Any:
         if name in ("simple", "bot"):
-            return SimpleBot(game_state, player=player)
+            return SimpleBot(game_state, player=player, rng=det_rng)
         if name == "medium":
-            return MediumBot(game_state, player=player)
+            return MediumBot(game_state, player=player, rng=det_rng)
         if name == "mixed":
             return MixedBot(game_state, player=player, rng=rng)
         if name == "advanced":
-            return AdvancedBot(game_state, player=player)
+            return AdvancedBot(game_state, player=player, rng=det_rng)
+        if name == "master":
+            return MasterBot(game_state, player=player, rng=det_rng)
         if name == "noop":
             return NoopBot(game_state, player=player)
         if name == "random":
@@ -165,13 +201,20 @@ class ScenarioStats:
     demo_wins: int = 0
     demo_losses: int = 0
     draws: int = 0
+    # Action-loop timeouts: the episode driver exited via step_budget
+    # without GameState.end_game ever running. Tracked separately from
+    # ``draws`` so users can distinguish 'map_turns_draw' (the game
+    # legitimately ended with no winner) from 'bot stuck in an
+    # intra-turn loop' (a failure mode that would otherwise inflate the
+    # draws column and look like the scenario is producing draws).
+    step_budget_exhausted: int = 0
     total_demos: int = 0
     total_turns: int = 0
     end_reasons: Dict[str, int] = field(default_factory=dict)
 
     @property
     def total_games(self) -> int:
-        return self.demo_wins + self.demo_losses + self.draws
+        return self.demo_wins + self.demo_losses + self.draws + self.step_budget_exhausted
 
     @property
     def demo_win_rate(self) -> float:
@@ -194,6 +237,10 @@ class ScenarioStats:
             self.demo_wins += 1
         elif outcome.demonstrator_lost:
             self.demo_losses += 1
+        elif outcome.end_reason == "step_budget_exhausted":
+            # Distinguishable from a genuine draw: this is a bot-stall
+            # signature, not an outcome of play.
+            self.step_budget_exhausted += 1
         else:
             self.draws += 1
         self.total_demos += outcome.n_demos
@@ -582,6 +629,7 @@ def _play_episode(
     fog_of_war: bool,
     seed: Optional[int],
     demonstrator_player: int,
+    stochastic_tiebreak: bool = False,
 ) -> Tuple[List[Demonstration], EpisodeOutcome]:
     """Internal driver. Plays one game, returns demos plus end-state outcome.
 
@@ -593,6 +641,17 @@ def _play_episode(
         raise ValueError(f"demonstrator_player must be 1 or 2, got {demonstrator_player}")
 
     rng = random.Random(seed) if seed is not None else None
+    # Dedicated rng for deterministic-bot tiebreaks. Derived from the
+    # same seed via a fixed XOR offset so the run is reproducible, but
+    # the stream is INDEPENDENT of ``rng`` -- toggling
+    # ``stochastic_tiebreak`` on a given seed leaves the stochastic
+    # bots' (random / balanced_random / mixed) action traces
+    # byte-identical. Without this split, a deterministic-bot shuffle
+    # consumes the shared rng and silently shifts RandomBot's next
+    # .choice() draw, making the two modes incomparable on the same
+    # seed. The 0xC0FFEEBAD constant is arbitrary; just needs to be
+    # stable across runs.
+    tiebreak_rng = random.Random(seed ^ 0xC0FFEEBAD) if (seed is not None and stochastic_tiebreak) else None
     if map_file:
         map_data = FileIO.load_map(map_file)
     else:
@@ -624,8 +683,28 @@ def _play_episode(
     recorder.install()
 
     try:
-        demo_factory = _make_bot(demonstrator, rng=rng)
-        opp_factory = _make_bot(opponent, rng=rng)
+        # Both factories share the per-episode rng for stochastic-bot
+        # action draws (random / balanced_random / mixed). When
+        # ``stochastic_tiebreak`` is True, _make_bot threads
+        # ``tiebreak_rng`` into the deterministic bots so equal-scoring
+        # decisions resolve randomly per episode -- the only way to get
+        # distinct trajectories from a fully-deterministic matchup
+        # (e.g. AdvancedBot vs AdvancedBot) on the same map. ``rng``
+        # and ``tiebreak_rng`` are independent streams so toggling
+        # ``stochastic_tiebreak`` on the same seed only affects the
+        # deterministic-bot tiebreaks.
+        demo_factory = _make_bot(
+            demonstrator,
+            rng=rng,
+            stochastic_tiebreak=stochastic_tiebreak,
+            tiebreak_rng=tiebreak_rng,
+        )
+        opp_factory = _make_bot(
+            opponent,
+            rng=rng,
+            stochastic_tiebreak=stochastic_tiebreak,
+            tiebreak_rng=tiebreak_rng,
+        )
 
         opponent_player = 3 - demonstrator_player
         bots = {
@@ -646,10 +725,21 @@ def _play_episode(
     finally:
         recorder.uninstall()
 
+    # Distinguish action-loop timeouts (loop exited via step_budget,
+    # game_state.game_over still False) from legitimate map-cap draws
+    # (GameState.end_game ran with winner=None, end_reason='max_turns_draw'
+    # or similar). Without this both look identical -- winner=None,
+    # end_reason=None vs end_reason='max_turns_draw' -- and the scenario
+    # stats' draws column lumps both together, hiding bot-stall
+    # failures behind apparent map draws.
+    end_reason = game_state.end_reason
+    if not game_state.game_over and end_reason is None:
+        end_reason = "step_budget_exhausted"
+
     outcome = EpisodeOutcome(
         demonstrator_player=demonstrator_player,
         winner=game_state.winner,
-        end_reason=game_state.end_reason,
+        end_reason=end_reason,
         n_turns=game_state.turn_number,
         n_demos=len(recorder.demos),
     )
@@ -665,12 +755,19 @@ def record_episode(
     fog_of_war: bool = False,
     seed: Optional[int] = None,
     demonstrator_player: int = 1,
+    stochastic_tiebreak: bool = False,
 ) -> List[Demonstration]:
     """Play one bot-vs-bot game and return demos from ``demonstrator_player``.
 
     The demonstrator and opponent share the same ``GameState``. The
     demonstrator's mutator calls are intercepted and recorded; the
     opponent's calls flow through untouched.
+
+    ``stochastic_tiebreak=True`` resolves equal-scoring bot decisions
+    randomly per episode -- required to get distinct trajectories from
+    N runs of a fully-deterministic matchup like
+    ``demonstrator='advanced', opponent='advanced'`` (which otherwise
+    produces N byte-identical games).
     """
     demos, _ = _play_episode(
         demonstrator=demonstrator,
@@ -681,6 +778,7 @@ def record_episode(
         fog_of_war=fog_of_war,
         seed=seed,
         demonstrator_player=demonstrator_player,
+        stochastic_tiebreak=stochastic_tiebreak,
     )
     return demos
 
@@ -697,6 +795,7 @@ def collect_demonstrations(
     demonstrator_player: int = 1,
     progress: bool = False,
     scenario_name: Optional[str] = None,
+    stochastic_tiebreak: bool = False,
 ) -> DemonstrationDataset:
     """Collect demonstrations from ``n_episodes`` bot-vs-bot games.
 
@@ -705,6 +804,11 @@ def collect_demonstrations(
     count, and end-reason histogram across the ``n_episodes`` games --
     surfaces demonstrator quality so callers can sanity-check BC label
     quality before training.
+
+    When ``stochastic_tiebreak=True``, deterministic bots receive the
+    per-episode rng so equal-scoring decisions resolve randomly. Each
+    episode gets a different ``seed + ep`` rng, so N episodes produce
+    N distinct trajectories instead of N copies of the same game.
     """
     all_demos: List[Demonstration] = []
     stats = ScenarioStats(
@@ -726,6 +830,7 @@ def collect_demonstrations(
             fog_of_war=fog_of_war,
             seed=ep_seed,
             demonstrator_player=demonstrator_player,
+            stochastic_tiebreak=stochastic_tiebreak,
         )
         all_demos.extend(ep_demos)
         stats.record(outcome)
@@ -782,6 +887,14 @@ class DemonstrationScenario:
         weight: Optional sampling weight applied at concat time. Values >1
             duplicate demos from this scenario; <1 subsamples. Use sparingly
             — duplication grows memory linearly.
+        stochastic_tiebreak: When True, the deterministic bots
+            (simple/medium/advanced/master) receive a per-episode rng
+            that shuffles equal-scoring decisions before they sort.
+            Required for any scenario whose demonstrator AND opponent
+            are both deterministic -- without it, every episode plays
+            the byte-identical same game and N episodes give 1 unique
+            trajectory. Default ``False`` preserves backward
+            compatibility (existing tests / tournaments unchanged).
     """
 
     map_file: Optional[str] = None
@@ -794,6 +907,7 @@ class DemonstrationScenario:
     demonstrator_player: int = 1
     weight: float = 1.0
     name: Optional[str] = None  # Free-form label used in logs only
+    stochastic_tiebreak: bool = False
 
 
 def _grid_dims_from_map(map_file: Optional[str]) -> Tuple[int, int]:
@@ -818,7 +932,20 @@ def _resample_dataset(
     n = len(dataset)
     target = max(1, int(round(weight * n)))
     if target == n:
-        return dataset
+        # Build a fresh DemonstrationDataset rather than aliasing the
+        # input. The numpy arrays are still shared (no-op resampling
+        # never copies data), but ``scenario_stats`` gets a new list
+        # so a caller that later mutates ``returned.scenario_stats``
+        # does not also mutate the original's stats. Matches the
+        # contract of the non-trivial paths below (which always return
+        # a fresh dataset object).
+        return DemonstrationDataset(
+            obs=dict(dataset.obs),
+            actions=dataset.actions,
+            masks_concat=dataset.masks_concat,
+            dim_sizes=dataset.dim_sizes,
+            scenario_stats=list(dataset.scenario_stats),
+        )
     if target < n:
         idx = rng.choice(n, size=target, replace=False)
     else:
@@ -949,6 +1076,7 @@ def collect_demonstrations_multi(
             demonstrator_player=sc.demonstrator_player,
             progress=False,
             scenario_name=sc.name or sc.map_file or f"scenario_{i}",
+            stochastic_tiebreak=sc.stochastic_tiebreak,
         )
         if sc.weight != 1.0:
             ds = _resample_dataset(ds, sc.weight, rng)
@@ -992,41 +1120,49 @@ def format_scenario_stats_table(stats: List[ScenarioStats]) -> str:
     """Render a per-scenario W/L/D + avg_turns table as plain text.
 
     Designed for direct ``print()`` in notebooks. Columns: scenario name,
-    demonstrator vs opponent, games, demonstrator W/L/D, win-rate %,
-    average game length in turns, average demos collected per game.
+    demonstrator vs opponent, games, demonstrator W/L/D, action-loop
+    timeouts (T), win-rate %, average game length in turns, average
+    demos collected per game.
+
+    The T (timeout) column distinguishes action-loop timeouts -- where
+    the per-episode step budget was exhausted while both bots remained
+    in-turn -- from genuine map-cap draws (counted in D). Without this
+    split, bot-stall failures would silently inflate the draw count
+    and look like a property of the scenario rather than a bug.
     """
     if not stats:
         return "(no scenario stats collected)"
 
     header = (
         f"{'scenario':<32s}  {'matchup':<28s}  {'games':>5s}  "
-        f"{'W':>4s} {'L':>4s} {'D':>4s}  {'WR':>6s}  {'turns':>6s}  {'demos/g':>8s}"
+        f"{'W':>4s} {'L':>4s} {'D':>4s} {'T':>4s}  {'WR':>6s}  {'turns':>6s}  {'demos/g':>8s}"
     )
     sep = "-" * len(header)
     lines = [header, sep]
-    tot_w = tot_l = tot_d = tot_demos = 0
+    tot_w = tot_l = tot_d = tot_t = tot_demos = 0
     tot_turns = 0
     for s in stats:
         matchup = f"{s.demonstrator} vs {s.opponent}"
         lines.append(
             f"{s.name:<32s}  {matchup:<28s}  {s.total_games:>5d}  "
-            f"{s.demo_wins:>4d} {s.demo_losses:>4d} {s.draws:>4d}  "
+            f"{s.demo_wins:>4d} {s.demo_losses:>4d} {s.draws:>4d} {s.step_budget_exhausted:>4d}  "
             f"{100.0 * s.demo_win_rate:>5.1f}%  {s.avg_turns:>6.1f}  "
             f"{s.avg_demos_per_game:>8.1f}"
         )
         tot_w += s.demo_wins
         tot_l += s.demo_losses
         tot_d += s.draws
+        tot_t += s.step_budget_exhausted
         tot_demos += s.total_demos
         tot_turns += s.total_turns
-    tot_games = tot_w + tot_l + tot_d
+    tot_games = tot_w + tot_l + tot_d + tot_t
     tot_wr = (tot_w / tot_games) if tot_games else 0.0
     tot_avg_turns = (tot_turns / tot_games) if tot_games else 0.0
     tot_avg_demos = (tot_demos / tot_games) if tot_games else 0.0
     lines.append(sep)
     lines.append(
         f"{'TOTAL':<32s}  {'':<28s}  {tot_games:>5d}  "
-        f"{tot_w:>4d} {tot_l:>4d} {tot_d:>4d}  "
+        f"{tot_w:>4d} {tot_l:>4d} {tot_d:>4d} {tot_t:>4d}  "
         f"{100.0 * tot_wr:>5.1f}%  {tot_avg_turns:>6.1f}  {tot_avg_demos:>8.1f}"
     )
     return "\n".join(lines)
@@ -1267,6 +1403,7 @@ def make_warm_started_model(
     ppo_kwargs: Optional[Dict[str, Any]] = None,
     scenarios: Optional[List[DemonstrationScenario]] = None,
     end_turn_weight: Optional[float] = None,
+    stochastic_tiebreak: bool = False,
 ) -> Tuple[Any, DemonstrationDataset, List[BCStats]]:
     """Build a MaskablePPO model and warm-start it via behavior cloning.
 
@@ -1279,9 +1416,17 @@ def make_warm_started_model(
 
     When ``scenarios`` is provided, the single-source ``demonstrator`` /
     ``opponent`` / ``map_file`` / ``enabled_units`` / ``max_turns`` /
-    ``fog_of_war`` arguments are ignored and demonstrations are collected
-    via :func:`collect_demonstrations_multi` instead — useful for ability
-    curricula where each scenario targets a specific behaviour.
+    ``fog_of_war`` / ``stochastic_tiebreak`` arguments are ignored and
+    demonstrations are collected via :func:`collect_demonstrations_multi`
+    instead -- each scenario's own ``stochastic_tiebreak`` field then
+    controls the behaviour per scenario.
+
+    ``stochastic_tiebreak`` only applies to the single-source path. When
+    True, the deterministic-bot demonstrator/opponent receive a
+    per-episode rng so equal-scoring decisions resolve randomly --
+    required to get distinct trajectories from an all-deterministic
+    matchup (e.g. ``demonstrator='advanced', opponent='advanced'``)
+    which otherwise produces N byte-identical copies of one game.
 
     Returns:
         Tuple of (model, dataset, bc_stats). Call ``model.learn(...)`` next.
@@ -1305,6 +1450,7 @@ def make_warm_started_model(
             fog_of_war=fog_of_war,
             seed=seed,
             progress=True,
+            stochastic_tiebreak=stochastic_tiebreak,
         )
         logger.info("Collected %d demonstrations across %d episodes", len(dataset), n_episodes)
 

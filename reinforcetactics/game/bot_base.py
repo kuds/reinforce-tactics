@@ -84,6 +84,29 @@ class BotUnitMixin:
     # this mixin).
     game_state: Any
     bot_player: int
+    # Optional rng for stochastic tiebreaking. ``None`` (default) means
+    # fully deterministic: every game from the same starting state plays
+    # out identically. When set (a ``random.Random``), ``_maybe_shuffle``
+    # randomises iteration order before sort / best-tracking loops, so
+    # actions tied on the bot's scoring heuristic resolve to different
+    # picks across episodes. Scoring logic is unchanged -- the bot still
+    # only ever picks among its top-rated options -- so the bot's
+    # strategic quality is preserved while episode-level diversity is
+    # restored.
+    _rng: Any = None
+
+    def _maybe_shuffle(self, items: List[Any]) -> List[Any]:
+        """Shuffle ``items`` in place when ``self._rng`` is set.
+
+        Returns ``items`` (the same list) for chained use. With
+        ``self._rng = None`` this is a no-op and the bot retains the
+        deterministic, insertion-order tiebreak behaviour. Wrap the
+        input of any sort / best-tracking site to randomise ties
+        without touching the scoring logic.
+        """
+        if getattr(self, "_rng", None) is not None:
+            self._rng.shuffle(items)
+        return items
 
     # Re-export the module-level categories as class attributes so existing
     # call sites (``self.MELEE_UNITS`` etc.) keep working.

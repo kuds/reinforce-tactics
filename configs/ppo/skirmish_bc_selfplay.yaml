@@ -114,25 +114,61 @@ eval:
 
 curriculum:
   stages:
-    # PROBE-SIZED single stage (1M steps, ~20 eval points at
-    # eval_freq=50_000). Purpose: confirm the BC -> PPO pipeline shows
-    # *any* upward trend before committing to a multi-million-step run.
-    # The previous run held WR at 0.0% with std 0.0 for 750k steps --
-    # if this probe shows the same flat-zero signature, the setup
-    # needs structural changes (curriculum ramp, demonstrator mix,
-    # entropy schedule) rather than more compute. Promotion gate is
-    # almost certainly not hit at this budget; the gate is left at
-    # 0.60 so the YAML stays meaningful when ``max_timesteps`` is
-    # raised back to the production ~10M.
-    - name: skirmish_advanced
+    # PROBE-SIZED 2-stage ramp (500k + 500k = 1M total, ~20 eval
+    # points at eval_freq=50_000). Goal: confirm the BC -> PPO
+    # pipeline shows *any* upward trend before committing to a
+    # multi-million-step run.
+    #
+    # Stage 1 bridges from the BC checkpoint into the Advanced
+    # matchup via MixedBot(medium, advanced, p_hard=0.5), so half the
+    # episodes give the policy achievable wins (vs Medium) and half
+    # expose it to Advanced. Run 20260524_163828 showed BC -> Advanced
+    # cold stalls at 0% WR for 750k steps with reward std 0.0 -- zero
+    # learning signal. The bridge stage exists to fix that: even a
+    # partial-success rate vs MixedBot gives PPO non-zero reward
+    # variance to learn from, and the Advanced-half of the
+    # distribution starts shaping the policy toward the actual target.
+    #
+    # Stage 2 is the pure target. By the time we reach it the policy
+    # has already seen ~250k Advanced-half episodes via the bridge,
+    # so the transition is much smaller than BC -> Advanced direct.
+    #
+    # Promotion gates are loose for the probe: if either stage clears,
+    # great -- but the primary signal is "WR moves off zero" rather
+    # than "promotes to next stage." Raise to ~10M total and tighten
+    # gates once the upward-trend signature is confirmed.
+    - name: skirmish_mixed_medium_advanced
       map_file: maps/1v1/skirmish.csv
-      opponent: advanced
-      promotion_win_rate: 0.60
+      opponent: mixed
+      opponent_kwargs:
+        easy: medium
+        hard: advanced
+        p_hard: 0.5
+      promotion_win_rate: 0.55
       patience: 3
-      max_timesteps: 1_000_000
+      max_timesteps: 500_000
       n_eval_episodes: 80
       max_turns: 100
       ent_coef:
         start: 0.10
         end: 0.03
+        schedule: linear
+
+    - name: skirmish_advanced
+      map_file: maps/1v1/skirmish.csv
+      opponent: advanced
+      # Lower gate than the bridge stage: vs pure Advanced, 50% WR is
+      # already a meaningful target for the probe. The production run
+      # can tighten this back to 0.60+ once the pipeline is proven.
+      promotion_win_rate: 0.50
+      patience: 3
+      max_timesteps: 500_000
+      n_eval_episodes: 80
+      max_turns: 100
+      # Cooler entropy than stage 1: by this point the policy should
+      # be exploiting Advanced-specific patterns it learned during
+      # the bridge, not exploring broadly.
+      ent_coef:
+        start: 0.05
+        end: 0.01
         schedule: linear
