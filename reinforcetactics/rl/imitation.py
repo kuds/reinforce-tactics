@@ -932,7 +932,20 @@ def _resample_dataset(
     n = len(dataset)
     target = max(1, int(round(weight * n)))
     if target == n:
-        return dataset
+        # Build a fresh DemonstrationDataset rather than aliasing the
+        # input. The numpy arrays are still shared (no-op resampling
+        # never copies data), but ``scenario_stats`` gets a new list
+        # so a caller that later mutates ``returned.scenario_stats``
+        # does not also mutate the original's stats. Matches the
+        # contract of the non-trivial paths below (which always return
+        # a fresh dataset object).
+        return DemonstrationDataset(
+            obs=dict(dataset.obs),
+            actions=dataset.actions,
+            masks_concat=dataset.masks_concat,
+            dim_sizes=dataset.dim_sizes,
+            scenario_stats=list(dataset.scenario_stats),
+        )
     if target < n:
         idx = rng.choice(n, size=target, replace=False)
     else:

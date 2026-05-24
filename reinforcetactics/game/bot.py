@@ -868,9 +868,22 @@ class MediumBot(BotUnitMixin, BaseBot):
             if not potential:
                 continue
 
-            # Pick minimal kill set: biggest hitters first.
-            # Shuffle so attackers with equal projected damage queue
-            # up in random order across episodes.
+            # Pick minimal kill set: biggest hitters first. Shuffle
+            # so attackers with equal projected damage queue up in
+            # random order across episodes.
+            #
+            # NOTE: this is more than cosmetic tiebreaking -- the loop
+            # below stops accumulating once damage_so_far >= enemy.health,
+            # so when two equal-damage attackers tie, the shuffle
+            # decides which one is COMMITTED to the kill and which is
+            # left free to act elsewhere this turn. That cascades into
+            # who takes the counterattack damage, who is spent vs.
+            # available, and (for MasterBot.coordinate_attacks) the
+            # HP-asc swing order. The bot still only picks among
+            # equally-good options, but the *set* of committed
+            # attackers changes per episode -- intended for diversity,
+            # but worth flagging for readers expecting a strictly-
+            # cosmetic shuffle.
             self._maybe_shuffle(potential)
             potential.sort(key=lambda ad: ad[1], reverse=True)
             total_damage = sum(d for _, d in potential)
@@ -1877,6 +1890,16 @@ class AdvancedBot(MediumBot):
             # randomly across episodes (the strict > below means the
             # first-visited equal-value enemy would otherwise always
             # win the tie).
+            #
+            # NOTE: the rebound ``enemy_units`` propagates further than
+            # the strict-> loop -- the ``min(enemy_units, ...)`` call
+            # below for the move-toward-nearest fallback also iterates
+            # the shuffled list (Python min() returns the first item
+            # on ties, so equidistant enemies tiebreak randomly too),
+            # and the ``get_attackable_enemies(unit, enemy_units, ...)``
+            # call after a move receives a shuffle-ordered input. Both
+            # are consistent with the stochastic-tiebreak philosophy
+            # but broader than the immediate sort below.
             enemy_units = self._maybe_shuffle(list(enemy_units))
             best_target = None
             best_score = -float("inf")
