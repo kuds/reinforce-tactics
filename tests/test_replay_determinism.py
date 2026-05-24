@@ -752,3 +752,94 @@ def test_v3_schema_written_by_full_game(tmp_path):
             assert "attacker_unit_id" in act and "target_unit_id" in act
         elif act["type"] in ("move", "seize", "heal", "cure", "paralyze", "haste", "defence_buff", "attack_buff"):
             assert "actor_unit_id" in act, f"{act['type']} must carry actor_unit_id in v3"
+
+
+def test_haste_double_move_replay_through_v3(tmp_path):
+    """End-to-end regression for the MasterBot Knight-ghost case.
+
+    Builds the actual engine scenario that produced the ghost
+    actions in balance_analysis_baseline_20260524_014131:
+
+      1. A Sorcerer hastes an adjacent friendly Knight
+      2. The Knight does its normal turn move
+      3. ``Unit.end_unit_turn(force_end=False)`` consumes the haste
+         and refreshes ``can_move`` / ``can_attack`` (this is the
+         bot's mechanism for converting haste into a second action)
+      4. The Knight does a second move via the engine
+
+    Then saves the replay and runs it through the v3 dispatch on a
+    fresh ``GameState`` -- which previously dropped the second move
+    silently because ``game_state.move_unit`` refused it on
+    ``can_move=False``. The v3 ``apply_recorded_move_v3`` helper
+    sets ``unit.x, unit.y`` directly with no engine gate, so the
+    Knight ends up at its recorded final position.
+
+    Companion to the synthetic ``test_v3_move_helper_bypasses_can_move_gate``:
+    that one calls the helper directly; this one drives the full
+    record-then-replay loop, so any future engine/schema regression
+    that drops a haste action's effect mid-pipeline is caught here.
+    """
+    g = _make_game()
+
+    sorcerer = g.create_unit("S", 1, 4, player=1)  # p tile, adjacent to knight
+    knight = g.create_unit("K", 1, 3, player=1)  # p tile, distance 1 from sorcerer
+    # Place an enemy so the game stays in progress (otherwise
+    # ``_check_player_eliminated`` short-circuits and the replay
+    # comparison is trivial).
+    enemy = g.create_unit("W", 4, 1, player=2)
+    _enable(sorcerer)
+    _enable(knight)
+    _enable(enemy)
+
+    # 1. Sorcerer hastes the Knight. Haste sets is_hasted=True and
+    #    refreshes can_move/can_attack on the Knight.
+    assert g.haste(sorcerer, knight), "sorcerer should be able to haste adjacent knight"
+    assert knight.is_hasted is True
+    assert knight.can_move is True
+
+    # 2. Knight's normal-turn move (1,3) -> (3,3).
+    assert g.move_unit(knight, 3, 3), "first knight move should succeed"
+    assert (knight.x, knight.y) == (3, 3)
+    assert knight.can_move is False
+
+    # 3. End the Knight's first action -- this is where the bot
+    #    (MasterBot.move_and_act_units_enhanced at bot.py:2498)
+    #    consumes the haste and gets the bonus refresh.
+    assert knight.end_unit_turn(force_end=False) is True
+    assert knight.is_hasted is False, "haste must be consumed"
+    assert knight.can_move is True, "can_move must be refreshed by end_unit_turn"
+
+    # 4. Knight's hasted bonus move (3,3) -> (3,1). Pre-Option-A the
+    #    *replay* of this exact move was silently dropped by
+    #    ``video.py``; post-Option-A and v3 both reproduce it.
+    assert g.move_unit(knight, 3, 1), "second knight move should succeed"
+    assert (knight.x, knight.y) == (3, 1)
+
+    # Save and inspect: the action log must carry both moves and
+    # tag them with the same actor_unit_id (the v3 schema's
+    # whole point).
+    path = _save_replay(g, tmp_path)
+    data = FileIO.load_replay(path)
+    assert data["game_info"]["replay_schema_version"] == 3
+
+    knight_moves = [a for a in data["actions"] if a["type"] == "move" and a.get("unit_type") == "K"]
+    assert len(knight_moves) == 2, f"expected 2 Knight moves, got {len(knight_moves)}"
+    assert knight_moves[0]["actor_unit_id"] == knight.unit_id
+    assert knight_moves[1]["actor_unit_id"] == knight.unit_id
+    assert (knight_moves[0]["from_x"], knight_moves[0]["from_y"]) == (1, 3)
+    assert (knight_moves[0]["to_x"], knight_moves[0]["to_y"]) == (3, 3)
+    assert (knight_moves[1]["from_x"], knight_moves[1]["from_y"]) == (3, 3)
+    assert (knight_moves[1]["to_x"], knight_moves[1]["to_y"]) == (3, 1)
+
+    # Replay the recording on a fresh GameState through the v3 dispatch
+    # (the ``_replay`` helper uses ``video._execute_replay_action``)
+    # and confirm the Knight ends at (3,1), not stuck at (3,3) like
+    # in the pre-fix video.py path.
+    replay_game, _ = _replay(path)
+    replayed_knight = next((u for u in replay_game.units if u.type == "K" and u.player == 1), None)
+    assert replayed_knight is not None, "Knight must exist in the replay"
+    assert (replayed_knight.x, replayed_knight.y) == (3, 1), (
+        f"v3 replay must reproduce haste double-move; Knight at ({replayed_knight.x}, "
+        f"{replayed_knight.y}) instead of (3, 1). Pre-fix this used to be (3, 3) because "
+        f"the replay player rejected the hasted second move on can_move=False."
+    )
