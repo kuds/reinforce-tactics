@@ -205,7 +205,7 @@ function MapGallerySection(): ReactNode {
           Diverse Tactical Maps
         </Heading>
         <p className={styles.sectionSubtitle}>
-          14 hand-crafted maps across 1v1, 1v1v1, and 2v2 formats with varied terrain, chokepoints, and strategic objectives.
+          25 hand-crafted maps across 1v1, 1v1v1, and 2v2 formats with varied terrain, chokepoints, and strategic objectives.
         </p>
         <div className={styles.mapGrid}>
           {mapPreviews.map((map) => (

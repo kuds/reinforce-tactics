@@ -20,7 +20,7 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 
 ### Game Mechanics
 - [x] `reinforcetactics/game/mechanics.py` - Combat, healing, structures, income, all special abilities
-- [x] `reinforcetactics/game/bot.py` - SimpleBot, MediumBot, and AdvancedBot AI for training
+- [x] `reinforcetactics/game/bot.py` - SimpleBot, MediumBot, AdvancedBot, MasterBot, and MixedBot (curriculum bridge) AI for training
 - [x] `reinforcetactics/game/llm_bot.py` - LLM-powered bots (OpenAI GPT, Claude, Gemini)
 - [x] `reinforcetactics/game/model_bot.py` - Trained model bot for tournament play
 - [x] `reinforcetactics/game/alphazero_bot.py` - AlphaZero bot with MCTS
@@ -40,6 +40,10 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 - [x] `reinforcetactics/rl/alphazero_net.py` - AlphaZero neural network
 - [x] `reinforcetactics/rl/mcts.py` - Monte Carlo Tree Search
 - [x] `reinforcetactics/rl/evaluation.py` - RL evaluation utilities
+- [x] `reinforcetactics/rl/imitation.py` - Behavior cloning warm-start for MaskablePPO (uses MediumBot/AdvancedBot as the expert source)
+- [x] `reinforcetactics/rl/bootstrap.py` - End-to-end bootstrap pipeline (BC → PPO fine-tuning) with config-driven training
+- [x] `reinforcetactics/rl/purchase_exploration.py` - Exploration bonus that encourages diverse unit purchases during training
+- [x] `reinforcetactics/rl/viz.py` - Training visualisations (loss curves, scenario stats, evaluation plots)
 
 ### Tournament System
 - [x] `reinforcetactics/tournament/runner.py` - Tournament execution engine
@@ -73,8 +77,8 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 | **Special Abilities** | Paralyze, Heal, Cure, Charge, Flank, Evade, Haste, Attack Buff, Defence Buff | ✅ Complete |
 | **Terrain Types** | 6 (Grass, Water, Ocean, Mountain, Forest, Road) | ✅ Complete |
 | **Structure Types** | 3 (HQ, Building, Tower) | ✅ Complete |
-| **Bot Types** | SimpleBot, MediumBot, AdvancedBot, LLM Bots (3 providers), ModelBot | ✅ Complete |
-| **RL Features** | Gymnasium env, Action masking, Self-play, Feudal HRL, AlphaZero with MCTS | ✅ Complete |
+| **Bot Types** | SimpleBot, MediumBot, AdvancedBot, MasterBot, MixedBot (curriculum), LLM Bots (3 providers), ModelBot | ✅ Complete |
+| **RL Features** | Gymnasium env, Action masking, Self-play, Feudal HRL, AlphaZero with MCTS, Behavior Cloning warm-start | ✅ Complete |
 | **Tournament** | Round-robin, ELO ratings, Resume, Multi-map | ✅ Complete |
 | **Fog of War** | Full visibility system with explored/visible states | ✅ Complete |
 | **Map Editor** | GUI-based map creation and editing | ✅ Complete |
