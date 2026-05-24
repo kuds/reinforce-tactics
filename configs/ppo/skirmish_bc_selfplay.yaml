@@ -73,7 +73,21 @@ env:
     haste: 0.0
     defence_buff: 0.0
     attack_buff: 0.0
-    invalid_action: -0.1
+    # invalid_action lowered 10x from the v33 -0.1 default after run
+    # 20260524_225835 stage 1 evals showed reward stuck at ~-83 with
+    # 0% WR across 4 evals. Expected loss baseline on a 12-turn game
+    # is loss=-50 + turn_penalty*12=-2.4 + shaping~0 ≈ -52. The extra
+    # -30 was almost certainly invalid-action accumulation: MaskablePPO
+    # gates per-dim values, but the 6-dim tuple still has cross-dim
+    # constraints (a legal unit + legal from_xy + legal to_xy can
+    # combine into a tuple no actual legal action matches). BC's
+    # full_action_acc=14% means the policy picks the wrong combined
+    # tuple ~86% of the time -- many land as invalid. At -0.1 per
+    # invalid, ~300 invalid actions per game dominated the terminal
+    # signal and gave PPO no gradient to escape. At -0.01 the
+    # invalid-action total stays in the single-digit-reward range,
+    # leaving the loss/win terminals as the dominant signal.
+    invalid_action: -0.01
     turn_penalty: -0.2
     win_speed_bonus: 0.0
     enemy_neutral_capture: 0.0

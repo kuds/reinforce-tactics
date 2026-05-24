@@ -44,22 +44,20 @@ scenarios:
   # behaviour around neutral towers / neutral buildings that scripted
   # MediumBot may underuse.
   #
-  # demonstrator_player=2 because run 20260524_190214 showed this
-  # matchup is 0/60/0 from player 1's perspective on skirmish.csv --
-  # AdvancedBot as player 2 wins every single game against AdvancedBot
-  # as player 1 (structural map asymmetry or first-move disadvantage
-  # in AdvancedBot's heuristics). Recording from player 1 fed BC
-  # ~6,840 pure losing-trajectory labels; flipping to player 2 records
-  # from the winning side, so the BC labels for this scenario become
-  # "what winning AdvancedBot play looks like against AdvancedBot" --
-  # the actual signal we wanted. The map's player-side asymmetry
-  # itself is worth a follow-up investigation but doesn't block BC.
+  # demonstrator_player defaults to 1. The earlier 20260524_190214
+  # run reported 0/60 from player 1's perspective on this matchup
+  # and we flipped to player 2 thinking the map favoured side 2 --
+  # but that 0/60 was a deterministic-tiebreak artifact. With
+  # stochastic_tiebreak enabled (run 20260524_225835) the same matchup
+  # came back as 20W/40L from player 2's perspective, i.e. player 1
+  # actually wins ~67% of the time. Recording from player 1 puts BC
+  # on the winning side. See docs/bootstrap_lessons_learned.md
+  # "Failure mode B" for the full diagnosis.
   - name: advanced_vs_advanced
     map_file: maps/1v1/skirmish.csv
     enabled_units: [W, M, C, A, K]
     demonstrator: advanced
     opponent: advanced
-    demonstrator_player: 2
     n_episodes: 60
     max_turns: 100
     weight: 1.0
