@@ -62,6 +62,21 @@ class TournamentConfig:
     # Unit restriction settings
     enabled_units: Optional[List[str]] = None
 
+    # Stochastic tiebreak settings. ``rng_seed=None`` keeps every scripted
+    # bot fully deterministic (every replay of the same matchup is byte-
+    # identical -- the historical behaviour). When set, each game is
+    # assigned a per-game seed derived from ``(rng_seed, game_id,
+    # map_stem, bot1_name, bot2_name)`` and that seed feeds a
+    # ``random.Random`` instance into each bot's constructor. Bots use
+    # the rng to tiebreak at every sort/max/min site (see
+    # ``BotUnitMixin._maybe_shuffle``), so games with the same matchup
+    # produce *distinct* episodes while a re-run of the whole tournament
+    # with the same ``rng_seed`` reproduces the same set of games. This
+    # is the recommended setting for balance-analysis runs -- without
+    # it, ``games_per_side > 1`` writes duplicate replays instead of
+    # producing independent samples.
+    rng_seed: Optional[int] = None
+
     # Execution settings
     concurrent_games: int = 1
 
@@ -121,6 +136,7 @@ class TournamentConfig:
                 llm_api_delay=tournament_data.get("llm_api_delay", 1.0),
                 concurrent_games=tournament_data.get("concurrent_games", 1),
                 enabled_units=tournament_data.get("enabled_units"),
+                rng_seed=tournament_data.get("rng_seed"),
             )
 
         # Handle flat format
@@ -143,6 +159,7 @@ class TournamentConfig:
             llm_api_delay=data.get("llm_api_delay", 1.0),
             concurrent_games=data.get("concurrent_games", 1),
             enabled_units=data.get("enabled_units"),
+            rng_seed=data.get("rng_seed"),
         )
 
     @classmethod
@@ -177,6 +194,7 @@ class TournamentConfig:
             "llm_api_delay": self.llm_api_delay,
             "concurrent_games": self.concurrent_games,
             "enabled_units": self.enabled_units,
+            "rng_seed": self.rng_seed,
         }
 
     def to_json(self, filepath: str) -> None:

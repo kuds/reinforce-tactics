@@ -299,10 +299,18 @@ class BotUnitMixin:
         if not reachable:
             return None
 
+        # Shuffle so equidistant reachable tiles tiebreak randomly under
+        # stochastic mode -- the strict ``<`` below otherwise hard-prefers
+        # the first-visited candidate, which is the most-hit decision site
+        # in the bot (every move-toward-target call). Without this, two
+        # equally-good landing tiles produce identical games every run.
+        reachable_list = list(reachable)
+        self._maybe_shuffle(reachable_list)
+
         best_pos = None
         best_distance = float("inf")
 
-        for pos in reachable:
+        for pos in reachable_list:
             distance = self.manhattan_distance(pos[0], pos[1], target_x, target_y)
             if distance < best_distance:
                 best_distance = distance
@@ -339,7 +347,11 @@ class BotUnitMixin:
             return False
 
         frontline = [a for a in healable if a.type in ("W", "B", "K")]
-        target = min(frontline or healable, key=lambda a: a.health)
+        # Shuffle so equal-HP allies tiebreak randomly. ``min()`` returns
+        # the first item on ties.
+        pool = list(frontline or healable)
+        self._maybe_shuffle(pool)
+        target = min(pool, key=lambda a: a.health)
         self.game_state.heal(unit, target)
         self._record("cleric_heal")
         return True
@@ -370,6 +382,8 @@ class BotUnitMixin:
 
         capturing = [e for e in in_range if self._is_capturing_us(e)]
         if capturing:
+            # Equal-cost enemies tiebreak randomly under stochastic mode.
+            self._maybe_shuffle(capturing)
             target = max(capturing, key=_unit_cost)
             self.game_state.paralyze(unit, target)
             self._record("mage_paralyze")
@@ -386,6 +400,7 @@ class BotUnitMixin:
         if not worth_paralyzing:
             return False
 
+        self._maybe_shuffle(worth_paralyzing)
         target = max(worth_paralyzing, key=_unit_cost)
         self.game_state.paralyze(unit, target)
         self._record("mage_paralyze")

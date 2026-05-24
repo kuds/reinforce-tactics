@@ -6,6 +6,7 @@ for tournament play.
 """
 
 import logging
+import random
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -198,6 +199,7 @@ def create_bot_instance(
     conversation_log_dir: Optional[str] = None,
     game_session_id: Optional[str] = None,
     should_reason: bool = False,
+    rng: Optional[random.Random] = None,
 ) -> Any:
     """
     Create a bot instance from a descriptor.
@@ -210,6 +212,9 @@ def create_bot_instance(
         conversation_log_dir: Directory for conversation logs
         game_session_id: Unique session ID for logging
         should_reason: Enable reasoning output for LLM bots
+        rng: Optional ``random.Random`` for stochastic tiebreaking on
+            scripted bots. ``None`` (default) keeps the bot fully
+            deterministic. LLM/RL bots ignore this argument.
 
     Returns:
         Bot instance ready to play
@@ -223,22 +228,22 @@ def create_bot_instance(
     if bot_type == BotType.SIMPLE:
         from reinforcetactics.game.bot import SimpleBot
 
-        return SimpleBot(game_state, player)
+        return SimpleBot(game_state, player, rng=rng)
 
     elif bot_type == BotType.MEDIUM:
         from reinforcetactics.game.bot import MediumBot
 
-        return MediumBot(game_state, player)
+        return MediumBot(game_state, player, rng=rng)
 
     elif bot_type == BotType.ADVANCED:
         from reinforcetactics.game.bot import AdvancedBot
 
-        return AdvancedBot(game_state, player)
+        return AdvancedBot(game_state, player, rng=rng)
 
     elif bot_type == BotType.MASTER:
         from reinforcetactics.game.bot import MasterBot
 
-        return MasterBot(game_state, player)
+        return MasterBot(game_state, player, rng=rng)
 
     elif bot_type == BotType.LLM:
         return _create_llm_bot(

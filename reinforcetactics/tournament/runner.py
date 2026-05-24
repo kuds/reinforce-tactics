@@ -5,14 +5,16 @@ This module provides the main TournamentRunner class that executes
 tournament games and manages the overall tournament flow.
 """
 
+import hashlib
 import logging
 import os
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
@@ -237,6 +239,39 @@ class TournamentRunner:
 
         return completed_count
 
+    def _make_per_game_rngs(
+        self,
+        game_id: int,
+        map_stem: str,
+        bot1_name: str,
+        bot2_name: str,
+    ) -> Tuple[Optional[random.Random], Optional[random.Random]]:
+        """Derive deterministic per-side ``random.Random`` instances for a game.
+
+        Returns ``(None, None)`` when ``self.config.rng_seed`` is None,
+        which keeps every scripted bot fully deterministic (the historical
+        behaviour). When the tournament has a seed set, each side gets a
+        seed derived from ``(rng_seed, game_id, map_stem, bot_name,
+        player)`` via SHA-256, so the seed is stable across runs (re-run
+        the tournament with the same config → same games) but distinct
+        per game (each game samples an independent trajectory). Hashing
+        with SHA-256 rather than Python's ``hash()`` matters because
+        ``hash()`` is salted per process and would break reproducibility
+        across runs.
+        """
+        seed = self.config.rng_seed
+        if seed is None:
+            return None, None
+
+        def _seed_for(player: int, bot_name: str) -> int:
+            key = f"{seed}|{game_id}|{map_stem}|{bot1_name}|{bot2_name}|p{player}|{bot_name}"
+            digest = hashlib.sha256(key.encode("utf-8")).digest()
+            # First 8 bytes -> 64-bit int. ``random.Random`` accepts any
+            # int, but we mask to a sensible width for stable repr.
+            return int.from_bytes(digest[:8], "big")
+
+        return random.Random(_seed_for(1, bot1_name)), random.Random(_seed_for(2, bot2_name))
+
     def _execute_game(self, scheduled_game: ScheduledGame) -> GameResult:
         """
         Execute a single scheduled game.
@@ -278,6 +313,17 @@ class TournamentRunner:
         max_turns = map_config.max_turns or self.config.max_turns
         game_state.max_turns = max_turns
 
+        # Per-game stochastic tiebreak seeds. When the tournament-level
+        # ``rng_seed`` is None every bot stays fully deterministic and the
+        # ``games_per_side > 1`` runs just write duplicate replays.
+        # When it's set, derive a stable per-game seed from
+        # ``(rng_seed, game_id, map_stem, bot_name)`` so:
+        #   * the same tournament re-run with the same seed produces the
+        #     same set of games (reproducibility), and
+        #   * each game gets a distinct seed (independent samples).
+        # Each side gets its own rng so bot1 and bot2 don't share state.
+        bot1_rng, bot2_rng = self._make_per_game_rngs(scheduled_game.game_id, map_config.stem, bot1_desc.name, bot2_desc.name)
+
         # Create bot instances
         bot1 = create_bot_instance(
             bot1_desc,
@@ -287,6 +333,7 @@ class TournamentRunner:
             conversation_log_dir=matchup_log_dir,
             game_session_id=session_id,
             should_reason=self.config.should_reason,
+            rng=bot1_rng,
         )
         bot2 = create_bot_instance(
             bot2_desc,
@@ -296,6 +343,7 @@ class TournamentRunner:
             conversation_log_dir=matchup_log_dir,
             game_session_id=session_id,
             should_reason=self.config.should_reason,
+            rng=bot2_rng,
         )
         bots = {1: bot1, 2: bot2}
 
@@ -376,8 +424,15 @@ class TournamentRunner:
         bot2: Optional[Any] = None,
     ) -> str:
         """Save game replay and return path."""
+        # ``game_id`` is included in the filename to disambiguate multiple
+        # games of the same matchup that complete within the same second.
+        # Without it, the second-precision timestamp causes silent replay
+        # overwrites when ``games_per_side > 1`` -- a pre-existing bug
+        # that only became visible once stochastic mode produced distinct
+        # games per matchup instead of identical reruns.
         replay_filename = (
-            f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
+            f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
+            f"id{game_id:04d}_{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
         )
         assert self.config.replay_dir is not None
         replay_path = str(Path(self.config.replay_dir) / map_config.stem / replay_filename)
