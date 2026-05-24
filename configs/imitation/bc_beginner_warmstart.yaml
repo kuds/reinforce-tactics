@@ -9,7 +9,8 @@
 #
 # Constraints (current imitation.py infrastructure):
 #   * All scenarios must share map dimensions (DemonstrationDataset stacks
-#     observations into one tensor). Locked to beginner.csv (6x6).
+#     observations into one tensor). starter.csv and beginner.csv are
+#     both 6x6, so both can coexist in the mix without infra changes.
 #   * enabled_units must be the same across scenarios. Locked to [W,M,C,A,K].
 #   * max_turns matches the curriculum's beginner-stage cap (75).
 #   * Demonstrations are NOT padded to the curriculum-wide (10,12) shape;
@@ -17,9 +18,19 @@
 #     multi-size maps requires threading pad_to_size through
 #     collect_demonstrations -- deferred until the BC hypothesis is validated.
 #
-# Total demos: ~250 episodes (with weighting). Each ~50-100 demonstrator
-# actions => ~15-25k (obs, action, mask) tuples -- substantial supervised
-# dataset.
+# Map coverage rationale (post run 20260524_020449):
+# The first BC build trained only on beginner.csv. The curriculum's first
+# stage runs on starter.csv. Although both are 6x6 (so set_parameters does
+# not fail), the layouts differ substantially: starter.csv has an outer
+# ring of impassable ocean with HQs at (1,1)/(4,4), while beginner.csv is
+# fully playable with HQs at (0,0)/(5,5). The CNN extractor uses
+# coord_conv, so the BC policy encoded HQ-at-corner spatial priors that
+# are wrong on starter.csv. starter scenarios are added below so the
+# policy sees both layouts during BC.
+#
+# Total demos: ~475 episodes (with weighting), ~310 on beginner.csv and
+# ~165 on starter.csv. Each ~50-100 demonstrator actions => ~25-50k
+# (obs, action, mask) tuples -- substantial supervised dataset.
 scenarios:
   # Anchor: balanced bot vs balanced bot. Teaches the basics -- build, advance,
   # attack -- on the proven roster the curriculum uses.
@@ -75,5 +86,51 @@ scenarios:
     demonstrator: medium
     opponent: balanced_random
     n_episodes: 30
+    max_turns: 75
+    weight: 1.0
+
+  # ---- starter.csv scenarios ---------------------------------------
+  # v33's curriculum opens with starter_random / starter_simple /
+  # starter_medium -- four stages on starter.csv before reaching the
+  # beginner block. starter.csv is 6x6 with an impassable ocean border
+  # and inner-corner HQs, structurally distinct from beginner.csv.
+  # Without these scenarios the BC policy would face the first three
+  # stages on a layout it has never seen, and the coord_conv-aware CNN
+  # carries the wrong positional priors into the run. Episode counts
+  # mirror the beginner block's mix (random / medium / balanced_random
+  # opponents) so the dataset stays roughly balanced across both maps.
+  - name: medium_vs_medium_starter
+    map_file: maps/1v1/starter.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: medium
+    n_episodes: 40
+    max_turns: 75
+    weight: 1.0
+
+  - name: medium_vs_random_starter
+    map_file: maps/1v1/starter.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: random
+    n_episodes: 40
+    max_turns: 75
+    weight: 1.5
+
+  - name: advanced_vs_random_starter
+    map_file: maps/1v1/starter.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: random
+    n_episodes: 30
+    max_turns: 75
+    weight: 1.5
+
+  - name: medium_vs_balanced_random_starter
+    map_file: maps/1v1/starter.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: medium
+    opponent: balanced_random
+    n_episodes: 20
     max_turns: 75
     weight: 1.0
