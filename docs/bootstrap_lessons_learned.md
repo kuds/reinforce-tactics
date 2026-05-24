@@ -40,6 +40,20 @@ easier are actively harder for PPO.
    as an opt-in feature but is **not** set on `*_random_N` stages in
    production; PPO's natural promotion rhythm beats forced overtraining
    on drift-attractor stages.
+7. **BC dataset quality > dataset size.** N episodes of a fully-deterministic
+   bot-vs-bot matchup produce **1 unique trajectory copied N times**, not N
+   distinct demos. Without the new `stochastic_tiebreak` opt-in (or
+   stochastic opponents), most of a BC dataset is duplicates and the
+   policy memorises three game scripts instead of learning a
+   distribution. See "BC warm-start: what we learned" near the bottom
+   of this doc.
+8. **Player-side asymmetries observed in deterministic bot-vs-bot play
+   are usually artifacts, not structural.** AdvancedBot-vs-AdvancedBot on
+   skirmish.csv looked like a 0/60 sweep for player 2 — recording demos
+   from player 2 looked like the obvious fix. With stochastic tiebreak,
+   the same matchup is 40/60 *for player 1* (i.e. roughly symmetric).
+   Don't conclude "the map favours side X" from runs where ties resolve
+   by data-structure iteration order.
 
 ## The cold-start problem on this env
 
@@ -835,9 +849,212 @@ deltas, not bot win/loss, to assess unit-stat tuning.
   network's input dimensionality. Note: AZ and Feudal RL pipelines
   *do* use the obs-mask and would break if we removed it globally —
   has to be a per-policy feature extractor, not an env change.
-- **Behaviour-cloning warm-up** as described above, if the random-
-  opponent curriculum fails on a future bigger map.
+- **Behaviour-cloning warm-up** is now built (`reinforcetactics/rl/
+  imitation.py` + section 3c of `ppo_bootstrap.ipynb`) and validated
+  on the beginner curriculum (v33 cleared random_15 with BC). See
+  "BC warm-start: what we learned" below for the failure modes that
+  surfaced during validation. Open follow-ups: pad_to_size threading
+  for multi-size-map BC, and decoupling BC's dataset config from the
+  curriculum's first-stage map.
 - **`start_fresh` flag on `CurriculumStage`** to optionally
   reinitialise the model at a stage boundary instead of always
   reusing weights — useful when a map shift is too steep for the
   starter policy to bridge.
+
+## BC warm-start: what we learned
+
+Behaviour cloning (BC) was originally listed as future work; we built it
+during the v33 cycle to break the random_15 wall, then refined it on a
+single-map skirmish probe before the second wall (BC -> AdvancedBot
+directly, 0% WR for 750k steps). The validation work surfaced several
+failure modes that aren't obvious from "just clone the bot's actions"
+intuition and that recur if the diagnostics aren't built in.
+
+### Failure mode A: deterministic bots produce 1 unique trajectory per N episodes
+
+**Symptom**: BC dataset has 60 demos from a scenario, but the per-scenario
+`avg_turns` comes back as an *exact integer* (18.0, 21.0, 14.0). The 60
+episodes were 60 byte-identical replays of one game. Compare to scenarios
+with a stochastic opponent (random, balanced_random), where `avg_turns`
+is fractional (21.9, 10.6) — those produced 60 actually-distinct games.
+
+**Cause**: `SimpleBot` / `MediumBot` / `AdvancedBot` / `MasterBot` are
+fully deterministic on game state. Their sort / max / best-tracking
+sites resolve ties by data-structure iteration order (Python's stable
+sort, leftmost-on-ties `max()`). Two games from the same starting state
+produce the same decisions at every step. `_make_bot` seeds them an
+`rng`, but they don't consume it.
+
+**Diagnostic**: per-scenario `ScenarioStats` table (added in this
+branch, prints from notebook section 3d) — the W/L/D + avg_turns
+columns reveal duplicate-game scenarios at a glance via the
+exact-integer-avg-turns signature.
+
+**Fix**: opt-in `stochastic_tiebreak: true` on each
+`DemonstrationScenario`. The bots receive a per-episode rng and
+`_maybe_shuffle()` the input to every sort / best-tracking site
+before the deterministic comparison runs. Scoring logic is unchanged
+— the bot still picks among its top-rated options — but ties resolve
+randomly, so N episodes give ~N unique trajectories.
+
+**Why it matters for BC**: a duplicate-heavy dataset lets the supervised
+policy *memorise* a handful of game scripts. Action-type accuracy
+looks great (81% on the first run) but reflects pattern matching, not
+generalisation. With stochastic-tiebreak diversity, action-type
+accuracy drops to 76% — that's the *real* ceiling on a representative
+distribution.
+
+### Failure mode B: deterministic-tiebreak artifacts look like structural map bias
+
+The first skirmish BC build showed `advanced_vs_advanced` as **0 wins
+/ 60 losses for player 1**. We diagnosed this as "the skirmish map
+favours player 2" and flipped `demonstrator_player: 2` to record from
+the winning side.
+
+With stochastic tiebreak enabled on the next build, the same matchup
+came back as **20 wins / 40 losses for player 2** — i.e. **player 1
+wins ~67% of the time**. The original 0/60 was not structural map
+bias; it was a single fixed tiebreak sequence that happened to
+deterministically punish player 1's move order. Tiny perturbations
+flipped the matchup wholesale.
+
+**Lesson**: do not infer "map X favours side Y" from
+deterministic-bot-vs-deterministic-bot outcomes. The deterministic
+tiebreaks are an unmodelled adversarial parameter, and changing it
+can invert the conclusion.
+
+### Failure mode C: `make_warm_started_model` single-source path silently ignores `stochastic_tiebreak`
+
+When the BC infra was first wired, `stochastic_tiebreak` lived on
+`DemonstrationScenario` but **not** on `make_warm_started_model`'s
+single-source kwargs. Calling `make_warm_started_model(env,
+demonstrator='advanced', opponent='advanced', n_episodes=50)` without
+`scenarios=` silently produced 50 byte-identical games regardless of
+the flag — the exact failure the flag is supposed to fix, with no
+way to opt in. The notebook uses `scenarios=` so it was fine, but any
+ad-hoc caller hit the duplicate trap.
+
+**Fix**: thread `stochastic_tiebreak` through every BC entry point.
+Default `False` everywhere preserves backwards compatibility, but the
+flag has to be reachable from every caller.
+
+### Failure mode D: MixedBot's inner bots were deterministic
+
+`MixedBot(easy=medium, hard=advanced)` resamples easy-vs-hard per
+episode (`self.use_hard = self._rng.random() < p_hard`) but
+`MixedBot._build_inner` originally constructed the chosen inner bot
+without forwarding `rng`. So even with `stochastic_tiebreak=True`,
+each "Medium episode" played out identically to every other "Medium
+episode" — you got ~2 unique trajectories total (one per inner
+choice), not N. The PPO curriculum's `skirmish_mixed_medium_advanced`
+bridge stage was affected too (each "side" of MixedBot was
+deterministic).
+
+**Fix**: `_build_inner` now accepts and forwards `rng`. Caught only
+because the per-scenario stats showed identical `avg_turns` on a
+MixedBot scenario after we'd "fixed" the deterministic-bot issue
+elsewhere.
+
+### Failure mode E: action-loop timeouts silently inflate the "draws" count
+
+`_play_episode`'s outer step-budget cap (`max_turns * 4 + 50`) is a
+defense against bots stalling in an intra-turn action loop. When it
+fires, `game_state.game_over` is still False and `winner is None` —
+which `EpisodeOutcome.is_draw` correctly treats as a draw. But this
+conflates "game legitimately ended without a winner at the
+`max_turns` cap" (a property of the matchup) with "bot got stuck in
+an action loop" (a bot bug). The per-scenario draws column inflates,
+and the user can't tell which.
+
+**Fix**: when the step-budget cap fires before `end_game` runs, set
+`end_reason = "step_budget_exhausted"` and bump a separate
+`step_budget_exhausted` counter on `ScenarioStats`. The formatter's
+`T` column makes timeouts visible alongside W/L/D so a
+duplicate-game scenario or bot bug surfaces immediately.
+
+### Failure mode F: shared rng desyncs stochastic-bot trajectories when toggling `stochastic_tiebreak`
+
+When `stochastic_tiebreak=True`, the same per-episode rng powered both
+deterministic-bot tiebreak shuffles and stochastic-bot action draws
+(RandomBot/BalancedRandomBot/MixedBot's coin flip). Toggling the
+flag on the same seed shifted RandomBot's `.choice()` draws because
+AdvancedBot's prior `_maybe_shuffle` consumed rng state. The two
+modes were not reproducibility-comparable.
+
+**Fix**: `_play_episode` derives a separate `tiebreak_rng =
+random.Random(seed ^ 0xC0FFEEBAD)` for the deterministic-bot
+tiebreaks. The stochastic-bot stream is unchanged regardless of the
+flag.
+
+### Diagnostic discipline: print per-scenario stats *before* PPO
+
+Three of the six failure modes above (A, B, E) were caught by the
+`format_scenario_stats_table` print in notebook section 3d, which
+exists *only because we built it*. A BC checkpoint with the wrong
+demonstrator side, or with 12% duplicate-game labels, or with most
+"draws" actually being bot-stall timeouts, will all train without
+error and produce a checkpoint that looks superficially fine. The
+diagnostic columns (`W/L/D/T` plus `avg_turns`) are the cheapest
+signal we have for catching these *before* a multi-hour PPO run.
+
+**Rule of thumb**: an exact-integer `avg_turns` value on any
+all-deterministic-bot scenario means N copies of one game. Action-loop
+timeouts in the `T` column mean a bot bug, not a map property. A
+demonstrator WR substantially below 50% on a same-bot matchup
+(`X vs X`) means you're recording from the losing perspective.
+
+### What BC's training metrics actually tell you
+
+Per-epoch BC stats (`bc_training_stats.json` + `bc_training_curves.png`)
+have a specific shape we now understand:
+
+- **`loss`** falls cleanly. Always. If it doesn't, the dataset / model
+  config is broken before BC-specific concerns apply.
+- **`action_type_acc`** rises sharply for the first 3-4 epochs then
+  **plateaus around 70-80%** on diversified data. More epochs do not
+  help this metric meaningfully. It is the ceiling of the action-type
+  classifier on the dataset's action distribution, not an
+  under-training signal.
+- **`full_action_acc`** rises slowly throughout training. The (from,
+  to) coordinate predictions take longer than the type classification
+  to converge. Strict-match metric so the absolute number is low
+  (~14% at epoch 8) — *don't read this as bad*; even a near-optimal
+  policy can pick a different-but-valid target than the demonstrator.
+
+**Implication for `BC_EPOCHS`**: stop tuning by action_type_acc — it
+caps fast on diversified data. 8 epochs is fine; 16 mostly helps
+full_action_acc and at diminishing returns.
+
+### What BC's value head doesn't learn
+
+`behavior_clone` updates the policy network (features extractor +
+shared MLP + action head) but **not** the value head. BC has
+supervised labels for actions but no labels for state values; we
+could estimate values from terminal outcomes but they'd be noisy and
+would bias PPO's bootstrapping. The value head starts fresh and PPO
+fits it during the first few updates.
+
+**Consequence**: expect a `value_loss` spike in the first 1-2 PPO
+updates that decays as the critic catches up. Healthy. The
+diagnostic is when the spike *doesn't* decay — that signals either
+reward-scale issues or a value-head capacity ceiling.
+
+### Single-map probe pattern (do this every time)
+
+Before any multi-hour curriculum run on a new map / new BC mix:
+
+1. Drop `total_timesteps` and stage `max_timesteps` to ~1M total.
+   That's ~60 PPO updates at our hyperparams, ~20 eval points.
+2. Confirm `WR > 0` with `std > 0` within the first 3-5 evals.
+3. Confirm reward is not falling (yellow flag) and avg_turns isn't
+   monotonically climbing toward `max_turns` (the stall-attractor
+   signature from the v15-v23 sweep).
+4. Only after the probe shows upward signal, raise budgets back to
+   production scale.
+
+The first skirmish run was a 10M-budget run that held WR=0.0% with
+std=0.0 for 750k steps before we stopped it. The probe pattern catches
+that signature in ~15 minutes of wall-clock instead of multiple hours,
+and the saved diagnostic artifacts (`scenario_stats.txt`,
+`bc_training_curves.png`, `bc_demo_outcomes.png`) live on Drive so
+they survive Colab disconnects and are comparable across iterations.
