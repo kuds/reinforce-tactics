@@ -238,6 +238,17 @@ class SimpleBot(BotUnitMixin, BaseBot):
         "S": 8,  # Sorcerer - buff support
     }
 
+    # Cap Warrior share of the army. Without this, the (priority=1,
+    # cost=cheapest) sort always picks Warrior -- the baseline tournament
+    # showed SimpleBot building 100% Warriors. Once the army has at least
+    # ``WARRIOR_CAP_MIN_UNITS`` units AND Warrior share is at or above
+    # ``WARRIOR_SHARE_CAP``, Warriors drop out of the affordable set and
+    # the next priority unit fills the slot. The bot still defaults to
+    # Warrior on the very first buy and any time it's the only thing in
+    # range, so weak early-game tempo is preserved.
+    WARRIOR_SHARE_CAP = 0.5
+    WARRIOR_CAP_MIN_UNITS = 3
+
     def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the bot.
@@ -285,6 +296,19 @@ class SimpleBot(BotUnitMixin, BaseBot):
             if not affordable:
                 break
 
+            # Apply Warrior composition cap. Counts live units (newly built
+            # ones from earlier iterations of this loop are included), so the
+            # ratio updates as we go.
+            my_units = [u for u in self.game_state.units if u.player == self.bot_player]
+            total = len(my_units)
+            if total >= self.WARRIOR_CAP_MIN_UNITS:
+                w_count = sum(1 for u in my_units if u.type == "W")
+                if total > 0 and (w_count / total) >= self.WARRIOR_SHARE_CAP:
+                    non_w = [a for a in affordable if a["unit_type"] != "W"]
+                    if non_w:
+                        affordable = non_w
+                        self._record("warrior_cap_hit")
+
             # Sort by priority (lower = buy first), then by cost (cheaper first).
             # Shuffle first so equal-priority/equal-cost units (e.g. two
             # affordable warriors on different spawn tiles) tiebreak randomly
@@ -294,6 +318,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
 
             action = affordable[0]
             self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+            self._record(f"buy_{action['unit_type']}")
 
     def move_and_act_units(self):
         """Move and act with all bot units."""
@@ -555,6 +580,20 @@ class MediumBot(BotUnitMixin, BaseBot):
         "S": (7, "buff"),  # Sorcerer - buff support
     }
 
+    # Warrior composition cap, same shape as SimpleBot but with a higher
+    # threshold so MediumBot still goes Warrior-heavy in the early game.
+    # The (priority=0, cost=cheapest) sort otherwise produces a Warrior
+    # monoculture identical to SimpleBot's; smoke runs showed MediumBot
+    # building ~7 Warriors per game and zero of anything else even though
+    # A/K are enabled. With the cap, once the army has at least
+    # ``WARRIOR_CAP_MIN_UNITS`` units AND Warrior share is at or above
+    # ``WARRIOR_SHARE_CAP``, Warriors drop out of the affordable set and
+    # the next priority unit (Barbarian, then Archer) fills the slot.
+    # ``warrior_cap_hit`` is recorded each time the filter activates so
+    # the cap's frequency is observable in capabilities_per_bot.
+    WARRIOR_SHARE_CAP = 0.6
+    WARRIOR_CAP_MIN_UNITS = 4
+
     def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the bot.
@@ -650,6 +689,7 @@ class MediumBot(BotUnitMixin, BaseBot):
         if (unit.x, unit.y) != target:
             self.game_state.move_unit(unit, target[0], target[1])
         unit.end_unit_turn()
+        self._record("retreat_to_heal")
         return True
 
     def get_structure_priority(self, structure, unit=None):
@@ -753,6 +793,8 @@ class MediumBot(BotUnitMixin, BaseBot):
         """Purchase units based on priority from all enabled types."""
         # Keep buying units until we can't afford any more
         counter_unit = self.get_counter_unit()
+        if counter_unit is not None:
+            self._record("counter_unit_rule_fired")
         while True:
             legal_actions = self.game_state.get_legal_actions(self.bot_player)
             create_actions = legal_actions["create_unit"]
@@ -771,6 +813,22 @@ class MediumBot(BotUnitMixin, BaseBot):
 
             if not affordable_actions:
                 break
+
+            # Warrior composition cap. Same shape as SimpleBot but with a
+            # higher threshold (0.6) so MediumBot is allowed to go heavier
+            # on Warriors before the cap intervenes. The counter-unit rule
+            # always overrides the cap -- if the enemy fielded enough W/B
+            # to trigger the counter, we want to buy the Archer counter
+            # regardless of our current W share.
+            my_units = [u for u in self.game_state.units if u.player == self.bot_player]
+            total = len(my_units)
+            if total >= self.WARRIOR_CAP_MIN_UNITS:
+                w_count = sum(1 for u in my_units if u.type == "W")
+                if total > 0 and (w_count / total) >= self.WARRIOR_SHARE_CAP:
+                    non_w = [a for a in affordable_actions if a["unit_type"] != "W"]
+                    if non_w:
+                        affordable_actions = non_w
+                        self._record("warrior_cap_hit")
 
             # Sort by priority (uses UNIT_PRIORITIES), then by cost. When a
             # counter unit applies, it leaps to the front of the queue;
@@ -791,6 +849,9 @@ class MediumBot(BotUnitMixin, BaseBot):
             # Buy the top priority affordable unit
             action = affordable_actions[0]
             self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+            self._record(f"buy_{action['unit_type']}")
+            if counter_unit is not None and action["unit_type"] == counter_unit:
+                self._record("counter_unit_bought")
 
     def move_and_act_units(self):
         """Move and act with all bot units using coordinated strategy."""
@@ -1075,6 +1136,31 @@ class MediumBot(BotUnitMixin, BaseBot):
         # Also consider unit costs
         attacker_cost = int(UNIT_DATA[attacker.type]["cost"])
         target_cost = int(UNIT_DATA[target.type]["cost"])
+
+        # Suicide guard: don't die to land a non-killing hit. Prior versions
+        # of this function let value go positive when raw damage was high
+        # enough to offset the cost penalty (a 200g Warrior trading 100
+        # damage for 80 counter and dying still scored +4). The kill_confirm
+        # path above already short-circuits the lethal case, so reaching
+        # here with ``counter_damage >= attacker.health`` always means a
+        # fatal trade that leaves the target alive. Treat those as strictly
+        # worse than skipping the attack -- callers gate on ``best_value
+        # > 0``, so a strongly negative score reliably routes the unit to
+        # another action.
+        #
+        # ``suicide_eval_rejected`` (not ``suicide_blocked``) because this
+        # records one event per *evaluation* that triggered the guard,
+        # not one per attack we declined to take. Multiple candidates
+        # within a single attack-selection pass can trip it; the chosen
+        # attack might separately be a positive-EV non-suicidal target,
+        # in which case "blocked" overstates the guard's behavioural
+        # impact. Counting evaluations is still useful (it tells you
+        # *that* the guard fired, and which bots see suicidal options
+        # the most often) -- just don't read the column as "attacks
+        # prevented."
+        if counter_damage >= attacker.health and damage_dealt < target.health:
+            self._record("suicide_eval_rejected")
+            return -1000.0 - counter_damage
 
         # Prefer favorable trades
         value = damage_dealt - counter_damage
@@ -1673,6 +1759,7 @@ class AdvancedBot(MediumBot):
 
             if best_action and best_priority > -1:
                 self.game_state.create_unit(best_action["unit_type"], best_action["x"], best_action["y"], self.bot_player)
+                self._record(f"buy_{best_action['unit_type']}")
                 unit_counts[best_action["unit_type"]] = unit_counts.get(best_action["unit_type"], 0) + 1
                 total_units += 1
             else:
@@ -1684,6 +1771,8 @@ class AdvancedBot(MediumBot):
                     affordable_actions.sort(key=lambda a: UNIT_DATA[a["unit_type"]]["cost"])
                     action = affordable_actions[0]
                     self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+                    self._record(f"buy_{action['unit_type']}")
+                    self._record("buy_fallback")
                     unit_counts[action["unit_type"]] = unit_counts.get(action["unit_type"], 0) + 1
                     total_units += 1
                 else:
@@ -2016,6 +2105,7 @@ class AdvancedBot(MediumBot):
             pos, enemy, _ = best_charge
             self.game_state.move_unit(unit, pos[0], pos[1])
             self.game_state.attack(unit, enemy)
+            self._record("knight_charge")
             return True
 
         return False
@@ -2042,6 +2132,7 @@ class AdvancedBot(MediumBot):
                 key=lambda e: self.calculate_attack_value(unit, e),
             )
             self.game_state.attack(unit, best_target)
+            self._record("rogue_flank")
             return True
 
         # Try to move to flank position
@@ -2069,6 +2160,7 @@ class AdvancedBot(MediumBot):
         if best_flank_pos and best_target:
             self.game_state.move_unit(unit, best_flank_pos[0], best_flank_pos[1])
             self.game_state.attack(unit, best_target)
+            self._record("rogue_flank")
             return True
 
         return False
@@ -2110,6 +2202,7 @@ class AdvancedBot(MediumBot):
 
         if best_forest:
             self.game_state.move_unit(unit, best_forest[0], best_forest[1])
+            self._record("rogue_forest_position")
             # Try to attack after moving to forest. Shuffle so
             # equal-value attackable enemies tiebreak randomly.
             attackable = self.game_state.mechanics.get_attackable_enemies(unit, enemies, self.game_state.grid)
@@ -2128,7 +2221,12 @@ class AdvancedBot(MediumBot):
         # Mage Paralyze: prefer locking down a unit currently capturing one of
         # our structures; fall back to the shared mage paralyze heuristic.
         if unit.type == "M" and self.has_paralyze_units() and unit.can_attack and unit.can_use_paralyze():
-            for enemy in self.game_state.units:
+            # First-match-wins iteration over self.game_state.units biases
+            # toward earlier-spawned enemies. Shuffle so among multiple
+            # in-range capturing enemies, the paralyze pick tiebreaks
+            # randomly under stochastic mode.
+            candidates = self._maybe_shuffle(list(self.game_state.units))
+            for enemy in candidates:
                 if enemy.player == self.bot_player or enemy.health <= 0 or enemy.is_paralyzed():
                     continue
                 if not self._is_capturing_us(enemy):
@@ -2186,6 +2284,8 @@ class AdvancedBot(MediumBot):
                     dist = self.manhattan_distance(knight.x, knight.y, enemy.x, enemy.y)
                     if CHARGE_MIN_DISTANCE <= dist <= knight.movement_range + 1:
                         self.game_state.haste(unit, knight)
+                        self._record("sorcerer_haste")
+                        self._record("sorcerer_haste_knight_charge")
                         return True
 
         # Priority 2: Haste a Rogue for flank opportunity (if Rogue is enabled)
@@ -2194,6 +2294,8 @@ class AdvancedBot(MediumBot):
             for rogue in rogues_in_range:
                 if self._find_flank_targets(rogue):
                     self.game_state.haste(unit, rogue)
+                    self._record("sorcerer_haste")
+                    self._record("sorcerer_haste_rogue_flank")
                     return True
 
         # Priority 3: Attack buff on frontline unit about to engage
@@ -2202,19 +2304,26 @@ class AdvancedBot(MediumBot):
                 a for a in allies_in_range if a.type in ("W", "K", "B", "R") and a.can_attack and not a.has_attack_buff()
             ]
             if frontline_in_range:
+                # Equidistant frontline allies tiebreak randomly under
+                # stochastic mode.
+                self._maybe_shuffle(frontline_in_range)
                 best_frontline = min(
                     frontline_in_range,
                     key=lambda a: min(self.manhattan_distance(a.x, a.y, e.x, e.y) for e in enemies),
                 )
                 self.game_state.attack_buff(unit, best_frontline)
+                self._record("sorcerer_attack_buff")
                 return True
 
-        # Priority 4: Defence buff on unit capturing contested structure
+        # Priority 4: Defence buff on unit capturing contested structure.
+        # Shuffle so multiple contested-capturing allies tiebreak randomly.
         if can_defence_buff:
-            for ally in allies_in_range:
+            for ally in self._maybe_shuffle(list(allies_in_range)):
                 tile = self.game_state.grid.get_tile(ally.x, ally.y)
                 if tile.is_capturable() and tile.health < tile.max_health and not ally.has_defence_buff():
                     self.game_state.defence_buff(unit, ally)
+                    self._record("sorcerer_defence_buff")
+                    self._record("sorcerer_defence_buff_capturing")
                     return True
 
             # Priority 5: Defence buff on low-health frontline unit
@@ -2224,8 +2333,11 @@ class AdvancedBot(MediumBot):
                 if a.type in ("W", "K", "B") and a.health < a.max_health * 0.5 and not a.has_defence_buff()
             ]
             if low_health_frontline:
+                self._maybe_shuffle(low_health_frontline)
                 target = min(low_health_frontline, key=lambda a: a.health)
                 self.game_state.defence_buff(unit, target)
+                self._record("sorcerer_defence_buff")
+                self._record("sorcerer_defence_buff_low_hp")
                 return True
 
         return False
@@ -2248,13 +2360,16 @@ class AdvancedBot(MediumBot):
         melee_targets = [e for e in attackable if e.type not in ["A", "M", "S"]]
 
         if melee_targets:
-            # Attack the one with lowest health (finish off)
+            # Attack the one with lowest health (finish off). Equal-HP
+            # targets tiebreak randomly under stochastic mode.
+            self._maybe_shuffle(melee_targets)
             target = min(melee_targets, key=lambda e: e.health)
             self.game_state.attack(unit, target)
             return True
 
         # Otherwise attack any target
-        target = min(attackable, key=lambda e: e.health)
+        attackable_list = self._maybe_shuffle(list(attackable))
+        target = min(attackable_list, key=lambda e: e.health)
         self.game_state.attack(unit, target)
         return True
 
@@ -2564,6 +2679,7 @@ class MasterBot(AdvancedBot):
         d_hq = self.manhattan_distance(unit.x, unit.y, enemy_hq.x, enemy_hq.y)
         d_pick = self.manhattan_distance(unit.x, unit.y, target.x, target.y)
         if d_hq <= d_pick + 2:
+            self._record("hq_snipe")
             return enemy_hq
         return target
 
@@ -2608,6 +2724,7 @@ class MasterBot(AdvancedBot):
             # recursion path inside the parent), is_hasted is already
             # False and we wouldn't have entered this branch.
             if unit.end_unit_turn(force_end=False):
+                self._record("haste_followthrough")
                 self.act_with_unit_enhanced(unit)
 
     # ------------------------------------------------------------------
@@ -2660,6 +2777,8 @@ class MasterBot(AdvancedBot):
                     damage = int(k.get_attack_damage(e.x, e.y, on_mountain) * (1 + CHARGE_BONUS))
                     if damage >= e.health:
                         self.game_state.haste(unit, k)
+                        self._record("sorcerer_haste")
+                        self._record("master_haste_combo_knight_kill")
                         return True
 
         # Combo 2: double-capture. Find an ally that can move-and-seize
@@ -2677,9 +2796,12 @@ class MasterBot(AdvancedBot):
                 reachable = set(self.get_reachable(ally))
                 reachable.add((ally.x, ally.y))
                 # First capture: pick the cheapest reachable capturable.
+                # Equidistant capturables tiebreak randomly under
+                # stochastic mode.
                 first_options = [c for c in capturables if (c.x, c.y) in reachable]
                 if not first_options:
                     continue
+                self._maybe_shuffle(first_options)
                 first = min(
                     first_options,
                     key=lambda t: self.manhattan_distance(ally.x, ally.y, t.x, t.y),
@@ -2692,6 +2814,8 @@ class MasterBot(AdvancedBot):
                         continue
                     if self.manhattan_distance(first.x, first.y, second.x, second.y) <= ally.movement_range:
                         self.game_state.haste(unit, ally)
+                        self._record("sorcerer_haste")
+                        self._record("master_haste_combo_double_capture")
                         return True
 
         # Combo 3: long-mobility ally with a distant capture. Pick a
@@ -2721,6 +2845,8 @@ class MasterBot(AdvancedBot):
                     # upper bound that the post-pass will validate).
                     if self.manhattan_distance(ally.x, ally.y, tile.x, tile.y) <= 2 * ally.movement_range:
                         self.game_state.haste(unit, ally)
+                        self._record("sorcerer_haste")
+                        self._record("master_haste_combo_distant_capture")
                         return True
 
         return False

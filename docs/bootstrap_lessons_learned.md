@@ -804,6 +804,22 @@ durability). **`balance_analysis` (bot tournaments) cannot validate
 RL-relevant stat changes.** Use replay-level metrics or RL training
 deltas, not bot win/loss, to assess unit-stat tuning.
 
+**Update (post-`rng_seed` plumbing):** the "byte-identical" framing
+above was *partly* a deterministic-replay artifact, not solely a
+function of static-priority bots. With `games_per_side=1` and no rng,
+the entire tournament was 12 unique games × 8 replicas, so any stat
+change that didn't flip a deterministic decision branch produced
+literally identical bytes. With stochastic mode the bot-tournament
+*outputs* (winrates, capture counts) now have real statistical content
+— but the static-priority point still holds: a stat change that
+doesn't alter any sort key won't shift scripted-bot behaviour, no
+matter how many independent samples you collect. The new contribution
+is that replay-level metrics (gold shares, build counts, survival
+rates) are now statistically meaningful at the per-game level, which
+makes them usable for stat-tuning signal. See
+[`docs/balance_analysis_lessons_learned.md`](balance_analysis_lessons_learned.md)
+for the full balance-analysis retrospective.
+
 ### What is *not* worth chasing again (sweep edition)
 
 - **Entropy-schedule variants.** Two clean negatives (v20, v21). The
