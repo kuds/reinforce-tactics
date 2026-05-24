@@ -1285,18 +1285,26 @@ class MixedBot(BotUnitMixin, BaseBot):
         self._rng = rng if rng is not None else random
         self.use_hard = self._rng.random() < p_hard
         chosen = hard if self.use_hard else easy
-        self._inner = self._build_inner(chosen, game_state, player)
+        # Forward the rng into the chosen inner bot so its stochastic
+        # tiebreaking activates. Without this the inner bot's _rng is
+        # None and every MixedBot episode that lands on the same inner
+        # choice plays the byte-identical game -- defeating the purpose
+        # of passing rng to MixedBot in the first place. The inner bot
+        # consumes the same rng as the coin flip above; that's fine
+        # because the coin flip happens once at construction and the
+        # inner then takes over for the rest of the episode.
+        self._inner = self._build_inner(chosen, game_state, player, rng=self._rng)
 
     @classmethod
-    def _build_inner(cls, name: str, game_state, player: int):
+    def _build_inner(cls, name: str, game_state, player: int, rng=None):
         if name == "simple":
-            return SimpleBot(game_state, player=player)
+            return SimpleBot(game_state, player=player, rng=rng)
         if name == "medium":
-            return MediumBot(game_state, player=player)
+            return MediumBot(game_state, player=player, rng=rng)
         if name == "advanced":
-            return AdvancedBot(game_state, player=player)
+            return AdvancedBot(game_state, player=player, rng=rng)
         if name == "master":
-            return MasterBot(game_state, player=player)
+            return MasterBot(game_state, player=player, rng=rng)
         raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
 
     def take_turn(self):

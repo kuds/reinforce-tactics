@@ -40,6 +40,7 @@ from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import (
     AdvancedBot,
     BalancedRandomBot,
+    MasterBot,
     MediumBot,
     MixedBot,
     NoopBot,
@@ -118,6 +119,8 @@ def _make_bot(
             return MixedBot(game_state, player=player, rng=rng)
         if name == "advanced":
             return AdvancedBot(game_state, player=player, rng=det_rng)
+        if name == "master":
+            return MasterBot(game_state, player=player, rng=det_rng)
         if name == "noop":
             return NoopBot(game_state, player=player)
         if name == "random":
@@ -192,13 +195,20 @@ class ScenarioStats:
     demo_wins: int = 0
     demo_losses: int = 0
     draws: int = 0
+    # Action-loop timeouts: the episode driver exited via step_budget
+    # without GameState.end_game ever running. Tracked separately from
+    # ``draws`` so users can distinguish 'map_turns_draw' (the game
+    # legitimately ended with no winner) from 'bot stuck in an
+    # intra-turn loop' (a failure mode that would otherwise inflate the
+    # draws column and look like the scenario is producing draws).
+    step_budget_exhausted: int = 0
     total_demos: int = 0
     total_turns: int = 0
     end_reasons: Dict[str, int] = field(default_factory=dict)
 
     @property
     def total_games(self) -> int:
-        return self.demo_wins + self.demo_losses + self.draws
+        return self.demo_wins + self.demo_losses + self.draws + self.step_budget_exhausted
 
     @property
     def demo_win_rate(self) -> float:
@@ -221,6 +231,10 @@ class ScenarioStats:
             self.demo_wins += 1
         elif outcome.demonstrator_lost:
             self.demo_losses += 1
+        elif outcome.end_reason == "step_budget_exhausted":
+            # Distinguishable from a genuine draw: this is a bot-stall
+            # signature, not an outcome of play.
+            self.step_budget_exhausted += 1
         else:
             self.draws += 1
         self.total_demos += outcome.n_demos
@@ -680,10 +694,21 @@ def _play_episode(
     finally:
         recorder.uninstall()
 
+    # Distinguish action-loop timeouts (loop exited via step_budget,
+    # game_state.game_over still False) from legitimate map-cap draws
+    # (GameState.end_game ran with winner=None, end_reason='max_turns_draw'
+    # or similar). Without this both look identical -- winner=None,
+    # end_reason=None vs end_reason='max_turns_draw' -- and the scenario
+    # stats' draws column lumps both together, hiding bot-stall
+    # failures behind apparent map draws.
+    end_reason = game_state.end_reason
+    if not game_state.game_over and end_reason is None:
+        end_reason = "step_budget_exhausted"
+
     outcome = EpisodeOutcome(
         demonstrator_player=demonstrator_player,
         winner=game_state.winner,
-        end_reason=game_state.end_reason,
+        end_reason=end_reason,
         n_turns=game_state.turn_number,
         n_demos=len(recorder.demos),
     )
@@ -1051,41 +1076,49 @@ def format_scenario_stats_table(stats: List[ScenarioStats]) -> str:
     """Render a per-scenario W/L/D + avg_turns table as plain text.
 
     Designed for direct ``print()`` in notebooks. Columns: scenario name,
-    demonstrator vs opponent, games, demonstrator W/L/D, win-rate %,
-    average game length in turns, average demos collected per game.
+    demonstrator vs opponent, games, demonstrator W/L/D, action-loop
+    timeouts (T), win-rate %, average game length in turns, average
+    demos collected per game.
+
+    The T (timeout) column distinguishes action-loop timeouts -- where
+    the per-episode step budget was exhausted while both bots remained
+    in-turn -- from genuine map-cap draws (counted in D). Without this
+    split, bot-stall failures would silently inflate the draw count
+    and look like a property of the scenario rather than a bug.
     """
     if not stats:
         return "(no scenario stats collected)"
 
     header = (
         f"{'scenario':<32s}  {'matchup':<28s}  {'games':>5s}  "
-        f"{'W':>4s} {'L':>4s} {'D':>4s}  {'WR':>6s}  {'turns':>6s}  {'demos/g':>8s}"
+        f"{'W':>4s} {'L':>4s} {'D':>4s} {'T':>4s}  {'WR':>6s}  {'turns':>6s}  {'demos/g':>8s}"
     )
     sep = "-" * len(header)
     lines = [header, sep]
-    tot_w = tot_l = tot_d = tot_demos = 0
+    tot_w = tot_l = tot_d = tot_t = tot_demos = 0
     tot_turns = 0
     for s in stats:
         matchup = f"{s.demonstrator} vs {s.opponent}"
         lines.append(
             f"{s.name:<32s}  {matchup:<28s}  {s.total_games:>5d}  "
-            f"{s.demo_wins:>4d} {s.demo_losses:>4d} {s.draws:>4d}  "
+            f"{s.demo_wins:>4d} {s.demo_losses:>4d} {s.draws:>4d} {s.step_budget_exhausted:>4d}  "
             f"{100.0 * s.demo_win_rate:>5.1f}%  {s.avg_turns:>6.1f}  "
             f"{s.avg_demos_per_game:>8.1f}"
         )
         tot_w += s.demo_wins
         tot_l += s.demo_losses
         tot_d += s.draws
+        tot_t += s.step_budget_exhausted
         tot_demos += s.total_demos
         tot_turns += s.total_turns
-    tot_games = tot_w + tot_l + tot_d
+    tot_games = tot_w + tot_l + tot_d + tot_t
     tot_wr = (tot_w / tot_games) if tot_games else 0.0
     tot_avg_turns = (tot_turns / tot_games) if tot_games else 0.0
     tot_avg_demos = (tot_demos / tot_games) if tot_games else 0.0
     lines.append(sep)
     lines.append(
         f"{'TOTAL':<32s}  {'':<28s}  {tot_games:>5d}  "
-        f"{tot_w:>4d} {tot_l:>4d} {tot_d:>4d}  "
+        f"{tot_w:>4d} {tot_l:>4d} {tot_d:>4d} {tot_t:>4d}  "
         f"{100.0 * tot_wr:>5.1f}%  {tot_avg_turns:>6.1f}  {tot_avg_demos:>8.1f}"
     )
     return "\n".join(lines)
