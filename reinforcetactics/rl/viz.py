@@ -1060,3 +1060,120 @@ def plot_stage_diagnostics(
         "unit_build_distribution": plot_unit_build_distribution(results, charts_dir=charts_dir),
         "combat_summary": plot_combat_summary(results, charts_dir=charts_dir),
     }
+
+
+# ---------------------------------------------------------------------------
+# Behavior-cloning diagnostics
+#
+# Separate from the PPO/eval plotters above because BC has a very different
+# data shape: per-epoch supervised metrics (loss + accuracy) and per-
+# scenario demonstrator outcomes (W/L/D, avg turns). No timestep axis.
+# ---------------------------------------------------------------------------
+
+
+def plot_bc_training_curves(
+    bc_stats: Sequence[Any],
+    *,
+    charts_dir: Optional[Any] = None,
+    name: str = "bc_training_curves.png",
+) -> plt.Figure:
+    """Per-epoch BC supervised metrics: loss + two accuracy curves.
+
+    Consumes the ``List[BCStats]`` returned by ``behavior_clone`` /
+    ``make_warm_started_model``. Loss on the left axis, accuracies on the
+    right. action_type_acc is the easier metric (10-way); full_action_acc
+    requires all 6 dims to match and is structurally much lower -- both
+    are plotted so trend (rising) and ceiling are visible.
+    """
+    if not bc_stats:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.text(0.5, 0.5, "No BC stats", ha="center", va="center", transform=ax.transAxes)
+        return _save_and_return(fig, charts_dir, name)
+
+    epochs = [s.epoch for s in bc_stats]
+    loss = [s.loss for s in bc_stats]
+    acc_type = [s.accuracy_action_type for s in bc_stats]
+    acc_full = [s.accuracy_full for s in bc_stats]
+
+    fig, ax_loss = plt.subplots(figsize=(9, 5))
+    ax_loss.plot(epochs, loss, marker="o", color="#d32f2f", label="loss")
+    ax_loss.set_xlabel("epoch")
+    ax_loss.set_ylabel("masked cross-entropy loss", color="#d32f2f")
+    ax_loss.tick_params(axis="y", labelcolor="#d32f2f")
+    ax_loss.grid(True, alpha=0.3)
+
+    ax_acc = ax_loss.twinx()
+    ax_acc.plot(epochs, acc_type, marker="s", color="#2e7d32", label="action_type acc")
+    ax_acc.plot(epochs, acc_full, marker="^", color="#1565c0", label="full_action acc")
+    ax_acc.set_ylabel("accuracy", color="#1565c0")
+    ax_acc.tick_params(axis="y", labelcolor="#1565c0")
+    ax_acc.set_ylim(0.0, 1.0)
+
+    # Combined legend across both axes so the panel reads cleanly.
+    lines_loss, labels_loss = ax_loss.get_legend_handles_labels()
+    lines_acc, labels_acc = ax_acc.get_legend_handles_labels()
+    ax_loss.legend(lines_loss + lines_acc, labels_loss + labels_acc, loc="center right")
+
+    ax_loss.set_title(f"BC training -- {len(bc_stats)} epochs")
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, name)
+
+
+def plot_bc_demo_outcomes(
+    scenario_stats: Sequence[Any],
+    *,
+    charts_dir: Optional[Any] = None,
+    name: str = "bc_demo_outcomes.png",
+) -> plt.Figure:
+    """Per-scenario demonstrator outcomes: stacked W/L/D + avg turn count.
+
+    Consumes ``DemonstrationDataset.scenario_stats``. Top panel: stacked
+    bar of demonstrator wins / losses / draws per scenario, with the
+    demonstrator win-rate annotated. Bottom panel: average game length
+    (turns) per scenario.
+
+    Read together, these surface BC-label quality issues *before* PPO
+    fine-tuning: a scenario with WR < 50% means BC is being taught
+    losing trajectories at the majority rate; long avg_turns (near the
+    max_turns cap) means games are timing out as draws rather than
+    resolving, so the demonstrator's "winning" trajectories are mostly
+    stalemates.
+    """
+    if not scenario_stats:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.text(0.5, 0.5, "No scenario stats", ha="center", va="center", transform=ax.transAxes)
+        return _save_and_return(fig, charts_dir, name)
+
+    names = [s.name for s in scenario_stats]
+    wins = np.array([s.demo_wins for s in scenario_stats])
+    losses = np.array([s.demo_losses for s in scenario_stats])
+    draws = np.array([s.draws for s in scenario_stats])
+    win_rates = np.array([s.demo_win_rate for s in scenario_stats])
+    avg_turns = np.array([s.avg_turns for s in scenario_stats])
+
+    n = len(names)
+    fig, (ax_wld, ax_turns) = plt.subplots(2, 1, figsize=(max(8, 1.2 * n + 4), 7), sharex=True)
+
+    x = np.arange(n)
+    ax_wld.bar(x, wins, color="#2e7d32", label="demo wins")
+    ax_wld.bar(x, losses, bottom=wins, color="#c62828", label="demo losses")
+    ax_wld.bar(x, draws, bottom=wins + losses, color="#9e9e9e", label="draws")
+    ax_wld.set_ylabel("games")
+    ax_wld.set_title("Demonstrator W/L/D per scenario")
+    ax_wld.legend(loc="upper right")
+    ax_wld.grid(True, alpha=0.3, axis="y")
+    # Annotate demonstrator WR on top of each bar -- the key BC-quality
+    # signal at a glance.
+    totals = wins + losses + draws
+    for xi, total, wr in zip(x, totals, win_rates):
+        ax_wld.text(xi, total + max(totals) * 0.02, f"{100.0 * wr:.0f}%", ha="center", va="bottom", fontsize=9)
+
+    ax_turns.bar(x, avg_turns, color="#1565c0")
+    ax_turns.set_ylabel("avg turns / game")
+    ax_turns.set_title("Average game length per scenario")
+    ax_turns.grid(True, alpha=0.3, axis="y")
+    ax_turns.set_xticks(x)
+    ax_turns.set_xticklabels(names, rotation=30, ha="right")
+
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, name)
