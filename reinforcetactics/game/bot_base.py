@@ -73,7 +73,7 @@ class BaseBot(ABC):
     # Capability telemetry
     #
     # Per-game tally of how often each scripted capability fired (e.g.
-    # ``knight_charge``, ``sorcerer_haste``, ``suicide_blocked``,
+    # ``knight_charge``, ``sorcerer_haste``, ``suicide_eval_rejected``,
     # ``buy_W``). Lazily created so subclasses that bypass
     # ``BaseBot.__init__`` (most of the scripted hierarchy sets fields
     # directly) still work. Tournament runner snapshots this into the

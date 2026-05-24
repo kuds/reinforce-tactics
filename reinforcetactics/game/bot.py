@@ -580,6 +580,20 @@ class MediumBot(BotUnitMixin, BaseBot):
         "S": (7, "buff"),  # Sorcerer - buff support
     }
 
+    # Warrior composition cap, same shape as SimpleBot but with a higher
+    # threshold so MediumBot still goes Warrior-heavy in the early game.
+    # The (priority=0, cost=cheapest) sort otherwise produces a Warrior
+    # monoculture identical to SimpleBot's; smoke runs showed MediumBot
+    # building ~7 Warriors per game and zero of anything else even though
+    # A/K are enabled. With the cap, once the army has at least
+    # ``WARRIOR_CAP_MIN_UNITS`` units AND Warrior share is at or above
+    # ``WARRIOR_SHARE_CAP``, Warriors drop out of the affordable set and
+    # the next priority unit (Barbarian, then Archer) fills the slot.
+    # ``warrior_cap_hit`` is recorded each time the filter activates so
+    # the cap's frequency is observable in capabilities_per_bot.
+    WARRIOR_SHARE_CAP = 0.6
+    WARRIOR_CAP_MIN_UNITS = 4
+
     def __init__(self, game_state, player=2, rng=None):
         """
         Initialize the bot.
@@ -799,6 +813,22 @@ class MediumBot(BotUnitMixin, BaseBot):
 
             if not affordable_actions:
                 break
+
+            # Warrior composition cap. Same shape as SimpleBot but with a
+            # higher threshold (0.6) so MediumBot is allowed to go heavier
+            # on Warriors before the cap intervenes. The counter-unit rule
+            # always overrides the cap -- if the enemy fielded enough W/B
+            # to trigger the counter, we want to buy the Archer counter
+            # regardless of our current W share.
+            my_units = [u for u in self.game_state.units if u.player == self.bot_player]
+            total = len(my_units)
+            if total >= self.WARRIOR_CAP_MIN_UNITS:
+                w_count = sum(1 for u in my_units if u.type == "W")
+                if total > 0 and (w_count / total) >= self.WARRIOR_SHARE_CAP:
+                    non_w = [a for a in affordable_actions if a["unit_type"] != "W"]
+                    if non_w:
+                        affordable_actions = non_w
+                        self._record("warrior_cap_hit")
 
             # Sort by priority (uses UNIT_PRIORITIES), then by cost. When a
             # counter unit applies, it leaps to the front of the queue;
@@ -1117,8 +1147,19 @@ class MediumBot(BotUnitMixin, BaseBot):
         # worse than skipping the attack -- callers gate on ``best_value
         # > 0``, so a strongly negative score reliably routes the unit to
         # another action.
+        #
+        # ``suicide_eval_rejected`` (not ``suicide_blocked``) because this
+        # records one event per *evaluation* that triggered the guard,
+        # not one per attack we declined to take. Multiple candidates
+        # within a single attack-selection pass can trip it; the chosen
+        # attack might separately be a positive-EV non-suicidal target,
+        # in which case "blocked" overstates the guard's behavioural
+        # impact. Counting evaluations is still useful (it tells you
+        # *that* the guard fired, and which bots see suicidal options
+        # the most often) -- just don't read the column as "attacks
+        # prevented."
         if counter_damage >= attacker.health and damage_dealt < target.health:
-            self._record("suicide_blocked")
+            self._record("suicide_eval_rejected")
             return -1000.0 - counter_damage
 
         # Prefer favorable trades

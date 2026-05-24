@@ -442,6 +442,7 @@ class TournamentRunner:
             BotType.SIMPLE: "bot",
             BotType.MEDIUM: "bot",
             BotType.ADVANCED: "bot",
+            BotType.MASTER: "bot",
             BotType.LLM: "llm",
             BotType.MODEL: "rl",
         }

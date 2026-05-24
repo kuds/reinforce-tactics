@@ -586,3 +586,91 @@ class TestMultiMapTournament:
         # Check Elo history
         assert "Bot1" in result_dict["elo_history"]
         assert "Bot2" in result_dict["elo_history"]
+
+
+class TestRngSeedReproducibility:
+    """Verify ``rng_seed`` reproduces the same set of games regardless of
+    concurrent_games. The per-game seed is derived from
+    ``(rng_seed, game_id, map_stem, bot1_name, bot2_name, player, bot_name)``
+    via SHA-256 in the runner, so concurrent execution must not affect the
+    outcome -- each game's rng is determined entirely by inputs, no shared
+    mutable state."""
+
+    @staticmethod
+    def _action_hashes(replay_dir):
+        """Return list of (game_id, sha256-of-action-stream) for every
+        replay JSON under ``replay_dir``, sorted by game_id so the
+        comparison is order-independent (concurrent runs save in
+        arrival order, not schedule order). game_id is parsed from the
+        replay filename's ``idNNNN`` segment."""
+        import hashlib
+        import json
+        import re
+        from pathlib import Path
+
+        results = []
+        for path in sorted(Path(replay_dir).rglob("*.json")):
+            with open(path) as f:
+                d = json.load(f)
+            m = re.search(r"id(\d+)_", path.name)
+            game_id = int(m.group(1)) if m else -1
+            flat = "|".join(f"{a.get('type')}:p{a.get('player')}:{a.get('unit_type', '')}" for a in d.get("actions", []))
+            results.append((game_id, hashlib.sha256(flat.encode()).hexdigest()))
+        return sorted(results)
+
+    def _run(self, *, tmp_path, rng_seed, concurrent_games):
+        """Run a tiny tournament and return per-game action hashes."""
+        from pathlib import Path
+
+        config = TournamentConfig(
+            name="rng_repro",
+            maps=[MapConfig(path="maps/1v1/starter.csv", max_turns=200)],
+            games_per_side=3,
+            save_replays=True,
+            replay_dir=str(Path(tmp_path) / "replays"),
+            output_dir=str(tmp_path),
+            max_turns=200,
+            rng_seed=rng_seed,
+            concurrent_games=concurrent_games,
+        )
+        bots = [
+            BotDescriptor(name="SimpleBot", bot_type=BotType.SIMPLE),
+            BotDescriptor(name="MediumBot", bot_type=BotType.MEDIUM),
+        ]
+        TournamentRunner(config).run(bots)
+        return self._action_hashes(config.replay_dir)
+
+    def test_same_seed_reproduces_across_runs(self, tmp_path):
+        """rng_seed=42 + concurrent_games=1 -> identical games on rerun."""
+        a = self._run(tmp_path=tmp_path / "run_a", rng_seed=42, concurrent_games=1)
+        b = self._run(tmp_path=tmp_path / "run_b", rng_seed=42, concurrent_games=1)
+        assert len(a) == len(b) > 0
+        # Compare (game_id, hash) pairs -- same schedule order produces
+        # same game_id assignments, and same seed produces same hash.
+        assert a == b, "Same seed produced different action streams across runs"
+
+    def test_concurrent_matches_sequential(self, tmp_path):
+        """rng_seed=42 with concurrent_games=4 -> same hash *set* as
+        concurrent_games=1. Order of completion differs, but per-game
+        seeds are derived from inputs only, so each game_id should
+        produce the same trajectory in either mode."""
+        seq = self._run(tmp_path=tmp_path / "seq", rng_seed=42, concurrent_games=1)
+        par = self._run(tmp_path=tmp_path / "par", rng_seed=42, concurrent_games=4)
+        assert len(seq) == len(par) > 0
+        assert seq == par, "concurrent execution produced different games than sequential"
+
+    def test_seed_none_produces_duplicate_trajectories(self, tmp_path):
+        """rng_seed=None + games_per_side=3 -> only one unique trajectory
+        per matchup direction (the historical deterministic behaviour
+        that motivated adding rng_seed)."""
+        hashes = self._run(tmp_path=tmp_path, rng_seed=None, concurrent_games=1)
+        unique = {h for _, h in hashes}
+        # 2 bots * 3 games/side * 2 directions = 6 games on 1 map.
+        # Without rng, expect at most 2 unique trajectories (one per
+        # matchup direction), not 6.
+        assert len(hashes) == 6, f"Expected 6 games, got {len(hashes)}"
+        assert len(unique) <= 2, (
+            f"Expected <=2 unique trajectories without rng_seed; got {len(unique)} -- "
+            f"either games_per_side isn't producing duplicates (good!) or the schedule "
+            f"changed."
+        )
