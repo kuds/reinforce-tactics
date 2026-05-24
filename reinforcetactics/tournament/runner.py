@@ -431,7 +431,7 @@ class TournamentRunner:
             "end_reason": end_reason,
             "winning_action_index": game_state.game_over_action_index,
             "library_version": _rt_version,
-            "replay_schema_version": 2,
+            "replay_schema_version": 3,
             "final_units_p1": len(final_units_p1),
             "final_units_p2": len(final_units_p2),
             "final_hp_total_p1": sum(u.health for u in final_units_p1),

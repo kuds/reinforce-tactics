@@ -24,8 +24,12 @@ from reinforcetactics.ui.icons import (
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.replay_actions import (
     apply_recorded_attack,
+    apply_recorded_attack_v3,
     apply_recorded_heal,
+    apply_recorded_heal_v3,
+    apply_recorded_move_v3,
     apply_recorded_seize,
+    apply_recorded_seize_v3,
     get_schema_version,
 )
 
@@ -244,24 +248,41 @@ class ReplayPlayer:
             if action_type == "create_unit":
                 # Translate coordinates from original to padded
                 padded_x, padded_y = self._translate_coords(action["x"], action["y"])
-                self.game_state.create_unit(action["unit_type"], padded_x, padded_y, action["player"])
+                unit = self.game_state.create_unit(action["unit_type"], padded_x, padded_y, action["player"])
+                # v3: pin the unit's id to the recorded value so subsequent
+                # actions can find this unit by id. The engine's natural
+                # id assignment is monotonic, so values normally already
+                # match, but enforcing it explicitly hardens against any
+                # transient create-unit failure in the replay (e.g. a
+                # gold-cost mismatch) skewing the counter.
+                if unit is not None and self.schema_version >= 3 and "unit_id" in action:
+                    unit.unit_id = action["unit_id"]
+                    self.game_state._next_unit_id = max(self.game_state._next_unit_id, unit.unit_id + 1)
 
             elif action_type == "move":
-                # Translate coordinates from original to padded
-                from_x, from_y = self._translate_coords(action["from_x"], action["from_y"])
-                to_x, to_y = self._translate_coords(action["to_x"], action["to_y"])
-                # Find the unit at the translated position
-                unit = self.game_state.get_unit_at_position(from_x, from_y)
-                if unit and unit.player == action["player"]:
-                    # Trust the recorded action: enable the move so the engine's
-                    # ``can_move`` guard doesn't block replay of legal actions
-                    # (e.g. a unit created earlier in this same turn whose
-                    # ``can_move`` flips to True only at next turn start).
-                    unit.can_move = True
-                    self.game_state.move_unit(unit, to_x, to_y)
+                if self.schema_version >= 3 and "actor_unit_id" in action:
+                    # v3: id-based lookup + direct position write. No
+                    # engine can_move/reachable/occupancy gates can
+                    # silently reject a legitimately-recorded second
+                    # move (e.g. Sorcerer Haste reset).
+                    apply_recorded_move_v3(self.game_state, action, self._translate_coords)
+                else:
+                    # v1/v2 path: engine-driven move with can_move override.
+                    from_x, from_y = self._translate_coords(action["from_x"], action["from_y"])
+                    to_x, to_y = self._translate_coords(action["to_x"], action["to_y"])
+                    unit = self.game_state.get_unit_at_position(from_x, from_y)
+                    if unit and unit.player == action["player"]:
+                        # Trust the recorded action: enable the move so the engine's
+                        # ``can_move`` guard doesn't block replay of legal actions
+                        # (e.g. a unit created earlier in this same turn whose
+                        # ``can_move`` flips to True only at next turn start).
+                        unit.can_move = True
+                        self.game_state.move_unit(unit, to_x, to_y)
 
             elif action_type == "attack":
-                if self.schema_version >= 2:
+                if self.schema_version >= 3 and "attacker_unit_id" in action:
+                    apply_recorded_attack_v3(self.game_state, action, self._translate_coords)
+                elif self.schema_version >= 2:
                     # v2: apply recorded outcome directly. No RNG re-roll,
                     # no damage recomputation -- the only path that's
                     # immune to mechanics drift and Rogue evade variance.
@@ -280,7 +301,9 @@ class ReplayPlayer:
                         self.game_state.attack(attacker, target)
 
             elif action_type == "seize":
-                if self.schema_version >= 2:
+                if self.schema_version >= 3 and "actor_unit_id" in action:
+                    apply_recorded_seize_v3(self.game_state, action, self._translate_coords)
+                elif self.schema_version >= 2:
                     apply_recorded_seize(self.game_state, action, self._translate_coords)
                 else:
                     orig_position = action["position"]
@@ -301,7 +324,9 @@ class ReplayPlayer:
                     self.game_state.paralyze(paralyzer, target)
 
             elif action_type == "heal":
-                if self.schema_version >= 2:
+                if self.schema_version >= 3 and "actor_unit_id" in action:
+                    apply_recorded_heal_v3(self.game_state, action, self._translate_coords)
+                elif self.schema_version >= 2:
                     apply_recorded_heal(self.game_state, action, self._translate_coords)
                 else:
                     orig_healer_pos = action["healer_pos"]

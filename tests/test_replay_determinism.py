@@ -81,7 +81,7 @@ def _save_replay(game: GameState, tmp_path: Path) -> str:
         "game_over": game.game_over,
         "end_reason": game.end_reason,
         "winning_action_index": game.game_over_action_index,
-        "replay_schema_version": 2,
+        "replay_schema_version": 3,
         "final_units_p1": len(final_p1),
         "final_units_p2": len(final_p2),
         "final_hp_total_p1": sum(u.health for u in final_p1),
@@ -374,6 +374,10 @@ def test_schema_version_v2():
     assert get_schema_version({"replay_schema_version": 2}) == 2
 
 
+def test_schema_version_v3():
+    assert get_schema_version({"replay_schema_version": 3}) == 3
+
+
 def test_no_trailing_actions_after_game_over(tmp_path):
     """Phase 1 ``record_action`` early-return: once game_over is set,
     no further actions should land in action_history regardless of how
@@ -542,3 +546,209 @@ def test_v2_seize_helper_applies_tile_state_even_without_seizer(tmp_path):
     assert g.game_over, "captured HQ must trigger hq_capture end-game"
     assert g.end_reason == "hq_capture"
     assert g.winner == 1
+
+
+# ===================================================================
+# v3 schema: unit-id-keyed action log
+# ===================================================================
+
+
+def test_unit_id_assigned_on_create():
+    """Every unit created through ``GameState.create_unit`` gets a stable
+    monotonic ``unit_id``."""
+    g = _make_game()
+    u1 = g.create_unit("W", 2, 1, player=1)
+    u2 = g.create_unit("W", 2, 2, player=2)
+    u3 = g.create_unit("W", 3, 1, player=1)
+    assert u1.unit_id == 0
+    assert u2.unit_id == 1
+    assert u3.unit_id == 2
+    assert g._next_unit_id == 3
+
+
+def test_unit_id_recorded_in_actions():
+    """The v3 schema adds ``actor_unit_id`` / ``target_unit_id`` to every
+    action that involves a unit."""
+    g = _make_game()
+    a = g.create_unit("W", 2, 1, player=1)
+    d = g.create_unit("W", 2, 2, player=2)
+    _enable(a)
+    _enable(d)
+    a.health = 1  # guarantee counter-kill
+
+    g.attack(a, d)
+
+    create_action = next(act for act in g.action_history if act["type"] == "create_unit")
+    attack_action = next(act for act in g.action_history if act["type"] == "attack")
+
+    assert create_action["unit_id"] == 0
+    assert attack_action["attacker_unit_id"] == a.unit_id
+    assert attack_action["target_unit_id"] == d.unit_id
+
+
+def test_unit_id_persists_across_save_load(tmp_path):
+    """``GameState.to_dict`` / ``from_dict`` round-trip preserves
+    ``unit_id`` and ``_next_unit_id`` so post-load creations don't
+    collide with pre-load ids."""
+    g = _make_game()
+    u1 = g.create_unit("W", 2, 1, player=1)
+    u2 = g.create_unit("W", 2, 2, player=2)
+    original_ids = (u1.unit_id, u2.unit_id, g._next_unit_id)
+
+    state = g.to_dict()
+    restored = GameState.from_dict(state, SMALL_MAP)
+    restored_ids = tuple(u.unit_id for u in restored.units) + (restored._next_unit_id,)
+
+    assert restored_ids == original_ids
+    # Newly created post-load unit should pick up where the counter left off.
+    u3 = restored.create_unit("W", 3, 1, player=1)
+    assert u3.unit_id == 2  # was _next_unit_id
+
+
+def test_v3_replay_uses_unit_id_when_position_is_ambiguous(tmp_path):
+    """Pin the v3 lookup behaviour: when an old unit and a new unit
+    happen to occupy the same position across the timeline, the
+    replay must route each action to the right unit by id, not by
+    position. Hand-built action log; no engine recompute path involved.
+    """
+    g = _make_game()
+
+    from reinforcetactics.utils.replay_actions import apply_recorded_attack_v3
+
+    # Two P1 units; the second is the "ghost target" of the action
+    # below. If the v3 lookup wrongly used position, it would attack
+    # the wrong unit (the one currently *at* the recorded position).
+    u_a = g.create_unit("W", 2, 1, player=1)
+    u_b = g.create_unit("W", 3, 1, player=1)
+    u_a.unit_id = 100
+    u_b.unit_id = 101
+    enemy = g.create_unit("W", 2, 2, player=2)
+    enemy.unit_id = 200
+    _enable(enemy)
+
+    # Synthesize a v3 attack: enemy hits u_b. enemy is at (2,2),
+    # u_b is at (3,1). The recorded target_pos is (3,1).
+    fake_attack = {
+        "type": "attack",
+        "player": 2,
+        "attacker_pos": [2, 2],
+        "target_pos": [3, 1],
+        "attacker_type": "W",
+        "target_type": "W",
+        "damage": 3,
+        "target_killed": False,
+        "attacker_killed": False,
+        "counter_damage": 0,
+        "attacker_hp_after": 15,
+        "target_hp_after": 7,
+        "evade": False,
+        "charge_bonus": False,
+        "flank_bonus": False,
+        "attack_buff": False,
+        "defence_buff": False,
+        "attacker_unit_id": 200,
+        "target_unit_id": 101,
+    }
+    apply_recorded_attack_v3(g, fake_attack, _translate)
+
+    # Only u_b should have taken damage.
+    assert u_b.health == 7
+    assert u_a.health == u_a.max_health, "non-targeted unit must be untouched"
+
+
+def test_v3_replay_warns_on_missing_unit_id(caplog):
+    """When a recorded ``actor_unit_id`` isn't in ``game_state.units``
+    (real divergence), the v3 helper must log a warning so future
+    bot bugs surface in tests instead of cascading silently."""
+    import logging
+
+    from reinforcetactics.utils.replay_actions import apply_recorded_attack_v3
+
+    g = _make_game()
+    p1 = g.create_unit("W", 2, 1, player=1)
+    _enable(p1)
+    assert not g.game_over
+
+    fake_attack = {
+        "type": "attack",
+        "player": 1,
+        "attacker_pos": [9, 9],  # nothing there
+        "target_pos": [8, 8],  # nothing there
+        "damage": 7,
+        "target_killed": True,
+        "attacker_killed": False,
+        "counter_damage": 0,
+        "attacker_hp_after": 15,
+        "target_hp_after": 0,
+        "evade": False,
+        "charge_bonus": False,
+        "flank_bonus": False,
+        "attack_buff": False,
+        "defence_buff": False,
+        "attacker_unit_id": 9999,  # not in units
+        "target_unit_id": 8888,  # not in units
+    }
+    with caplog.at_level(logging.WARNING, logger="reinforcetactics.utils.replay_actions"):
+        apply_recorded_attack_v3(g, fake_attack, _translate)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("attacker_unit_id" in str(r.args) or "9999" in r.getMessage() for r in warnings), (
+        f"expected a warning about the missing attacker id; got: {[r.getMessage() for r in warnings]}"
+    )
+
+
+def test_v3_move_helper_bypasses_can_move_gate(tmp_path):
+    """A unit whose ``can_move`` has been cleared (e.g. by a prior
+    move-then-attack) can still apply a second recorded move in v3.
+    This is the Sorcerer-Haste-double-move case Option A papered
+    over by toggling ``can_move = True`` before calling the engine;
+    v3 just applies the recorded outcome directly."""
+    from reinforcetactics.utils.replay_actions import apply_recorded_move_v3
+
+    g = _make_game()
+    u = g.create_unit("W", 2, 1, player=1)
+    _enable(u)
+    u.can_move = False  # simulate "already moved this turn"
+
+    fake_move = {
+        "type": "move",
+        "player": 1,
+        "from_x": 2,
+        "from_y": 1,
+        "to_x": 3,
+        "to_y": 1,
+        "unit_type": "W",
+        "actor_unit_id": u.unit_id,
+    }
+    apply_recorded_move_v3(g, fake_move, _translate)
+
+    assert (u.x, u.y) == (3, 1), "v3 move helper must apply position directly"
+    assert u.has_moved is True
+    assert u.can_move is False
+    # distance_moved tracked from from->to so Knight charge math still works
+    # if a recorded sequence includes a multi-tile second move.
+    assert u.distance_moved >= 1
+
+
+def test_v3_schema_written_by_full_game(tmp_path):
+    """End-to-end: a scripted game saved through the normal save path
+    carries ``replay_schema_version: 3`` and the v3 unit-id fields
+    on every action that has a unit involved."""
+    g = _make_game()
+    a = g.create_unit("W", 2, 1, player=1)
+    d = g.create_unit("W", 2, 2, player=2)
+    _enable(a)
+    _enable(d)
+    a.health = 1
+    g.attack(a, d)
+
+    path = _save_replay(g, tmp_path)
+    data = FileIO.load_replay(path)
+    assert data["game_info"]["replay_schema_version"] == 3
+    for act in data["actions"]:
+        if act["type"] == "create_unit":
+            assert "unit_id" in act, "create_unit must carry unit_id in v3"
+        elif act["type"] == "attack":
+            assert "attacker_unit_id" in act and "target_unit_id" in act
+        elif act["type"] in ("move", "seize", "heal", "cure", "paralyze", "haste", "defence_buff", "attack_buff"):
+            assert "actor_unit_id" in act, f"{act['type']} must carry actor_unit_id in v3"

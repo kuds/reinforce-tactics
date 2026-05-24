@@ -121,6 +121,12 @@ class GameState:
         """
         self.grid = TileGrid(map_data)
         self.units: List[Unit] = []
+        # Monotonic per-game unit-id counter. Stamped on every newly
+        # created unit; written into the replay log alongside each
+        # action so the v3 replay player can look up units by id
+        # rather than by brittle (x, y) position. Restored from saves
+        # in ``from_dict`` so post-load creations don't collide.
+        self._next_unit_id: int = 0
         self.current_player: int = 1
         self.num_players: int = num_players
         self.engine_overrides: Dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
@@ -543,11 +549,15 @@ class GameState:
         # Create the unit
         self.player_gold[player] -= cost
         unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
+        unit.unit_id = self._next_unit_id
+        self._next_unit_id += 1
         self.units.append(unit)
         self._invalidate_cache()
 
-        # Record action
-        self.record_action("create_unit", unit_type=unit_type, x=x, y=y, player=player)
+        # Record action. unit_id lets the replay player rebuild its
+        # id -> Unit map on the fly (v3 schema), so subsequent
+        # actions can find this unit even after it moves.
+        self.record_action("create_unit", unit_type=unit_type, x=x, y=y, player=player, unit_id=unit.unit_id)
 
         logger.debug(f"Player {player} created {unit_type} at ({x}, {y})")
         return unit
@@ -614,7 +624,16 @@ class GameState:
         unit.can_move = False  # Consume move action
 
         # Record action
-        self.record_action("move", unit_type=unit.type, from_x=from_x, from_y=from_y, to_x=to_x, to_y=to_y, player=unit.player)
+        self.record_action(
+            "move",
+            unit_type=unit.type,
+            from_x=from_x,
+            from_y=from_y,
+            to_x=to_x,
+            to_y=to_y,
+            player=unit.player,
+            actor_unit_id=unit.unit_id,
+        )
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
         self._invalidate_cache()
@@ -678,6 +697,8 @@ class GameState:
             attack_buff=result["attack_buff"],
             defence_buff=result["defence_buff"],
             player=attacker.player,
+            attacker_unit_id=attacker.unit_id,
+            target_unit_id=target.unit_id,
         )
 
         # Handle unit deaths
@@ -717,7 +738,12 @@ class GameState:
             paralyzer.can_move = False
             paralyzer.can_attack = False
             self.record_action(
-                "paralyze", paralyzer_pos=(paralyzer.x, paralyzer.y), target_pos=(target.x, target.y), player=paralyzer.player
+                "paralyze",
+                paralyzer_pos=(paralyzer.x, paralyzer.y),
+                target_pos=(target.x, target.y),
+                player=paralyzer.player,
+                actor_unit_id=paralyzer.unit_id,
+                target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
@@ -741,6 +767,8 @@ class GameState:
                 amount=amount,
                 target_hp_after=target.health,
                 player=healer.player,
+                actor_unit_id=healer.unit_id,
+                target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return amount
@@ -753,7 +781,14 @@ class GameState:
         if result:
             curer.can_move = False
             curer.can_attack = False
-            self.record_action("cure", curer_pos=(curer.x, curer.y), target_pos=(target.x, target.y), player=curer.player)
+            self.record_action(
+                "cure",
+                curer_pos=(curer.x, curer.y),
+                target_pos=(target.x, target.y),
+                player=curer.player,
+                actor_unit_id=curer.unit_id,
+                target_unit_id=target.unit_id,
+            )
             self._invalidate_cache()
         return result
 
@@ -780,6 +815,8 @@ class GameState:
                 target_pos=(target.x, target.y),
                 target_type=target.type,
                 player=sorcerer.player,
+                actor_unit_id=sorcerer.unit_id,
+                target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
@@ -807,6 +844,8 @@ class GameState:
                 target_pos=(target.x, target.y),
                 target_type=target.type,
                 player=sorcerer.player,
+                actor_unit_id=sorcerer.unit_id,
+                target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
@@ -834,6 +873,8 @@ class GameState:
                 target_pos=(target.x, target.y),
                 target_type=target.type,
                 player=sorcerer.player,
+                actor_unit_id=sorcerer.unit_id,
+                target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
@@ -864,6 +905,7 @@ class GameState:
             tile_hp_after=tile.health,
             tile_owner_after=tile.player,
             player=unit.player,
+            actor_unit_id=unit.unit_id,
         )
 
         if result["game_over"]:
@@ -1245,6 +1287,12 @@ class GameState:
             "units": [unit.to_dict() for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
             "action_history": self.action_history,
+            # Restore the per-game unit-id counter on reload so newly
+            # created units after load don't reuse retired ids
+            # (which would let the replay v3 dispatch route an action
+            # to the wrong unit -- exactly the brittleness this whole
+            # schema bump is meant to eliminate).
+            "next_unit_id": self._next_unit_id,
         }
 
     def to_numpy(self, for_player: Optional[int] = None) -> Dict[str, np.ndarray]:
@@ -1455,7 +1503,7 @@ class GameState:
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
             "library_version": _rt_version,
-            "replay_schema_version": 2,
+            "replay_schema_version": 3,
             "final_unit_counts": final_counts,
             "final_hp_totals": final_hp,
         }
@@ -1497,6 +1545,10 @@ class GameState:
         game.winner = save_data.get("winner")
         game.end_reason = save_data.get("end_reason")
         game.game_over_action_index = save_data.get("winning_action_index")
+        # Restore unit-id counter. Old saves predate this field; ``from_dict``
+        # for the units themselves leaves ``unit.unit_id = None`` in that
+        # case and ``find_unit_by_id`` falls back to position-based lookup.
+        game._next_unit_id = save_data.get("next_unit_id", 0)
 
         # Fix player_gold dictionary key type (JSON serializes as strings)
         saved_gold = save_data.get("player_gold", {})

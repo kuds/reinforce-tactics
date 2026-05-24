@@ -30,6 +30,15 @@ class Unit:
         """
         if stats is None:
             stats = UNIT_DATA[unit_type]
+        # Stable per-game identifier. ``None`` here is a placeholder for
+        # the legacy direct-constructor path (e.g. ``Unit.from_dict``).
+        # ``GameState.create_unit`` assigns a real id from its
+        # ``_next_unit_id`` counter before the unit is added to
+        # ``self.units``. Replay schema v3 (PR #360 follow-up) keys
+        # every recorded action by this id instead of (x, y), so
+        # position-drift bugs can't silently mis-route actions in the
+        # replay player.
+        self.unit_id = None
         self.type = unit_type
         self.x = x
         self.y = y
@@ -274,6 +283,7 @@ class Unit:
     def to_dict(self):
         """Convert unit to dictionary for serialization."""
         return {
+            "unit_id": self.unit_id,
             "type": self.type,
             "x": self.x,
             "y": self.y,
@@ -298,6 +308,10 @@ class Unit:
     def from_dict(cls, data):
         """Create unit from dictionary."""
         unit = cls(data["type"], data["x"], data["y"], data["player"])
+        # ``None`` for old saves that pre-date the unit_id field; the
+        # owning GameState restores ``_next_unit_id`` so newly-created
+        # units after load still get fresh non-colliding ids.
+        unit.unit_id = data.get("unit_id")
         unit.health = data["health"]
         unit.paralyzed_turns = data.get("paralyzed_turns", 0)
         unit.paralyze_cooldown = data.get("paralyze_cooldown", 0)
