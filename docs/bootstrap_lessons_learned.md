@@ -54,6 +54,14 @@ easier are actively harder for PPO.
    the same matchup is 40/60 *for player 1* (i.e. roughly symmetric).
    Don't conclude "the map favours side X" from runs where ties resolve
    by data-structure iteration order.
+9. **Ad-hoc eval envs MUST forward every kwarg the production env uses
+   — not just the obvious ones.** Especially `reward_config` and
+   `max_actions_per_turn`. The env's built-in defaults are 10-1000×
+   off from any well-tuned YAML, and missing `max_actions_per_turn`
+   disables the never-end-turn safety net that production trains
+   against. We hit this in 20260524_225835 and almost misdiagnosed
+   "BC is broken" when the real issue was a 1-line eval env bug. See
+   "BC warm-start: what we learned" → Failure mode G.
 
 ## The cold-start problem on this env
 
@@ -1001,6 +1009,105 @@ modes were not reproducibility-comparable.
 random.Random(seed ^ 0xC0FFEEBAD)` for the deterministic-bot
 tiebreaks. The stochastic-bot stream is unchanged regardless of the
 flag.
+
+### Failure mode G: sanity-eval env construction omits production env kwargs → measurement artifact looks like a BC failure
+
+This one cost us a full iteration almost-misdiagnosed. The newly-added
+section 3e ("BC sanity eval") in `ppo_bootstrap.ipynb` built its eval
+env via:
+
+```python
+sanity_env = make_maskable_env(
+    map_file=first_stage.map_file,
+    opponent=opp,
+    max_turns=first_stage.resolve_max_turns(cfg.env),
+    max_steps=first_stage.resolve_max_steps(cfg.env),
+    enabled_units=cfg.env.enabled_units,
+    action_space_type=cfg.env.action_space_type,
+    seed=cfg.seed + 7777,
+)
+```
+
+Notice what's missing: **`reward_config` and `max_actions_per_turn`**.
+When those aren't passed, `make_maskable_env` →
+`StrategyGameEnv.__init__` falls back to the env's
+*built-in defaults* (`gym_env.py:406-454`):
+
+| Knob | YAML (skirmish_bc_selfplay) | Env default | Ratio |
+|---|---|---|---|
+| `invalid_action` | -0.01 | **-10.0** | 1000× more punitive |
+| `draw` | -50 | **-200** | 4× more punitive |
+| `loss` | -50 | **-1000** | 20× more punitive |
+| `max_actions_per_turn` | 60 | **None** (disabled) | Safety net gone |
+
+The first three made the reward magnitudes uninterpretable. The fourth
+caused a structural eval failure: without `max_actions_per_turn`,
+nothing forces end_turn after N agent actions. The BC policy
+under-predicts end_turn at greedy decode and produces per-dim-legal-
+but-jointly-invalid action tuples (Failure mode 4 from the agent
+audit -- per-dim MaskablePPO masking is an over-approximation). The
+agent loops on those invalids for the full `max_steps=3000` budget
+without ever advancing a single game-turn, then truncates as
+`max_steps_truncate` (classified as a draw).
+
+**Observed symptoms in run 20260524_225835**:
+```
+BC vs simple   WR= 0.0%   reward=-30169.0   W/L/D=0/0/30
+```
+
+Arithmetic checks: `3000 invalid_actions × -10 = -30,000` plus
+`-200` default draw terminal plus small potential-shaping bias
+≈ `-30,200`, matching observed `-30,169` to within shaping noise.
+The 0/0/30 outcome was every episode looping on invalids until
+`max_steps`, not "BC can't beat SimpleBot."
+
+**The misdiagnosis we almost shipped**: the obvious read of the
+output was "BC is fundamentally broken; bump `end_turn_weight` from
+auto-balance to 30 to force more end_turn prediction." That's the
+exact wrong fix -- the BC policy *was* under-predicting end_turn,
+but with the production env's `max_actions_per_turn=60` safety net
+the cap would have forced end_turn after 60 invalids and the agent
+would have actually played the game. Disabling the safety net in
+the sanity eval inverted the diagnosis.
+
+**Fix**: section 3e now mirrors what section 6's post-curriculum
+sanity eval and `run_curriculum`'s in-training eval already do
+correctly -- forward `reward_config = first_stage.resolve_reward_config(cfg.env)`,
+`max_actions_per_turn = cfg.env.max_actions_per_turn`,
+`pad_to_size = cfg.env.pad_to_size`. Also added `avg_length`,
+`avg_turns`, and `end_reasons` to the printed output so the
+never-end-turn failure mode is visible inline rather than buried in
+the reward magnitude.
+
+**General lesson**: any "ad-hoc" env construction outside of
+`run_curriculum` (sanity evals, replay videos, hand-rolled
+debugging probes) has to forward the *same* kwargs the production
+env uses, not just the obvious ones (map / opponent / max_turns).
+`reward_config` is the easy one to forget because it doesn't
+change *behavior*, only *measurement* -- but the env's built-in
+defaults are 10-1000× off from the YAML values across most keys,
+so any reward number from a not-forwarded env is uninterpretable.
+`max_actions_per_turn` is the dangerous one to forget because it
+*does* change behavior in a way that masquerades as a different
+failure mode.
+
+The kwargs that must be forwarded for measurement consistency:
+
+```python
+make_maskable_env(
+    map_file=stage.map_file,
+    opponent=opp,
+    max_steps=stage.resolve_max_steps(cfg.env),
+    max_turns=stage.resolve_max_turns(cfg.env),
+    reward_config=stage.resolve_reward_config(cfg.env),  # essential
+    enabled_units=cfg.env.enabled_units,
+    action_space_type=cfg.env.action_space_type,
+    max_actions_per_turn=cfg.env.max_actions_per_turn,    # essential
+    pad_to_size=cfg.env.pad_to_size,
+    opponent_kwargs=stage.opponent_kwargs,                # if applicable
+    seed=cfg.seed + <fresh offset>,
+)
+```
 
 ### Diagnostic discipline: print per-scenario stats *before* PPO
 
