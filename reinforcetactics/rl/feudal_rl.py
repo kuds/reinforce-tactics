@@ -716,10 +716,11 @@ def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda, segment_
     """
     Compute Generalized Advantage Estimation.
 
-    For the manager, segment_lengths adjusts the discount to gamma^k
-    where k is the number of worker steps in each manager segment.
-    The GAE propagation term uses the *next* segment's length to correctly
-    discount the accumulated advantage from future segments.
+    For the manager, segment_lengths adjusts the discount to gamma^{k_t}
+    where k_t is the number of worker steps in segment t. The same
+    gamma^{k_t} factor (a) discounts V(s_{t+1}) in delta_t and (b) advances
+    the GAE recursion one segment from t to t+1, so the propagation
+    discount on the future advantage is gamma^{k_t}, *not* gamma^{k_{t+1}}.
     """
     n = len(rewards)
     advantages = np.zeros(n, dtype=np.float32)
@@ -729,14 +730,7 @@ def _compute_gae(rewards, values, dones, last_value, gamma, gae_lambda, segment_
         non_terminal = 1.0 - float(dones[t])
         discount = (gamma ** segment_lengths[t]) if segment_lengths is not None else gamma
         delta = rewards[t] + discount * next_val * non_terminal - values[t]
-        # For GAE propagation, use the *next* segment's discount to properly
-        # weight the future advantage. At the last step, use the current discount
-        # as a fallback (the last_gae is 0.0 at initialization anyway).
-        if segment_lengths is not None and t < n - 1:
-            next_discount = gamma ** segment_lengths[t + 1]
-        else:
-            next_discount = discount
-        last_gae = delta + next_discount * gae_lambda * non_terminal * last_gae
+        last_gae = delta + discount * gae_lambda * non_terminal * last_gae
         advantages[t] = last_gae
     returns = advantages + values
     return advantages, returns

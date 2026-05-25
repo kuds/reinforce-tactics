@@ -383,6 +383,91 @@ class TestComputeGAE:
         expected_delta_1 = 10.0 + (0.99**5) * 3.0 - 2.0
         np.testing.assert_allclose(adv[1], expected_delta_1, atol=1e-5)
 
+    def test_segment_lengths_propagation_uses_current_segment(self):
+        """Propagation discount must be gamma^{k_t} (length of segment t),
+        not gamma^{k_{t+1}}. A_{n-1} is invariant to the choice (last_gae
+        starts at 0), so this test pins down A_0 over segments of
+        *different* lengths — the case the earlier test couldn't catch.
+        """
+        rewards = np.array([5.0, 10.0])
+        values = np.array([1.0, 2.0])
+        dones = np.array([0.0, 0.0])
+        last_value = 3.0
+        gamma, lam = 0.99, 0.95
+        seg_len = np.array([3, 5])
+
+        adv, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam, segment_lengths=seg_len)
+
+        # Hand-derived:
+        #   delta_1 = 10 + gamma^5 * 3 - 2
+        #   delta_0 =  5 + gamma^3 * 2 - 1
+        #   A_1 = delta_1
+        #   A_0 = delta_0 + gamma^{k_0} * lambda * A_1   with k_0 = 3
+        delta_1 = 10.0 + (gamma**5) * 3.0 - 2.0
+        delta_0 = 5.0 + (gamma**3) * 2.0 - 1.0
+        expected_A_0 = delta_0 + (gamma**3) * lam * delta_1
+        np.testing.assert_allclose(adv[0], expected_A_0, atol=1e-5)
+
+    def test_segment_lengths_three_segments(self):
+        """Three segments of distinct lengths so each propagation step uses
+        a different ``gamma^{k_t}`` factor. Catches any off-by-one between
+        ``segment_lengths[t]`` and ``segment_lengths[t+1]`` regressions.
+        """
+        rewards = np.array([2.0, 4.0, 7.0])
+        values = np.array([0.5, 1.0, 1.5])
+        dones = np.array([0.0, 0.0, 0.0])
+        last_value = 2.0
+        gamma, lam = 0.99, 0.95
+        seg_len = np.array([2, 4, 6])
+
+        adv, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam, segment_lengths=seg_len)
+
+        # Hand-derived using A_t = delta_t + gamma^{k_t} * lambda * A_{t+1}:
+        delta_2 = 7.0 + (gamma**6) * 2.0 - 1.5
+        delta_1 = 4.0 + (gamma**4) * 1.5 - 1.0
+        delta_0 = 2.0 + (gamma**2) * 1.0 - 0.5
+        A_2 = delta_2
+        A_1 = delta_1 + (gamma**4) * lam * A_2
+        A_0 = delta_0 + (gamma**2) * lam * A_1
+        np.testing.assert_allclose(adv[2], A_2, atol=1e-5)
+        np.testing.assert_allclose(adv[1], A_1, atol=1e-5)
+        np.testing.assert_allclose(adv[0], A_0, atol=1e-5)
+
+    def test_segment_length_one_matches_plain_gae(self):
+        """With segment_lengths all 1, segmented GAE collapses to plain GAE
+        (gamma^1 = gamma). Sanity check that the segmented path is a strict
+        generalization of the non-segmented one.
+        """
+        rewards = np.array([1.0, 2.0, 3.0])
+        values = np.array([0.5, 1.0, 1.5])
+        dones = np.array([0.0, 0.0, 0.0])
+        last_value = 2.0
+        gamma, lam = 0.99, 0.95
+
+        adv_plain, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam)
+        adv_seg, _ = _compute_gae(
+            rewards, values, dones, last_value, gamma, lam, segment_lengths=np.array([1, 1, 1])
+        )
+        np.testing.assert_allclose(adv_plain, adv_seg, atol=1e-6)
+
+    def test_segment_lengths_terminal_zeros_future_advantage(self):
+        """A done at segment t must zero the propagated future advantage,
+        even when segment_lengths is supplied. (non_terminal multiplies
+        last_gae regardless of which discount factor is in front of it.)
+        """
+        rewards = np.array([10.0, 20.0])
+        values = np.array([1.0, 2.0])
+        # Segment 0 ends the episode → segment 1's advantage must not bleed
+        # back into A_0 even though k_0 != k_1.
+        dones = np.array([1.0, 0.0])
+        last_value = 5.0
+        gamma, lam = 0.99, 0.95
+        seg_len = np.array([3, 5])
+
+        adv, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam, segment_lengths=seg_len)
+        # With dones[0]=1: delta_0 = r_0 - V(s_0) (no bootstrap, no propagation).
+        np.testing.assert_allclose(adv[0], rewards[0] - values[0], atol=1e-5)
+
     def test_all_done(self):
         rewards = np.array([1.0, 2.0])
         values = np.array([0.0, 0.0])
