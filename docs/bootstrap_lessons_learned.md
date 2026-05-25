@@ -62,6 +62,20 @@ easier are actively harder for PPO.
    against. We hit this in 20260524_225835 and almost misdiagnosed
    "BC is broken" when the real issue was a 1-line eval env bug. See
    "BC warm-start: what we learned" → Failure mode G.
+10. **Better BC training metrics ≠ different gameplay.** Run
+    20260525_015401 bumped `end_turn_weight` 10× → 30× (3× the
+    auto-balance) and got measurably better BC training (loss
+    2.73 → 1.21, action_type_acc 0.78 → 0.83, full_action_acc
+    0.21 → 0.27) — but BC's sanity-eval result vs SimpleBot was
+    *byte-identical*. The class re-weight upweights gradient
+    contribution from end_turn samples, which makes the policy
+    predict end_turn more accurately *when end_turn is the
+    correct demonstrator action*, but doesn't shift the
+    argmax prior at the OTHER states (where the demonstrator
+    would have made a productive move). Loss / accuracy curves
+    can improve invisibly to gameplay. Sanity-eval BC against
+    the bot ladder *before* trusting training metrics. See
+    Failure mode H.
 
 ## The cold-start problem on this env
 
@@ -1108,6 +1122,102 @@ make_maskable_env(
     seed=cfg.seed + <fresh offset>,
 )
 ```
+
+### Failure mode H: end_turn_weight upweights loss, not argmax priors
+
+The class-imbalance auto-rebalance in `behavior_clone` (default
+`end_turn_weight = n_non_end / n_end ≈ 10`) was originally added to
+counteract the ~10:1 imbalance between non-end_turn and end_turn
+demonstrations. v33's notes describe BC's "never-end-turn attractor"
+as a consequence of the imbalance, and the auto-rebalance was meant
+to neutralise it. Skirmish run 20260525_015401 tested whether
+*explicitly bumping* the weight to 30 (3× the auto-balance value)
+would push the BC policy out of the attractor.
+
+**It did not.** Same map, same seed, same scenarios, only
+`end_turn_weight=30.0` changed. Sanity-eval results vs SimpleBot
+were **byte-identical** to the auto-balance run:
+
+```
+                end_turn=auto (~10×)    end_turn_weight=30.0
+BC vs simple    +796.6 / 50 turns       +796.5 / 50 turns
+                W/L/D 0/0/30            W/L/D 0/0/30
+                end=max_steps_truncate  end=max_steps_truncate
+```
+
+But the BC *training* metrics improved substantially across the same
+60 epochs:
+
+```
+                Loss        action_type_acc   full_action_acc
+auto-balance    5.0 → 2.73  0.60 → 0.78       0.08 → 0.21
+weight=30.0     3.0 → 1.21  0.57 → 0.83       0.09 → 0.27
+```
+
+Lower loss, higher accuracies on every axis. The supervised policy
+is **objectively better trained** under `end_turn_weight=30`. It
+just doesn't play any differently at greedy decode against the
+passive opponent.
+
+**Why the gap**: the loss weight increases the gradient contribution
+from samples where `end_turn` is the correct label, so the policy
+predicts `end_turn` more accurately *when faced with states where
+end_turn is the correct answer in the demonstrations*. It does NOT
+shift the argmax prior in states where no specific demonstrator
+action is strongly correct. At sanity-eval time, the BC policy
+encounters game states the demonstrator would have played a
+move/attack/capture on (because scripted bots are aggressive); the
+argmax over those high-logit non-end_turn actions still wins, and
+the agent never voluntarily ends its turn.
+
+The asymmetry is structural: **upweighting samples ≠ shifting
+argmax priors at unrelated states**. The class-imbalance argument
+assumes the policy must "learn that end_turn is a possible
+action"; but the policy already knows that — it just ranks end_turn
+below the most likely non-end_turn action at most states, and
+weight scaling alone doesn't flip that ordering on the states where
+the demonstrator was making a productive move.
+
+What might actually shift the argmax (untested, ordered by
+intrusiveness):
+
+1. **Much higher weight (100, 500, 1000).** Diminishing returns
+   expected — the loss eventually saturates and gradients to
+   non-end_turn samples vanish, but the relative logit ordering at
+   inference may still favor whichever non-end_turn action had the
+   most demos. Quick to try (a hyperparam sweep), low-risk fallback.
+2. **Asymmetric / margin-based loss.** Penalize wrong-end_turn
+   predictions more than wrong-non_end_turn predictions, or add a
+   margin term that pushes end_turn's logit up by at least δ above
+   the next-best non-end_turn action when end_turn is correct.
+   Bigger code change in `behavior_clone`.
+3. **Different inference rule.** At eval time, pick end_turn if
+   `max(non_end_turn_logit) - end_turn_logit < threshold` — i.e.,
+   "no high-confidence productive action available, just end the
+   turn". This bypasses the BC training issue entirely but is a
+   post-hoc behavioral hack, not a model fix.
+4. **`flat_discrete` action space.** End_turn becomes one of N
+   equally-weighted action tokens; per-action masking instead of
+   per-dim masking; the cross-entropy is well-defined over a flat
+   distribution. Probably the cleanest model-level fix but
+   requires extending `imitation.py` to record flat_discrete
+   demonstrations.
+
+**Lesson**: don't conclude that a hyperparameter "didn't work"
+purely from supervised metrics — also don't conclude it "worked"
+from supervised metrics alone. The training-curve view (loss
+falling, accuracy rising) can hide an unchanged argmax behavior
+when the metric and the gameplay policy diverge. The
+`evaluate_bc_against_bot_ladder` sanity eval is the diagnostic
+that catches this — without it, we'd have happily shipped
+`end_turn_weight=30` and discovered the same 0% WR at PPO eval
+@ step 8 of the next curriculum run.
+
+**Concrete sequence for future BC iterations on this codebase**:
+sanity eval first (cheap, ~1 min), training metrics second (load
+JSON), curriculum run third (expensive). If sanity-eval WR vs
+Simple is unchanged after a hyperparam tweak, abort before the
+curriculum run — additional PPO compute won't fix what BC didn't.
 
 ### Diagnostic discipline: print per-scenario stats *before* PPO
 
