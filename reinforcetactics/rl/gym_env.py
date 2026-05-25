@@ -1523,12 +1523,24 @@ class StrategyGameEnv(gym.Env):
         # property of potential-based reward shaping (Ng et al., 1999).
         self._prev_potential = self._compute_potential()
 
-        # Reset opponent
+        # Reset opponent.
+        #
+        # All bot types -- including the scripted ones (SimpleBot / MediumBot
+        # / AdvancedBot) -- are seeded with a per-episode rng derived from
+        # the env's np_random. Without this the scripted bots play
+        # deterministically given the starting state, which collapses
+        # cross-episode return variance to zero on the stochastic-tiebreak
+        # axis and drives the draw-with-shaping policy-drift attractor
+        # documented in docs/bootstrap_lessons_learned.md. Seeding from
+        # np_random keeps reset(seed=...) reproducible while injecting
+        # genuine per-episode opponent variance.
         opponent_player = 3 - self.agent_player
         if self.opponent_type in ("bot", "simple"):
-            self.opponent = SimpleBot(self.game_state, player=opponent_player)
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = SimpleBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
         elif self.opponent_type == "medium":
-            self.opponent = MediumBot(self.game_state, player=opponent_player)
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = MediumBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
         elif self.opponent_type == "mixed":
             # Per-episode bridge between SimpleBot and MediumBot: MixedBot
             # samples one of the two at construction (here, in reset()) so
@@ -1542,7 +1554,8 @@ class StrategyGameEnv(gym.Env):
                 **self.opponent_kwargs,
             )
         elif self.opponent_type == "advanced":
-            self.opponent = AdvancedBot(self.game_state, player=opponent_player)
+            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
+            self.opponent = AdvancedBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
         elif self.opponent_type == "noop":
             self.opponent = NoopBot(self.game_state, player=opponent_player)
         elif self.opponent_type == "random":

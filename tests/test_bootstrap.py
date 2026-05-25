@@ -497,6 +497,46 @@ class TestCurriculumLoading:
             CurriculumStage(**common, reward_config=[1, 2, 3]).validate()
 
 
+class TestBootstrapStagesAreConstructible:
+    """Every stage in ``configs/ppo/bootstrap.yaml`` must build a working env.
+
+    Without this, an opponent_kwargs / opponent-type mismatch (e.g. a
+    MixedBot inner name the bot module doesn't recognise) hides until
+    Colab actually hits that stage at runtime and crashes mid-curriculum.
+    The smoke test exercises every stage's ``make_stage_env`` path at
+    least once with the bootstrap.yaml's exact kwargs, forcing both
+    branches of any opponent the stage might construct (e.g. MixedBot's
+    easy and hard sides) by sweeping a small set of seeds.
+    """
+
+    @pytest.fixture(scope="class")
+    def shipped_cfg(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        return load_config(repo_root / "configs" / "ppo" / "bootstrap.yaml")
+
+    def test_every_stage_env_constructs_and_resets(self, shipped_cfg):
+        from reinforcetactics.rl.bootstrap import make_stage_env
+
+        # Sweep multiple seeds per stage so MixedBot's per-episode coin
+        # flip exercises both inner-bot branches at least once. With
+        # p_hard between 0.25 and 0.5 across all mixed stages, four
+        # seeds gives >99.6% probability of hitting both sides.
+        seeds = [0, 1, 2, 3]
+        failures = []
+        for stage in shipped_cfg.curriculum.stages:
+            for seed in seeds:
+                try:
+                    env = make_stage_env(stage, shipped_cfg.env, seed=seed)
+                    # ``make_stage_env`` already calls reset(seed=seed) once
+                    # in make_maskable_env; reset again here to exercise the
+                    # opponent-rebuild path that fires every episode.
+                    env.reset(seed=seed)
+                    env.close()
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"{stage.name} (seed={seed}): {type(exc).__name__}: {exc}")
+        assert not failures, "\n".join(failures)
+
+
 class TestCurriculumStageResolution:
     def test_resolves_to_defaults_when_unset(self):
         env = EnvConfig(max_steps=400, max_turns=20)

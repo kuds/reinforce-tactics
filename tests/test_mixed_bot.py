@@ -89,12 +89,50 @@ class TestMixedBotInvalidName:
     def test_unknown_easy_raises(self, map_data):
         gs = _new_game_state(map_data)
         with pytest.raises(ValueError, match="unknown bot type"):
-            MixedBot(gs, player=2, easy="random", hard="medium", p_hard=0.0, rng=random.Random(0))
+            MixedBot(gs, player=2, easy="bogus", hard="medium", p_hard=0.0, rng=random.Random(0))
 
     def test_unknown_hard_raises(self, map_data):
         gs = _new_game_state(map_data)
         with pytest.raises(ValueError, match="unknown bot type"):
             MixedBot(gs, player=2, easy="simple", hard="bogus", p_hard=1.0, rng=random.Random(0))
+
+
+class TestMixedBotRandomBranches:
+    """``random`` and ``balanced_random`` are valid inner bot names so the
+    curriculum's intermediate/skirmish/corner_points mixed-bridge stages
+    (which use ``easy=random`` or ``easy=balanced_random``) can construct
+    without crashing the env at reset.
+    """
+
+    def test_easy_random_constructs(self, map_data):
+        from reinforcetactics.game.bot import RandomBot
+
+        gs = _new_game_state(map_data)
+        bot = MixedBot(gs, player=2, easy="random", hard="simple", p_hard=0.0, rng=random.Random(0))
+        assert isinstance(bot._inner, RandomBot)
+
+    def test_easy_balanced_random_constructs(self, map_data):
+        from reinforcetactics.game.bot import BalancedRandomBot
+
+        gs = _new_game_state(map_data)
+        bot = MixedBot(gs, player=2, easy="balanced_random", hard="simple", p_hard=0.0, rng=random.Random(0))
+        assert isinstance(bot._inner, BalancedRandomBot)
+
+    def test_easy_random_with_max_actions_kwarg(self, map_data):
+        from reinforcetactics.game.bot import RandomBot
+
+        gs = _new_game_state(map_data)
+        bot = MixedBot(
+            gs,
+            player=2,
+            easy="random",
+            hard="simple",
+            p_hard=0.0,
+            rng=random.Random(0),
+            easy_kwargs={"max_actions": 10},
+        )
+        assert isinstance(bot._inner, RandomBot)
+        assert bot._inner.max_actions == 10
 
 
 class TestMixedBotTakeTurn:
