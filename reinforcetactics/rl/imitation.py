@@ -470,6 +470,50 @@ class _ActionRecorder:
             )
             return
 
+        # Narrow "don't-care" per-dim masks to one-hot at the recorded
+        # value. evaluate_actions returns a joint log_prob summed across
+        # all 6 head dims; without this narrowing the BC loss bleeds
+        # gradient into heads whose recorded value is a placeholder, not
+        # a real demonstrator choice. Two failure modes the leak drives:
+        #
+        #   * end_turn (atype=5) records (unit=0, fx=0, fy=0, tx=0, ty=0).
+        #     The full mask keeps every legal create/move/attack/seize
+        #     bit set across the unit / position dims; log P(0 | union)
+        #     is then >> log(1), so each end_turn demo pushes the unit
+        #     head toward Warrior AND the position heads toward (0, 0).
+        #     With ``end_turn_weight`` auto-balancing at ~10x, that
+        #     pressure is amplified and bleeds into non-end_turn states
+        #     because the position / unit heads are shared across atypes.
+        #   * Non-create, non-end_turn (move / attack / seize / heal /
+        #     ability) records the unit dim as ``_default_unit_idx()``
+        #     (always 0 = enabled_units[0]); the position dims hold the
+        #     real source / target. Only the unit dim is a placeholder,
+        #     and it leaks the same way -- every such demo pushes the
+        #     unit head toward 0 (Warrior), biasing create_unit toward
+        #     Warrior across the board.
+        #
+        # Narrowing a placeholder dim's mask to ``{recorded_value}`` makes
+        # log P(value | {value}) = log 1 = 0, so the loss contributes no
+        # gradient to that head -- the only gradient that flows on a
+        # placeholder dim is from real demos where that dim is a real
+        # choice. The action_type mask (``at``) is left alone: every
+        # demo's atype is a real choice and the BC head should learn it
+        # against the full legal-atype distribution.
+        if a_type == END_TURN_ACTION_IDX:
+            ut = np.zeros(NUM_UNIT_TYPES, dtype=bool)
+            ut[a_unit] = True
+            fx = np.zeros(self.width, dtype=bool)
+            fx[a_fx] = True
+            fy = np.zeros(self.height, dtype=bool)
+            fy[a_fy] = True
+            tx = np.zeros(self.width, dtype=bool)
+            tx[a_tx] = True
+            ty = np.zeros(self.height, dtype=bool)
+            ty[a_ty] = True
+        elif a_type != 0:  # non-create_unit, non-end_turn: only unit dim is a placeholder
+            ut = np.zeros(NUM_UNIT_TYPES, dtype=bool)
+            ut[a_unit] = True
+
         self.demos.append(
             Demonstration(
                 obs=obs,
@@ -1327,16 +1371,22 @@ def behavior_clone(
 
             _values, log_prob, _entropy = policy.evaluate_actions(obs_batch, actions, action_masks=masks)
             # Weighted NLL: end_turn samples get ``resolved_end_turn_weight``,
-            # everything else stays at 1.0. Normalised by the per-batch
-            # weight sum so the effective learning-rate scale is preserved
-            # regardless of how many end_turn samples land in this batch.
+            # everything else stays at 1.0. Normalised by batch size N (not
+            # ``sum_w``) so each end_turn sample contributes exactly ``w``x
+            # the gradient of a non-end_turn sample regardless of batch
+            # composition. Dividing by ``sum_w`` (the prior formulation)
+            # partially cancelled the upweighting: a batch that happened
+            # to draw many end_turn samples had a larger denominator that
+            # diluted the per-sample weight, and an all-end_turn batch
+            # collapsed back to effective weight 1. ``.mean()`` preserves
+            # the "end_turn samples weigh ``w``x" contract per batch.
             sample_w = th.ones_like(log_prob)
             sample_w = th.where(
                 actions[:, 0] == END_TURN_ACTION_IDX,
                 th.full_like(log_prob, resolved_end_turn_weight),
                 sample_w,
             )
-            loss = -(log_prob * sample_w).sum() / sample_w.sum().clamp(min=1.0)
+            loss = -(log_prob * sample_w).mean()
 
             optimizer.zero_grad()
             loss.backward()
