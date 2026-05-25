@@ -230,7 +230,8 @@ class StrategyGameEnv(gym.Env):
         - 'grid':  (H, W, GRID_CHANNELS) - one-hot terrain + agent-relative
                    owner one-hot (self/opp/neutral) + structure HP fraction.
         - 'units': (H, W, UNIT_CHANNELS) - one-hot unit type + agent-relative
-                   owner one-hot + HP fraction.
+                   owner one-hot + own_acted + HP fraction + 4 status channels
+                   (paralyze, haste, defence_buff, attack_buff).
         - 'global_features': (5,) - own_gold, opp_gold, turn, own_units, opp_units.
         Action masks are pulled separately via ``env.action_masks()`` for
         MaskablePPO and are not part of the policy observation.
