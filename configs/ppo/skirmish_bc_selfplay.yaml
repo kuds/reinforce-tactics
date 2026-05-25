@@ -31,7 +31,7 @@ warm_start_path: benchmarks/bc/YYYYMMDD_HHMMSS/bc_warmstart.zip
 
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 1_000_000  # PROBE-SIZED; raise to ~10M once setup is validated
+total_timesteps: 1_500_000  # PROBE-SIZED 3-stage ramp; raise to ~10M once setup is validated
 
 env:
   n_envs: 8
@@ -128,29 +128,56 @@ eval:
 
 curriculum:
   stages:
-    # PROBE-SIZED 2-stage ramp (500k + 500k = 1M total, ~20 eval
-    # points at eval_freq=50_000). Goal: confirm the BC -> PPO
+    # PROBE-SIZED 3-stage ramp (600k + 400k + 500k = 1.5M total, ~30
+    # eval points at eval_freq=50_000). Goal: confirm the BC -> PPO
     # pipeline shows *any* upward trend before committing to a
     # multi-million-step run.
     #
-    # Stage 1 bridges from the BC checkpoint into the Advanced
-    # matchup via MixedBot(medium, advanced, p_hard=0.5), so half the
-    # episodes give the policy achievable wins (vs Medium) and half
-    # expose it to Advanced. Run 20260524_163828 showed BC -> Advanced
-    # cold stalls at 0% WR for 750k steps with reward std 0.0 -- zero
-    # learning signal. The bridge stage exists to fix that: even a
-    # partial-success rate vs MixedBot gives PPO non-zero reward
-    # variance to learn from, and the Advanced-half of the
-    # distribution starts shaping the policy toward the actual target.
+    # Stage 1 (NEW): skirmish_random. Added after run 20260525_011808
+    # confirmed that BC + MixedBot first stage stalls at 0% WR for
+    # 150k steps with no upward trend. The diagnosis (see
+    # docs/bootstrap_lessons_learned.md "BC warm-start" section):
+    # PPO needs a winnable opponent in the first stage to escape the
+    # BC checkpoint's never-end-turn attractor. RandomBot makes
+    # uniformly-random moves -- it occasionally loses units, exposes
+    # its HQ, leaves structures uncontested -- so even a partially-
+    # stuck agent collects rare wins that give PPO positive gradient
+    # signal. Mirrors what made v33 work on the beginner curriculum
+    # (v33's starter_random stage was the BC-escape bootstrap).
     #
-    # Stage 2 is the pure target. By the time we reach it the policy
-    # has already seen ~250k Advanced-half episodes via the bridge,
-    # so the transition is much smaller than BC -> Advanced direct.
+    # Stage 2 bridges into the Advanced matchup via
+    # MixedBot(medium, advanced, p_hard=0.5). Half the episodes give
+    # achievable wins (vs Medium) and half expose the policy to
+    # Advanced. Budget shrunk from 500k to 400k because the
+    # bootstrap from RandomBot in stage 1 should mean stage 2 starts
+    # from a non-zero baseline.
     #
-    # Promotion gates are loose for the probe: if either stage clears,
+    # Stage 3 is the pure target. By this point the policy has
+    # already seen ~200k Advanced-half episodes via the bridge,
+    # plus ~600k against Random for general policy improvement.
+    #
+    # Promotion gates are loose for the probe: if any stage clears,
     # great -- but the primary signal is "WR moves off zero" rather
     # than "promotes to next stage." Raise to ~10M total and tighten
     # gates once the upward-trend signature is confirmed.
+    - name: skirmish_random
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      promotion_win_rate: 0.60
+      patience: 2
+      max_timesteps: 600_000
+      n_eval_episodes: 80
+      max_turns: 100
+      # Higher entropy than the later stages: the BC checkpoint comes
+      # in stuck in the never-end-turn attractor (see Failure mode G
+      # in bootstrap_lessons_learned.md). High exploration helps PPO
+      # find action distributions that include end_turn at productive
+      # moments rather than always pushing past max_actions_per_turn.
+      ent_coef:
+        start: 0.15
+        end: 0.05
+        schedule: linear
+
     - name: skirmish_mixed_medium_advanced
       map_file: maps/1v1/skirmish.csv
       opponent: mixed
@@ -160,7 +187,7 @@ curriculum:
         p_hard: 0.5
       promotion_win_rate: 0.55
       patience: 3
-      max_timesteps: 500_000
+      max_timesteps: 400_000
       n_eval_episodes: 80
       max_turns: 100
       ent_coef:
