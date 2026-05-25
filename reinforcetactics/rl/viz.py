@@ -1077,13 +1077,16 @@ def plot_bc_training_curves(
     charts_dir: Optional[Any] = None,
     name: str = "bc_training_curves.png",
 ) -> plt.Figure:
-    """Per-epoch BC supervised metrics: loss + two accuracy curves.
+    """Per-epoch BC supervised metrics: loss + accuracy + per-dim heads.
 
     Consumes the ``List[BCStats]`` returned by ``behavior_clone`` /
-    ``make_warm_started_model``. Loss on the left axis, accuracies on the
-    right. action_type_acc is the easier metric (10-way); full_action_acc
-    requires all 6 dims to match and is structurally much lower -- both
-    are plotted so trend (rising) and ceiling are visible.
+    ``make_warm_started_model``. When ``BCStats.per_dim_accuracy`` is
+    populated (datasets built by the current ``imitation.py``), the
+    bottom panel also plots per-dim greedy accuracy under the un-narrowed
+    env mask -- the single most diagnostic view of "which head is the
+    bottleneck." The legacy ``accuracy_full`` (narrowed-mask view)
+    is plotted alongside the honest ``accuracy_full_env_mask`` so the
+    gap (placeholder dims auto-matching under narrowing) is visible.
     """
     if not bc_stats:
         fig, ax = plt.subplots(figsize=(8, 4))
@@ -1094,27 +1097,64 @@ def plot_bc_training_curves(
     loss = [s.loss for s in bc_stats]
     acc_type = [s.accuracy_action_type for s in bc_stats]
     acc_full = [s.accuracy_full for s in bc_stats]
+    # ``accuracy_full_env_mask`` defaults to 0.0 on older datasets; treat
+    # the all-zero case as "field unavailable" rather than plotting a flat
+    # line at zero, which would be misleading.
+    acc_full_env = [getattr(s, "accuracy_full_env_mask", 0.0) for s in bc_stats]
+    have_env = any(v > 0 for v in acc_full_env)
+    per_dim_acc_rows = [getattr(s, "per_dim_accuracy", ()) for s in bc_stats]
+    have_per_dim = bool(per_dim_acc_rows[-1]) if per_dim_acc_rows else False
 
-    fig, ax_loss = plt.subplots(figsize=(9, 5))
+    if have_per_dim:
+        # Two-panel layout: top is the legacy headline plot; bottom is
+        # the per-dim breakdown that surfaces which head is plateauing.
+        fig, (ax_loss, ax_dims) = plt.subplots(
+            2, 1, figsize=(9, 8), gridspec_kw={"height_ratios": [3, 2]}, sharex=True
+        )
+    else:
+        fig, ax_loss = plt.subplots(figsize=(9, 5))
+        ax_dims = None
+
     ax_loss.plot(epochs, loss, marker="o", color="#d32f2f", label="loss")
-    ax_loss.set_xlabel("epoch")
     ax_loss.set_ylabel("masked cross-entropy loss", color="#d32f2f")
     ax_loss.tick_params(axis="y", labelcolor="#d32f2f")
     ax_loss.grid(True, alpha=0.3)
+    if not have_per_dim:
+        ax_loss.set_xlabel("epoch")
 
     ax_acc = ax_loss.twinx()
     ax_acc.plot(epochs, acc_type, marker="s", color="#2e7d32", label="action_type acc")
-    ax_acc.plot(epochs, acc_full, marker="^", color="#1565c0", label="full_action acc")
+    ax_acc.plot(epochs, acc_full, marker="^", color="#1565c0", label="full_action acc (narrowed)")
+    if have_env:
+        ax_acc.plot(epochs, acc_full_env, marker="D", color="#6a1b9a", label="full_action acc (env mask)")
     ax_acc.set_ylabel("accuracy", color="#1565c0")
     ax_acc.tick_params(axis="y", labelcolor="#1565c0")
     ax_acc.set_ylim(0.0, 1.0)
 
-    # Combined legend across both axes so the panel reads cleanly.
     lines_loss, labels_loss = ax_loss.get_legend_handles_labels()
     lines_acc, labels_acc = ax_acc.get_legend_handles_labels()
     ax_loss.legend(lines_loss + lines_acc, labels_loss + labels_acc, loc="center right")
-
     ax_loss.set_title(f"BC training -- {len(bc_stats)} epochs")
+
+    if ax_dims is not None:
+        # PER_DIM_NAMES is imported lazily to keep the import graph for
+        # this viz module independent of the imitation pipeline (matters
+        # for environments that have matplotlib but not torch/sb3).
+        from reinforcetactics.rl.imitation import PER_DIM_NAMES
+
+        # Distinct colors per dim so a slow-learning dim is identifiable
+        # even when several are bunched near a similar accuracy.
+        colors = ("#d32f2f", "#fb8c00", "#fdd835", "#43a047", "#1e88e5", "#5e35b1")
+        for i, name_i in enumerate(PER_DIM_NAMES):
+            vals = [row[i] if len(row) > i else 0.0 for row in per_dim_acc_rows]
+            ax_dims.plot(epochs, vals, marker=".", color=colors[i % len(colors)], label=name_i)
+        ax_dims.set_xlabel("epoch")
+        ax_dims.set_ylabel("per-dim greedy acc (env mask)")
+        ax_dims.set_ylim(0.0, 1.0)
+        ax_dims.grid(True, alpha=0.3)
+        ax_dims.legend(loc="lower right", ncols=3, fontsize=9)
+        ax_dims.set_title("per-dim accuracy under the un-narrowed env mask")
+
     fig.tight_layout()
     return _save_and_return(fig, charts_dir, name)
 

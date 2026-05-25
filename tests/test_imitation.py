@@ -146,6 +146,86 @@ class TestBehaviorClone:
         # The post-BC model must remain a usable PPO model.
         model.learn(total_timesteps=128, progress_bar=False)
 
+    def test_dataset_carries_env_masks(self, small_dataset):
+        # Datasets built by the current ``imitation.py`` must populate
+        # ``env_masks_concat`` -- without it, the per-dim diagnostics in
+        # ``behavior_clone`` silently fall back to empty tuples and the
+        # whole point of the field (catching the placeholder-narrowing
+        # over-report on full_action_acc) is lost.
+        assert small_dataset.env_masks_concat is not None
+        assert small_dataset.env_masks_concat.shape == small_dataset.masks_concat.shape
+        # The env (un-narrowed) view should be a superset of the narrowed
+        # view: every bit set in masks_concat must also be set in
+        # env_masks_concat. If this fails, narrowing leaked bits OUTSIDE
+        # the env's union, which would be a correctness bug (the loss
+        # would push the policy toward off-mask actions).
+        leaked = (small_dataset.masks_concat & ~small_dataset.env_masks_concat).any()
+        assert not leaked, "narrowed mask has bits outside the env union mask"
+        # And on at least one demo the env view must contain bits the
+        # narrowed view dropped -- otherwise narrowing did nothing and
+        # the env-mask diagnostics give the same numbers as the legacy
+        # ones (defeating their purpose).
+        env_only = (~small_dataset.masks_concat & small_dataset.env_masks_concat).sum()
+        assert env_only > 0, "narrowing dropped no bits -- diagnostics will not differ"
+
+    def test_bc_populates_per_dim_metrics(self, small_dataset):
+        # Verifies the diagnostic fields land on every BCStats row when
+        # the dataset carries env_masks_concat. The honest joint accuracy
+        # should be <= the legacy one (placeholder dims auto-match under
+        # narrowing), and per-dim arrays must align with PER_DIM_NAMES.
+        sb3_contrib = pytest.importorskip("sb3_contrib")
+        from reinforcetactics.rl import make_maskable_env
+        from reinforcetactics.rl.imitation import PER_DIM_NAMES
+
+        env = make_maskable_env(opponent="random")
+        model = sb3_contrib.MaskablePPO(
+            "MultiInputPolicy",
+            env,
+            n_steps=64,
+            batch_size=32,
+            verbose=0,
+        )
+        stats = behavior_clone(model, small_dataset, n_epochs=2, batch_size=32, seed=0)
+        for s in stats:
+            assert len(s.per_dim_loss) == len(PER_DIM_NAMES)
+            assert len(s.per_dim_accuracy) == len(PER_DIM_NAMES)
+            # Every per-dim NLL should be non-negative (log_softmax floor).
+            assert all(v >= 0.0 for v in s.per_dim_loss)
+            # Honest <= legacy: placeholder dims give a free match under
+            # narrowing, so the legacy view is always >= the env view.
+            assert s.accuracy_full_env_mask <= s.accuracy_full + 1e-6
+
+    def test_bc_backward_compat_without_env_masks(self, small_dataset):
+        # Older serialized datasets won't have env_masks_concat. BC must
+        # still run; the per-dim fields just stay empty.
+        sb3_contrib = pytest.importorskip("sb3_contrib")
+        from reinforcetactics.rl import make_maskable_env
+        from reinforcetactics.rl.imitation import DemonstrationDataset
+
+        legacy = DemonstrationDataset(
+            obs={k: v.copy() for k, v in small_dataset.obs.items()},
+            actions=small_dataset.actions.copy(),
+            masks_concat=small_dataset.masks_concat.copy(),
+            dim_sizes=small_dataset.dim_sizes,
+            env_masks_concat=None,  # simulate old dataset
+            scenario_stats=list(small_dataset.scenario_stats),
+        )
+        env = make_maskable_env(opponent="random")
+        model = sb3_contrib.MaskablePPO(
+            "MultiInputPolicy",
+            env,
+            n_steps=64,
+            batch_size=32,
+            verbose=0,
+        )
+        stats = behavior_clone(model, legacy, n_epochs=1, batch_size=32, seed=0)
+        assert stats[0].per_dim_loss == ()
+        assert stats[0].per_dim_accuracy == ()
+        assert stats[0].accuracy_full_env_mask == 0.0
+        # Legacy fields still populated.
+        assert 0.0 <= stats[0].accuracy_action_type <= 1.0
+        assert 0.0 <= stats[0].accuracy_full <= 1.0
+
 
 class TestMultiScenarioCollection:
     """Verify scenario mixing produces a single concatenated dataset."""

@@ -140,17 +140,42 @@ def _make_bot(
 
 @dataclass
 class Demonstration:
-    """A single (obs, action, mask) triple captured from a demonstrator turn."""
+    """A single (obs, action, mask) triple captured from a demonstrator turn.
+
+    Two per-dim mask views are stored:
+
+      * ``*_mask`` (load-bearing for the BC loss) -- narrowed to one-hot on
+        placeholder dims (see ``_snapshot``). Avoids gradient leakage on dims
+        whose recorded value is a default rather than a real demonstrator
+        choice.
+      * ``env_*_mask`` (load-bearing for diagnostics) -- the un-narrowed
+        env-style union mask, identical to what ``StrategyGameEnv._build_masks``
+        would produce at this state. Used by ``behavior_clone`` to compute
+        per-dim loss / accuracy and an "honest" joint accuracy that doesn't
+        get a free trivial match on placeholder dims.
+
+    Storing both keeps the load shape stable and lets the loss / metric
+    decisions diverge per call site without recomputing masks at train
+    time.
+    """
 
     obs: Dict[str, np.ndarray]
     action: np.ndarray  # shape (6,), int64
-    # Per-dimension boolean masks, same layout MaskablePPO consumes.
+    # Narrowed per-dimension boolean masks, fed to MaskablePPO for the loss.
     at_mask: np.ndarray  # (10,)
     ut_mask: np.ndarray  # (8,)
     fx_mask: np.ndarray  # (W,)
     fy_mask: np.ndarray  # (H,)
     tx_mask: np.ndarray  # (W,)
     ty_mask: np.ndarray  # (H,)
+    # Un-narrowed env-style per-dim masks (the union over all legal actions
+    # at this state) -- used for honest accuracy diagnostics, not the loss.
+    env_at_mask: Optional[np.ndarray] = None  # (10,)
+    env_ut_mask: Optional[np.ndarray] = None  # (8,)
+    env_fx_mask: Optional[np.ndarray] = None  # (W,)
+    env_fy_mask: Optional[np.ndarray] = None  # (H,)
+    env_tx_mask: Optional[np.ndarray] = None  # (W,)
+    env_ty_mask: Optional[np.ndarray] = None  # (H,)
 
 
 @dataclass
@@ -251,13 +276,25 @@ class ScenarioStats:
 
 @dataclass
 class DemonstrationDataset:
-    """Stacked demonstrations as numpy arrays ready for batched BC training."""
+    """Stacked demonstrations as numpy arrays ready for batched BC training.
+
+    ``masks_concat`` holds the *narrowed* per-dim masks (placeholder dims
+    collapsed to one-hot at the recorded value -- consumed by the BC loss).
+    ``env_masks_concat`` holds the *un-narrowed* env union masks, consumed
+    by per-dim / honest-joint diagnostics. The env view is optional for
+    backward compatibility with datasets built before the field existed
+    (those fall back to ``masks_concat`` at diagnostic time, which gives
+    the old over-optimistic numbers but doesn't break anything).
+    """
 
     obs: Dict[str, np.ndarray]
     actions: np.ndarray  # (N, 6), int64
-    masks_concat: np.ndarray  # (N, 10+8+W+H+W+H), bool
+    masks_concat: np.ndarray  # (N, 10+8+W+H+W+H), bool -- narrowed (loss)
     # Dimension sizes used to split ``masks_concat`` back per-dim if needed.
     dim_sizes: Tuple[int, ...] = field(default_factory=tuple)
+    # Un-narrowed env-style per-dim masks for honest diagnostics. None for
+    # older datasets serialized before this field existed.
+    env_masks_concat: Optional[np.ndarray] = None  # (N, 10+8+W+H+W+H), bool
     # Per-scenario outcomes. Empty when the dataset is built by
     # ``from_list`` alone; populated by ``collect_demonstrations`` /
     # ``collect_demonstrations_multi`` so callers can plot demonstrator
@@ -278,7 +315,8 @@ class DemonstrationDataset:
 
         actions = np.stack([d.action for d in demos], axis=0).astype(np.int64)
 
-        # Concatenate per-dim masks in the order MaskablePPO splits them.
+        # Concatenate the narrowed per-dim masks in the order MaskablePPO
+        # splits them. These feed the BC loss.
         mask_blocks = []
         for d in demos:
             mask_blocks.append(
@@ -289,6 +327,29 @@ class DemonstrationDataset:
             )
         masks_concat = np.stack(mask_blocks, axis=0)
 
+        # Concatenate the env-style (un-narrowed) per-dim masks if every
+        # demonstration carries them. All-or-nothing keeps the field
+        # honest: a partially populated stack would silently mix narrowed
+        # and un-narrowed rows, defeating the diagnostic purpose.
+        env_masks_concat: Optional[np.ndarray] = None
+        if all(d.env_at_mask is not None for d in demos):
+            env_blocks = []
+            for d in demos:
+                env_blocks.append(
+                    np.concatenate(
+                        [
+                            d.env_at_mask,
+                            d.env_ut_mask,
+                            d.env_fx_mask,
+                            d.env_fy_mask,
+                            d.env_tx_mask,
+                            d.env_ty_mask,
+                        ],
+                        axis=0,
+                    ).astype(np.bool_)
+                )
+            env_masks_concat = np.stack(env_blocks, axis=0)
+
         dim_sizes = (
             demos[0].at_mask.shape[0],
             demos[0].ut_mask.shape[0],
@@ -298,7 +359,13 @@ class DemonstrationDataset:
             demos[0].ty_mask.shape[0],
         )
 
-        return cls(obs=obs_stacked, actions=actions, masks_concat=masks_concat, dim_sizes=dim_sizes)
+        return cls(
+            obs=obs_stacked,
+            actions=actions,
+            masks_concat=masks_concat,
+            dim_sizes=dim_sizes,
+            env_masks_concat=env_masks_concat,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +566,18 @@ class _ActionRecorder:
         # choice. The action_type mask (``at``) is left alone: every
         # demo's atype is a real choice and the BC head should learn it
         # against the full legal-atype distribution.
+        #
+        # Snapshot the un-narrowed env-style masks first -- diagnostics
+        # downstream (per-dim accuracy, honest full_action_acc) need to
+        # see the real decision distribution, not the artificially
+        # collapsed loss view.
+        env_at = at.copy()
+        env_ut = ut.copy()
+        env_fx = fx.copy()
+        env_fy = fy.copy()
+        env_tx = tx.copy()
+        env_ty = ty.copy()
+
         if a_type == END_TURN_ACTION_IDX:
             ut = np.zeros(NUM_UNIT_TYPES, dtype=bool)
             ut[a_unit] = True
@@ -524,6 +603,12 @@ class _ActionRecorder:
                 fy_mask=fy,
                 tx_mask=tx,
                 ty_mask=ty,
+                env_at_mask=env_at,
+                env_ut_mask=env_ut,
+                env_fx_mask=env_fx,
+                env_fy_mask=env_fy,
+                env_tx_mask=env_tx,
+                env_ty_mask=env_ty,
             )
         )
 
@@ -988,6 +1073,7 @@ def _resample_dataset(
             actions=dataset.actions,
             masks_concat=dataset.masks_concat,
             dim_sizes=dataset.dim_sizes,
+            env_masks_concat=dataset.env_masks_concat,
             scenario_stats=list(dataset.scenario_stats),
         )
     if target < n:
@@ -997,6 +1083,7 @@ def _resample_dataset(
         extra = rng.choice(n, size=target - n, replace=True)
         idx = np.concatenate([np.arange(n), extra])
     obs = {k: v[idx] for k, v in dataset.obs.items()}
+    env_masks_concat = dataset.env_masks_concat[idx] if dataset.env_masks_concat is not None else None
     # ``scenario_stats`` describes the ORIGINAL demonstrator outcomes for
     # this scenario, independent of any down/up-sampling applied to the
     # demo rows -- carry it through unchanged so the user sees the real
@@ -1006,6 +1093,7 @@ def _resample_dataset(
         actions=dataset.actions[idx],
         masks_concat=dataset.masks_concat[idx],
         dim_sizes=dataset.dim_sizes,
+        env_masks_concat=env_masks_concat,
         scenario_stats=list(dataset.scenario_stats),
     )
 
@@ -1037,6 +1125,13 @@ def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
     obs = {k: np.concatenate([p.obs[k] for p in parts], axis=0) for k in ref.obs}
     actions = np.concatenate([p.actions for p in parts], axis=0)
     masks_concat = np.concatenate([p.masks_concat for p in parts], axis=0)
+    # Only carry env_masks_concat through if every part has it; otherwise the
+    # diagnostic field becomes meaningless (mixed narrowed / un-narrowed
+    # rows). The all-or-nothing contract matches ``from_list``.
+    if all(p.env_masks_concat is not None for p in parts):
+        env_masks_concat: Optional[np.ndarray] = np.concatenate([p.env_masks_concat for p in parts], axis=0)
+    else:
+        env_masks_concat = None
     merged_stats: List[ScenarioStats] = []
     for p in parts:
         merged_stats.extend(p.scenario_stats)
@@ -1045,6 +1140,7 @@ def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
         actions=actions,
         masks_concat=masks_concat,
         dim_sizes=ref.dim_sizes,
+        env_masks_concat=env_masks_concat,
         scenario_stats=merged_stats,
     )
 
@@ -1149,11 +1245,13 @@ def collect_demonstrations_multi(
 
     if shuffle:
         order = rng.permutation(len(combined))
+        env_masks_concat = combined.env_masks_concat[order] if combined.env_masks_concat is not None else None
         combined = DemonstrationDataset(
             obs={k: v[order] for k, v in combined.obs.items()},
             actions=combined.actions[order],
             masks_concat=combined.masks_concat[order],
             dim_sizes=combined.dim_sizes,
+            env_masks_concat=env_masks_concat,
             scenario_stats=combined.scenario_stats,
         )
 
@@ -1259,14 +1357,46 @@ def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
 # ---------------------------------------------------------------------------
 
 
+# Order matches ``_per_dim_sizes`` and the MaskablePPO MultiDiscrete head
+# split. Kept as a module-level constant so logging / serialization /
+# plotting agree on the dim labels without each call site re-naming them.
+PER_DIM_NAMES: Tuple[str, ...] = ("at", "ut", "fx", "fy", "tx", "ty")
+
+
 @dataclass
 class BCStats:
-    """Per-epoch BC training metrics."""
+    """Per-epoch BC training metrics.
+
+    The legacy fields (``loss``, ``accuracy_action_type``, ``accuracy_full``)
+    remain so older notebooks / plotters keep working. The new fields surface
+    per-dimension diagnostics under the *un-narrowed* env masks -- the loss
+    view (narrowed masks) gives trivially-perfect log_prob on placeholder
+    dims, which hides whether the per-dim heads are actually learning the
+    decision distribution.
+
+    Per-dim metrics are reported in :data:`PER_DIM_NAMES` order
+    (action_type, unit_type, from_x, from_y, to_x, to_y). ``per_dim_loss``
+    is mean masked NLL per dim; ``per_dim_accuracy`` is the greedy-argmax
+    match-rate per dim. ``accuracy_full_env_mask`` is the joint greedy-
+    argmax match-rate computed under env masks -- the honest analogue to
+    ``accuracy_full`` (which is inflated by the loss-view narrowing).
+    """
 
     epoch: int
     loss: float
     accuracy_action_type: float
     accuracy_full: float
+    # Per-dim metrics computed under the un-narrowed env-style masks.
+    # Empty tuple when ``DemonstrationDataset.env_masks_concat`` is None
+    # (older datasets serialized before the env-mask field existed).
+    per_dim_loss: Tuple[float, ...] = field(default_factory=tuple)
+    per_dim_accuracy: Tuple[float, ...] = field(default_factory=tuple)
+    # Honest joint accuracy: greedy argmax of every head under the env
+    # mask matches the recorded action. ``accuracy_full`` above is the
+    # legacy (narrowed-mask) view, which trivially scores 100% on
+    # placeholder dims and so over-reports joint quality. 0.0 when the
+    # dataset has no env_masks_concat.
+    accuracy_full_env_mask: float = 0.0
 
 
 def _iter_minibatches(
@@ -1320,6 +1450,7 @@ def behavior_clone(
         cheap regression sanity check in tests.
     """
     import torch as th  # local import: torch is heavy and only needed here
+    import torch.nn.functional as F  # noqa: N812  (canonical alias)
 
     policy = model.policy
     device = policy.device
@@ -1357,12 +1488,42 @@ def behavior_clone(
     def _to_tensor(arr: np.ndarray) -> th.Tensor:
         return th.as_tensor(arr, device=device)
 
+    n_dims = len(dataset.dim_sizes) if dataset.dim_sizes else 6
+    # Cumulative offsets for in-place per-dim slicing of the concatenated
+    # masks. Computed once to avoid repeating the cumsum on every batch.
+    dim_splits = list(dataset.dim_sizes) if dataset.dim_sizes else [NUM_ACTION_TYPES, NUM_UNIT_TYPES, 0, 0, 0, 0]
+    # Whether the dataset carries the un-narrowed env-style masks needed
+    # for the diagnostic metrics. Older datasets do not; the diagnostic
+    # fields stay zero in that case (legacy ``accuracy_full`` is still
+    # populated for backwards compatibility).
+    has_env_masks = dataset.env_masks_concat is not None
+    if not has_env_masks:
+        logger.warning(
+            "BC dataset has no env_masks_concat; per-dim diagnostics will be "
+            "empty and accuracy_full uses the narrowed mask (over-reports). "
+            "Re-collect demos with the current imitation.py to populate the "
+            "env-mask view."
+        )
+
+    # Probe whether the policy exposes the standard ActorCriticPolicy
+    # forward path (extract_features -> mlp_extractor -> action_net). All
+    # MaskablePPO policies in this codebase do; the guard exists so a
+    # custom policy lacking these attributes cleanly skips per-dim metrics
+    # rather than raising during training.
+    can_compute_per_dim = all(hasattr(policy, attr) for attr in ("extract_features", "mlp_extractor", "action_net"))
+
     stats: List[BCStats] = []
     for epoch in range(n_epochs):
         epoch_loss = 0.0
         epoch_correct_atype = 0
         epoch_correct_full = 0
         epoch_count = 0
+        # Per-dim aggregators (NLL sum and greedy-correct count under the
+        # un-narrowed env mask, per dim). Length matches ``n_dims``.
+        per_dim_nll_sum = [0.0] * n_dims
+        per_dim_correct = [0] * n_dims
+        epoch_correct_full_env = 0
+        epoch_env_mask_count = 0
 
         for batch_idx in _iter_minibatches(dataset, batch_size, rng):
             obs_batch = {k: _to_tensor(v[batch_idx]) for k, v in dataset.obs.items()}
@@ -1394,42 +1555,141 @@ def behavior_clone(
             optimizer.step()
 
             with th.no_grad():
-                # Greedy decode under masking for accuracy diagnostics.
+                batch_n = int(actions.shape[0])
+                epoch_count += batch_n
+                epoch_loss += float(loss.item()) * batch_n
+
+                # Diagnostic forward pass: recover raw per-dim logits from
+                # the policy and compute per-dim metrics under BOTH the
+                # narrowed mask (matches the legacy accuracy fields) and
+                # the un-narrowed env mask (the honest view).
+                #
+                # Replicating the forward avoids the GPU->CPU->numpy->GPU
+                # round-trip ``policy.predict`` triggered (it serializes
+                # the whole obs dict per batch). With ``no_grad`` and
+                # eval mode this is ~free compared to the round-trip on
+                # 25k-demo datasets.
+                if not can_compute_per_dim:
+                    continue
                 policy.set_training_mode(False)
-                pred_actions, _ = policy.predict(
-                    {k: v.cpu().numpy() for k, v in obs_batch.items()},
-                    deterministic=True,
-                    action_masks=masks.cpu().numpy(),
-                )
-                policy.set_training_mode(True)
+                try:
+                    raw_logits = _policy_raw_action_logits(policy, obs_batch)
+                finally:
+                    policy.set_training_mode(True)
 
-                pred_t = th.as_tensor(pred_actions, device=device).long()
-                # action_type matches column 0
-                epoch_correct_atype += int((pred_t[:, 0] == actions[:, 0]).sum().item())
-                epoch_correct_full += int((pred_t == actions).all(dim=1).sum().item())
-                epoch_count += int(actions.shape[0])
-                epoch_loss += float(loss.item()) * int(actions.shape[0])
+                per_dim_logits = th.split(raw_logits, dim_splits, dim=-1)
 
+                # Greedy argmax under the narrowed (loss) mask -- matches
+                # the legacy ``accuracy_full`` definition exactly. Kept for
+                # backward compatibility with existing plots / JSON dumps.
+                narrowed_per_dim = th.split(masks.float(), dim_splits, dim=-1)
+                greedy_narrowed = []
+                for logits_i, mask_i in zip(per_dim_logits, narrowed_per_dim):
+                    masked_i = logits_i.masked_fill(~mask_i.bool(), -1e8)
+                    greedy_narrowed.append(masked_i.argmax(dim=-1))
+                greedy_narrowed_stack = th.stack(greedy_narrowed, dim=-1)
+                epoch_correct_atype += int((greedy_narrowed_stack[:, 0] == actions[:, 0]).sum().item())
+                epoch_correct_full += int((greedy_narrowed_stack == actions).all(dim=-1).sum().item())
+
+                if has_env_masks:
+                    env_masks_batch = _to_tensor(dataset.env_masks_concat[batch_idx])
+                    env_per_dim = th.split(env_masks_batch.float(), dim_splits, dim=-1)
+                    greedy_env = []
+                    for i, (logits_i, mask_i) in enumerate(zip(per_dim_logits, env_per_dim)):
+                        mask_bool = mask_i.bool()
+                        masked_i = logits_i.masked_fill(~mask_bool, -1e8)
+                        log_probs_i = F.log_softmax(masked_i, dim=-1)
+                        true_i = actions[:, i]
+                        # Per-dim NLL under the env mask -- this is what
+                        # surfaces "the policy can't tell legal value
+                        # apart in this dim" failure modes (e.g. fx/fy
+                        # never converge for non-create actions because
+                        # the loss view narrows them to one-hot).
+                        nll_i = -log_probs_i.gather(-1, true_i.unsqueeze(-1)).squeeze(-1)
+                        per_dim_nll_sum[i] += float(nll_i.sum().item())
+                        greedy_i = masked_i.argmax(dim=-1)
+                        per_dim_correct[i] += int((greedy_i == true_i).sum().item())
+                        greedy_env.append(greedy_i)
+                    greedy_env_stack = th.stack(greedy_env, dim=-1)
+                    epoch_correct_full_env += int((greedy_env_stack == actions).all(dim=-1).sum().item())
+                    epoch_env_mask_count += batch_n
+
+        denom = max(epoch_count, 1)
+        env_denom = max(epoch_env_mask_count, 1)
+        per_dim_loss = (
+            tuple(s / env_denom for s in per_dim_nll_sum) if has_env_masks else ()
+        )
+        per_dim_accuracy = (
+            tuple(c / env_denom for c in per_dim_correct) if has_env_masks else ()
+        )
+        accuracy_full_env_mask = (epoch_correct_full_env / env_denom) if has_env_masks else 0.0
         stat = BCStats(
             epoch=epoch + 1,
-            loss=epoch_loss / max(epoch_count, 1),
-            accuracy_action_type=epoch_correct_atype / max(epoch_count, 1),
-            accuracy_full=epoch_correct_full / max(epoch_count, 1),
+            loss=epoch_loss / denom,
+            accuracy_action_type=epoch_correct_atype / denom,
+            accuracy_full=epoch_correct_full / denom,
+            per_dim_loss=per_dim_loss,
+            per_dim_accuracy=per_dim_accuracy,
+            accuracy_full_env_mask=accuracy_full_env_mask,
         )
         stats.append(stat)
         if (epoch + 1) % log_every == 0:
-            logger.info(
-                "BC epoch %d/%d  loss=%.4f  action_type_acc=%.3f  full_acc=%.3f  (n=%d)",
-                stat.epoch,
-                n_epochs,
-                stat.loss,
-                stat.accuracy_action_type,
-                stat.accuracy_full,
-                epoch_count,
-            )
+            if has_env_masks:
+                # Per-dim diagnostics in the order PER_DIM_NAMES advertises.
+                # The headline ``full_acc`` is the legacy (narrowed) view;
+                # ``full_env`` is the honest one. Both printed because the
+                # gap is itself diagnostic (large gap = placeholder dims
+                # carrying most of the legacy "match").
+                per_dim_str = "  ".join(
+                    f"{name}_loss={loss_val:.3f}/acc={acc_val:.2f}"
+                    for name, loss_val, acc_val in zip(PER_DIM_NAMES, per_dim_loss, per_dim_accuracy)
+                )
+                logger.info(
+                    "BC epoch %d/%d  loss=%.4f  atype_acc=%.3f  full_acc=%.3f  "
+                    "full_env=%.3f  (n=%d)\n              per-dim: %s",
+                    stat.epoch,
+                    n_epochs,
+                    stat.loss,
+                    stat.accuracy_action_type,
+                    stat.accuracy_full,
+                    stat.accuracy_full_env_mask,
+                    epoch_count,
+                    per_dim_str,
+                )
+            else:
+                logger.info(
+                    "BC epoch %d/%d  loss=%.4f  action_type_acc=%.3f  full_acc=%.3f  (n=%d)",
+                    stat.epoch,
+                    n_epochs,
+                    stat.loss,
+                    stat.accuracy_action_type,
+                    stat.accuracy_full,
+                    epoch_count,
+                )
 
     policy.set_training_mode(False)
     return stats
+
+
+def _policy_raw_action_logits(policy: Any, obs_batch: Dict[str, Any]) -> Any:
+    """Recover the raw (pre-mask) per-head logit tensor from an SB3 policy.
+
+    Replicates ``ActorCriticPolicy.evaluate_actions``'s forward up to
+    ``action_net`` so the caller can split per-dim logits without going
+    through the (slow) ``policy.predict`` round-trip. Returns a tensor
+    of shape ``(B, sum(dim_sizes))``.
+
+    Handles both shared and split features extractors. Centralised so
+    when SB3 reshuffles internals there's a single site to update.
+    """
+    features = policy.extract_features(obs_batch)
+    if isinstance(features, tuple):
+        # share_features_extractor=False: (pi_features, vf_features).
+        pi_features = features[0]
+    else:
+        pi_features = features
+    latent_pi = policy.mlp_extractor.forward_actor(pi_features)
+    return policy.action_net(latent_pi)
 
 
 # ---------------------------------------------------------------------------

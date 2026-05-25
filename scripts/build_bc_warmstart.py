@@ -121,10 +121,9 @@ def main() -> int:
 
     from reinforcetactics.rl import (
         load_scenarios_from_yaml,
-        make_maskable_env,
         make_warm_started_model,
     )
-    from reinforcetactics.rl.bootstrap import _resolve_policy_kwargs
+    from reinforcetactics.rl.bootstrap import _resolve_policy_kwargs, make_stage_env
     from reinforcetactics.rl.config import load_config
 
     output_path = _resolve_output_path(args.output)
@@ -150,16 +149,29 @@ def main() -> int:
     curriculum_cfg = load_config(str(curriculum_config_path))
     policy_kwargs = _resolve_policy_kwargs(curriculum_cfg.ppo.policy_kwargs)
 
-    # Template env: the policy network shapes are built around this env's
-    # spaces, so it must match the curriculum env v33 will use. Action space
-    # is multi_discrete (BC infra requirement); enabled_units / map / max_turns
-    # are set explicitly to mirror v33's beginner stages.
-    template_env = make_maskable_env(
-        map_file=args.map_file,
+    # Template env mirrors the production curriculum env down to the
+    # measurement-sensitive kwargs (reward_config, max_actions_per_turn,
+    # gold/turn/unit_count scales, engine_overrides, pad_to_size). Going
+    # through ``make_stage_env`` instead of constructing ``make_maskable_env``
+    # by hand prevents the kwarg-drift class of bug that bit the section-3e
+    # sanity eval (Failure mode G in docs/bootstrap_lessons_learned.md):
+    # any env override the curriculum config sets MUST flow into BC too,
+    # or BC trains against a different normalization than PPO will load.
+    #
+    # The CLI ``--map-file`` / ``--enabled-units`` / ``--max-turns`` are
+    # now diagnostic-only: they're echoed in the printout for legibility
+    # but the actual env construction trusts the curriculum config as
+    # the single source of truth, matching what bootstrap.py does for
+    # production.
+    if not curriculum_cfg.curriculum.stages:
+        print(f"Error: curriculum config has no stages: {curriculum_config_path}", file=sys.stderr)
+        return 1
+    first_stage = curriculum_cfg.curriculum.stages[0]
+    template_env = make_stage_env(
+        first_stage,
+        curriculum_cfg.env,
         opponent="medium",  # arbitrary -- template env never trains, only provides shapes
-        action_space_type="multi_discrete",
-        enabled_units=args.enabled_units,
-        max_turns=args.max_turns,
+        seed=curriculum_cfg.seed + 8888,
     )
 
     print("=" * 64)
@@ -169,10 +181,13 @@ def main() -> int:
     total_eps = sum(int(s.n_episodes * s.weight) for s in scenarios)
     print(f"  total weighted episodes: ~{total_eps}")
     print(
-        f"  template env: map={args.map_file} units={args.enabled_units} "
-        f"max_turns={args.max_turns} action_space=multi_discrete"
+        f"  template env (from curriculum first stage): "
+        f"map={first_stage.map_file} units={curriculum_cfg.env.enabled_units} "
+        f"max_turns={first_stage.resolve_max_turns(curriculum_cfg.env)} "
+        f"action_space={curriculum_cfg.env.action_space_type} "
+        f"max_actions_per_turn={curriculum_cfg.env.max_actions_per_turn}"
     )
-    print(f"  curriculum config (policy_kwargs source): {curriculum_config_path}")
+    print(f"  curriculum config (template env + policy_kwargs source): {curriculum_config_path}")
     if policy_kwargs:
         fe_class = policy_kwargs.get("features_extractor_class")
         fe_name = getattr(fe_class, "__name__", str(fe_class)) if fe_class else "(SB3 default)"
