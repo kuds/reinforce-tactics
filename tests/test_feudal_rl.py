@@ -445,9 +445,7 @@ class TestComputeGAE:
         gamma, lam = 0.99, 0.95
 
         adv_plain, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam)
-        adv_seg, _ = _compute_gae(
-            rewards, values, dones, last_value, gamma, lam, segment_lengths=np.array([1, 1, 1])
-        )
+        adv_seg, _ = _compute_gae(rewards, values, dones, last_value, gamma, lam, segment_lengths=np.array([1, 1, 1]))
         np.testing.assert_allclose(adv_plain, adv_seg, atol=1e-6)
 
     def test_segment_lengths_terminal_zeros_future_advantage(self):
