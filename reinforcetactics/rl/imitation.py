@@ -1563,12 +1563,20 @@ def evaluate_bc_against_bot_ladder(
     for opp in opponents:
         env = make_stage_env(first_stage, cfg.env, opponent=opp, seed=eval_seed)
         try:
+            # ``track_breakdown=True`` adds ``action_counts`` to the
+            # metrics dict (per-step action_type histogram aggregated
+            # across all episodes). Critical for the BC never-end-turn
+            # diagnostic: a stuck BC policy sits near ~1.6% end_turn
+            # (forced by max_actions_per_turn cap) vs ~10% for a
+            # policy ending turns voluntarily. See
+            # docs/bootstrap_lessons_learned.md Failure mode H.
             metrics = evaluate_model(
                 model,
                 env,
                 n_episodes=n_episodes,
                 deterministic=deterministic,
                 seed=eval_seed,
+                track_breakdown=True,
             )
         finally:
             env.close()

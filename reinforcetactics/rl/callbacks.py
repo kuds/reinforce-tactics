@@ -191,6 +191,24 @@ class PeriodicEvalCallback(BaseCallback):
         self.logger.record("eval/mean_ep_turns", m["avg_turns"])
 
         if self.verbose:
+            # Derive end_turn % from action_counts when available. This is
+            # the headline diagnostic for the BC never-end-turn attractor
+            # (see docs/bootstrap_lessons_learned.md Failure mode H): a
+            # policy stuck under-predicting end_turn sits near 1.7%
+            # (the max_actions_per_turn=60 cap divides evenly into one
+            # forced end_turn per turn -> 1/61 ≈ 1.6%). A healthy policy
+            # ending turns voluntarily sits around 10% (one of ~10
+            # actions per turn). Printing it inline lets us watch the
+            # attractor escape in real time instead of waiting for the
+            # post-run charts.
+            action_counts = m.get("action_counts")
+            end_turn_str = ""
+            if action_counts:
+                total_actions = sum(action_counts.values())
+                end_turn_n = action_counts.get("end_turn", 0)
+                if total_actions > 0:
+                    end_turn_pct = 100.0 * end_turn_n / total_actions
+                    end_turn_str = f"  end_turn%={end_turn_pct:4.1f}"
             print(
                 f"  [eval @ {m['timesteps']:>9,}]  "
                 f"WR={m['win_rate'] * 100:5.1f}%  "
@@ -198,6 +216,7 @@ class PeriodicEvalCallback(BaseCallback):
                 f"len={m['avg_length']:5.1f}  "
                 f"turns={m['avg_turns']:5.1f}  "
                 f"W/L/D={m['wins']}/{m['losses']}/{m['draws']}"
+                f"{end_turn_str}"
             )
 
         # Save best by win rate, with avg_reward as a tiebreaker so we don't
