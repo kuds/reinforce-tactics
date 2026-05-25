@@ -1476,3 +1476,101 @@ def make_warm_started_model(
     )
 
     return model, dataset, bc_stats
+
+
+# ---------------------------------------------------------------------------
+# Post-training BC evaluation
+#
+# Quick standalone eval of a BC checkpoint against the bot ladder
+# (simple / medium / advanced) using the curriculum's first-stage env
+# template. Run this immediately after the BC build to decouple
+# "BC quality" from "PPO can't recover from a bad BC start" -- without
+# it, the only signal on BC quality is the supervised training metrics
+# (loss / action_type_acc / full_action_acc) which proxy poorly for
+# actual gameplay performance.
+#
+# Critically uses :func:`reinforcetactics.rl.bootstrap.make_stage_env`
+# so the eval env matches the production curriculum env down to
+# ``reward_config`` and ``max_actions_per_turn``. Lifted from the
+# notebook (section 3e) precisely because the manual env construction
+# there hit a debugging trap when those kwargs were silently omitted
+# (run 20260524_225835: WR=0% / reward=-30,169 was a measurement
+# artifact, not BC failure). Centralising the env construction kills
+# the bug class permanently.
+# ---------------------------------------------------------------------------
+
+
+def evaluate_bc_against_bot_ladder(
+    model: Any,
+    cfg: Any,
+    *,
+    n_episodes: int = 30,
+    opponents: Tuple[str, ...] = ("simple", "medium", "advanced"),
+    seed: Optional[int] = None,
+    deterministic: bool = True,
+) -> Dict[str, Dict[str, Any]]:
+    """Evaluate a BC checkpoint against scripted bots on the first stage's env.
+
+    Designed to be called right after BC training to surface the BC
+    policy's actual gameplay WR before committing to a multi-hour PPO
+    run. Uses :func:`bootstrap.make_stage_env` so the eval env matches
+    the production curriculum env exactly -- omitting kwargs like
+    ``reward_config`` and ``max_actions_per_turn`` (the bug we hit in
+    run 20260524_225835) is structurally impossible through this path.
+
+    Args:
+        model: Trained BC ``MaskablePPO`` instance.
+        cfg: The :class:`TrainingConfig` whose ``curriculum.stages[0]``
+            and ``env`` define the eval env template.
+        n_episodes: Episodes per opponent. 30 is a reasonable default
+            (~1-2 min per opponent on skirmish; short games against
+            random/balanced_random, longer against medium/advanced).
+        opponents: Bot ladder to evaluate against. Default
+            ``(simple, medium, advanced)`` covers the canonical "is BC
+            broken? where's the ceiling? where's the gap?" questions.
+            Adding ``random`` / ``balanced_random`` is sometimes useful
+            for diagnosing exploration vs strategy issues.
+        seed: Seed for env construction. ``None`` defaults to
+            ``cfg.seed + 7777`` (matches the notebook's convention --
+            a fresh offset distinct from the training loop's eval
+            seed so the BC sanity eval isn't a deterministic copy of
+            an in-training eval episode).
+        deterministic: Pass-through to :func:`evaluate_model`. Default
+            ``True`` matches eval-time PPO behaviour.
+
+    Returns:
+        Dict mapping opponent name to the full metrics dict from
+        :func:`evaluate_model` (``win_rate``, ``avg_reward``,
+        ``avg_length``, ``avg_turns``, ``wins`` / ``losses`` /
+        ``draws``, ``end_reasons``, etc.). Suitable for direct
+        serialisation alongside other BC artifacts.
+
+    Example:
+        >>> results = evaluate_bc_against_bot_ladder(bc_model, cfg)
+        >>> results["simple"]["win_rate"]  # > 0.4 means BC is at least
+        ...                                #   competent vs trivial opponent
+    """
+    from reinforcetactics.rl.bootstrap import make_stage_env
+    from reinforcetactics.rl.evaluation import evaluate_model
+
+    if not cfg.curriculum.stages:
+        raise ValueError("cfg.curriculum.stages is empty; no stage to template the eval env on")
+    first_stage = cfg.curriculum.stages[0]
+
+    eval_seed = seed if seed is not None else cfg.seed + 7777
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for opp in opponents:
+        env = make_stage_env(first_stage, cfg.env, opponent=opp, seed=eval_seed)
+        try:
+            metrics = evaluate_model(
+                model,
+                env,
+                n_episodes=n_episodes,
+                deterministic=deterministic,
+                seed=eval_seed,
+            )
+        finally:
+            env.close()
+        results[opp] = metrics
+    return results

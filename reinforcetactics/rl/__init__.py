@@ -11,6 +11,10 @@ This module provides:
 
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet
 from reinforcetactics.rl.alphazero_trainer import AlphaZeroTrainer, ReplayBuffer
+from reinforcetactics.rl.bootstrap import (
+    make_stage_env,
+    record_curriculum_replays,
+)
 from reinforcetactics.rl.evaluation import evaluate_model
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 from reinforcetactics.rl.imitation import (
@@ -23,6 +27,7 @@ from reinforcetactics.rl.imitation import (
     behavior_clone,
     collect_demonstrations,
     collect_demonstrations_multi,
+    evaluate_bc_against_bot_ladder,
     format_scenario_stats_table,
     load_scenarios_from_yaml,
     make_warm_started_model,
@@ -74,8 +79,12 @@ __all__ = [
     "behavior_clone",
     "collect_demonstrations",
     "collect_demonstrations_multi",
+    "evaluate_bc_against_bot_ladder",
     "format_scenario_stats_table",
     "load_scenarios_from_yaml",
     "make_warm_started_model",
     "record_episode",
+    # Curriculum stage helpers
+    "make_stage_env",
+    "record_curriculum_replays",
 ]

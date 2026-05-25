@@ -953,3 +953,223 @@ def run_curriculum(
         "final_model_path": str(final_path),
         "metrics_callback": metrics_callback,
     }
+
+
+# ---------------------------------------------------------------------------
+# Stage-faithful env construction + post-training evaluators
+#
+# These exist to kill a class of subtle bugs we hit during the skirmish BC
+# probe (run 20260524_225835): ad-hoc env construction outside
+# ``run_curriculum`` (sanity evals, replay videos, debugging probes) silently
+# omitting kwargs that the production env uses -- ``reward_config``
+# (env default is 10-1000x off from any tuned YAML), ``max_actions_per_turn``
+# (defaults to None = disables the never-end-turn safety net), ``pad_to_size``,
+# scale factors, ``opponent_kwargs``. The eval numbers then aren't comparable
+# to PPO's in-training evals and the omission of ``max_actions_per_turn`` is
+# actively dangerous (changes behaviour, not just measurement).
+#
+# ``make_stage_env`` is the single forwarding point. Other helpers that
+# need to build "a faithful copy of the stage's env" should use it rather
+# than calling ``make_maskable_env`` directly.
+# ---------------------------------------------------------------------------
+
+
+def make_stage_env(
+    stage: CurriculumStage,
+    env_cfg: Any,
+    *,
+    seed: int,
+    opponent: Optional[str] = None,
+    opponent_kwargs: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Build a ``make_maskable_env`` matching the production env for a stage.
+
+    Forwards every kwarg that affects either behaviour or measurement so
+    eval / replay envs report numbers comparable to in-training PPO evals.
+    Pass this to every code path that needs "the same env the stage was
+    trained against" -- sanity evals, replay video recording, BC bot-ladder
+    eval, debugging probes.
+
+    Args:
+        stage: The :class:`CurriculumStage` to mirror. Provides the map,
+            opponent (unless overridden), max_steps / max_turns /
+            reward_config (resolved against ``env_cfg`` for defaults),
+            and opponent_kwargs.
+        env_cfg: The run-wide :class:`EnvConfig` providing fallbacks for
+            ``stage.resolve_*`` calls plus the scale factors,
+            ``enabled_units``, ``action_space_type``,
+            ``max_actions_per_turn``, ``pad_to_size``, and
+            ``engine_overrides`` that the stage doesn't override.
+        seed: Per-env seed. Forwarded into ``env.reset(seed=...)`` so the
+            episode RNG is deterministic. Required keyword to push
+            callers to choose a fresh offset (e.g. ``cfg.seed + 9999``
+            for a different seed than the training loop's eval used).
+        opponent: Optional override for ``stage.opponent``. When set,
+            ``stage.opponent_kwargs`` is dropped (it likely doesn't apply
+            to the new opponent type) and the caller should pass any
+            substitute kwargs via ``opponent_kwargs``.
+        opponent_kwargs: Optional override for ``stage.opponent_kwargs``.
+            Used when ``opponent`` is overridden and the new opponent
+            type takes different constructor kwargs.
+
+    Returns:
+        ``ActionMaskedEnv`` ready to feed into ``MaskablePPO.predict``
+        or ``record_evaluation_to_video``.
+    """
+    from reinforcetactics.rl.masking import make_maskable_env
+
+    if opponent is None:
+        opponent = stage.opponent
+        if opponent_kwargs is None:
+            opponent_kwargs = stage.opponent_kwargs
+
+    return make_maskable_env(
+        map_file=stage.map_file,
+        opponent=opponent,
+        max_steps=stage.resolve_max_steps(env_cfg),
+        max_turns=stage.resolve_max_turns(env_cfg),
+        reward_config=stage.resolve_reward_config(env_cfg),
+        enabled_units=env_cfg.enabled_units,
+        action_space_type=env_cfg.action_space_type,
+        max_actions_per_turn=env_cfg.max_actions_per_turn,
+        pad_to_size=env_cfg.pad_to_size,
+        opponent_kwargs=opponent_kwargs,
+        gold_scale=env_cfg.gold_scale,
+        turn_scale=env_cfg.turn_scale,
+        unit_count_scale=env_cfg.unit_count_scale,
+        engine_overrides=env_cfg.engine_overrides,
+        seed=seed,
+    )
+
+
+def record_curriculum_replays(
+    cfg: TrainingConfig,
+    stage_checkpoints: Dict[str, Dict[str, Any]],
+    videos_dir: Union[str, Path],
+    *,
+    seed_offset: int = 12345,
+    fps: int = 4,
+    scale: int = 4,
+    use_pixel_art: bool = True,
+    deterministic: bool = True,
+    prefer_best: bool = True,
+) -> List[Dict[str, Any]]:
+    """Record one replay video per stage checkpoint on the stage's env.
+
+    For each entry in ``stage_checkpoints`` (the dict produced by the
+    notebook's section 4b mirror), loads the checkpoint (preferring
+    ``best_model.zip`` when available), builds a stage-faithful env via
+    :func:`make_stage_env`, and records one episode against the stage's
+    opponent on the stage's map via
+    :func:`reinforcetactics.utils.video.record_evaluation_to_video`.
+
+    Failures on a single stage's video (missing imageio_ffmpeg, pygame
+    issues, etc.) are caught and logged so the rest of the loop still
+    runs -- a renderer hiccup shouldn't lose the videos for the other
+    stages.
+
+    Args:
+        cfg: The :class:`TrainingConfig` whose ``curriculum.stages`` and
+            ``env`` provide the per-stage env templates.
+        stage_checkpoints: Mapping ``stage_name -> {map_file, opponent,
+            stage_final, best_model, promoted, best_win_rate}`` as
+            produced by the notebook's section 4b. Stages whose
+            checkpoint paths are both ``None`` are skipped.
+        videos_dir: Output directory for ``<stage_name>.mp4`` files.
+            Created if missing.
+        seed_offset: Added to ``cfg.seed`` to derive the per-env seed.
+            Use a value distinct from the training loop's eval seed
+            (typical: cfg.seed + 9999 for sanity eval, + 12345 for
+            replays) so the replay isn't a deterministic copy of an
+            in-training eval episode.
+        fps: Replay video frames-per-second.
+        scale: Render scale multiplier for the video frames.
+        use_pixel_art: Use the pixel-art renderer instead of the
+            vector renderer.
+        deterministic: Use deterministic argmax actions during replay
+            recording. ``True`` matches what ``evaluate_model``'s
+            default eval mode does so the replay is representative
+            of the eval-time policy.
+        prefer_best: When True, prefer ``best_model.zip`` over
+            ``stage_final.zip`` for the replay. Mirrors the
+            in-notebook default.
+
+    Returns:
+        List of summary dicts, one per recorded video. Each contains
+        ``stage``, ``map_file``, ``opponent``, ``video_path``,
+        ``winner``, ``end_reason``, ``steps``, ``total_reward``, and
+        ``step_stats`` (per-step trace consumed by
+        ``plot_individual_game_stats``). Stages whose recording
+        failed contribute no entry.
+    """
+    try:
+        from sb3_contrib import MaskablePPO
+    except ImportError as exc:
+        raise ImportError("sb3-contrib is required for record_curriculum_replays. Install: pip install sb3-contrib") from exc
+
+    from reinforcetactics.utils.video import record_evaluation_to_video
+
+    videos_dir = Path(videos_dir)
+    videos_dir.mkdir(parents=True, exist_ok=True)
+
+    stages_by_name = {s.name: s for s in cfg.curriculum.stages}
+    summaries: List[Dict[str, Any]] = []
+
+    for stage_name, meta in stage_checkpoints.items():
+        # Prefer the best-by-WR snapshot when available; the final
+        # post-promotion checkpoint is the fallback. A stage with no
+        # checkpoint path (rare -- write failure mid-run) is skipped.
+        ckpt_path = (meta.get("best_model") if prefer_best else None) or meta.get("stage_final")
+        if ckpt_path is None:
+            print(f"[{stage_name}] no checkpoint, skipping video")
+            continue
+
+        stage = stages_by_name.get(stage_name)
+        if stage is None:
+            print(f"[{stage_name}] no matching CurriculumStage in cfg, skipping video")
+            continue
+
+        replay_env = make_stage_env(stage, cfg.env, seed=cfg.seed + seed_offset)
+        try:
+            model = MaskablePPO.load(ckpt_path)
+            video_path = videos_dir / f"{stage_name}.mp4"
+            info = record_evaluation_to_video(
+                replay_env,
+                model,
+                output_path=str(video_path),
+                fps=fps,
+                max_steps=stage.resolve_max_steps(cfg.env),
+                deterministic=deterministic,
+                scale=scale,
+                use_pixel_art=use_pixel_art,
+            )
+            summaries.append(
+                {
+                    "stage": stage_name,
+                    "map_file": meta.get("map_file"),
+                    "opponent": meta.get("opponent"),
+                    "video_path": info.get("video_path"),
+                    "winner": info.get("winner"),
+                    "end_reason": info.get("end_reason"),
+                    "steps": info.get("steps"),
+                    "total_reward": info.get("total_reward"),
+                    # Per-step trace required by section 9 (individual
+                    # game stats 2x3). Each entry has unit/gold/structure
+                    # counts plus per-step action_type / reward_breakdown.
+                    "step_stats": info.get("step_stats", []),
+                }
+            )
+            print(
+                f"[{stage_name}] map={meta.get('map_file')}  opp={meta.get('opponent')}  "
+                f"winner={info.get('winner')}  end={info.get('end_reason')}  "
+                f"steps={info.get('steps')}  -> {info.get('video_path')}"
+            )
+        except Exception as exc:
+            # Don't let a single rendering hiccup take out the rest of
+            # the loop -- ffmpeg / pygame failures are usually
+            # environment-specific.
+            print(f"[{stage_name}] video failed: {exc}")
+        finally:
+            replay_env.close()
+
+    return summaries
