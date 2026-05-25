@@ -91,6 +91,28 @@ scenarios:
     weight: 1.5
     stochastic_tiebreak: true
 
+  # AdvancedBot vs SimpleBot. Closes a gap in the BC scenario ladder
+  # -- the sanity eval in notebook 3e tests BC-as-player-1 vs
+  # SimpleBot-as-player-2, but no BC scenario previously demonstrated
+  # against SimpleBot, so the state distribution overlap with that
+  # eval was indirect (via advanced_vs_random / balanced_random).
+  # SimpleBot's heuristic-driven play produces a meaningfully
+  # different state distribution than uniform-random, and putting
+  # demos in the exact distribution BC will be evaluated against
+  # helps the supervised loss target the right state coverage.
+  # Games are short (Advanced dominates Simple in ~5-8 turns), so
+  # this contributes modest dataset volume (~40 ep * ~50 demos/game
+  # = ~2k demos, ~3-4% of the corpus).
+  - name: advanced_vs_simple
+    map_file: maps/1v1/skirmish.csv
+    enabled_units: [W, M, C, A, K]
+    demonstrator: advanced
+    opponent: simple
+    n_episodes: 40
+    max_turns: 100
+    weight: 1.0
+    stochastic_tiebreak: true
+
   - name: advanced_vs_balanced_random
     map_file: maps/1v1/skirmish.csv
     enabled_units: [W, M, C, A, K]
