@@ -1941,11 +1941,16 @@ def compute_intrinsic_reward(
     units = next_state["units"]  # (H, W, UNIT_CHANNELS), agent-relative
     grid = next_state["grid"]  # (H, W, GRID_CHANNELS), agent-relative
 
-    # Channel layout from rl.observation: the first NUM_UNIT_TYPES channels
-    # are the type one-hot, then [self, opp, _reserved, hp]. Likewise grid:
-    # NUM_TILE_TYPES one-hot, then [self_owner, opp_owner, neutral, hp].
-    # ``agent_player`` is not needed: we read the "self" / "opp" channels
-    # directly off the agent-relative observation.
+    # Channel layout from rl.observation: the first NUM_UNIT_TYPES
+    # channels are the type one-hot, then [self, opp, own_acted, hp,
+    # paralyze, haste, defence_buff, attack_buff]. Likewise grid:
+    # NUM_TILE_TYPES one-hot, then [self_owner, opp_owner, structure_hp].
+    # ``agent_player`` is not needed: we read the "self" / "opp"
+    # channels directly off the agent-relative observation. This
+    # function only consumes the owner channels; if you grow it to
+    # read HP / status, source the channel index from
+    # ``reinforcetactics.rl.observation`` rather than ``units[..., -1]``
+    # so a future channel addition doesn't silently shift the index.
     self_owner_unit_ch = NUM_UNIT_TYPES + 0
     opp_owner_unit_ch = NUM_UNIT_TYPES + 1
     self_owner_tile_ch = NUM_TILE_TYPES + 0

@@ -75,7 +75,13 @@ def _make_state(player_positions=None, opponent_positions=None, grid_val=0):
 
     self_unit_ch = NUM_UNIT_TYPES + 0
     opp_unit_ch = NUM_UNIT_TYPES + 1
-    hp_unit_ch = UNIT_CHANNELS - 1
+    # HP is at NUM_UNIT_TYPES + 3 -- pinning to the absolute index instead
+    # of ``UNIT_CHANNELS - 1`` so the helper stays correct when status
+    # channels (paralyze / haste / buffs) are appended after HP. The earlier
+    # ``UNIT_CHANNELS - 1`` form silently moved to the attack_buff channel
+    # when the status channels landed, leaving the helper writing to the
+    # wrong slot until any test happened to read HP through it.
+    hp_unit_ch = NUM_UNIT_TYPES + 3
 
     if player_positions:
         for y, x in player_positions:

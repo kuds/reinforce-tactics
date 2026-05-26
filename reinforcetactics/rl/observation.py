@@ -17,7 +17,7 @@ Observation contract (1v1 only, agent-relative):
         Neutral ownership is encoded implicitly as ``(own=0, opp=0)`` — the
         explicit neutral channel was dropped as a linear combination of the
         other two owner channels.
-    units:           (H, W, C_UNITS=12) float32
+    units:           (H, W, C_UNITS=16) float32
         channels 0-7  one-hot unit type in ALL_UNIT_TYPES
                       ("empty cell" = all-zero across these eight channels)
         channel  8    owner == self
@@ -28,6 +28,17 @@ Observation contract (1v1 only, agent-relative):
                       policy / value head see which own units are exhausted
                       without inferring it from the action mask.
         channel  11   unit HP fraction in [0, 1]
+        channel  12   paralyzed_turns / PARALYZE_DURATION (Mage debuff;
+                      remaining turns the unit cannot act, normalised
+                      to [0, 1]).
+        channel  13   is_hasted (Sorcerer haste buff; 1.0 iff the unit has
+                      an extra action queued this turn, 0.0 otherwise).
+        channel  14   defence_buff_turns / SORCERER_BUFF_DURATION
+                      (Sorcerer defence buff; remaining turns of -50%
+                      damage taken, normalised to [0, 1]).
+        channel  15   attack_buff_turns / SORCERER_BUFF_DURATION
+                      (Sorcerer attack buff; remaining turns of +50%
+                      damage dealt, normalised to [0, 1]).
     global_features: (5,) float32, each in [0, 1)
         [own_gold, opp_gold, turn, own_units, opp_units], each squashed
         through ``tanh(x / scale)`` so all dims share a comparable
@@ -58,7 +69,11 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from reinforcetactics.constants import ALL_UNIT_TYPES
+from reinforcetactics.constants import (
+    ALL_UNIT_TYPES,
+    PARALYZE_DURATION,
+    SORCERER_BUFF_DURATION,
+)
 
 # Canonical tile-type ordering for the one-hot encoding. Must match the
 # integer codes produced by ``TileGrid.to_numpy`` (see core/grid.py).
@@ -69,8 +84,25 @@ NUM_UNIT_TYPES = len(ALL_UNIT_TYPES)
 # Channel layout constants — exposed so model factories / tests can size
 # input layers without duplicating the encoding logic.
 GRID_CHANNELS = NUM_TILE_TYPES + 2 + 1  # 11: 8 tile + 2 owner (self/opp) + 1 hp
-UNIT_CHANNELS = NUM_UNIT_TYPES + 2 + 1 + 1  # 12: 8 unit + 2 owner + own_acted + hp
+# 16: 8 unit type + 2 owner + own_acted + hp + 4 status (paralyze,
+# haste, defence_buff, attack_buff). The four status channels carry
+# debuff / buff timers so the policy can value attacking paralyzed
+# targets, predicting which own units have an extra action queued
+# (haste), and pricing the +50% damage / -50% damage-taken modifiers
+# from Sorcerer buffs. Without these channels the action mask tells
+# the policy *what it can do*, but the policy can't observe the
+# *consequences* of an opponent's buff/debuff on units it already sees.
+UNIT_CHANNELS = NUM_UNIT_TYPES + 2 + 1 + 1 + 4
 GLOBAL_FEATURES_DIM = 5
+
+# Status-effect channel indices into the per-cell unit feature vector.
+# Kept as named constants so the slicing in build_observation and any
+# downstream consumer (e.g. status-aware reward shaping) stays in sync
+# if the channel layout is ever reshuffled.
+UNIT_CH_PARALYZE = NUM_UNIT_TYPES + 4  # 12
+UNIT_CH_HASTE = NUM_UNIT_TYPES + 5  # 13
+UNIT_CH_DEFENCE_BUFF = NUM_UNIT_TYPES + 6  # 14
+UNIT_CH_ATTACK_BUFF = NUM_UNIT_TYPES + 7  # 15
 
 # Only 1v1 games are supported. The agent-relative encoding uses
 # ``opp = 3 - perspective_player`` to identify the single opponent; any
@@ -229,6 +261,10 @@ def build_observation(
     #   [..., 1] = absolute owner (0 = empty cell, else player number)
     #   [..., 2] = unit HP percentage in [0, 100]
     #   [..., 3] = has_moved flag in {0.0, 1.0}
+    #   [..., 4] = paralyzed_turns (raw int, 0..PARALYZE_DURATION)
+    #   [..., 5] = is_hasted (0.0 / 1.0)
+    #   [..., 6] = defence_buff_turns (raw int, 0..SORCERER_BUFF_DURATION)
+    #   [..., 7] = attack_buff_turns (raw int, 0..SORCERER_BUFF_DURATION)
     units = np.zeros((h, w, UNIT_CHANNELS), dtype=np.float32)
     unit_type_idx = raw_units[..., 0].astype(np.int64)
     has_unit = unit_type_idx > 0
@@ -246,6 +282,21 @@ def build_observation(
     if raw_units.shape[-1] > 3:
         units[..., NUM_UNIT_TYPES + 2] = (raw_units[..., 3] * own_mask).astype(np.float32)
     units[..., NUM_UNIT_TYPES + 3] = raw_units[..., 2].astype(np.float32) / 100.0
+    # Status-effect channels. Guarded against the older 4-channel
+    # raw_units layout (pre-status-effect-channels schema) so a stale
+    # GameState binary doesn't crash observation construction -- the
+    # extra channels stay zero, matching "no status active". Visibility
+    # filtering is handled by GameState.to_numpy (hidden enemy cells
+    # have zero across every raw_units slot), so the status channels
+    # are correctly zeroed under fog of war.
+    if raw_units.shape[-1] > 4:
+        units[..., UNIT_CH_PARALYZE] = raw_units[..., 4].astype(np.float32) / float(PARALYZE_DURATION)
+    if raw_units.shape[-1] > 5:
+        units[..., UNIT_CH_HASTE] = raw_units[..., 5].astype(np.float32)
+    if raw_units.shape[-1] > 6:
+        units[..., UNIT_CH_DEFENCE_BUFF] = raw_units[..., 6].astype(np.float32) / float(SORCERER_BUFF_DURATION)
+    if raw_units.shape[-1] > 7:
+        units[..., UNIT_CH_ATTACK_BUFF] = raw_units[..., 7].astype(np.float32) / float(SORCERER_BUFF_DURATION)
 
     if pad_to is not None:
         pad_h, pad_w = int(pad_to[0]), int(pad_to[1])

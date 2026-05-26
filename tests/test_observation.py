@@ -10,6 +10,7 @@ one-hots, and fog of war correctly hides enemy info.
 import numpy as np
 import pytest
 
+from reinforcetactics.constants import PARALYZE_DURATION, SORCERER_BUFF_DURATION
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
@@ -17,6 +18,10 @@ from reinforcetactics.rl.observation import (
     GRID_CHANNELS,
     NUM_TILE_TYPES,
     NUM_UNIT_TYPES,
+    UNIT_CH_ATTACK_BUFF,
+    UNIT_CH_DEFENCE_BUFF,
+    UNIT_CH_HASTE,
+    UNIT_CH_PARALYZE,
     UNIT_CHANNELS,
     UNIT_COUNT_SCALE,
     build_observation,
@@ -268,6 +273,97 @@ def test_hp_channel_is_normalized(game):
     # A freshly created unit at full health should be at HP=1.0 modulo
     # rounding from to_numpy's percentage encoding.
     assert hp == pytest.approx(1.0, abs=1e-3)
+
+
+# ---------- status-effect channels (paralyze / haste / buffs) ----------
+
+
+def test_status_channels_zero_when_no_effects_active(game):
+    """Status channels default to 0 on freshly-built units."""
+    from reinforcetactics.core.unit import Unit
+
+    game.units = [Unit("W", 0, 0, player=1)]
+    obs = build_observation(game, perspective_player=1)
+    for ch in (UNIT_CH_PARALYZE, UNIT_CH_HASTE, UNIT_CH_DEFENCE_BUFF, UNIT_CH_ATTACK_BUFF):
+        assert obs["units"][0, 0, ch] == 0.0
+
+
+def test_paralyze_channel_is_normalised_by_duration(game):
+    """Paralyze channel = ``paralyzed_turns / PARALYZE_DURATION``; full
+    debuff freshly applied lands at 1.0."""
+    from reinforcetactics.core.unit import Unit
+
+    target = Unit("W", 1, 1, player=2)
+    target.paralyzed_turns = PARALYZE_DURATION
+    game.units = [target]
+    obs = build_observation(game, perspective_player=1)
+    assert obs["units"][1, 1, UNIT_CH_PARALYZE] == pytest.approx(1.0)
+
+    # Mid-debuff value normalises proportionally.
+    target.paralyzed_turns = 1
+    obs = build_observation(game, perspective_player=1)
+    assert obs["units"][1, 1, UNIT_CH_PARALYZE] == pytest.approx(1.0 / PARALYZE_DURATION)
+
+
+def test_haste_channel_is_binary_on_hasted_units(game):
+    """Haste channel is 1.0 iff the unit has an extra action queued."""
+    from reinforcetactics.core.unit import Unit
+
+    hasted = Unit("W", 2, 2, player=1)
+    hasted.is_hasted = True
+    fresh = Unit("W", 3, 3, player=1)
+    game.units = [hasted, fresh]
+    obs = build_observation(game, perspective_player=1)
+    assert obs["units"][2, 2, UNIT_CH_HASTE] == 1.0
+    assert obs["units"][3, 3, UNIT_CH_HASTE] == 0.0
+
+
+def test_buff_channels_normalised_by_buff_duration(game):
+    """Defence / attack buff channels normalise by ``SORCERER_BUFF_DURATION``."""
+    from reinforcetactics.core.unit import Unit
+
+    target = Unit("W", 4, 4, player=1)
+    target.defence_buff_turns = SORCERER_BUFF_DURATION
+    target.attack_buff_turns = SORCERER_BUFF_DURATION - 1
+    game.units = [target]
+    obs = build_observation(game, perspective_player=1)
+    assert obs["units"][4, 4, UNIT_CH_DEFENCE_BUFF] == pytest.approx(1.0)
+    assert obs["units"][4, 4, UNIT_CH_ATTACK_BUFF] == pytest.approx((SORCERER_BUFF_DURATION - 1) / SORCERER_BUFF_DURATION)
+
+
+def test_status_channels_visible_on_opponent_units(game):
+    """Status effects on opponent units must surface in the obs -- the
+    policy values attacking a paralyzed enemy and avoiding a buffed one."""
+    from reinforcetactics.core.unit import Unit
+
+    enemy = Unit("W", 5, 5, player=2)
+    enemy.paralyzed_turns = PARALYZE_DURATION
+    enemy.defence_buff_turns = SORCERER_BUFF_DURATION
+    game.units = [enemy]
+    obs = build_observation(game, perspective_player=1)
+    assert obs["units"][5, 5, UNIT_CH_PARALYZE] == pytest.approx(1.0)
+    assert obs["units"][5, 5, UNIT_CH_DEFENCE_BUFF] == pytest.approx(1.0)
+
+
+def test_status_channels_zero_under_fog_for_invisible_enemy(game_fow):
+    """Under fog of war, invisible enemy units have all unit channels --
+    including status -- zeroed so the policy can't peek at hidden buffs."""
+    from reinforcetactics.core.unit import Unit
+
+    # Place the enemy unit far enough from any p1 unit / structure that
+    # the random map's visibility radius can't reveal it. The fixture
+    # generates a 10x10 map; opposite corner is safely out of sight.
+    enemy = Unit("M", 9, 9, player=2)
+    enemy.paralyzed_turns = PARALYZE_DURATION
+    enemy.attack_buff_turns = SORCERER_BUFF_DURATION
+    game_fow.units.append(enemy)
+    game_fow.update_visibility()
+    if game_fow.is_position_visible(9, 9, player=1):
+        pytest.skip("random map happened to reveal (9, 9); status-FOW test needs an invisible cell")
+    obs = build_observation(game_fow, perspective_player=1)
+    # All unit channels at the hidden cell must be zero -- the type
+    # one-hots, the owner channels, and the status channels.
+    assert np.all(obs["units"][9, 9, :] == 0.0)
 
 
 # ---------- pad_to (cross-stage observation-shape unification) ----------

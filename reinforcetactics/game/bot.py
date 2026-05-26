@@ -1364,7 +1364,17 @@ class MixedBot(BotUnitMixin, BaseBot):
     medium->advanced bridge.
     """
 
-    _BOT_NAMES = ("simple", "medium", "advanced", "master")
+    _BOT_NAMES = ("simple", "medium", "advanced", "master", "random", "balanced_random")
+
+    # Inner-bot constructor args MixedBot supplies itself. Forbidden in
+    # easy_kwargs / hard_kwargs because forwarding them would either trip
+    # Python's "got multiple values for keyword argument" TypeError
+    # (rng, player are passed positionally / explicitly to ``_build_inner``)
+    # or let a YAML config override the live game_state mid-curriculum.
+    # Surfaced at construction time so a typo in opponent_kwargs fails on
+    # the very first env.reset() rather than at some random Nth episode
+    # when the coin flip happens to pick the side carrying the bad kwarg.
+    _RESERVED_INNER_KWARGS = frozenset({"rng", "player", "game_state"})
 
     def __init__(
         self,
@@ -1374,16 +1384,31 @@ class MixedBot(BotUnitMixin, BaseBot):
         hard: str = "medium",
         p_hard: float = 0.5,
         rng=None,
+        easy_kwargs: Optional[Dict[str, Any]] = None,
+        hard_kwargs: Optional[Dict[str, Any]] = None,
     ):
         self.game_state = game_state
         self.bot_player = player
         self.easy = easy
         self.hard = hard
         self.p_hard = p_hard
+        # Reject reserved keys up front -- pre-PR these would crash with
+        # an opaque "got multiple values for keyword argument 'rng'" only
+        # on the episodes whose coin flip picks the side carrying the
+        # collision, hiding the misconfig until mid-curriculum.
+        for label, kw in (("easy_kwargs", easy_kwargs), ("hard_kwargs", hard_kwargs)):
+            if kw:
+                conflicts = self._RESERVED_INNER_KWARGS & set(kw)
+                if conflicts:
+                    raise ValueError(
+                        f"MixedBot {label} cannot contain reserved keys {sorted(conflicts)}; "
+                        f"MixedBot supplies these to the inner bot itself."
+                    )
         # Both ``random`` and ``random.Random()`` instances expose ``.random``.
         self._rng = rng if rng is not None else random
         self.use_hard = self._rng.random() < p_hard
         chosen = hard if self.use_hard else easy
+        chosen_kwargs = (hard_kwargs if self.use_hard else easy_kwargs) or {}
         # Forward the rng into the chosen inner bot so its stochastic
         # tiebreaking activates. Without this the inner bot's _rng is
         # None and every MixedBot episode that lands on the same inner
@@ -1392,18 +1417,29 @@ class MixedBot(BotUnitMixin, BaseBot):
         # consumes the same rng as the coin flip above; that's fine
         # because the coin flip happens once at construction and the
         # inner then takes over for the rest of the episode.
-        self._inner = self._build_inner(chosen, game_state, player, rng=self._rng)
+        self._inner = self._build_inner(chosen, game_state, player, rng=self._rng, **chosen_kwargs)
 
     @classmethod
-    def _build_inner(cls, name: str, game_state, player: int, rng=None):
+    def _build_inner(cls, name: str, game_state, player: int, rng=None, **kwargs):
+        # The ``random`` / ``balanced_random`` cases exist because the
+        # curriculum's ``intermediate_mixed_random_simple`` / ``skirmish_mixed_*`` /
+        # ``corner_points_mixed_*`` bridge stages pass these as the ``easy``
+        # branch (see configs/ppo/bootstrap.yaml). Without them the env
+        # crashes at reset whenever the coin flip picks the easy side,
+        # which blocks the curriculum from progressing past random_20
+        # into the harder simple/medium opponents.
         if name == "simple":
-            return SimpleBot(game_state, player=player, rng=rng)
+            return SimpleBot(game_state, player=player, rng=rng, **kwargs)
         if name == "medium":
-            return MediumBot(game_state, player=player, rng=rng)
+            return MediumBot(game_state, player=player, rng=rng, **kwargs)
         if name == "advanced":
-            return AdvancedBot(game_state, player=player, rng=rng)
+            return AdvancedBot(game_state, player=player, rng=rng, **kwargs)
         if name == "master":
-            return MasterBot(game_state, player=player, rng=rng)
+            return MasterBot(game_state, player=player, rng=rng, **kwargs)
+        if name == "random":
+            return RandomBot(game_state, player=player, rng=rng, **kwargs)
+        if name == "balanced_random":
+            return BalancedRandomBot(game_state, player=player, rng=rng, **kwargs)
         raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
 
     def take_turn(self):
