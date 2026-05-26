@@ -102,6 +102,12 @@ class TestMixedBotRandomBranches:
     curriculum's intermediate/skirmish/corner_points mixed-bridge stages
     (which use ``easy=random`` or ``easy=balanced_random``) can construct
     without crashing the env at reset.
+
+    Identity checks use ``type(...) is X`` rather than ``isinstance`` so a
+    future refactor that accidentally routes ``"random"`` to
+    ``BalancedRandomBot`` (its subclass) would fail the test loudly --
+    ``isinstance(BalancedRandomBot_instance, RandomBot)`` is True and
+    would mask the bug.
     """
 
     def test_easy_random_constructs(self, map_data):
@@ -109,14 +115,14 @@ class TestMixedBotRandomBranches:
 
         gs = _new_game_state(map_data)
         bot = MixedBot(gs, player=2, easy="random", hard="simple", p_hard=0.0, rng=random.Random(0))
-        assert isinstance(bot._inner, RandomBot)
+        assert type(bot._inner) is RandomBot
 
     def test_easy_balanced_random_constructs(self, map_data):
         from reinforcetactics.game.bot import BalancedRandomBot
 
         gs = _new_game_state(map_data)
         bot = MixedBot(gs, player=2, easy="balanced_random", hard="simple", p_hard=0.0, rng=random.Random(0))
-        assert isinstance(bot._inner, BalancedRandomBot)
+        assert type(bot._inner) is BalancedRandomBot
 
     def test_easy_random_with_max_actions_kwarg(self, map_data):
         from reinforcetactics.game.bot import RandomBot
@@ -131,8 +137,85 @@ class TestMixedBotRandomBranches:
             rng=random.Random(0),
             easy_kwargs={"max_actions": 10},
         )
-        assert isinstance(bot._inner, RandomBot)
+        assert type(bot._inner) is RandomBot
         assert bot._inner.max_actions == 10
+
+    def test_hard_random_with_max_actions_kwarg(self, map_data):
+        """Symmetric coverage with the easy_kwargs test: forces p_hard=1.0 so
+        the selector picks ``hard_kwargs``. Without this the easy/hard
+        ternary selector (MixedBot.__init__ ``chosen_kwargs = (hard_kwargs
+        if self.use_hard else easy_kwargs)``) is untested in the hard
+        branch -- a swapped selector regression would slip through.
+        """
+        from reinforcetactics.game.bot import RandomBot
+
+        gs = _new_game_state(map_data)
+        bot = MixedBot(
+            gs,
+            player=2,
+            easy="simple",
+            hard="random",
+            p_hard=1.0,
+            rng=random.Random(0),
+            hard_kwargs={"max_actions": 7},
+        )
+        assert type(bot._inner) is RandomBot
+        assert bot._inner.max_actions == 7
+
+
+class TestMixedBotRejectsReservedKwargs:
+    """``easy_kwargs`` / ``hard_kwargs`` must not carry keys MixedBot already
+    supplies to ``_build_inner`` (``rng`` / ``player`` / ``game_state``).
+    Pre-PR these would crash mid-curriculum with the opaque ``TypeError:
+    got multiple values for keyword argument`` only on the episodes whose
+    coin flip picked the side carrying the collision.
+    """
+
+    @pytest.mark.parametrize("reserved", ["rng", "player", "game_state"])
+    def test_easy_kwargs_rejects_reserved_key(self, map_data, reserved):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="reserved keys"):
+            MixedBot(
+                gs,
+                player=2,
+                easy="random",
+                hard="simple",
+                p_hard=0.0,
+                rng=random.Random(0),
+                easy_kwargs={reserved: "anything"},
+            )
+
+    @pytest.mark.parametrize("reserved", ["rng", "player", "game_state"])
+    def test_hard_kwargs_rejects_reserved_key(self, map_data, reserved):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="reserved keys"):
+            MixedBot(
+                gs,
+                player=2,
+                easy="simple",
+                hard="random",
+                p_hard=1.0,
+                rng=random.Random(0),
+                hard_kwargs={reserved: "anything"},
+            )
+
+    def test_validation_fires_regardless_of_coin_flip(self, map_data):
+        """Even when the coin flip *won't* select the side carrying the bad
+        kwarg, the validation still fires -- catches misconfig at construction
+        rather than on a probabilistic later episode."""
+        gs = _new_game_state(map_data)
+        # use_hard=False (p_hard=0.0) -- only easy_kwargs would normally be
+        # consumed, but the validation reads both regardless.
+        with pytest.raises(ValueError, match="reserved keys"):
+            MixedBot(
+                gs,
+                player=2,
+                easy="simple",
+                hard="random",
+                p_hard=0.0,
+                rng=random.Random(0),
+                hard_kwargs={"rng": random.Random(99)},
+            )
 
 
 class TestMixedBotTakeTurn:

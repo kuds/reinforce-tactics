@@ -503,37 +503,91 @@ class TestBootstrapStagesAreConstructible:
     Without this, an opponent_kwargs / opponent-type mismatch (e.g. a
     MixedBot inner name the bot module doesn't recognise) hides until
     Colab actually hits that stage at runtime and crashes mid-curriculum.
-    The smoke test exercises every stage's ``make_stage_env`` path at
-    least once with the bootstrap.yaml's exact kwargs, forcing both
-    branches of any opponent the stage might construct (e.g. MixedBot's
-    easy and hard sides) by sweeping a small set of seeds.
+    The smoke test exercises every stage's ``make_stage_env`` path with
+    the bootstrap.yaml's exact kwargs, sweeping seeds so MixedBot's
+    per-episode coin flip lands on both branches across the run.
+
+    Specifically asserts:
+      * Construction works (catches the original MixedBot ``unknown bot
+        type 'random'`` crash that motivated this test).
+      * Reset works across multiple distinct seeds, so MixedBot rebuilds
+        a different inner bot per episode.
+      * One env step succeeds, exercising the chosen inner bot's
+        ``take_turn`` path -- catches mid-episode bugs in the inner
+        scripted/random bot that pure construction would miss.
+      * ``pad_to_size`` is resolved the way production resolves it
+        (bootstrap.py's ``_resolve_curriculum_pad_size`` picks the
+        per-axis max when the curriculum spans multiple map sizes),
+        so any regression in the padded-obs path is caught here rather
+        than at the first production step.
     """
 
     @pytest.fixture(scope="class")
     def shipped_cfg(self):
         repo_root = Path(__file__).resolve().parents[1]
-        return load_config(repo_root / "configs" / "ppo" / "bootstrap.yaml")
+        cfg = load_config(repo_root / "configs" / "ppo" / "bootstrap.yaml")
+        # Resolve pad_to_size the same way ``run_curriculum`` does. The
+        # shipped bootstrap.yaml spans 6x6 / 7x7 / 8x8 / 10x12 maps with
+        # ``action_space_type=flat_discrete``; production therefore picks
+        # ``pad_to_size=(10, 12)``. Without this resolution every stage's
+        # env would build at its native size and the padded-obs code path
+        # would be untested.
+        from reinforcetactics.rl.bootstrap import _resolve_curriculum_pad_size
 
-    def test_every_stage_env_constructs_and_resets(self, shipped_cfg):
+        cfg.env.pad_to_size = _resolve_curriculum_pad_size(cfg)
+        return cfg
+
+    def test_every_stage_env_constructs_resets_and_steps(self, shipped_cfg):
+        import numpy as np
+
         from reinforcetactics.rl.bootstrap import make_stage_env
 
-        # Sweep multiple seeds per stage so MixedBot's per-episode coin
-        # flip exercises both inner-bot branches at least once. With
-        # p_hard between 0.25 and 0.5 across all mixed stages, four
-        # seeds gives >99.6% probability of hitting both sides.
-        seeds = [0, 1, 2, 3]
-        failures = []
+        # Sweep multiple distinct seeds per stage so MixedBot's per-episode
+        # coin flip lands on both inner-bot branches. For p_hard=0.25
+        # stages (the worst case in bootstrap.yaml), 8 distinct seeds gives
+        # P(miss one branch) = 0.75^8 ~= 10%, vs the earlier 4-seed sweep
+        # which left ~32% miss probability -- enough to silently regress
+        # CI runs.
+        seeds = list(range(8))
+        failures: List[str] = []
         for stage in shipped_cfg.curriculum.stages:
             for seed in seeds:
+                env = None
                 try:
+                    # Each (stage, seed) builds a fresh env. ``make_stage_env``
+                    # forwards reward_config / max_actions_per_turn /
+                    # pad_to_size etc. from ``shipped_cfg.env`` so the
+                    # smoke env matches what run_curriculum would build.
                     env = make_stage_env(stage, shipped_cfg.env, seed=seed)
-                    # ``make_stage_env`` already calls reset(seed=seed) once
-                    # in make_maskable_env; reset again here to exercise the
-                    # opponent-rebuild path that fires every episode.
-                    env.reset(seed=seed)
-                    env.close()
+                    # Reset with a DIFFERENT seed than the construction
+                    # seed so the opponent-rebuild path actually draws a
+                    # fresh ``np_random.integers(...)``. With the same
+                    # seed gym re-seeds np_random identically and the
+                    # rebuild is byte-identical -- pointless.
+                    env.reset(seed=seed + 10_000)
+                    # Step once so the inner bot's ``take_turn`` path
+                    # (executed inside ``end_turn``) is exercised. Pick
+                    # the first legal action via the mask. Failures here
+                    # catch bugs in the bot's per-turn logic that pure
+                    # construction would miss.
+                    mask = env.action_masks()
+                    if isinstance(mask, tuple):
+                        mask = mask[0]
+                    action = int(np.argmax(np.asarray(mask, dtype=bool)))
+                    env.step(action)
                 except Exception as exc:  # noqa: BLE001
                     failures.append(f"{stage.name} (seed={seed}): {type(exc).__name__}: {exc}")
+                finally:
+                    # ``finally`` so a failure in reset / step doesn't
+                    # leak env handles (subprocess pipes under
+                    # use_subprocess=True). Without this, a chain of
+                    # stage failures could accumulate >100 leaked envs
+                    # before pytest tears down.
+                    if env is not None:
+                        try:
+                            env.close()
+                        except Exception:  # noqa: BLE001
+                            pass
         assert not failures, "\n".join(failures)
 
 

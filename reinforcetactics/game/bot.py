@@ -1366,6 +1366,16 @@ class MixedBot(BotUnitMixin, BaseBot):
 
     _BOT_NAMES = ("simple", "medium", "advanced", "master", "random", "balanced_random")
 
+    # Inner-bot constructor args MixedBot supplies itself. Forbidden in
+    # easy_kwargs / hard_kwargs because forwarding them would either trip
+    # Python's "got multiple values for keyword argument" TypeError
+    # (rng, player are passed positionally / explicitly to ``_build_inner``)
+    # or let a YAML config override the live game_state mid-curriculum.
+    # Surfaced at construction time so a typo in opponent_kwargs fails on
+    # the very first env.reset() rather than at some random Nth episode
+    # when the coin flip happens to pick the side carrying the bad kwarg.
+    _RESERVED_INNER_KWARGS = frozenset({"rng", "player", "game_state"})
+
     def __init__(
         self,
         game_state,
@@ -1382,6 +1392,18 @@ class MixedBot(BotUnitMixin, BaseBot):
         self.easy = easy
         self.hard = hard
         self.p_hard = p_hard
+        # Reject reserved keys up front -- pre-PR these would crash with
+        # an opaque "got multiple values for keyword argument 'rng'" only
+        # on the episodes whose coin flip picks the side carrying the
+        # collision, hiding the misconfig until mid-curriculum.
+        for label, kw in (("easy_kwargs", easy_kwargs), ("hard_kwargs", hard_kwargs)):
+            if kw:
+                conflicts = self._RESERVED_INNER_KWARGS & set(kw)
+                if conflicts:
+                    raise ValueError(
+                        f"MixedBot {label} cannot contain reserved keys {sorted(conflicts)}; "
+                        f"MixedBot supplies these to the inner bot itself."
+                    )
         # Both ``random`` and ``random.Random()`` instances expose ``.random``.
         self._rng = rng if rng is not None else random
         self.use_hard = self._rng.random() < p_hard
