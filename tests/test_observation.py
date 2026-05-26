@@ -328,9 +328,7 @@ def test_buff_channels_normalised_by_buff_duration(game):
     game.units = [target]
     obs = build_observation(game, perspective_player=1)
     assert obs["units"][4, 4, UNIT_CH_DEFENCE_BUFF] == pytest.approx(1.0)
-    assert obs["units"][4, 4, UNIT_CH_ATTACK_BUFF] == pytest.approx(
-        (SORCERER_BUFF_DURATION - 1) / SORCERER_BUFF_DURATION
-    )
+    assert obs["units"][4, 4, UNIT_CH_ATTACK_BUFF] == pytest.approx((SORCERER_BUFF_DURATION - 1) / SORCERER_BUFF_DURATION)
 
 
 def test_status_channels_visible_on_opponent_units(game):
