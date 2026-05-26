@@ -10,8 +10,8 @@ one-hots, and fog of war correctly hides enemy info.
 import numpy as np
 import pytest
 
-from reinforcetactics.core.game_state import GameState
 from reinforcetactics.constants import PARALYZE_DURATION, SORCERER_BUFF_DURATION
+from reinforcetactics.core.game_state import GameState
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
     GOLD_SCALE,
