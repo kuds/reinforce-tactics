@@ -1,0 +1,214 @@
+# PPO bootstrap validation slice -- cold-start probe for Colab L4
+# ===============================================================
+# Purpose: validate that the bootstrap pipeline + bug fixes work
+# end-to-end BEFORE committing to a multi-hour production run.
+# Mirrors `configs/ppo/bootstrap.yaml` (same env / ppo / reward
+# shape) but truncates the curriculum to the first 6 stages and
+# shrinks per-stage budgets so the whole thing fits in ~45-60 min
+# wall-clock on a Colab L4. After this clears, switch to the full
+# `bootstrap.yaml` for the production run.
+#
+# What this validates:
+#   1. Cold-start training reaches non-zero WR within 200-400k
+#      steps on `starter_random` (signal: WR > 0 with std > 0).
+#   2. `starter_simple / medium` clear without the deterministic-
+#      opponent drift attractor that the scripted-bot rng-seeding
+#      fix targets (PR #383 #2).
+#   3. Map transition into beginner.csv doesn't catastrophically
+#      collapse the value function.
+#   4. `beginner_random_15` -- the historical wall stage flagged
+#      across runs in docs/bootstrap_lessons_learned.md -- reaches
+#      WR > 0 within the reduced budget (full pass is optional;
+#      the diagnostic signal is "upward trend, not 0.0% std=0.0").
+#
+# Probe contract (per docs/bootstrap_lessons_learned.md "Single-map
+# probe pattern"):
+#   * Drop max_timesteps so the WHOLE run is ~3-4M steps.
+#   * Confirm WR > 0 with std > 0 within the first 3-5 evals of
+#     each stage. If not, abort and diagnose -- don't extend.
+#   * Track avg_turns: monotonic climb toward max_turns is the
+#     draw-attractor signature.
+#
+# Run from notebook ppo_bootstrap.ipynb:
+#   CONFIG_PATH = Path("configs/ppo/bootstrap_validation.yaml")
+#   BUILD_BC_WARMSTART = False   # cold start, no BC
+#
+# After the run completes (or stalls), the diagnostics in sections
+# 5-9 of the notebook show the same artifacts as a production run
+# -- you can confirm the pipeline is healthy at probe scale before
+# scaling to the full curriculum.
+algorithm: maskable_ppo
+seed: 42
+# Total is informational; per-stage budgets drive run length.
+# Sum below: 0.4 + 0.5 + 0.6 + 0.5 + 0.8 + 1.0 = 3.8M
+total_timesteps: 3_800_000
+
+env:
+  n_envs: 8
+  use_subprocess: true
+  max_steps: 3000
+  max_turns: 20
+  max_actions_per_turn: null
+  action_space_type: flat_discrete
+  # Mirrors bootstrap.yaml's reward_config exactly so the validation
+  # probe is testing the actual production reward landscape, not a
+  # simplified one. If the production reward shape has a regression
+  # (e.g. enemy_owned_capture / win_speed_bonus interactions called
+  # out in docs/bootstrap_lessons_learned.md as wall-creators), this
+  # probe is the cheapest place to surface it.
+  reward_config:
+    win_by_hq_capture: 50.0
+    win_by_elimination: 50.0
+    win: 50.0
+    loss: -50.0
+    draw: -50.0
+    income_diff: 0.05
+    unit_diff: 0.3
+    structure_control: 1.0
+    create_unit: 0.0
+    move: 0.0
+    damage_scale: 0.0
+    kill: 0.0
+    seize_progress: 3.0
+    capture: 10.0
+    tower_capture: 15.0
+    building_capture: 40.0
+    hq_capture: 25.0
+    cure: 0.0
+    heal_scale: 0.0
+    paralyze: 0.0
+    haste: 0.0
+    defence_buff: 0.0
+    attack_buff: 0.0
+    invalid_action: -0.1
+    turn_penalty: 0.0
+    win_speed_bonus: 50.0
+    enemy_neutral_capture: -8.0
+    enemy_owned_capture: -15.0
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
+    features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
+    features_extractor_kwargs:
+      features_dim: 256
+      pool: masked_avg
+      coord_conv: true
+      extra_conv: true
+
+eval:
+  # Halved from production's 50k so the smaller per-stage budgets
+  # still produce enough eval points (5-15 per stage) to diagnose
+  # trends rather than just see one or two readings.
+  eval_freq: 25_000
+  # 60 (vs production's 80) keeps eval overhead proportional. The
+  # std-error on a 0.7 WR estimate is sqrt(0.7*0.3/60) ~ 5.9%, fine
+  # for probe-level "is the trend up or flat" decisions.
+  n_eval_episodes: 60
+
+curriculum:
+  stages:
+    # Stage 1: cold-start escape. Random opponent provides the per-
+    # episode return variance PPO needs to bootstrap from a near-
+    # uniform policy. If WR doesn't move off 0 within 100-200k
+    # steps, the cold-start chain is broken -- abort and diagnose.
+    - name: starter_random
+      map_file: maps/1v1/starter.csv
+      opponent: random
+      promotion_win_rate: 0.85   # production 0.90, lowered to fit budget
+      patience: 2
+      max_timesteps: 400_000     # production 1M
+      ent_coef: 0.10
+      n_eval_episodes: 60
+
+    # Stage 2: validates the SimpleBot rng-seeding fix (PR #383 #2).
+    # Pre-fix SimpleBot was fully deterministic -- once PPO found
+    # its argmax, return variance collapsed and the policy locked
+    # in. With the fix, this stage should clear smoothly.
+    - name: starter_simple
+      map_file: maps/1v1/starter.csv
+      opponent: simple
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 500_000     # production 2M
+      ent_coef: 0.05
+      n_eval_episodes: 60
+
+    # Stage 3: same validation against MediumBot. Higher tactical
+    # depth (counter-units, focus fire) -- if SimpleBot cleared
+    # but Medium walls, the issue is bot complexity, not the rng fix.
+    - name: starter_medium
+      map_file: maps/1v1/starter.csv
+      opponent: medium
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 600_000     # production 3M
+      ent_coef: 0.05
+      n_eval_episodes: 60
+
+    # Stage 4: map transition (starter 4x5 -> beginner 6x6). This
+    # is the classic value-function-dislocation point (lessons-
+    # learned doc Failure mode 2). The ent_coef schedule restores
+    # exploration noise during the transition.
+    - name: beginner_balanced_random
+      map_file: maps/1v1/beginner.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.80
+      patience: 2
+      max_timesteps: 500_000     # production 1.5M
+      n_eval_episodes: 60
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    # Stage 5: first RandomBot stage on the bigger map. Historically
+    # the first place the policy genuinely has to learn map control
+    # rather than transfer from starter.
+    - name: beginner_random_10
+      map_file: maps/1v1/beginner.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 800_000     # production 1.5M
+      n_eval_episodes: 60
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
+
+    # Stage 6: the historical wall stage. Most v17-v23 runs in the
+    # lessons-learned doc stalled here. Reaching this and seeing
+    # WR > 0 with std > 0 within the reduced budget is the strongest
+    # signal that the cold-start + bug-fix pipeline is healthy.
+    # Clearing fully would be a bonus -- not required for validation.
+    - name: beginner_random_15
+      map_file: maps/1v1/beginner.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 15
+      promotion_win_rate: 0.65   # production 0.70, lowered for probe
+      patience: 2
+      max_timesteps: 1_000_000   # production 3M
+      n_eval_episodes: 60
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.03
+        schedule: linear
