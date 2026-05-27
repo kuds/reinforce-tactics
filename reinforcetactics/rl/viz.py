@@ -1032,6 +1032,185 @@ def plot_curriculum_metrics(
     }
 
 
+def plot_curriculum_composition_summary(
+    history: Sequence[Mapping[str, Any]],
+    *,
+    charts_dir: Optional[Any] = None,
+    final_evals_to_average: int = 3,
+) -> Optional[plt.Figure]:
+    """One-row-per-stage summary of *what the policy actually did*.
+
+    Per-stage diagnostics (``plot_stage_diagnostics``) and curriculum-
+    wide stacks (``plot_curriculum_metrics``) both surface unit-build
+    composition, but reading them requires opening one figure per
+    stage. This summary collapses the cleared / stalled curriculum
+    into a single horizontal stacked bar per stage, annotated with the
+    strategic signals that differentiated v34's mono-Warrior cleared-
+    14-stages run from v35's diverse-comp stalled-at-stage-6 run:
+
+      * unit-build composition (Warrior% / Mage% / etc.) on the bar
+      * Warrior% printed inline on the W segment (the dominant-unit
+        red flag -- 100% on every v34 stage, oscillating in v35)
+      * HQ captures + building captures printed on the right
+        (zero on every v34 stage; non-zero on v35 late evals)
+      * Mage paralyze + Sorcerer haste counts printed on the right
+        (zero on every v34 stage; the status-effect channels added in
+        PR #383 have nothing to observe if the policy never builds
+        the casters)
+      * Best WR + promoted flag printed on the left
+
+    Averaging window: by default the LAST ``final_evals_to_average=3``
+    evals per stage are pooled to smooth single-eval noise (compositions
+    on the last eval can be highly variable during recovery, as seen at
+    v35's beginner_random_10 stall: 7% W on eval 30 jumped to 10% W on
+    eval 31). Set to 1 to read off only the terminal eval.
+
+    Args:
+        history: ``run_curriculum`` result's ``"history"`` list. Each
+            entry must have ``"stage"`` and ``"results"`` (list of
+            eval dicts with ``units_built`` / ``combat_stats`` /
+            ``action_counts`` / ``win_rate`` / ``captures_by_type``).
+        charts_dir: Optional save directory.
+        final_evals_to_average: Number of trailing evals per stage to
+            pool when computing the composition. Default 3.
+
+    Returns:
+        Matplotlib ``Figure`` with the horizontal stacked bar chart,
+        or ``None`` if no stage has any units_built data.
+    """
+    rows: list[dict] = []
+    for h in history:
+        results = h.get("results") or []
+        if not results:
+            continue
+        tail = results[-max(1, int(final_evals_to_average)) :]
+        # Pool counters across the trailing evals.
+        ub_totals = {ut: 0.0 for ut in UNIT_TYPE_LETTERS}
+        kills = 0.0
+        para = haste = atk_buf = def_buf = 0.0
+        hq_caps = building_caps = tower_caps = 0.0
+        for r in tail:
+            for ut, v in (r.get("units_built") or {}).items():
+                if ut in ub_totals:
+                    ub_totals[ut] += float(v or 0)
+            cs = r.get("combat_stats") or {}
+            kills += float(cs.get("kills") or 0)
+            ac = r.get("action_counts") or {}
+            para += float(ac.get("paralyze") or 0)
+            haste += float(ac.get("haste") or 0)
+            atk_buf += float(ac.get("attack_buff") or 0)
+            def_buf += float(ac.get("defence_buff") or 0)
+            cbt = r.get("captures_by_type") or {}
+            hq_caps += float(cbt.get("hq") or 0)
+            building_caps += float(cbt.get("building") or 0)
+            tower_caps += float(cbt.get("tower") or 0)
+        total_units = sum(ub_totals.values())
+        if total_units == 0:
+            # Stage has no build data at all -- skip to keep the
+            # chart focused on stages where the question is meaningful.
+            continue
+        pct = {ut: 100.0 * ub_totals[ut] / total_units for ut in UNIT_TYPE_LETTERS}
+        rows.append(
+            {
+                "stage": h.get("stage", "?"),
+                "promoted": bool(h.get("promoted", False)),
+                "best_wr": float(h.get("best_win_rate", 0.0)),
+                "pct": pct,
+                "kills": kills,
+                "abilities": int(para + haste + atk_buf + def_buf),
+                "paralyze": int(para),
+                "hq_caps": int(hq_caps),
+                "building_caps": int(building_caps),
+                "tower_caps": int(tower_caps),
+                "n_evals_pooled": len(tail),
+            }
+        )
+
+    if not rows:
+        print("plot_curriculum_composition_summary: no stage has units_built data; nothing to plot.")
+        return None
+
+    n_stages = len(rows)
+    # Height scales with stage count so the chart stays legible from
+    # the validation slice (6 stages) up to the full production
+    # curriculum (33-35 stages).
+    fig_h = max(3.0, 0.45 * n_stages + 1.5)
+    fig, ax = plt.subplots(figsize=(13, fig_h))
+
+    y_positions = list(range(n_stages))
+    # Iterate in REVERSE so the first stage lands at the TOP of the
+    # chart (matplotlib's y axis grows upward). Easier to read as a
+    # curriculum timeline top-to-bottom.
+    rows_plot = list(reversed(rows))
+    y_labels = [row["stage"] for row in rows_plot]
+
+    # Stacked bar across unit types.
+    left = np.zeros(n_stages, dtype=float)
+    for ut in UNIT_TYPE_LETTERS:
+        values = np.array([row["pct"][ut] for row in rows_plot])
+        color = _UNIT_TYPE_COLORS.get(ut, "#888")
+        ax.barh(y_positions, values, left=left, color=color, edgecolor="white", linewidth=0.5, label=ut)
+        # Print "W:NN%" on the W segment when it's >= 8% wide enough
+        # to fit; this is the single most diagnostic readout for mono-
+        # build collapse. Other segments stay unannotated to avoid
+        # clutter.
+        if ut == "W":
+            for i, v in enumerate(values):
+                if v >= 8.0:
+                    ax.text(
+                        left[i] + v / 2,
+                        y_positions[i],
+                        f"W:{int(round(v))}%",
+                        ha="center",
+                        va="center",
+                        fontsize=8,
+                        color="white",
+                        fontweight="bold",
+                    )
+        left += values
+
+    # Left margin: best WR + promoted flag.
+    for i, row in enumerate(rows_plot):
+        wr_pct = row["best_wr"] * 100
+        flag = "OK" if row["promoted"] else "X"
+        ax.text(
+            -2.0,
+            y_positions[i],
+            f"{flag} {wr_pct:5.1f}%",
+            ha="right",
+            va="center",
+            fontsize=9,
+            color="#2e7d32" if row["promoted"] else "#c62828",
+            fontfamily="monospace",
+        )
+
+    # Right margin: strategic signals (HQ caps / building caps /
+    # paralyze / total ability use). These are the metrics that
+    # showed mono-Warrior elimination (hq=0, abilities=0) vs diverse
+    # comp (hq>0, abilities>0) in the v34 vs v35 comparison.
+    for i, row in enumerate(rows_plot):
+        annot = (
+            f"  HQ:{row['hq_caps']:>2}  B:{row['building_caps']:>3}  T:{row['tower_caps']:>3}  "
+            f"|  para:{row['paralyze']:>4}  abil:{row['abilities']:>4}  "
+            f"|  kills:{int(row['kills']):>5}"
+        )
+        ax.text(102, y_positions[i], annot, ha="left", va="center", fontsize=8, fontfamily="monospace")
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(y_labels, fontsize=9)
+    ax.set_xlim(0, 100)
+    # Make room for left WR annotation and right strategic signals.
+    ax.set_xlim(left=-20, right=100)
+    ax.set_xlabel("Build share (%)")
+    ax.set_xticks([0, 25, 50, 75, 100])
+    n_pooled_note = f" (avg of last {final_evals_to_average} evals/stage)" if final_evals_to_average > 1 else ""
+    ax.set_title(f"Per-stage composition + strategic signals{n_pooled_note}", fontsize=11)
+    ax.legend(loc="lower right", bbox_to_anchor=(1.45, 0.0), fontsize=8, title="Unit", framealpha=0.9)
+    ax.grid(True, axis="x", alpha=0.3)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "curriculum_composition_summary.png")
+
+
 def plot_stage_diagnostics(
     results: Sequence[dict],
     *,
