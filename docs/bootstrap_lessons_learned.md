@@ -1549,3 +1549,110 @@ through `beginner_mixed_r15_simple`.
   is probably a *separate* starter-only pre-curriculum run that
   ships a checkpoint, rather than splicing starter back into a
   config tuned for balance experiments.
+
+## The kill-farm draw-plateau at `beginner_random_15` (v41, run `20260528_135412`)
+
+`v41_r10_stability.yaml` applied the documented triple-fix (gate
+0.75→0.65, budget 3M→5M, entropy floor 0.03→0.01) to
+`beginner_random_10`. **It worked for its stated target** — r10
+cleared at 100% / 93.75% — but the curriculum stalled one stage later
+at **`beginner_random_15` (stage 3 of 33), best WR 0.65 vs the 0.70
+gate**, after exhausting ~3M steps (`run_status: curriculum_stalled`).
+This is the most-instrumented r15 stall to date (five diagnostic
+charts) and it pins the mechanism more precisely than the v15–v32
+sweep could.
+
+### It is the known draw-with-shaping drift — confirmed, not a new bug
+
+`eval_curves` match the "drift vs plateau" table exactly:
+**explained_variance ≈ 0.85, value_loss low and stable, approx_kl ≈
+0.005.** The value head fits returns; the policy barely updates per
+step yet wanders. So this is an **optimization/attractor** problem,
+not capacity — and it is **not** the v27a/v27c reward regression
+either: v41 already ships `win_speed_bonus: 0` and
+`enemy_owned_capture: 0`. The cause is elsewhere in the reward shape.
+
+### New detail: it's a combat-farm, and capture behaviour died at random_10
+
+Three charts the earlier sweeps lacked:
+
+- **Composition drifts wildly across stages; captures die early.**
+  `balanced_random`: W55%, captures HQ:4 / B:21 (seizing is part of
+  the plan). `random_10`: **W81%, HQ:0 / B:0 — cleared 100% purely by
+  ELIMINATION.** `random_15`: re-specs to **~70% Knight + ~20%
+  Barbarian**, kills 10,324/eval (highest of any stage) but only
+  HQ:1 / B:5. Capture-to-win behaviour evaporated at the
+  **balanced_random → random_10 transition**, not at r15.
+- **Action mix on r15 is a kill-farm.** ~50% move, ~22% attack, ~10%
+  create, ~10% end_turn, ~9% heal, and **seize only ~2–3%** — and
+  seize was already ~1–2% at r10. The agent moves and trades attacks;
+  it almost never works toward a capture.
+- **Reward decomposition shows why the farm is stable.** Summed per
+  80-ep eval: `action` (combat) +2000–5000, `shaping_delta`
+  +1000–2000, `terminal` a chronic −500 to −3500 (draw penalty). A
+  stalled 75-turn draw therefore nets **≈ +19/episode**: the dense
+  combat+potential farm out-pays the draw penalty. Winning ends the
+  farm and is rarely reached (HQ:1/eval), so the gradient points at
+  fighting-and-stalling, not finishing. W/L/D ≈ 3/1/76, turns pinned
+  at the 75-turn cap.
+
+This is the env reward docstring's own warning ("kill-farm local
+optimum that never finishes the game") and **lesson #3 of the v34–v40
+section** ("combat shaping is NOT a diversity lever — it rewards
+finishing fights, so the policy just gets more aggressive about the
+cheapest combatant"). The v34 combat shaping unlocked depth via
+elimination on easy stages; on r15 the more-active opponent
+(max_actions 10→15) can't be eliminated within 75 turns, so the same
+aggression draws.
+
+### Triple-fix side effect: r10 cleared *less* diverse than v40
+
+Worth flagging: v40's r10 *stalled* but at **28% Warrior** (diverse);
+v41's r10 **cleared at 81% Warrior, elimination-only**. The lower
+entropy floor (0.01) + extra budget let the policy commit to mono-W
+elimination and clear — trading the composition v40 had for a
+promotion. Clearing a `*_random_N` stage and clearing it *with
+composition* remain different things (lesson #4).
+
+### v42: remove the combat farm (single-variable test)
+
+`v42_remove_combat_farm.yaml` zeroes `damage_scale` and `kill` (the
+*only* delta vs v41, verified by config diff). With no per-step combat
+farm, a draw is unambiguously net-negative (`turn_penalty −0.5 × ~73
+turns` + `draw −10`, nothing to offset it), so capture/win is the only
+positive-return path. Supporting evidence beyond this run: the deep
+config (Experiment A / v26) cleared *past* r15 with no combat shaping,
+and the in-config note records that zeroed-combat runs reached
+`random_20` (past r15) — combat shaping only mattered for the final
+r20 push. If v42 *still* stalls at r15 with seize ≈ 2%, the bottleneck
+is capture **exploration** (the sparse, committed multi-step seize
+sequence), not the reward ratio — at which point reward tweaks are
+exhausted and the escalation is the higher-confidence levers already
+on the books: **BC warm-start from a capture-using demonstrator** (v33
+cleared r15 this way) and the **untested `net_arch [256,256]→[512,512]`
+capacity control**.
+
+### Lessons
+
+1. **A profitable draw is a reward bug, not a policy bug.** If the
+   per-step shaping (combat + potential) can out-earn the draw
+   terminal, PPO discovers the farm-and-stall equilibrium and the
+   draw-with-shaping attractor becomes a rational resting point, not a
+   transient. Check the reward decomposition: if `action +
+   shaping_delta` exceeds `|terminal|` on draws, the draw *pays*.
+2. **"Cleared" hides which win condition was learned.** r10 cleared at
+   100% with zero HQ/building captures — pure elimination. The
+   curriculum then hands an elimination-only policy to a stage where
+   elimination can't finish in time. Read `captures_by_type` on
+   cleared stages, not just WR.
+3. **The triple-fix relocates the stall; it doesn't remove the
+   mechanism.** Gate/budget/entropy got r10 past the bar (by
+   committing to mono-W elimination) and the identical drift reappeared
+   one stage later. The mechanism is the reward landscape, and it
+   travels with the policy down the curriculum.
+4. **Seize starvation is the through-line.** Across r10 and r15 the
+   agent seizes ~2% of the time. Every "can't close the game" stall on
+   the beginner ladder reduces to "the policy never learned the
+   committed seize sequence." That points the durable fix at capture
+   exploration (BC, or a denser/earlier capture curriculum) rather
+   than at opponent/gate/entropy tuning.
