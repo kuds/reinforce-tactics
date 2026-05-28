@@ -76,6 +76,34 @@ easier are actively harder for PPO.
     can improve invisibly to gameplay. Sanity-eval BC against
     the bot ladder *before* trusting training metrics. See
     Failure mode H.
+11. **Mono-strategy attractors are env-structural, not curriculum-
+    tweakable.** v34-v37 ran four independent levers — combat-shaping
+    reward, mild Warrior stat nerf (atk 10→8, def 6→4), 2× budget
+    on the stall stage, MixedBot mid-curriculum bridge, higher
+    promotion thresholds — and got **100% mono-Warrior policies on
+    every cleared stage** in all of them. v37b cleared 15 stages at
+    100% WR each, every one mono-W with zero ability use and zero
+    HQ captures. If the default unit balance has one unit winning
+    HP/$, Atk/$, AND a defense advantage at the cheapest tier, PPO
+    finds it and never leaves. The fix is cost-curve geometry
+    (v38/v39 changed Warrior's price), not curriculum pressure.
+12. **Don't run balance experiments on the tightest-clock map.** v38
+    (structural stat nerf) and v39 (cost-only nerf) both stalled at
+    `starter_random` (51% / 35% WR) — *not* because the nerfs were
+    wrong, but because starter's $250 starting gold + max_turns=20
+    has no headroom for the strategic tradeoff the nerfs are
+    supposed to teach. Same nerf on beginner (max_turns=75, $400
+    start) cleared the first stage at 100% WR in 200k steps. Starter
+    is a navigation warm-up; drop it from the curriculum when the
+    experiment is about balance, not navigation.
+13. **Composition tracking belongs in the eval pipeline.** `units_built`
+    per stage tells you whether the policy learned strategy or just
+    exploited the cheapest cost-efficient unit. WR + W/L/D alone
+    looks identical between "won via mono-Warrior elimination" and
+    "won via diverse composition with HQ rushes". `viz.plot_curriculum_
+    composition_summary` (added in this branch) makes this visible
+    at a glance — without it, four iterations would have looked
+    indistinguishable on the WR curves.
 
 ## The cold-start problem on this env
 
@@ -1291,3 +1319,233 @@ that signature in ~15 minutes of wall-clock instead of multiple hours,
 and the saved diagnostic artifacts (`scenario_stats.txt`,
 `bc_training_curves.png`, `bc_demo_outcomes.png`) live on Drive so
 they survive Colab disconnects and are comparable across iterations.
+
+## Composition diversity: the mono-Warrior attractor (v34–v40)
+
+After the BC pipeline cleared `beginner_random_15` (v33), the next
+goal was teaching the agent to **play with composition** — use
+Mages/Clerics/Knights, capture HQs, exercise the status-effect channels
+added in PR #383. v34 cold-started instead and surfaced a different
+problem: PPO can clear most of the curriculum without ever learning
+composition at all. v34–v40 chased the fix; the lessons below are
+what those seven configs cost.
+
+### The v34 finding: 14 stages cleared, zero strategy learned
+
+`v34_aggressive_combat.yaml` re-enabled the combat-shaping reward at
+the rescaled magnitudes the docs recommended (`damage_scale=0.002`,
+`kill=0.2`, `turn_penalty=-0.5`, `draw=-10`). Run `20260526_145412`
+cleared **14 stages** cold — through `beginner_advanced` and into
+intermediate — then stalled at `intermediate_random_20` at 60% WR.
+The headline number was good. The composition data wasn't:
+
+- `units_built["W"]` was **95–100%** of total builds on **every**
+  cleared stage. M/C/A/K/R/S/B were single digits or zero.
+- `captures_by_type.hq = 0` across every stage. The policy won
+  exclusively by elimination, never by HQ rush.
+- Status-effect observation channels (paralyze/haste/buffs) had
+  zero signal because the policy never built the units that produce
+  them.
+- `avg_turns` pegged at the 60-turn cap on the stalled stage:
+  intermediate's 7×7 map at max_turns=60 (smaller clock than 6×6
+  beginner's 75) ran out as draws (80/80 max_turns_draw on the
+  stall).
+
+The policy had learned a working but trivial strategy — "spam the
+cheapest unit with the best HP/$ + Atk/$, eliminate the opponent
+before the clock runs out" — which works on small maps with
+non-aggressive opponents and stops working immediately when geometry
+or opponent strength changes.
+
+### Why the default balance is a one-unit local optimum
+
+Before v34, default Warrior stats made it pareto-dominant per gold
+spent: cost=200 (cheapest), HP=15 (tied highest), atk=10 (tied
+highest), def=6 (highest of any unit). PPO finds this immediately
+and never explores. The status of the cost-efficiency table mattered:
+
+```
+  W: cost 200  HP/$ 0.075  Atk/$ 0.050  Def 6   <- top of every axis
+  K: cost 350  HP/$ 0.051  Atk/$ 0.023  Def 5
+  M: cost 300  HP/$ 0.033  Atk/$ 0.033  Def 4
+  A: cost 250  HP/$ 0.060  Atk/$ 0.020  Def 1
+```
+
+Once a single unit wins every cost-efficiency axis at the cheapest
+tier, there is no in-distribution policy gradient toward diversity.
+Entropy bonus generates random *exploration*, not random
+*exploitation* — the policy will sample a Mage occasionally, the
+Mage will under-perform vs spending the same gold on more Warriors,
+and the gradient pushes back toward W.
+
+### The four levers we tried (v35–v37)
+
+| Config | Lever | First stall | Mono-W on cleared stages |
+|---|---|---|---|
+| v35 | Warrior nerf atk 10→8, def 6→4; intermediate r10/r15 added; intermediate max_turns 60→75 | `beginner_random_10` (composition diversifying) | drift in progress |
+| v36 | v35 + `beginner_random_10` budget 1.5M → 3M (recovery time) | `beginner_random_10` (7 stages cleared) | 100% (5479/5479 = W on r10) |
+| v37a | revert nerf + MixedBot bridge stage between r15 and r20 | `beginner_random_15` (CUDA non-det stall) | 100% |
+| v37b | revert nerf + higher promotion thresholds (r10:0.75→0.90, r15:0.70→0.85, r20:0.70→0.75) | `intermediate_random_20` after **15 stages cleared at 100% WR each** | 100% on every cleared stage |
+
+**v37b is the decisive negative result.** A policy that clears 15
+stages at 100% WR — better than v34's deep run — with 0% composition
+diversity confirms the mono-W attractor is **not** a curriculum
+problem. No amount of mid-curriculum pressure (MixedBot bridge),
+no threshold tightening (forcing more stage-specific training),
+no soft stat nerf escapes it. The default balance is the cause.
+
+### v38 (structural nerf) and v39 (cost-only nerf) hit a new wall
+
+`v38_structural_warrior_nerf.yaml`: atk 10→7, def 6→3, HP 15→13.
+This makes Knight strictly better than Warrior on every combat
+axis. Run `20260527_200511` stalled at `starter_random` with **51%
+peak WR** vs the 0.90 threshold. Diagnosis: combat math broken at
+the smallest scale. With Warrior atk=7 facing def=4 units, kills
+took 3–4 turns each, and starter's max_turns=20 ran out before
+either side could resolve the fight — 50–70 draws per 80-episode
+eval. The nerf was too aggressive *and* the test map was too small
+to support the strategic tradeoff it was meant to teach.
+
+`v39_cost_only_nerf.yaml`: Warrior stats unchanged, cost 200→300.
+The motivation was surgical — change only the price (Warrior's
+last advantage axis), keep combat math intact. Run
+`20260528_005831` stalled at `starter_random` with **35% peak WR
+— worse than v38**. Diagnosis was different and more fundamental:
+starter has $250 starting gold and max_turns=20. At W cost=300,
+the policy literally **cannot build a Warrior on turn 1**, and
+gets ~1 unit per 2 turns of income afterward. Games run out as
+draws regardless of whether the policy was "winning" the early
+game.
+
+### Diagnostic: balance experiments are incompatible with starter
+
+The two stalls have the same root cause: **starter is too tight to
+test balance**. Starter's role in the curriculum is to teach the
+agent navigation cheaply — that's all. With the default balance
+PPO can speedrun starter (v34 cleared it in 50–100k each), so
+nothing about starter's economic structure ever mattered. Once
+you change the cost curve or the combat math, starter's hard
+limits (20 turns, $250 gold) collide with the new mechanics
+before the policy can express the strategic shift the curriculum
+is supposed to elicit.
+
+The shape of the failure is general: **a curriculum stage that
+worked at one balance setting may be infeasible at another, and
+the failure looks like a policy bug** (low WR, lots of draws)
+when it's actually an environment-clock bug. The diagnostic that
+distinguishes them: look at the *gold-spent / units-built* ratio
+on the stall — if it shows the policy spending almost everything
+on units but games still draw out, the clock is the problem; if
+gold is accumulating un-spent, the policy never learned to build.
+v38/v39 both showed the former.
+
+### v40's resolution
+
+`v40_skip_starter.yaml` drops `starter_random` / `starter_simple` /
+`starter_medium` entirely. The curriculum opens on
+`beginner_balanced_random` (6×6 map, max_turns=75, $400 start
+gold), keeps v39's W cost=300 nerf, and inherits the rest of v39
+unchanged. Run `20260528_020718` cleared stage 1 in 200k env-steps
+at 100% WR (W/L/D=80/0/0) on the first eval after the early-
+exploration dip — the cost-curve hypothesis is testable here in a
+way it wasn't on starter. Remaining stages are still TBD as the
+run progresses; the diagnostic question is whether the composition
+diversifies through `beginner_random_{10,15,20}` and especially
+through `beginner_mixed_r15_simple`.
+
+### Generalizable lessons
+
+1. **Default-balance composition is the policy's prior.** If the
+   default unit table has a clear cost-efficiency winner, every
+   PPO run on this env converges to mono-that-unit composition.
+   The curriculum doesn't push back — patience gates and stage
+   thresholds reward winning, not winning *with composition*. If
+   you want diversity, the cost curve has to break the per-axis
+   monopoly. (Three units winning different axes is the v39 design:
+   Knight HP/$, Mage Atk/$, Archer cheap-tier HP/$. Whether this
+   actually breaks the attractor is the v40 test.)
+
+2. **Stat nerfs and cost nerfs fail differently.** Stat nerfs
+   (v38) break combat *math* and propagate to "the policy can't
+   win at all" on tight-clock maps. Cost nerfs (v39) preserve
+   combat math but break the *economy* at low-gold maps.
+   Cost nerfs are reversible at finer granularity (300 → 275 → 250)
+   and don't interact with combat dynamics; prefer them when the
+   goal is composition shaping rather than per-unit rebalancing.
+
+3. **Combat-shaping reward (v34) is **not** a diversity lever.**
+   `damage_scale + kill` rewards finishing fights. The unit that
+   wins per gold spent on fights is the cheapest competent
+   combatant — i.e. the same unit the un-shaped policy was
+   already converging on. Combat shaping unlocked v34's depth
+   (14 stages vs prior ~7) but didn't change *what* the policy
+   built; it just made the policy more aggressive about it.
+
+4. **Promotion-threshold tightening doesn't force composition.**
+   v37b raised r10 to 0.90 and r15 to 0.85 hoping the bar would
+   force more stage-specific learning. The policy met the higher
+   bars by **getting better at mono-Warrior on the same opponents**,
+   not by diversifying. Patience and thresholds measure WR; WR is
+   measurable without composition diversity; therefore tighter
+   gates don't pressure for composition diversity.
+
+5. **MixedBot bridges are useful for opponent transitions, not
+   composition transitions.** The `beginner_mixed_r15_simple`
+   stage (50% RandomBot at max_actions=15, 50% SimpleBot) was
+   designed to punish mono-elimination plays via SimpleBot's
+   capture-greedy tempo. v37a passed through it cleanly *still
+   mono-W* — SimpleBot's pressure on contested structures wasn't
+   enough to make composition more valuable than more Warriors.
+   The bridge still has value as an opponent-difficulty step;
+   it just doesn't independently force diversity.
+
+6. **The composition-summary viz is the cheapest catch.** Adding
+   `plot_curriculum_composition_summary` (horizontal stacked
+   per-stage bar of units built + HQ captures + ability use)
+   surfaced "100% mono-W on every cleared stage" in v37b at a
+   glance. The same data was in `eval_log.csv` all along
+   (`units_built` is a per-stage JSON column) but no one was
+   parsing it. **Build the diagnostic that summarises *strategy*
+   per stage, not just outcomes** — and look at it after every
+   run, especially the runs that "succeed."
+
+7. **`units_built` shape decides whether new features are
+   exercised.** PR #383 added 4 new observation channels for
+   status-effect debuffs (paralyze, haste, defence_buff,
+   attack_buff). On a mono-Warrior policy those channels are
+   permanently zero in the observation stream — Mages/Sorcerers/
+   Clerics are never built, so no abilities are ever cast. New
+   observation features only pay off if the *policy* will end
+   up producing the data they encode. If the cost curve incentivises
+   ignoring those units, the channels are inert. Track this
+   coupling: an "improved observation space" that the policy never
+   exercises is dead weight.
+
+### Open questions for v40+
+
+- **Does W cost=300 actually break the attractor on beginner?**
+  v39 couldn't test this — it died on starter before reaching
+  any stage where the cost change had room to matter. v40's
+  beginner ladder is the first real test. Watch
+  `beginner_random_{10,15,20}` units_built distributions.
+- **If v40 clears the beginner/intermediate ladder mono-W
+  anyway**, then cost-curve geometry isn't the binding lever
+  either, and the next step is either (a) explicit diversity-
+  bonus reward (a small positive reward per Nth distinct unit
+  type built per episode) or (b) BC warm-start from a
+  demonstrator that uses composition. Both are higher-effort
+  than balance tuning.
+- **Capacity has not been tested.** Every v34–v40 run uses
+  `net_arch=[256, 256]`. If diversity *needs* a wider hidden
+  layer to represent multi-unit composition planning, none of
+  the balance/curriculum levers can fix that. A `[512, 512]`
+  control run on a config that otherwise reaches the
+  `intermediate_random_20` wall would discriminate "balance
+  bottleneck" from "capacity bottleneck."
+- **The starter ladder is currently un-trained.** v40's policy
+  enters `beginner_balanced_random` cold. If a future iteration
+  needs starter for navigation pre-training (e.g. if beginner's
+  bigger map slows cold-start convergence), the cleaner pattern
+  is probably a *separate* starter-only pre-curriculum run that
+  ships a checkpoint, rather than splicing starter back into a
+  config tuned for balance experiments.
