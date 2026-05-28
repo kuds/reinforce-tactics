@@ -1313,9 +1313,15 @@ class GameState:
         #   [..., 0] = unit_type int (0 = empty, 1..8 = ALL_UNIT_TYPES)
         #   [..., 1] = absolute owner (0 = empty cell, else player number)
         #   [..., 2] = unit HP percentage in [0, 100]
-        #   [..., 3] = has_moved flag (1.0 if the unit has already acted this
-        #             turn, 0.0 otherwise). Consumed by build_observation as
-        #             a per-unit "exhausted" signal for the policy.
+        #   [..., 3] = exhausted flag (1.0 if the unit has no actions left
+        #             this turn, 0.0 otherwise). Defined as
+        #             ``not (can_move or can_attack)`` so it captures every
+        #             way a unit spends its turn -- moving, attacking,
+        #             seizing, healing, or casting in place -- not just
+        #             movement. (A unit that moved but can still attack reads
+        #             0.0; a unit that attacked without moving reads 1.0.)
+        #             Consumed by build_observation as a per-unit "exhausted"
+        #             signal for the policy.
         #   [..., 4] = paralyzed_turns (0..PARALYZE_DURATION). Surfaces the
         #             Mage paralyze debuff so the policy can value attacking /
         #             defending paralyzed targets correctly.
@@ -1350,7 +1356,7 @@ class GameState:
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)
             unit_state[unit.y, unit.x, 1] = unit.player
             unit_state[unit.y, unit.x, 2] = (unit.health / unit.max_health) * 100
-            unit_state[unit.y, unit.x, 3] = 1.0 if unit.has_moved else 0.0
+            unit_state[unit.y, unit.x, 3] = 0.0 if (unit.can_move or unit.can_attack) else 1.0
             # Status effects (raw turn counts; observation.py normalises
             # by their respective max durations to land in [0, 1]).
             unit_state[unit.y, unit.x, 4] = float(getattr(unit, "paralyzed_turns", 0))
