@@ -18,6 +18,7 @@ from reinforcetactics.rl.observation import (
     GRID_CHANNELS,
     NUM_TILE_TYPES,
     NUM_UNIT_TYPES,
+    TILE_TYPE_ORDER,
     UNIT_CH_ATTACK_BUFF,
     UNIT_CH_DEFENCE_BUFF,
     UNIT_CH_HASTE,
@@ -230,36 +231,96 @@ def test_grid_neutral_owner_is_implicit(game):
     assert obs["grid"][tile.y, tile.x, opp_ch] == 0.0
 
 
-def test_own_acted_channel_reflects_has_moved(game):
-    """Channel ``NUM_UNIT_TYPES + 2`` is 1.0 for own units that have already
-    acted this turn and 0.0 otherwise."""
+def test_ocean_encodes_as_water_not_grass():
+    """Ocean ("o") folds onto the water ("w") one-hot channel rather than
+    the grass ("p") default. Regression for ocean being invisible-as-grass
+    to the policy: ``TileGrid.to_numpy`` previously had no "o" entry, so
+    ocean fell through ``.get(type, 0)`` and encoded identically to grass."""
+    import pandas as pd
+
+    # 1-row 1v1 map: HQ, grass, water, ocean, HQ.
+    md = pd.DataFrame([["h_1", "p", "w", "o", "h_2"]])
+    gs = GameState(md, num_players=2)
+    obs = build_observation(gs, perspective_player=1)
+
+    grass_ch = TILE_TYPE_ORDER.index("p")  # 0
+    water_ch = TILE_TYPE_ORDER.index("w")  # 1
+    n = len(TILE_TYPE_ORDER)
+
+    # Grass cell (x=1): grass channel set, water channel clear.
+    assert obs["grid"][0, 1, grass_ch] == 1.0
+    assert obs["grid"][0, 1, water_ch] == 0.0
+    # Water (x=2) and ocean (x=3): both set the water channel, grass clear.
+    assert obs["grid"][0, 2, water_ch] == 1.0
+    assert obs["grid"][0, 3, water_ch] == 1.0
+    assert obs["grid"][0, 3, grass_ch] == 0.0
+    # Ocean's tile-type one-hot now matches water, and differs from grass.
+    np.testing.assert_array_equal(obs["grid"][0, 3, :n], obs["grid"][0, 2, :n])
+    assert not np.array_equal(obs["grid"][0, 3, :n], obs["grid"][0, 1, :n])
+
+
+def test_own_exhausted_channel_reflects_remaining_actions(game):
+    """Channel ``NUM_UNIT_TYPES + 2`` is 1.0 for own units with no actions
+    left this turn (``not (can_move or can_attack)``) and 0.0 for units that
+    can still move or attack."""
     from reinforcetactics.core.unit import Unit
 
-    fresh = Unit("W", 1, 1, player=1)
+    available = Unit("W", 1, 1, player=1)
+    available.can_move = True
+    available.can_attack = True
     spent = Unit("W", 2, 2, player=1)
-    spent.has_moved = True
-    game.units = [fresh, spent]
+    spent.can_move = False
+    spent.can_attack = False
+    # Moved but can still attack -> NOT exhausted (the case the old
+    # has_moved signal got wrong in the other direction).
+    moved_can_attack = Unit("W", 4, 4, player=1)
+    moved_can_attack.can_move = False
+    moved_can_attack.can_attack = True
+    moved_can_attack.has_moved = True
+    game.units = [available, spent, moved_can_attack]
 
     obs = build_observation(game, perspective_player=1)
-    acted_ch = NUM_UNIT_TYPES + 2
-    assert obs["units"][1, 1, acted_ch] == 0.0
-    assert obs["units"][2, 2, acted_ch] == 1.0
+    ch = NUM_UNIT_TYPES + 2
+    assert obs["units"][1, 1, ch] == 0.0
+    assert obs["units"][2, 2, ch] == 1.0
+    assert obs["units"][4, 4, ch] == 0.0
 
 
-def test_own_acted_channel_is_zero_for_opp_units(game):
-    """Opponent ``has_moved`` is stale on our turn (they reset it at their
-    own turn start), so the acted channel must be gated to own units only."""
+def test_own_exhausted_reflects_in_place_attack(game):
+    """Regression: a unit that attacks without moving is exhausted even
+    though ``has_moved`` stays False, so the channel must read 1.0."""
     from reinforcetactics.core.unit import Unit
 
+    attacker = Unit("W", 1, 1, player=1)
+    attacker.can_move = True
+    attacker.can_attack = True
+    enemy = Unit("W", 2, 1, player=2)  # adjacent (distance 1), no move needed
+    enemy.can_move = True
+    enemy.can_attack = True
+    game.units = [attacker, enemy]
+
+    game.attack(attacker, enemy)
+    assert attacker.has_moved is False  # the old signal would miss this
+    assert not (attacker.can_move or attacker.can_attack)
+
+    obs = build_observation(game, perspective_player=1)
+    ch = NUM_UNIT_TYPES + 2
+    assert obs["units"][1, 1, ch] == 1.0
+
+
+def test_own_exhausted_channel_is_zero_for_opp_units(game):
+    """Opponent move/attack flags are stale on our turn (reset at their own
+    turn start), so the exhausted channel is gated to own units only."""
+    from reinforcetactics.core.unit import Unit
+
+    # Default can_move/can_attack are False -> raw exhausted flag would be 1,
+    # but it must be masked out for opponent units.
     opp_unit = Unit("W", 3, 3, player=2)
-    opp_unit.has_moved = True
     game.units = [opp_unit]
 
     obs = build_observation(game, perspective_player=1)
-    acted_ch = NUM_UNIT_TYPES + 2
-    # Even though the opp unit has has_moved=True, the channel is 0 from
-    # our perspective: it only encodes own-unit exhaustion.
-    assert obs["units"][3, 3, acted_ch] == 0.0
+    ch = NUM_UNIT_TYPES + 2
+    assert obs["units"][3, 3, ch] == 0.0
 
 
 def test_hp_channel_is_normalized(game):

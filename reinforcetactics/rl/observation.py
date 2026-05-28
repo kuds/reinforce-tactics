@@ -22,11 +22,16 @@ Observation contract (1v1 only, agent-relative):
                       ("empty cell" = all-zero across these eight channels)
         channel  8    owner == self
         channel  9    owner == opp
-        channel  10   own_acted: 1.0 iff this is an own unit that has already
-                      acted this turn (``unit.has_moved``); always 0.0 for
-                      opponent units (they don't act on our turn). Lets the
-                      policy / value head see which own units are exhausted
-                      without inferring it from the action mask.
+        channel  10   own_exhausted: 1.0 iff this is an own unit with no
+                      actions left this turn (``not (can_move or
+                      can_attack)``); always 0.0 for opponent units (they
+                      don't act on our turn). Captures every way a unit
+                      spends its turn -- move, attack, seize, heal, cast --
+                      not just movement, so a unit that attacked in place
+                      reads 1.0 while a unit that moved but can still attack
+                      reads 0.0. Lets the policy / value head see which own
+                      units are spent without inferring it from the action
+                      mask.
         channel  11   unit HP fraction in [0, 1]
         channel  12   paralyzed_turns / PARALYZE_DURATION (Mage debuff;
                       remaining turns the unit cannot act, normalised
@@ -77,6 +82,9 @@ from reinforcetactics.constants import (
 
 # Canonical tile-type ordering for the one-hot encoding. Must match the
 # integer codes produced by ``TileGrid.to_numpy`` (see core/grid.py).
+# Note: ocean ("o") is not a separate entry — ``TileGrid.to_numpy`` maps it
+# onto the water ("w") code (index 1) since the two are mechanically
+# identical (both impassable). Keep these two definitions in sync.
 TILE_TYPE_ORDER = ("p", "w", "m", "f", "r", "b", "h", "t")
 NUM_TILE_TYPES = len(TILE_TYPE_ORDER)
 NUM_UNIT_TYPES = len(ALL_UNIT_TYPES)
@@ -260,7 +268,7 @@ def build_observation(
     #   [..., 0] = unit_type int (0 = empty, 1..8 = ALL_UNIT_TYPES)
     #   [..., 1] = absolute owner (0 = empty cell, else player number)
     #   [..., 2] = unit HP percentage in [0, 100]
-    #   [..., 3] = has_moved flag in {0.0, 1.0}
+    #   [..., 3] = exhausted flag in {0.0, 1.0} (not (can_move or can_attack))
     #   [..., 4] = paralyzed_turns (raw int, 0..PARALYZE_DURATION)
     #   [..., 5] = is_hasted (0.0 / 1.0)
     #   [..., 6] = defence_buff_turns (raw int, 0..SORCERER_BUFF_DURATION)
@@ -276,9 +284,9 @@ def build_observation(
     own_mask = raw_unit_owner == perspective_player
     units[..., NUM_UNIT_TYPES + 0] = own_mask.astype(np.float32)
     units[..., NUM_UNIT_TYPES + 1] = (raw_unit_owner == opp).astype(np.float32)
-    # own_acted: gated by own_mask because (a) opponent ``has_moved`` is
-    # stale on our turn (it's reset at *their* turn start) and (b) the
-    # policy only cares which of *its own* units are exhausted.
+    # own_exhausted: gated by own_mask because (a) opponent move/attack
+    # flags are stale on our turn (they're reset at *their* turn start) and
+    # (b) the policy only cares which of *its own* units are spent.
     if raw_units.shape[-1] > 3:
         units[..., NUM_UNIT_TYPES + 2] = (raw_units[..., 3] * own_mask).astype(np.float32)
     units[..., NUM_UNIT_TYPES + 3] = raw_units[..., 2].astype(np.float32) / 100.0
