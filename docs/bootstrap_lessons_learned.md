@@ -1656,3 +1656,96 @@ capacity control**.
    committed seize sequence." That points the durable fix at capture
    exploration (BC, or a denser/earlier capture curriculum) rather
    than at opponent/gate/entropy tuning.
+
+## v42 (run `20260528_212658`): removing the combat farm — right direction, same wall
+
+`v42_remove_combat_farm.yaml` zeroed the combat shaping (`damage_scale`
+0.002→0, `kill` 0.2→0) — the single-variable test the v42 entry above
+predicted. It **stalled at `beginner_random_15` again**, best WR
+**0.7125** (vs v41's 0.65 — it *crossed* the 0.70 gate once but couldn't
+sustain patience-2). Three findings:
+
+1. **It over-sparsified the early ladder.** With the dense combat reward
+   gone, `random_10`'s first eval **collapsed to 0% / ~1 action-per-turn
+   / reward −47.6** (pure draw penalty — the stage-shift end-turn
+   collapse, with no combat gradient to climb back out), then took
+   **~2.9M steps** of wild oscillation to barely clear (0.65/0.75 pair at
+   ~3.0M) — vs v41 clearing it in **150k**. v41's combat-shaped policy was
+   an elimination machine that transferred instantly; v42's
+   capture-oriented policy didn't transfer and had no fallback aggression.
+
+2. **It traded one degenerate attractor for another: Cleric-spam.** r15
+   drifted to **~74% Cleric** (W21% / C74% / K5%), HQ:0 / B:0. The
+   mechanism is the cost curve: the v39/v40 nerf made Warrior cost 300,
+   so **Cleric (200) is now the cheapest unit**, and removing combat
+   shaping removed the only reason to prefer fighters over the cheap
+   support unit → the **spam-the-cheapest-unit attractor** (the v34–v40
+   lesson) resurfaced with a *new* cheapest unit. A Cleric-heavy army
+   can't capture or eliminate reliably → draws.
+
+3. **The drift itself is untouched.** Same healthy-but-drifting PPO
+   signature (explained_variance ~0.8, approx_kl low, value_loss stable).
+   r15 peaked 0.7125 @ 3.9M then *genuinely* collapsed (0.46, 0.60, → ~0
+   for a long stretch). Capture behaviour never survived past stage 1:
+   `balanced_random` reached **HQ:11** captures (vs v41's HQ:4 — removing
+   the farm *did* diversify + capture on the easy stage), but r10 and r15
+   were both **HQ:0**.
+
+**Verdict: the combat-reward axis is exhausted.** v41 *added* combat
+shaping → Knight kill-farm, stall at r15. v42 *removed* it → Cleric
+spam, stall at r15. Both directions wall at the same stage with the same
+drift. The accumulated evidence (v15→v42) now spans **both adding and
+removing** the reward levers — all stall at r15. **Reward shaping is not
+the lever.** This lands on the v42 config's own decision-tree branch:
+"stalls at r15 with seize ~2% → reward tweaks exhausted, escalate to the
+non-reward levers."
+
+### Generalizable lesson
+
+**Removing a dense shaping term doesn't redirect behaviour toward the
+sparse goal — it just relocates the cheapest-unit attractor.** The hope
+was that killing the combat farm would push the policy toward capturing.
+Instead it pushed the policy onto whatever the *new* lowest-friction
+behaviour was (spam the now-cheapest unit, Cleric, and draw). The
+capture sequence is sparse and committed; it isn't reached by *removing*
+an incentive, only by *adding* a path to experience it (denser capture
+curriculum or BC). Corollary: **a cost-curve nerf changes which unit the
+"spam the cheapest" attractor lands on** — nerfing Warrior's price made
+Cleric the cheapest, so the attractor moved to Cleric. If you keep the
+W=300 nerf, the cheapest-unit identity (Cleric) is now its own problem.
+
+## v43a / v43b: opponent diversity ± capacity (testing the non-reward levers)
+
+Since the reward axis is spent, v43 holds reward at **v41's** setting
+(combat shaping ON — the *fast* early ladder; v42's combat-off reward
+over-sparsified r10 to ~2.9M, which would bottleneck a parallel run
+before it reaches the r15 wall) and varies only the non-reward levers,
+as a parallel A/B:
+
+- **`v43a_opponent_diversity.yaml`** = v41 + **opponent diversity** on the
+  beginner `random_{10,15,20}` cluster. Each static RandomBot is replaced
+  by a per-episode `MixedBot(random@A, random@B)` (config-only — MixedBot
+  already forwards `easy_kwargs`/`hard_kwargs` to `RandomBot(max_actions)`):
+  r10→{10,15}, r15→{10,20} (brackets the 15 it stalled on), r20→{15,20}.
+  This is the doc's **"Option C"** anti-drift lever: a *static* stochastic
+  opponent gives no in-stage gradient, so PPO drifts off any winning
+  policy; varying the opponent per episode supplies one. `net_arch`
+  unchanged `[256,256]`.
+- **`v43b_opponent_diversity_capacity.yaml`** = v43a + `net_arch`
+  `[256,256]→[512,512]` (the *only* delta vs v43a). Capacity is paired
+  with opponent diversity rather than tested alone, because the
+  "drift vs plateau" diagnostic says r15 is an attractor problem, not
+  capacity-bound — so capacity-alone is the weak experiment. The narrower
+  bet: IF diverse multi-unit composition needs more width to represent,
+  the bigger net can exploit the stability diversity provides.
+
+**Reading the parallel pair:** v43a clears → diversity alone fixes the
+drift (capacity unneeded, save ~1.5–2× compute); v43b clears but v43a
+doesn't → capacity adds real value on top of the drift fix; neither
+clears → escalate to **BC warm-start** (the only lever that has ever
+cleared r15, v33). **Caveat:** v41's reward keeps a stalled draw
+marginally net-positive (combat+potential farm ~+57/ep vs ~−47 draw
+penalty), so opponent diversity fixes the *no-in-stage-gradient* root but
+not the *profitable-draw* root; if v43a/b still draw at r15, the
+follow-up is opponent diversity **+ v42's combat-off reward** (draws
+net-negative).
