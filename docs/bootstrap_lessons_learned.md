@@ -1749,3 +1749,57 @@ penalty), so opponent diversity fixes the *no-in-stage-gradient* root but
 not the *profitable-draw* root; if v43a/b still draw at r15, the
 follow-up is opponent diversity **+ v42's combat-off reward** (draws
 net-negative).
+
+### Results (v43a `20260529_142749`, v43b `20260529_144521`)
+
+A clean, decisive A/B.
+
+| Run | Lever | Stalled at | Stages cleared | Best WR |
+|---|---|---|---|---|
+| **v43a** | opp diversity, `[256,256]` | `beginner_random_15` | **3** | **0.8375** |
+| **v43b** | opp diversity + `[512,512]` | `beginner_random_10` | **2** | 0.8375 |
+
+1. **Capacity is out.** v43b got *less* far — stalled a full stage earlier
+   (r10 vs r15). Both peaked at 0.8375, so `[512,512]` isn't incompetent; it
+   **drifts the same way and stalls wherever the drift catches it**, exactly
+   as the "not capacity-bound" diagnostic predicted. No benefit, ~1.5–2× the
+   compute, and a stage lost here. Don't use it. (Part of the stage gap is
+   run-to-run noise, but the signal — "capacity provides no benefit" — is
+   clear.)
+
+2. **Opponent diversity is the single most effective lever in the whole
+   sweep.** v43a (a) **cleared the now-*harder* mixed r10** —
+   `MixedBot(random@10, random@15)`, tougher than v41's static r10 and the
+   stage v42 nearly died on — and (b) pushed r15 to **0.8375, the highest r15
+   WR of the modern cold-start line** (v41 0.65, v42 0.71; only the
+   old-code/-reward deep config ever did better). The in-stage-gradient
+   hypothesis is validated: varying the opponent per episode keeps the policy
+   competent at a far higher level. **Keep it.**
+
+3. **It still didn't crack the *sustain*.** Despite the 0.84 ceiling, v43a
+   stalled — the policy oscillates between evals (peaks ~0.84, dips below
+   0.70) and never strings **two consecutive ≥0.70**. The drift is *reduced*
+   (higher mean, competent longer) but not *eliminated*. The ~0.20
+   eval-to-eval swing is too large for sampling noise (80-ep σ≈0.05), so it's
+   genuine residual drift — and the W/L/D columns show **it oscillates between
+   *winning* and *drawing*, not losing** (the 0.8375 eval was 67W/1L/12D; the
+   low evals are ~0W/1L/79D). It's wandering into the profitable draw, exactly
+   the second root the v43 caveat flagged.
+
+**Conclusion + next step (v44).** Opponent diversity killed the
+*no-in-stage-gradient* root; the *profitable-draw* root (v41 reward keeps a
+stalled draw net-positive) is what's left. So the natural follow-up combines
+the two levers that each kill a different root:
+
+> **v44 = v43a (opponent diversity, `[256,256]`) + draws-made-unprofitable.**
+
+The single cleanest added variable is an **HQ-income cut**
+(`headquarters_income: 150 → 100`): it shrinks the guaranteed base income a
+policy can coast on, making a stalled draw economically worse, and
+simultaneously raises the *relative* value of contested buildings/towers
+(pushes toward capture). It's left as a single-variable delta vs v43a so its
+effect is attributable. (If it under-delivers, stack v42's combat-off reward
+on top, or escalate to BC warm-start — still the only lever that has ever
+cleared r15.) Caveat carried forward from the v38/v39 lesson: don't
+over-tighten the economy, and prefer cutting HQ income over building/tower
+income (cutting the latter would *discourage* the capture we want).
