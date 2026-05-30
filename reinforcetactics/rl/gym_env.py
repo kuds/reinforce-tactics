@@ -1513,9 +1513,7 @@ class StrategyGameEnv(gym.Env):
         # Accumulate the action-space diagnostics into episode_stats so the
         # eval pipeline (which only reads the terminal info dict) can surface
         # per-stage seize-availability and peak legal-action-set size.
-        self.episode_stats["max_legal_actions"] = max(
-            self.episode_stats["max_legal_actions"], int(n_legal_actions)
-        )
+        self.episode_stats["max_legal_actions"] = max(self.episode_stats["max_legal_actions"], int(n_legal_actions))
         if seize_available:
             self.episode_stats["seize_available_steps"] += 1
 
