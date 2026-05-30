@@ -1803,3 +1803,47 @@ on top, or escalate to BC warm-start — still the only lever that has ever
 cleared r15.) Caveat carried forward from the v38/v39 lesson: don't
 over-tighten the economy, and prefer cutting HQ income over building/tower
 income (cutting the latter would *discourage* the capture we want).
+
+### Results: v44 + v45 (runs `20260530_034840` = v44, `20260530_034656` = v45)
+
+Both off the v43a base (opponent diversity, `[256,256]`); each a single-variable
+delta. **Neither improved on v43a, and v44 regressed.**
+
+| Run | Single delta vs v43a | Stalled at | Cleared | Best WR |
+|---|---|---|---|---|
+| v43a (baseline) | — | `random_15` | 3 | **0.8375** |
+| **v44** | `headquarters_income 150→100` | **`random_10`** | **2** | 0.65 |
+| **v45** | r15 `ent_coef end 0.03→0.01` | `random_15` | 3 | 0.7375 |
+
+**v44 (HQ-income cut) backfired — the v38/v39 economy-too-tight failure,
+exactly as the caveat above warned.** It stalled a stage *earlier* (r10,
+never reached r15). The agent's win path is mass-elimination, so a leaner
+economy → smaller army → it can't close r10 against the mixed opponent. The
+CSV shows real **losses** at the dips (0W/18L/62D, 11W/16L/53D), not just
+draws — the symmetric income cut hurt the agent's economy-dependent strategy
+*more* than the random opponent's gold-independent play. The "less gold →
+more capture" hope did not materialize; less income just made the early game
+weaker. **HQ-income cut is out.**
+
+**v45 (entropy floor 0.01) was a wash.** It reached r15 like v43a but stalled
+the same way (peak 0.7375 vs v43a's 0.8375 — within CUDA-noise range, so not
+attributable to the change). Committing harder late did **not** stop the
+win↔draw oscillation. Consistent with the doc's "lower entropy reduces
+exploration" — possibly trading ceiling for commitment without gaining
+stability.
+
+**The converging signal (v43a/b, v44, v45).** Which stage it stalls on (r10
+vs r15) is partly noise — the policy is *marginal* right at the 0.70 gate.
+Opponent diversity genuinely raised the ceiling (0.84 achievable), but **every
+cheap config lever on top of it has now failed: capacity (v43b, worse),
+economy (v44, worse), entropy (v45, wash).** v43a remains the high-water mark.
+That's strong evidence that reward/economy/entropy/capacity tweaks won't make
+this policy *reliably* close out a win — the missing piece is a robust,
+repeatable **capture** win instead of fragile mass-elimination, which those
+tweaks keep failing to teach.
+
+**Next:** v46 (`unit_diff 0.3→0.0`, the last untested cheap lever — stop paying
+for mass) is queued to close out the cheap-lever sweep, but expectations are
+modest. The indicated escalation is **BC warm-start from a capture-using
+demonstrator** (keeping opponent diversity) — the only lever that has ever
+cleared r15 (v33), and the one that can teach the capture win directly.
