@@ -476,7 +476,12 @@ class StrategyGameEnv(gym.Env):
         # Action space configuration
         self.action_space_type = action_space_type
         self.max_flat_actions = max_flat_actions
-        self._current_actions: list[dict[str, Any]] = []  # Legal action list for flat_discrete mode
+        # Legal action list for flat_discrete mode. Each entry is a 6-element
+        # int array [action_type, unit_type, from_x, from_y, to_x, to_y] --
+        # the same layout as a MultiDiscrete action -- built by
+        # ``_build_flat_actions`` (not a dict, despite the per-action dict
+        # used elsewhere).
+        self._current_actions: list[np.ndarray] = []
 
         # Grid dimensions
         self.grid_height = self.game_state.grid.height
