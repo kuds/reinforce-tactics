@@ -189,6 +189,17 @@ class PeriodicEvalCallback(BaseCallback):
         self.logger.record("eval/mean_reward", m["avg_reward"])
         self.logger.record("eval/mean_ep_length", m["avg_length"])
         self.logger.record("eval/mean_ep_turns", m["avg_turns"])
+        # Action-space diagnostics. ``seize_available_rate`` is the fraction
+        # of decision points where a capture was legal -- a low value means
+        # the policy rarely even reaches a capturable tile (navigation
+        # bottleneck) vs. reaches one but declines (reward/exploration).
+        # ``max_legal_actions`` guards the flat_discrete truncation: if it
+        # approaches max_flat_actions, end_turn/seize were being crowded out
+        # before the truncation fix and the cap should be raised.
+        if "seize_available_rate" in m:
+            self.logger.record("eval/seize_available_rate", m["seize_available_rate"])
+        if "max_legal_actions" in m:
+            self.logger.record("eval/max_legal_actions", m["max_legal_actions"])
 
         if self.verbose:
             print(
@@ -197,7 +208,9 @@ class PeriodicEvalCallback(BaseCallback):
                 f"reward={m['avg_reward']:+8.1f} (+/-{m['std_reward']:5.1f})  "
                 f"len={m['avg_length']:5.1f}  "
                 f"turns={m['avg_turns']:5.1f}  "
-                f"W/L/D={m['wins']}/{m['losses']}/{m['draws']}"
+                f"W/L/D={m['wins']}/{m['losses']}/{m['draws']}  "
+                f"seize_avail={m.get('seize_available_rate', 0.0) * 100:4.1f}%  "
+                f"max_legal={m.get('max_legal_actions', 0)}"
             )
 
         # Save best by win rate, with avg_reward as a tiebreaker so we don't

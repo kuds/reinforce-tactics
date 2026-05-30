@@ -604,6 +604,17 @@ class StrategyGameEnv(gym.Env):
             "damage_taken": 0.0,
             "structures_lost_neutral": 0,
             "structures_lost_owned": 0,
+            # Action-space diagnostics (see step()):
+            #   ``seize_available_steps`` counts steps where a seize action
+            #     was legal -- divided by episode length downstream it gives
+            #     the "could the agent have captured" rate, which separates
+            #     "never reaches a capturable tile" (navigation) from
+            #     "reaches one but doesn't seize" (reward/exploration).
+            #   ``max_legal_actions`` is the peak legal-action-set size seen
+            #     this episode -- a guardrail for the flat_discrete
+            #     max_flat_actions truncation and a proxy for army bloat.
+            "seize_available_steps": 0,
+            "max_legal_actions": 0,
         }
 
     def _get_action_space_size(self) -> int:
@@ -920,15 +931,34 @@ class StrategyGameEnv(gym.Env):
         # End turn is always valid (last entry)
         end_turn_key = (5, 0, 0, 0, 0, 0)
         if end_turn_key not in seen:
+            seen.add(end_turn_key)
             actions.append(np.array(end_turn_key, dtype=np.int32))
 
         if len(actions) > self.max_flat_actions:
             logger.warning(
-                "Legal actions (%d) exceed max_flat_actions (%d), truncating. Consider increasing max_flat_actions.",
+                "Legal actions (%d) exceed max_flat_actions (%d); truncating "
+                "while preserving seize and end_turn. Consider increasing "
+                "max_flat_actions.",
                 len(actions),
                 self.max_flat_actions,
             )
-            actions = actions[: self.max_flat_actions]
+            # Naive head-truncation would silently drop the tail of the list
+            # -- which is exactly end_turn (appended last) and seize
+            # (action_type 3, built after create/move/attack). Losing
+            # end_turn can strand the agent for the rest of the game-turn
+            # when ``max_actions_per_turn`` is disabled; losing seize drops
+            # the rare, high-value capture action. So always keep those two
+            # action types and fill the remaining budget with the rest in
+            # their original order.
+            protected = [a for a in actions if int(a[0]) in (3, 5)]
+            others = [a for a in actions if int(a[0]) not in (3, 5)]
+            budget = max(0, self.max_flat_actions - len(protected))
+            actions = others[:budget] + protected
+            # Pathological fallback: if the protected set alone exceeds the
+            # cap, hard-truncate but keep end_turn (last protected entry) by
+            # trimming from the front of the seize block.
+            if len(actions) > self.max_flat_actions:
+                actions = actions[-self.max_flat_actions :]
 
         self._current_actions = actions
 
@@ -1465,13 +1495,29 @@ class StrategyGameEnv(gym.Env):
         # policy at this step. For flat_discrete this is the number of bits
         # set in the mask; for multi_discrete it's the size of the legal
         # action set returned by the game state.
+        # ``seize_available`` records whether a capture action was legal at
+        # this decision point, computed from the same legal-action source as
+        # ``n_legal_actions`` so the two stay consistent. Aggregated per
+        # episode into ``seize_available_steps`` for the "can-vs-won't
+        # capture" diagnostic.
         if self.action_space_type == "flat_discrete":
             n_legal_actions = len(self._current_actions)
+            seize_available = any(int(a[0]) == 3 for a in self._current_actions)
         else:
             legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
             # get_legal_actions returns lists of action dicts plus a boolean
             # "end_turn" flag — count list lengths, then +1 for end_turn.
             n_legal_actions = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
+            seize_available = bool(legal_actions.get("seize"))
+
+        # Accumulate the action-space diagnostics into episode_stats so the
+        # eval pipeline (which only reads the terminal info dict) can surface
+        # per-stage seize-availability and peak legal-action-set size.
+        self.episode_stats["max_legal_actions"] = max(
+            self.episode_stats["max_legal_actions"], int(n_legal_actions)
+        )
+        if seize_available:
+            self.episode_stats["seize_available_steps"] += 1
 
         # Get observation
         obs = self._get_obs()
@@ -1494,6 +1540,7 @@ class StrategyGameEnv(gym.Env):
             "unit_type": action_dict.get("unit_type") if action_dict["action_type"] == 0 and is_valid else None,
             "reward_breakdown": breakdown,
             "n_legal_actions": int(n_legal_actions),
+            "seize_available": bool(seize_available),
         }
 
         return obs, reward, terminated, truncated, info

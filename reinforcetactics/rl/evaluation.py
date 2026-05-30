@@ -123,6 +123,12 @@ def evaluate_model(
         every step of every episode) and ``reward_components`` (dict
         keyed by REWARD_COMPONENTS, summed analogously).
 
+        Always includes ``seize_available_rate`` (fraction of decision
+        points across all eval steps where a seize action was legal) and
+        ``max_legal_actions`` (peak legal-action-set size over the eval) --
+        action-space diagnostics for the capture bottleneck and the
+        flat_discrete truncation guardrail respectively.
+
         When ``trace_dir`` is set, episodes whose ``info["end_reason"]``
         is in ``trace_end_reasons`` are dumped to JSON Lines at
         ``<trace_dir>/episode_<ep_idx>_<end_reason>.jsonl`` -- one line
@@ -156,6 +162,15 @@ def evaluate_model(
     units_built = {ut: 0 for ut in UNIT_TYPE_LETTERS}
     combat_stats = {k: 0.0 for k in COMBAT_STAT_KEYS}
     captures_by_type = {k: 0 for k in CAPTURE_STRUCTURE_TYPES}
+
+    # Action-space diagnostics aggregated from ``info["episode_stats"]``.
+    # ``seize_available_steps`` / total steps -> the fraction of decision
+    # points where a capture was legal (the "can-vs-won't seize" signal);
+    # ``max_legal_actions`` tracks the peak legal-action-set size, a
+    # guardrail for flat_discrete truncation and a proxy for army bloat.
+    seize_available_steps_total = 0
+    steps_total = 0
+    max_legal_actions = 0
 
     if track_breakdown:
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
@@ -311,6 +326,13 @@ def evaluate_model(
             if val is not None:
                 captures_by_type[key] += int(val)
 
+        # Action-space diagnostics. ``ep_len`` is the per-episode step count
+        # (one env step per agent action); older checkpoints that don't
+        # populate the stats just contribute zeros.
+        seize_available_steps_total += int(episode_stats.get("seize_available_steps", 0) or 0)
+        steps_total += ep_len
+        max_legal_actions = max(max_legal_actions, int(episode_stats.get("max_legal_actions", 0) or 0))
+
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
     turns_arr = np.array(turns)
@@ -335,6 +357,8 @@ def evaluate_model(
         "units_built": units_built,
         "combat_stats": combat_stats,
         "captures_by_type": captures_by_type,
+        "seize_available_rate": (seize_available_steps_total / steps_total) if steps_total > 0 else 0.0,
+        "max_legal_actions": int(max_legal_actions),
     }
     if track_breakdown:
         result["action_counts"] = action_counts
