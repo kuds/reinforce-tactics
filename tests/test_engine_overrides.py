@@ -204,3 +204,73 @@ def test_gym_env_threads_overrides_into_game_state():
     env.reset(seed=0)
     assert env.game_state.starting_gold == 250
     assert env.game_state.unit_data["K"]["defence"] == 5
+
+
+# --- structure-health overrides (capture-difficulty lever) ---------------
+
+
+def _struct_map():
+    """3x3 map with one HQ (p1), one building (p1), one neutral tower."""
+    return np.array(
+        [
+            ["h_1", "b_1", "t"],
+            ["p", "p", "p"],
+            ["p", "p", "p"],
+        ],
+        dtype=object,
+    )
+
+
+def _find(gs, code):
+    return [t for row in gs.grid.tiles for t in row if t.type == code]
+
+
+def test_structure_health_default_unchanged():
+    gs = GameState(_struct_map(), num_players=2)
+    assert _find(gs, "h")[0].max_health == C.HEADQUARTERS_MAX_HEALTH
+    assert _find(gs, "b")[0].max_health == C.BUILDING_MAX_HEALTH
+    assert _find(gs, "t")[0].max_health == C.TOWER_MAX_HEALTH
+
+
+def test_structure_health_override_applied():
+    gs = GameState(
+        _struct_map(),
+        num_players=2,
+        engine_overrides={"headquarters_health": 30, "tower_health": 20},
+    )
+    hq, twr, bld = _find(gs, "h")[0], _find(gs, "t")[0], _find(gs, "b")[0]
+    assert (hq.health, hq.max_health) == (30, 30)
+    assert (twr.health, twr.max_health) == (20, 20)
+    # absent key keeps the constants.py default
+    assert bld.max_health == C.BUILDING_MAX_HEALTH
+
+
+@pytest.mark.parametrize("bad", [{"headquarters_health": 0}, {"tower_health": -5}, {"building_health": 0}])
+def test_structure_health_rejects_non_positive(bad):
+    with pytest.raises(ValueError):
+        GameState(_struct_map(), num_players=2, engine_overrides=bad)
+
+
+def test_structure_health_override_changes_capture_turns():
+    # HQ@30 -> a Warrior (15 HP) captures in 2 seizes vs 4 at the default 50.
+    gs = GameState(_struct_map(), num_players=2, engine_overrides={"headquarters_health": 30})
+    hq = _find(gs, "h")[0]
+    hq.player = 2
+    u = Unit("W", hq.x, hq.y, 1)
+    seizes = 0
+    while seizes <= 9:
+        result = GameMechanics.seize_structure(u, hq)
+        seizes += 1
+        if result["captured"]:
+            break
+    assert seizes == 2
+
+
+def test_structure_health_regen_scales_off_override():
+    # Regen is 50% of max_health; with HQ@30 a regen tick adds int(30*0.5)=15.
+    gs = GameState(_struct_map(), num_players=2, engine_overrides={"headquarters_health": 30})
+    hq = _find(gs, "h")[0]
+    hq.health = 5
+    hq.regenerating = True
+    GameMechanics.regenerate_structures(gs.grid, [])
+    assert hq.health == 20  # 5 + int(30 * 0.5)

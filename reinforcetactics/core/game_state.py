@@ -96,6 +96,50 @@ class GameState:
             raise ValueError(f"engine_overrides.damage_model must be 'flat' or 'hp_scaled', got {model!r}")
         return model
 
+    # YAML override key -> structure tile-type code. Lets a balance sweep tune
+    # capture difficulty (e.g. ``headquarters_health: 30`` halves a Warrior's
+    # HQ-capture time) from the config surface instead of editing constants.py.
+    _STRUCTURE_HEALTH_KEYS = {
+        "tower_health": "t",
+        "building_health": "b",
+        "headquarters_health": "h",
+    }
+
+    @classmethod
+    def _resolve_structure_health(cls, overrides: Dict[str, Any]) -> Dict[str, int]:
+        """Resolve per-structure max-HP overrides into ``{tile_code: hp}``.
+
+        Only keys present in ``overrides`` appear in the result; absent
+        structures keep their ``constants.py`` defaults. Non-positive values
+        fail loud (a structure with <=0 HP would be captured on the first
+        seize / be nonsensical for regen).
+        """
+        resolved: Dict[str, int] = {}
+        for ov_key, code in cls._STRUCTURE_HEALTH_KEYS.items():
+            if ov_key in (overrides or {}):
+                val = int(overrides[ov_key])
+                if val <= 0:
+                    raise ValueError(f"engine_overrides.{ov_key} must be a positive int, got {val}")
+                resolved[code] = val
+        return resolved
+
+    def _apply_structure_health_overrides(self) -> None:
+        """Overlay resolved structure-HP overrides onto the freshly-built grid.
+
+        ``TileGrid`` constructs structure tiles at the ``constants.py`` HP, so
+        this runs right after grid creation while every structure is at full
+        health -- setting both ``max_health`` and ``health`` keeps the tile
+        consistent (regen scales off ``max_health``; capture resets to it).
+        """
+        if not self.structure_health:
+            return
+        for row in self.grid.tiles:
+            for tile in row:
+                override_hp = self.structure_health.get(tile.type)
+                if override_hp is not None and tile.is_capturable():
+                    tile.max_health = override_hp
+                    tile.health = override_hp
+
     def __init__(
         self,
         map_data,
@@ -123,6 +167,10 @@ class GameState:
                       "headquarters_income": int,
                       "building_income": int,
                       "tower_income": int,
+                      "tower_health": int,         # structure max-HP overrides
+                      "building_health": int,      #   (capture-difficulty lever)
+                      "headquarters_health": int,
+                      "damage_model": "flat" | "hp_scaled",  # combat model
                       "unit_data": {CODE: {field: value}},  # sparse deltas
                     }
 
@@ -155,6 +203,12 @@ class GameState:
         # multiplied by the attacker's current HP fraction (decisive combat;
         # consistent with seize, which is already HP-scaled).
         self.damage_model: str = self._resolve_damage_model(self.engine_overrides)
+        # Per-structure max-HP overrides (capture-difficulty lever). Resolved
+        # from engine_overrides and overlaid onto the grid built above; absent
+        # keys keep constants.py defaults. Snapshotted into config.json via the
+        # verbatim engine_overrides log, same as damage_model / economy.
+        self.structure_health: Dict[str, int] = self._resolve_structure_health(self.engine_overrides)
+        self._apply_structure_health_overrides()
         self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: Optional[int] = None
