@@ -433,6 +433,8 @@ def _write_stage_config(
     output_dir: Path,
     promoted: bool,
     best_win_rate: float,
+    best_checkpoint_timestep: Optional[int] = None,
+    best_checkpoint_stage_steps: Optional[int] = None,
     warm_start_info: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write ``stage_dir / config.json`` describing the stage's resolved settings.
@@ -483,6 +485,13 @@ def _write_stage_config(
             "eval_freq": cfg.eval.eval_freq,
             "promoted": promoted,
             "best_win_rate": best_win_rate,
+            # Cumulative timestep at which best_model.zip was saved, and the
+            # same relative to the stage start. A peak at ~0 stage steps means
+            # the handed-forward checkpoint got little stage-specific training
+            # (skip-ahead); read alongside the first-eval seize_available_rate
+            # / captures_by_type to tell a robust carry-in from a lucky one.
+            "best_checkpoint_timestep": best_checkpoint_timestep,
+            "best_checkpoint_stage_steps": best_checkpoint_stage_steps,
             "output_dir": str(output_dir),
             "curriculum_hash": _curriculum_hash(cfg),
             "stage_count": len(cfg.curriculum.stages),
@@ -793,12 +802,26 @@ def run_curriculum(
             f"{ent_note}{purchase_note}{reward_note} ==="
         )
 
+        # Cumulative timestep entering the stage. ``num_timesteps`` is global
+        # (reset_num_timesteps=False), so subtracting this from the best
+        # checkpoint's timestep gives stage-relative "how much did this stage
+        # actually train before its peak" -- the skip-ahead diagnostic.
+        stage_start_timesteps = int(model.num_timesteps)
+
         model.learn(
             total_timesteps=stage.max_timesteps,
             callback=callbacks,
             reset_num_timesteps=False,
             progress_bar=progress_bar,
         )
+
+        # How far into the stage the saved peak was. ``best_timestep`` is
+        # cumulative; ``best_stage_steps`` is stage-relative (None if no best
+        # was ever saved this stage). A peak at ~0 stage-relative steps means
+        # the carry-in policy was already at the bar and the stage did little
+        # of its own learning before promoting (skip-ahead).
+        best_timestep = eval_cb.best_timestep if eval_cb.best_timestep >= 0 else None
+        best_stage_steps = (best_timestep - stage_start_timesteps) if best_timestep is not None else None
 
         stage_final = stage_dir / "stage_final.zip"
         model.save(str(stage_final))
@@ -821,6 +844,8 @@ def run_curriculum(
                 output_dir=output_dir,
                 promoted=promote_cb.promoted,
                 best_win_rate=eval_cb.best_win_rate,
+                best_checkpoint_timestep=best_timestep,
+                best_checkpoint_stage_steps=best_stage_steps,
                 warm_start_info=warm_start_info,
             )
         except Exception:  # noqa: BLE001
@@ -850,6 +875,8 @@ def run_curriculum(
                 "opponent": stage.opponent,
                 "promoted": promote_cb.promoted,
                 "best_win_rate": eval_cb.best_win_rate,
+                "best_checkpoint_timestep": best_timestep,
+                "best_checkpoint_stage_steps": best_stage_steps,
                 "results": list(eval_cb.results),
                 "stage_final_path": str(stage_final),
             }
@@ -929,7 +956,17 @@ def run_curriculum(
         if cfg.curriculum.restore_best_checkpoint_between_stages:
             best_ckpt = stage_dir / "best_model.zip"
             if best_ckpt.exists():
-                print(f"  restoring best checkpoint of '{stage.name}' (WR={eval_cb.best_win_rate:.1%}) before next stage")
+                # Surface how far into the stage the peak was: a peak at a few
+                # k stage-steps is a skip-ahead carry-in (little stage-specific
+                # training) -- a flag to sanity-check the next stage's first
+                # eval rather than trust the transfer.
+                if best_stage_steps is not None:
+                    when = f", peak @ {best_stage_steps:,}/{stage.max_timesteps:,} stage steps"
+                else:
+                    when = ""
+                print(
+                    f"  restoring best checkpoint of '{stage.name}' (WR={eval_cb.best_win_rate:.1%}{when}) before next stage"
+                )
                 model.set_parameters(str(best_ckpt), exact_match=True)
             else:
                 print(f"  [warn] no best_model.zip for '{stage.name}'; carrying end-of-stage policy forward")

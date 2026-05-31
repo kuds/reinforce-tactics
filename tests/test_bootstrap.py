@@ -70,6 +70,70 @@ def _append_eval(eval_cb: PeriodicEvalCallback, win_rate: float) -> None:
     eval_cb.results.append({"win_rate": win_rate, "avg_reward": 0.0})
 
 
+class _BestStubModel:
+    """Minimal model stub for exercising PeriodicEvalCallback's best-save."""
+
+    def __init__(self) -> None:
+        self.num_timesteps = 0
+        self.logger = _StubLogger()
+        self.saved: List[str] = []
+
+    def save(self, path: str) -> None:
+        self.saved.append(path)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("fake", encoding="utf-8")
+
+
+class TestBestCheckpointTimestep:
+    """``PeriodicEvalCallback.best_timestep`` records the cumulative timestep
+    of the highest-WR eval -- the basis for the curriculum runner's
+    'how far into the stage was the peak' (skip-ahead) diagnostic."""
+
+    def test_best_timestep_tracks_peak_not_last(self, tmp_path, monkeypatch):
+        # Rising-then-falling WR so the peak is the MIDDLE eval (@200), not
+        # the last -- a drifted-after-peak stage, the case the field exists for.
+        wr_program = iter([0.30, 0.90, 0.50])
+
+        def fake_eval(model, env, **kwargs):
+            wr = next(wr_program)
+            return {
+                "win_rate": wr,
+                "avg_reward": wr,
+                "avg_length": 1.0,
+                "avg_turns": 1.0,
+                "std_reward": 0.0,
+                "wins": 0,
+                "losses": 0,
+                "draws": 0,
+                "seize_available_rate": 0.0,
+                "max_legal_actions": 0,
+            }
+
+        monkeypatch.setattr("reinforcetactics.rl.callbacks.evaluate_model", fake_eval)
+
+        cb = PeriodicEvalCallback(
+            eval_env=object(),
+            eval_freq=100,
+            n_eval_episodes=1,
+            save_dir=tmp_path,
+            verbose=0,
+        )
+        cb.model = _BestStubModel()
+
+        for ts in (100, 200, 300):
+            # SB3's BaseCallback.on_step syncs ``self.num_timesteps`` from the
+            # model before invoking the user callback; mirror that here since
+            # we call ``_do_eval`` directly.
+            cb.num_timesteps = ts
+            cb.model.num_timesteps = ts
+            cb._last_eval_block = ts // 100
+            cb._do_eval()
+
+        assert cb.best_win_rate == pytest.approx(0.90)
+        assert cb.best_timestep == 200  # the peak eval's cumulative timestep
+        assert (tmp_path / "best_model.zip").exists()
+
+
 class TestPromotionCallback:
     def test_validates_threshold_and_patience(self):
         eval_cb = _make_eval_stub()

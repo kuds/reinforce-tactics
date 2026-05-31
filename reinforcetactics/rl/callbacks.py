@@ -150,6 +150,13 @@ class PeriodicEvalCallback(BaseCallback):
         self.results: List[dict] = []
         self.best_win_rate: float = -1.0
         self._best_reward: float = float("-inf")
+        # Cumulative ``num_timesteps`` at which the current best_model.zip was
+        # saved. -1 until a best is recorded. Exposed so the curriculum runner
+        # can report how far *into the stage* the saved peak actually was --
+        # a peak at the stage's first eval means the carry-in policy was
+        # already strong and the stage did ~0 stage-specific learning (the
+        # "skip-ahead" handoff failure documented in bootstrap_lessons_learned).
+        self.best_timestep: int = -1
         self._last_eval_block: int = -1
 
     def _on_step(self) -> bool:
@@ -221,6 +228,7 @@ class PeriodicEvalCallback(BaseCallback):
             if score > best:
                 self.best_win_rate = m["win_rate"]
                 self._best_reward = m["avg_reward"]
+                self.best_timestep = int(self.num_timesteps)
                 self.model.save(str(self.save_dir / "best_model.zip"))
 
 
