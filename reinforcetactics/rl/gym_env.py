@@ -433,7 +433,15 @@ class StrategyGameEnv(gym.Env):
             # Action rewards
             "create_unit": 0.5,
             "move": 0.0,
-            "damage_scale": 0.05,  # reward per damage point
+            "damage_scale": 0.05,  # reward per damage point dealt
+            # Penalty per damage point *taken* during the opponent's turn
+            # (negative magnitude). Makes combat shaping net-zero-sum: a
+            # mutual trade nets ~0 and only decisive combat (dealing more
+            # than you take) pays. Counters the kill/damage-farm draw
+            # attractor where two armies trade blows to the max-turns clock
+            # while collecting only the dealt-damage half of the exchange.
+            # Default 0.0 leaves legacy reward shapes unchanged.
+            "damage_taken_scale": 0.0,
             "kill": 5.0,
             "seize_progress": 5.0,
             "capture": 200.0,
@@ -1252,6 +1260,12 @@ class StrategyGameEnv(gym.Env):
                         post_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
                         damage_taken = sum(max(0, hp - post_hp.get(uid, 0)) for uid, hp in pre_hp.items())
                         self.episode_stats["damage_taken"] += float(damage_taken)
+                        # Symmetric-combat penalty: charge for damage taken so
+                        # mutual trading nets ~0 and only decisive combat pays
+                        # (see ``damage_taken_scale`` in the default config).
+                        # Attributed to the end_turn step, mirroring how the
+                        # opponent-capture penalties below are attributed.
+                        reward += damage_taken * rc.get("damage_taken_scale", 0.0)
                         # Tiered opponent-capture penalty. ``neutral_lost``
                         # fires when the opponent seized an unowned tile
                         # (we lost a race); ``owned_lost`` fires when the
