@@ -292,7 +292,21 @@ class GameMechanics:
         return buffable
 
     @staticmethod
-    def _calculate_counter_damage(unit, target_x, target_y, grid):
+    def _hp_damage_scale(unit, damage_model):
+        """Multiplier applied to a unit's outgoing damage under ``damage_model``.
+
+        ``"flat"`` (default/legacy) returns 1.0 -- damage is HP-independent.
+        ``"hp_scaled"`` returns the unit's current HP fraction so a wounded
+        unit deals proportionally less (the engine-side analog of seize,
+        which already scales with ``unit.health``). Guards against a zero /
+        missing ``max_health`` by falling back to 1.0.
+        """
+        if damage_model == "hp_scaled" and getattr(unit, "max_health", 0):
+            return unit.health / unit.max_health
+        return 1.0
+
+    @staticmethod
+    def _calculate_counter_damage(unit, target_x, target_y, grid, damage_model="flat"):
         """
         Calculate counter-attack damage for a unit.
 
@@ -301,6 +315,11 @@ class GameMechanics:
             target_x: X coordinate of the target
             target_y: Y coordinate of the target
             grid: TileGrid instance (optional, for checking mountain tiles)
+            damage_model: "flat" or "hp_scaled" (see ``attack_unit``). Under
+                "hp_scaled" the counter is scaled by the counter-attacker's
+                HP fraction -- and because counters are computed *after* the
+                unit has taken the incoming hit, a freshly-wounded defender
+                counters weaker, which is what makes focus-fire pay off.
 
         Returns:
             Counter-attack damage as integer
@@ -310,10 +329,12 @@ class GameMechanics:
             tile = grid.get_tile(unit.x, unit.y)
             on_mountain = tile.type == "m"
 
-        return int(unit.get_attack_damage(target_x, target_y, on_mountain) * COUNTER_ATTACK_MULTIPLIER)
+        base = unit.get_attack_damage(target_x, target_y, on_mountain) * COUNTER_ATTACK_MULTIPLIER
+        base = base * GameMechanics._hp_damage_scale(unit, damage_model)
+        return int(base)
 
     @staticmethod
-    def attack_unit(attacker, target, grid=None, units=None):
+    def attack_unit(attacker, target, grid=None, units=None, damage_model="flat"):
         """
         Execute an attack from attacker to target.
 
@@ -322,6 +343,9 @@ class GameMechanics:
             target: The target unit
             grid: TileGrid instance (optional, for checking mountain tiles)
             units: List of all units (optional, for flanking checks)
+            damage_model: "flat" (HP-independent, legacy) or "hp_scaled"
+                (outgoing damage scaled by the attacker's current HP
+                fraction). Applies symmetrically to the counter-attack.
 
         Returns:
             dict with 'attacker_alive', 'target_alive', 'damage', 'counter_damage',
@@ -333,8 +357,13 @@ class GameMechanics:
             attacker_tile = grid.get_tile(attacker.x, attacker.y)
             attacker_on_mountain = attacker_tile.type == "m"
 
-        # Calculate base attack damage
+        # Calculate base attack damage. Under "hp_scaled" the base is reduced
+        # by the attacker's current HP fraction *before* ability bonuses and
+        # defence reduction, so a wounded unit hits proportionally weaker
+        # (makes focus-fire decisive and discourages the even-attrition
+        # stalemate flat damage produces). "flat" scales by 1.0 (legacy).
         base_attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
+        base_attack_damage = base_attack_damage * GameMechanics._hp_damage_scale(attacker, damage_model)
 
         # Apply special ability bonuses
         charge_applied = False
@@ -396,7 +425,9 @@ class GameMechanics:
 
             if can_counter:
                 # Calculate base counter damage
-                base_counter_damage = GameMechanics._calculate_counter_damage(target, attacker.x, attacker.y, grid)
+                base_counter_damage = GameMechanics._calculate_counter_damage(
+                    target, attacker.x, attacker.y, grid, damage_model=damage_model
+                )
 
                 # Apply attack buff to counter-attacker (target)
                 if target.has_attack_buff():

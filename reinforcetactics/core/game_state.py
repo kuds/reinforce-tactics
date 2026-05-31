@@ -82,6 +82,20 @@ class GameState:
                 unit_data[code][field] = value
         return unit_data, income_rates, starting_gold
 
+    @staticmethod
+    def _resolve_damage_model(overrides: Dict[str, Any]) -> str:
+        """Resolve the combat damage model from the engine-override overlay.
+
+        ``"flat"`` (default) reproduces legacy HP-independent damage.
+        ``"hp_scaled"`` multiplies outgoing damage by the attacker's current
+        HP fraction. An unknown value fails loud rather than silently
+        training on an unintended combat model.
+        """
+        model = (overrides or {}).get("damage_model", "flat")
+        if model not in ("flat", "hp_scaled"):
+            raise ValueError(f"engine_overrides.damage_model must be 'flat' or 'hp_scaled', got {model!r}")
+        return model
+
     def __init__(
         self,
         map_data,
@@ -135,6 +149,12 @@ class GameState:
             self.income_rates,
             self.starting_gold,
         ) = self._resolve_engine_overrides(self.engine_overrides)
+        # Combat damage model (engine-side, config-surfaced via engine_overrides
+        # so it's snapshotted into config.json like the economy). "flat"
+        # (default, legacy) = HP-independent damage; "hp_scaled" = damage
+        # multiplied by the attacker's current HP fraction (decisive combat;
+        # consistent with seize, which is already HP-scaled).
+        self.damage_model: str = self._resolve_damage_model(self.engine_overrides)
         self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: Optional[int] = None
@@ -670,7 +690,7 @@ class GameState:
                 "defence_buff": False,
             }
 
-        result = self.mechanics.attack_unit(attacker, target, self.grid, self.units)
+        result = self.mechanics.attack_unit(attacker, target, self.grid, self.units, damage_model=self.damage_model)
 
         # Record action. The extra fields (attacker_killed, counter_damage,
         # *_hp_after, evade, *_bonus) are what makes the replay
