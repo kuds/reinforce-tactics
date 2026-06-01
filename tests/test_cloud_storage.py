@@ -81,6 +81,16 @@ class TestResolveOutputBase:
         env = {"AIP_MODEL_DIR": "gs://b/jobs/run1/model"}
         assert resolve_output_base(env) == "gs://b/jobs/run1"
 
+    def test_model_dir_at_bucket_root(self):
+        # baseOutputDirectory = bucket root -> AIP_MODEL_DIR = gs://b/model
+        assert resolve_output_base({"AIP_MODEL_DIR": "gs://b/model"}) == "gs://b"
+
+    def test_model_dir_trailing_slash_not_corrupted(self):
+        # A stray trailing slash must not strip part of the gs:// scheme
+        # (the old rsplit approach turned 'gs://b/' into 'gs:/').
+        assert resolve_output_base({"AIP_MODEL_DIR": "gs://b/"}) == "gs://b"
+        assert resolve_output_base({"AIP_MODEL_DIR": "gs://b/jobs/run1/model/"}) == "gs://b/jobs/run1"
+
     def test_none_when_unset(self):
         assert resolve_output_base({}) is None
 
@@ -187,6 +197,30 @@ class TestUploadTree:
     def test_invalid_dest_is_noop(self, tmp_path):
         (tmp_path / "f.txt").write_text("x")
         assert upload_tree(str(tmp_path), "not-gcs", client=_FakeClient()) == 0
+
+
+class TestManifestSkip:
+    def test_unchanged_files_skipped_across_syncs(self, tmp_path):
+        (tmp_path / "models").mkdir()
+        f = tmp_path / "models" / "a.zip"
+        f.write_text("v1")
+        manifest = {}
+
+        first = sync_directories("gs://b/run", root=str(tmp_path), client=_FakeClient(), manifest=manifest)
+        assert first == {"models": 1}
+
+        # Nothing changed → the second pass uploads nothing.
+        client2 = _FakeClient()
+        second = sync_directories("gs://b/run", root=str(tmp_path), client=client2, manifest=manifest)
+        assert second == {}
+        assert client2.uploads == []
+
+        # Changing the file (different size) → re-uploaded.
+        f.write_text("v2-much-larger")
+        client3 = _FakeClient()
+        third = sync_directories("gs://b/run", root=str(tmp_path), client=client3, manifest=manifest)
+        assert third == {"models": 1}
+        assert len(client3.uploads) == 1
 
 
 class TestIsAvailable:

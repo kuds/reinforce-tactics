@@ -52,8 +52,9 @@ if ! gcloud artifacts repositories describe "${AR_REPO}" \
     --description="Reinforce Tactics training images"
 fi
 
-# Build remotely and push. Cloud Build reads .dockerignore for the build context
-# and .gcloudignore for what to upload.
+# Build remotely and push. `gcloud builds submit` uploads the source honoring
+# .gcloudignore (falling back to .gitignore when absent); the docker build step
+# then applies .dockerignore when COPYing into the image.
 gcloud builds submit "${REPO_ROOT}" \
   --tag "${IMAGE_URI}" \
   --project="${PROJECT_ID}" \

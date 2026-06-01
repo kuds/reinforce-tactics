@@ -51,10 +51,13 @@ def _default_command() -> List[str]:
     return ["python3", "main.py", "--mode", "train"]
 
 
-def _sync(base_uri: Optional[str], credentials_file: Optional[str], lock: threading.Lock) -> None:
-    """Run one sync pass under ``lock`` so periodic and final syncs don't overlap."""
+def _sync(base_uri: Optional[str], credentials_file: Optional[str], lock: threading.Lock, manifest: dict) -> None:
+    """Run one sync pass under ``lock`` so periodic and final syncs don't overlap.
+
+    ``manifest`` is shared across passes so unchanged files are not re-uploaded.
+    """
     with lock:
-        uploaded = sync_directories(base_uri, credentials_file=credentials_file)
+        uploaded = sync_directories(base_uri, credentials_file=credentials_file, manifest=manifest)
     if uploaded:
         summary = ", ".join(f"{name}={count}" for name, count in uploaded.items())
         logger.info("Synced to %s (%s)", base_uri, summary)
@@ -66,11 +69,12 @@ def _periodic_sync_loop(
     interval: int,
     stop_event: threading.Event,
     lock: threading.Lock,
+    manifest: dict,
 ) -> None:
     """Sync every ``interval`` seconds until ``stop_event`` is set."""
     while not stop_event.wait(interval):
         try:
-            _sync(base_uri, credentials_file, lock)
+            _sync(base_uri, credentials_file, lock, manifest)
         except Exception as e:  # pragma: no cover - background best-effort
             logger.warning("Periodic GCS sync failed: %s", e)
 
@@ -109,11 +113,12 @@ def main() -> int:
 
     sync_lock = threading.Lock()
     stop_event = threading.Event()
+    manifest: dict = {}  # shared across syncs so unchanged files aren't re-uploaded
     sync_thread: Optional[threading.Thread] = None
     if base_uri and interval > 0:
         sync_thread = threading.Thread(
             target=_periodic_sync_loop,
-            args=(base_uri, credentials_file, interval, stop_event, sync_lock),
+            args=(base_uri, credentials_file, interval, stop_event, sync_lock, manifest),
             daemon=True,
         )
         sync_thread.start()
@@ -127,12 +132,15 @@ def main() -> int:
         if base_uri:
             logger.info("Performing final GCS sync...")
             try:
-                _sync(base_uri, credentials_file, sync_lock)
+                _sync(base_uri, credentials_file, sync_lock, manifest)
             except Exception as e:
                 logger.warning("Final GCS sync failed: %s", e)
 
     logger.info("Training process exited with code %s", returncode)
-    return returncode
+    # A child killed by signal N reports returncode -N; surface it as the
+    # conventional 128+N so orchestration can tell a preemption (SIGTERM -> 143)
+    # from a genuine non-zero failure.
+    return returncode if returncode >= 0 else 128 - returncode
 
 
 if __name__ == "__main__":

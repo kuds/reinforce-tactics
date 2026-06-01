@@ -14,13 +14,17 @@ module without the optional dependency installed.
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # Local output directories produced by the training entry points. These are all
 # git-ignored at the repo root; see ``.gitignore``.
 DEFAULT_OUTPUT_DIRS: Tuple[str, ...] = ("models", "checkpoints", "tensorboard", "logs")
+
+# A manifest maps a local file path to its (mtime, size) signature so repeated
+# syncs can skip files that have not changed since the last upload.
+Manifest = MutableMapping[str, Tuple[float, int]]
 
 
 def parse_gcs_uri(uri: str) -> Tuple[str, str]:
@@ -60,8 +64,10 @@ def resolve_output_base(env: Optional[Mapping[str, str]] = None) -> Optional[str
 
     model_dir = resolved.get("AIP_MODEL_DIR", "").strip()
     if model_dir:
-        # Vertex sets AIP_MODEL_DIR = <base>/model
-        return model_dir.rstrip("/").rsplit("/", 1)[0]
+        # Vertex sets AIP_MODEL_DIR = <base>/model. removesuffix keeps this
+        # robust for a bucket-root base (``gs://bucket/model`` -> ``gs://bucket``)
+        # and for a stray trailing slash, neither of which a blind rsplit handles.
+        return model_dir.rstrip("/").removesuffix("/model")
 
     return None
 
@@ -125,8 +131,18 @@ class GCSUploader:
             logger.warning("Failed to upload %s to GCS: %s", local_path, e)
             return None
 
-    def upload_directory(self, local_dir: str, remote_prefix: Optional[str] = None) -> int:
-        """Recursively upload every file under ``local_dir``; return the count uploaded."""
+    def upload_directory(
+        self,
+        local_dir: str,
+        remote_prefix: Optional[str] = None,
+        manifest: Optional[Manifest] = None,
+    ) -> int:
+        """Recursively upload files under ``local_dir``; return the count uploaded.
+
+        When ``manifest`` is provided, files whose ``(mtime, size)`` signature is
+        unchanged since the last upload are skipped — so a periodic sync does not
+        re-upload gigabytes of unchanged checkpoints every cycle.
+        """
         local_path = Path(local_dir)
         if not local_path.is_dir():
             return 0
@@ -135,11 +151,51 @@ class GCSUploader:
         for file_path in sorted(local_path.rglob("*")):
             if not file_path.is_file():
                 continue
+
+            signature = _file_signature(file_path)
+            if manifest is not None and signature is not None and manifest.get(str(file_path)) == signature:
+                continue
+
             relative = file_path.relative_to(local_path).as_posix()
             remote_path = f"{remote_prefix}/{relative}" if remote_prefix else relative
             if self.upload_file(str(file_path), remote_path):
                 uploaded += 1
+                if manifest is not None and signature is not None:
+                    manifest[str(file_path)] = signature
         return uploaded
+
+
+def _file_signature(path: Path) -> Optional[Tuple[float, int]]:
+    """Return a cheap ``(mtime, size)`` change-signature for ``path``."""
+    try:
+        st = path.stat()
+    except OSError:  # pragma: no cover - file vanished between rglob and stat
+        return None
+    return (st.st_mtime, st.st_size)
+
+
+def _make_uploader(
+    base_uri: Optional[str],
+    credentials_file: Optional[str],
+    client: Any,
+) -> Optional[GCSUploader]:
+    """Build a :class:`GCSUploader` for ``base_uri`` or return ``None`` to skip.
+
+    Returns ``None`` (a no-op for callers) when ``base_uri`` is falsy, not a valid
+    ``gs://`` URI, or when ``google-cloud-storage`` is unavailable and no client
+    was injected.
+    """
+    if not base_uri:
+        return None
+    try:
+        bucket, prefix = parse_gcs_uri(base_uri)
+    except ValueError as e:
+        logger.warning("Skipping GCS upload: %s", e)
+        return None
+    if client is None and not is_available():
+        logger.warning("google-cloud-storage not installed; skipping upload to %s", base_uri)
+        return None
+    return GCSUploader(bucket, prefix, credentials_file=credentials_file, client=client)
 
 
 def sync_directories(
@@ -148,6 +204,7 @@ def sync_directories(
     root: str = ".",
     credentials_file: Optional[str] = None,
     client: Any = None,
+    manifest: Optional[Manifest] = None,
 ) -> Dict[str, int]:
     """Upload local output directories to ``base_uri/<dir>/``.
 
@@ -155,28 +212,19 @@ def sync_directories(
     folder under ``base_uri``. Returns a mapping of directory name to the number
     of files uploaded. A no-op (empty dict) when ``base_uri`` is falsy or the
     ``google-cloud-storage`` dependency is missing — callers can treat this as
-    "ran locally, nothing synced".
+    "ran locally, nothing synced". Pass a shared ``manifest`` across repeated
+    calls to skip unchanged files.
     """
-    if not base_uri:
+    uploader = _make_uploader(base_uri, credentials_file, client)
+    if uploader is None:
         return {}
 
-    try:
-        bucket, prefix = parse_gcs_uri(base_uri)
-    except ValueError as e:
-        logger.warning("Skipping GCS sync: %s", e)
-        return {}
-
-    if client is None and not is_available():
-        logger.warning("google-cloud-storage not installed; skipping GCS sync to %s", base_uri)
-        return {}
-
-    uploader = GCSUploader(bucket, prefix, credentials_file=credentials_file, client=client)
     results: Dict[str, int] = {}
     for name in dirs:
         local_dir = os.path.join(root, name)
         if not os.path.isdir(local_dir):
             continue
-        count = uploader.upload_directory(local_dir, remote_prefix=name)
+        count = uploader.upload_directory(local_dir, remote_prefix=name, manifest=manifest)
         if count:
             results[name] = count
     return results
@@ -197,18 +245,7 @@ def upload_tree(
     is unavailable. Used to persist a bootstrap run directory (charts/, videos/,
     checkpoints/, …) to GCS.
     """
-    if not dest_uri:
+    uploader = _make_uploader(dest_uri, credentials_file, client)
+    if uploader is None:
         return 0
-
-    try:
-        bucket, prefix = parse_gcs_uri(dest_uri)
-    except ValueError as e:
-        logger.warning("Skipping upload: %s", e)
-        return 0
-
-    if client is None and not is_available():
-        logger.warning("google-cloud-storage not installed; skipping upload to %s", dest_uri)
-        return 0
-
-    uploader = GCSUploader(bucket, prefix, credentials_file=credentials_file, client=client)
     return uploader.upload_directory(local_dir)

@@ -53,6 +53,21 @@ if [[ -z "${BUCKET:-}" ]]; then
   exit 1
 fi
 
+# Validate numeric worker-pool fields up front so a typo (e.g. ACCELERATOR_COUNT=t4)
+# fails clearly here instead of crashing the arithmetic comparison below under
+# `set -u`, or silently producing an invalid job spec.
+for _numvar in REPLICA_COUNT ACCELERATOR_COUNT SYNC_INTERVAL; do
+  if ! [[ "${!_numvar}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: ${_numvar} must be a non-negative integer, got '${!_numvar}'." >&2
+    exit 1
+  fi
+done
+
+# Emit a value as a single-quoted YAML scalar. A single-quoted scalar only needs
+# embedded single quotes doubled, so values containing backslashes, ':', '$',
+# leading '-', etc. can never corrupt the generated config.
+yaml_squote() { printf "'%s'" "${1//\'/\'\'}"; }
+
 # Training command (defaults to a PPO run if none supplied).
 if [[ "$#" -gt 0 ]]; then
   TRAIN_CMD=("$@")
@@ -86,30 +101,31 @@ trap 'rm -f "${CONFIG_FILE}"' EXIT
   echo "workerPoolSpecs:"
   echo "  - replicaCount: ${REPLICA_COUNT}"
   echo "    machineSpec:"
-  echo "      machineType: ${MACHINE_TYPE}"
+  echo "      machineType: $(yaml_squote "${MACHINE_TYPE}")"
   if [[ "${ACCELERATOR_COUNT}" -gt 0 ]]; then
-    echo "      acceleratorType: ${ACCELERATOR_TYPE}"
+    echo "      acceleratorType: $(yaml_squote "${ACCELERATOR_TYPE}")"
     echo "      acceleratorCount: ${ACCELERATOR_COUNT}"
   fi
   echo "    containerSpec:"
-  echo "      imageUri: \"${IMAGE_URI}\""
+  echo "      imageUri: $(yaml_squote "${IMAGE_URI}")"
   echo "      args:"
   for arg in "${TRAIN_CMD[@]}"; do
-    # Quote every token so flags (--mode) and numbers (1000000) stay strings.
-    printf '        - "%s"\n' "${arg//\"/\\\"}"
+    # Single-quote every token so flags (--mode), numbers (1000000), and any
+    # value with backslashes/colons stay literal strings.
+    printf '        - %s\n' "$(yaml_squote "${arg}")"
   done
   echo "      env:"
   echo "        - name: GCS_OUTPUT_URI"
-  echo "          value: \"${BASE_OUTPUT}\""
+  echo "          value: $(yaml_squote "${BASE_OUTPUT}")"
   echo "        - name: GCS_SYNC_INTERVAL"
-  echo "          value: \"${SYNC_INTERVAL}\""
+  echo "          value: $(yaml_squote "${SYNC_INTERVAL}")"
   # Pass W&B credentials through when present so --wandb works on the worker.
   if [[ -n "${WANDB_API_KEY:-}" ]]; then
     echo "        - name: WANDB_API_KEY"
-    echo "          value: \"${WANDB_API_KEY}\""
+    echo "          value: $(yaml_squote "${WANDB_API_KEY}")"
   fi
   echo "baseOutputDirectory:"
-  echo "  outputUriPrefix: \"${BASE_OUTPUT}\""
+  echo "  outputUriPrefix: $(yaml_squote "${BASE_OUTPUT}")"
 } > "${CONFIG_FILE}"
 
 echo "Job config:"
