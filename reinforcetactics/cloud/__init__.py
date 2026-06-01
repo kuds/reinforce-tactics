@@ -7,6 +7,7 @@ from reinforcetactics.cloud.storage import (
     parse_gcs_uri,
     resolve_output_base,
     sync_directories,
+    upload_tree,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "parse_gcs_uri",
     "resolve_output_base",
     "sync_directories",
+    "upload_tree",
 ]

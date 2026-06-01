@@ -20,6 +20,10 @@ PROJECT_ID=your-project REGION=us-central1 ./scripts/cloud/build_image.sh
 BUCKET=your-bucket ./scripts/cloud/submit_vertex_job.sh \
   python3 main.py --mode train --algorithm ppo --timesteps 10000000
 
+# ...or reproduce the ppo_bootstrap notebook (curriculum + charts + videos):
+BUCKET=your-bucket ./scripts/cloud/submit_vertex_job.sh \
+  python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --device cuda
+
 # 3. Monitor
 gcloud ai custom-jobs list --region=us-central1
 gcloud ai custom-jobs stream-logs JOB_ID --region=us-central1

@@ -19,6 +19,7 @@ saves/
 replays/
 videos/
 tournament_results/
+benchmarks/
 
 # Test/coverage and editor cruft
 tests/

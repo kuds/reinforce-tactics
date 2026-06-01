@@ -8,6 +8,7 @@ from reinforcetactics.cloud.storage import (
     parse_gcs_uri,
     resolve_output_base,
     sync_directories,
+    upload_tree,
 )
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,35 @@ class TestSyncDirectories:
         (tmp_path / "models").mkdir()  # exists but empty
         client = _FakeClient()
         assert sync_directories("gs://bucket/run", root=str(tmp_path), client=client) == {}
+
+
+class TestUploadTree:
+    def test_uploads_whole_tree_under_dest_prefix(self, tmp_path):
+        run_dir = tmp_path / "20260601_120000"
+        (run_dir / "charts").mkdir(parents=True)
+        (run_dir / "videos").mkdir()
+        (run_dir / "charts" / "summary.png").write_text("png")
+        (run_dir / "videos" / "stage1.mp4").write_text("vid")
+        (run_dir / "bootstrap_results.csv").write_text("csv")
+
+        client = _FakeClient()
+        count = upload_tree(str(run_dir), "gs://bucket/jobs/job1/20260601_120000", client=client)
+
+        assert count == 3
+        uploaded = sorted(name for name, _ in client.uploads)
+        assert uploaded == [
+            "jobs/job1/20260601_120000/bootstrap_results.csv",
+            "jobs/job1/20260601_120000/charts/summary.png",
+            "jobs/job1/20260601_120000/videos/stage1.mp4",
+        ]
+
+    def test_no_dest_is_noop(self, tmp_path):
+        (tmp_path / "f.txt").write_text("x")
+        assert upload_tree(str(tmp_path), None, client=_FakeClient()) == 0
+
+    def test_invalid_dest_is_noop(self, tmp_path):
+        (tmp_path / "f.txt").write_text("x")
+        assert upload_tree(str(tmp_path), "not-gcs", client=_FakeClient()) == 0
 
 
 class TestIsAvailable:

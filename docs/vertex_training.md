@@ -76,6 +76,55 @@ BUCKET=YOUR_BUCKET ./scripts/cloud/submit_vertex_job.sh \
 `BUCKET` is required — it's where artifacts land. Outputs for a job go to
 `gs://BUCKET/jobs/<JOB_NAME>/{models,checkpoints,tensorboard,logs}/`.
 
+### Choosing a config on the CLI
+
+Pass the training command's own flags through the submit script. Which entry
+points accept `--config <yaml>`:
+
+| Entry point | `--config`? |
+|---|---|
+| `scripts/train/train_bootstrap.py` (curriculum) | ✅ |
+| `scripts/train/train_feudal_rl.py` | ✅ |
+| `scripts/train/train_alphazero.py` | ✅ |
+| `scripts/train/train_self_play.py` | ✅ |
+| `main.py` (`--mode train`) | ❌ — individual flags only (`--algorithm`, `--timesteps`, …) |
+
+### Curriculum bootstrap — charts & videos
+
+`scripts/train/train_bootstrap.py` is a headless CLI mirror of
+`notebooks/ppo_bootstrap.ipynb`: it runs the curriculum (`run_curriculum`),
+writes all the diagnostic **charts** (`viz.plot_*`), and records a per-stage
+replay **video** (`.mp4`) — the same artifacts the notebook produces, minus the
+Colab/Drive bits. The image already bundles the libraries (matplotlib, pygame,
+opencv, imageio+ffmpeg) and forces headless rendering (`SDL_VIDEODRIVER=dummy`,
+`MPLBACKEND=Agg`), so it runs unattended.
+
+```bash
+# Reproduce the ppo_bootstrap pipeline on Vertex; pick the YAML with --config
+BUCKET=YOUR_BUCKET ./scripts/cloud/submit_vertex_job.sh \
+  python3 scripts/train/train_bootstrap.py \
+    --config configs/ppo/bootstrap.yaml --device cuda
+
+# With a BC warm-start (needs a multi_discrete config), e.g. the v33 sweep config
+BUCKET=YOUR_BUCKET ./scripts/cloud/submit_vertex_job.sh \
+  python3 scripts/train/train_bootstrap.py \
+    --config configs/ppo/bootstrap_sweep/v33_production_bc_warmstart.yaml \
+    --build-bc --device cuda
+```
+
+The script writes everything under one run directory
+(`benchmarks/bootstrap/<timestamp>/` by default) — `charts/`, `videos/`,
+`checkpoints/`, the config snapshot, `bootstrap_results.csv`, `final_model.zip` —
+and uploads that whole tree to `gs://BUCKET/jobs/<JOB_NAME>/<timestamp>/` at the
+end (including on a stall). Useful flags: `--skip-videos`, `--skip-plots`,
+`--sanity-episodes N`, `--set dotted.key=value` (config overrides), `--gcs-output gs://...`
+(explicit destination). Run `python3 scripts/train/train_bootstrap.py --help`
+for the full list. Fetch the results with:
+
+```bash
+gcloud storage cp -r gs://YOUR_BUCKET/jobs/JOB_NAME ./bootstrap_run
+```
+
 ### Configuration (environment variables)
 
 | Variable | Default | Purpose |

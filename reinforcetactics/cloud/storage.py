@@ -180,3 +180,35 @@ def sync_directories(
         if count:
             results[name] = count
     return results
+
+
+def upload_tree(
+    local_dir: str,
+    dest_uri: Optional[str],
+    credentials_file: Optional[str] = None,
+    client: Any = None,
+) -> int:
+    """Upload an entire local directory tree to a ``gs://`` destination.
+
+    Unlike :func:`sync_directories` (which maps several named top-level dirs),
+    this uploads everything under ``local_dir`` to ``dest_uri``, preserving the
+    relative layout. Returns the number of files uploaded — ``0`` when
+    ``dest_uri`` is falsy, the directory is missing, or ``google-cloud-storage``
+    is unavailable. Used to persist a bootstrap run directory (charts/, videos/,
+    checkpoints/, …) to GCS.
+    """
+    if not dest_uri:
+        return 0
+
+    try:
+        bucket, prefix = parse_gcs_uri(dest_uri)
+    except ValueError as e:
+        logger.warning("Skipping upload: %s", e)
+        return 0
+
+    if client is None and not is_available():
+        logger.warning("google-cloud-storage not installed; skipping upload to %s", dest_uri)
+        return 0
+
+    uploader = GCSUploader(bucket, prefix, credentials_file=credentials_file, client=client)
+    return uploader.upload_directory(local_dir)

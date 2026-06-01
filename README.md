@@ -224,6 +224,11 @@ PROJECT_ID=your-project REGION=us-central1 ./scripts/cloud/build_image.sh
 BUCKET=your-bucket ./scripts/cloud/submit_vertex_job.sh \
   python3 main.py --mode train --algorithm ppo --timesteps 10000000
 
+# ...or run the full curriculum bootstrap headlessly (charts + replay videos),
+# a CLI mirror of notebooks/ppo_bootstrap.ipynb:
+BUCKET=your-bucket ./scripts/cloud/submit_vertex_job.sh \
+  python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --device cuda
+
 # Fetch the trained model when it's done
 gcloud storage cp -r gs://your-bucket/jobs/JOB_NAME/models ./models
 ```
