@@ -210,6 +210,27 @@ docker-compose up --build
 
 Configure bots, maps, and settings in `docker/tournament/config.json`. See `docker/tournament/README.md` for details.
 
+## Cloud Training (Vertex AI)
+
+Run a single long-running training job on Google Cloud using the project's
+Docker image and Vertex AI custom jobs. Trained models, checkpoints, and logs are
+synced to Google Cloud Storage automatically (the job's machine is ephemeral).
+
+```bash
+# Build + push the training image to Artifact Registry (via Cloud Build)
+PROJECT_ID=your-project REGION=us-central1 ./scripts/cloud/build_image.sh
+
+# Submit a job — anything after the script is the training command
+BUCKET=your-bucket ./scripts/cloud/submit_vertex_job.sh \
+  python3 main.py --mode train --algorithm ppo --timesteps 10000000
+
+# Fetch the trained model when it's done
+gcloud storage cp -r gs://your-bucket/jobs/JOB_NAME/models ./models
+```
+
+See [`docs/vertex_training.md`](docs/vertex_training.md) for prerequisites, GPU
+selection, IAM, and troubleshooting.
+
 ## Documentation
 
 Docs are split by audience:

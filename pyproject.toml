@@ -47,6 +47,9 @@ llm = [
     "anthropic",
     "google-genai",
 ]
+cloud = [
+    "google-cloud-storage",
+]
 dev = [
     "pytest",
     "pytest-cov",
@@ -57,6 +60,7 @@ dev = [
 all = [
     "reinforcetactics[gui]",
     "reinforcetactics[llm]",
+    "reinforcetactics[cloud]",
     "reinforcetactics[dev]",
 ]
 
