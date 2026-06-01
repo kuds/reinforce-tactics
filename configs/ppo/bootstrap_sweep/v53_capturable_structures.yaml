@@ -13,8 +13,9 @@
 # MECHANICALLY reachable. v53 lowers structure HP so a full-HP unit can take a
 # building in ~2 turns and the HQ in ~3 (seize damage = the seizer's current
 # HP, so turns = ceil(tile_HP / unit_HP)):
-#   tower_health        30 -> 15   (1-2 turns)
-#   building_health     40 -> 20   (2 turns for all but Barbarian)
+#   tower_health        30 -> 20   (2 turns; 1 for Barbarian)
+#   building_health     40 -> 25   (2 turns for built units 15-20 HP; 3 for
+#                                   the rarely-built 10-12 HP casters)
 #   headquarters_health 50 -> 30   (2 turns for 15-20 HP units, 3 for 10-12 HP)
 #
 # WHY this is the indicated next lever: the v50 run (deepest ever, ~20 stages
@@ -460,14 +461,17 @@ env:
     # v53 NEW: lower structure max-HP so capture is a reachable win path, not a
     # 3-4 turn attrition gauntlet. seize damage = the seizer's current HP, so a
     # full-HP unit captures in ceil(tile_HP / unit_HP) turns:
-    #   Tower@15      -> 1-2 turns (fast neutral grab; 15+ HP units 1 turn)
-    #   Building@20   -> 2 turns for every unit except Barbarian (1)
+    #   Tower@20      -> 2 turns (1 for Barbarian); fast neutral grab
+    #   Building@25   -> 2 turns for the units the policy builds (A/W/K/B,
+    #                    15-20 HP); 3 for the rarely-built 10-12 HP casters
     #   Headquarters@30 -> 2 turns for 15-20 HP units, 3 for the 10-12 HP ones
     # Targets met: "most full-HP units capture a building in 2 turns; the HQ in
-    # 3 at most (2 ok)". Regen scales off max_health (now 50% of the lower HP)
-    # and capture resets to it, so both stay consistent.
-    tower_health: 15           # was 30
-    building_health: 20        # was 40
+    # 3 at most (2 ok)". Conservative spacing (20<25<30) vs an aggressive
+    # 15/20/30 -- if capture/pace is still too slow, drop building_health
+    # toward 20 and/or cut the 50% structure regen rate. Regen scales off
+    # max_health and capture resets to it, so both stay consistent.
+    tower_health: 20           # was 30
+    building_health: 25        # was 40
     headquarters_health: 30    # was 50
     # v50 SINGLE DELTA vs v49: HP-scaled combat damage. Outgoing damage (and
     # counters) scale with the attacker's current HP fraction, so wounded
