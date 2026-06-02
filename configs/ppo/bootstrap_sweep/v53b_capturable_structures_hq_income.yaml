@@ -25,10 +25,13 @@
 #      per-unit value is unchanged -- this shrinks army SIZE, not composition).
 #      Deliberately gentle: a first probe, not a starvation. If armies stay
 #      bloated, step it toward 100 (== building_income) next.
-#   2. max_units_per_player 50 (explicit; also the new global default). A hard
-#      ceiling so gold past 50 units has no sink -- bounds both the action-space
-#      balloon and the convert-all-gold economy. 50 is generous (skirmish armies
-#      are ~20) so it is a runaway guardrail, not a binding constraint yet.
+#   2. max_units_per_player 20 (the CODE default stays 50; 20 is set here as an
+#      active lever). Motivated by board density vs per-map walkable tiles: 20
+#      units is physically impossible/gridlock on beginner (both sides = 111%)
+#      and intermediate (93%), so it is free there; on skirmish it is exactly the
+#      ~1/3-board (32% one side, 65% both) congestion threshold the measured
+#      ~20-24 peak army sat at; only on corner_points (18% density) is it an
+#      active downward constraint, where it forces precision rather than gridlock.
 #
 # v53 vs v53b is a clean A/B on the central question raised by the v52a review:
 #   * v53 (max_flat 1024)    -> ACCOMMODATE the big army (raise the ceiling).
@@ -511,12 +514,24 @@ env:
     # probe; step toward 100 if the new army-economy telemetry still shows a
     # bloated peak army with piled-up banked gold.
     headquarters_income: 120     # was 150
-    # v53b NEW (hard guardrail): cap units-per-player so gold past the cap has no
-    # sink -- bounds both the action-space balloon (move enumeration scales with
-    # army size) and the convert-all-gold economy. 50 is also the new global
-    # default; set explicitly here so it's snapshotted into config.json and to
-    # document that v53b is the army-size-control config.
-    max_units_per_player: 50
+    # v53b NEW (active army-size lever, not just a guardrail): cap units-per-
+    # player at 20. Motivated by board DENSITY against per-map walkable tiles:
+    #   beginner 6x6   (36 walk): 20/side = 56%, both = 111% -> physically
+    #                             impossible; map self-caps ~15-18, so 20 is free
+    #   intermediate 7x7 (43)    : 20/side = 47%, both = 93%  -> gridlock; free
+    #   skirmish 8x8   (62 walk) : 20/side = 32% (~1/3 board), both = 65% -> THIS
+    #                             is the gridlock/slow-walk threshold the measured
+    #                             ~20-24 peak armies sat at; 20 catches it exactly
+    #   corner_points 12x10 (114): 20/side = 18% -> roomy; 20 is the only map
+    #                             where this is an active downward constraint, and
+    #                             there it forces precision rather than gridlock.
+    # So 20 is generous-to-free on the small maps and bites only at genuine
+    # congestion (skirmish) or to force a precise force on the big map. The CODE
+    # default stays 50 (a safe guardrail for arbitrary maps); 20 is set here as
+    # the deliberate experimental lever. WATCH corner_points: if it stalls with
+    # army pinned at 20 and banked gold piling up (army/gold telemetry), that map
+    # genuinely needed a bigger force -> per-stage cap, not a global loosen.
+    max_units_per_player: 20
     # v53 NEW: lower structure max-HP so capture is a reachable win path, not a
     # 3-4 turn attrition gauntlet. seize damage = the seizer's current HP, so a
     # full-HP unit captures in ceil(tile_HP / unit_HP) turns:
