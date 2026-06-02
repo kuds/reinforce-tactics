@@ -21,6 +21,7 @@ kaggle_environments/envs/reinforce_tactics/
     __init__.py                  # Package init (empty or re-exports)
     reinforce_tactics.json       # Environment specification
     reinforce_tactics.py         # Interpreter, renderer, specification, agents
+    maps.py                      # Built-in maps (BUILTIN_MAPS), from maps/1v1/
     reinforce_tactics_engine/    # Vendored game engine (self-contained)
         __init__.py              # Exports GameState, UNIT_DATA
         constants.py             # Game constants and unit data
