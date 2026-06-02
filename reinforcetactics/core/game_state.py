@@ -90,6 +90,13 @@ class GameState:
         Defaults to :data:`MAX_UNITS_PER_PLAYER`. A positive int is required
         -- a cap <= 0 would forbid all unit creation, which is never the
         intent and should fail loud rather than silently soft-lock a game.
+
+        The cap is a *creation gate*, not a retroactive trim: it blocks new
+        ``create_unit`` calls once a player is at the cap but never removes
+        existing units, so a scenario that starts a side at or above the cap
+        (or a sweep that sets the cap below the starting army) simply can't
+        grow until attrition drops the count. It is therefore a soft ceiling
+        on growth, not a hard guarantee of ``<= cap`` units at every instant.
         """
         if "max_units_per_player" not in (overrides or {}):
             return MAX_UNITS_PER_PLAYER
@@ -302,7 +309,14 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units, self.fog_of_war)
+        self.__init__(
+            map_data,
+            self.num_players,
+            self.max_turns,
+            self.enabled_units,
+            self.fog_of_war,
+            engine_overrides=self.engine_overrides,
+        )
 
     def set_map_metadata(
         self,
@@ -1401,6 +1415,11 @@ class GameState:
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
+            # Persist the engine-constant overlay so a reloaded game runs under
+            # the same balance (damage_model, structure HP, economy, unit cap)
+            # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
+            # back to {} (== module defaults), preserving backward-compat.
+            "engine_overrides": self.engine_overrides,
             "units": [unit.to_dict() for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
             "action_history": self.action_history,
@@ -1673,8 +1692,17 @@ class GameState:
         fog_of_war_method = save_data.get("fog_of_war_method", "simple_radius" if fog_of_war else "none")
 
         max_turns = save_data.get("max_turns")
+        # Restore the engine-constant overlay (damage_model / structure HP /
+        # economy / unit cap). Absent in pre-0.3.3 saves -> {} == module
+        # defaults, byte-identical to the old load behaviour.
+        engine_overrides = save_data.get("engine_overrides") or {}
         game = cls(
-            map_data, save_data.get("num_players", 2), max_turns=max_turns, enabled_units=enabled_units, fog_of_war=fog_of_war
+            map_data,
+            save_data.get("num_players", 2),
+            max_turns=max_turns,
+            enabled_units=enabled_units,
+            fog_of_war=fog_of_war,
+            engine_overrides=engine_overrides,
         )
 
         # Restore the fog of war method

@@ -306,6 +306,38 @@ def test_create_unit_blocked_at_cap():
     assert sum(1 for u in gs.units if u.player == 1) == 2
 
 
+def test_engine_overrides_survive_reset():
+    # reset() must re-thread engine_overrides; otherwise the cap (and every
+    # other override) silently reverts to constants.py defaults.
+    ov = {"max_units_per_player": 7, "headquarters_income": 120, "damage_model": "hp_scaled"}
+    gs = GameState(_map(), num_players=2, engine_overrides=ov)
+    gs.reset(_map())
+    assert gs.max_units_per_player == 7
+    assert gs.income_rates["headquarters"] == 120
+    assert gs.damage_model == "hp_scaled"
+    assert gs.engine_overrides == ov
+
+
+def test_engine_overrides_round_trip_to_from_dict():
+    ov = {"max_units_per_player": 9, "starting_gold": 250, "damage_model": "hp_scaled"}
+    gs = GameState(_map(), num_players=2, engine_overrides=ov)
+    restored = GameState.from_dict(gs.to_dict(), _map())
+    assert restored.engine_overrides == ov
+    assert restored.max_units_per_player == 9
+    assert restored.starting_gold == 250  # economy resolved from the restored overlay
+    assert restored.damage_model == "hp_scaled"
+
+
+def test_from_dict_without_engine_overrides_is_backward_compatible():
+    # Pre-0.3.3 saves have no "engine_overrides" key -> defaults, no crash.
+    gs = GameState(_map(), num_players=2)
+    save = gs.to_dict()
+    del save["engine_overrides"]
+    restored = GameState.from_dict(save, _map())
+    assert restored.engine_overrides == {}
+    assert restored.max_units_per_player == C.MAX_UNITS_PER_PLAYER
+
+
 def test_legal_actions_hide_create_at_cap():
     # Building lets player 1 create; at the cap the create_unit list empties
     # so the action mask never offers an over-cap creation.
