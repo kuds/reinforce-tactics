@@ -1,10 +1,14 @@
 # v53c -- entropy-schedule stability (stop the forget-and-relearn churn)
 # ============================================================================
 # Base: configs/ppo/bootstrap_sweep/v53b_capturable_structures_hq_income.yaml.
-# v53c keeps ALL of v53b's engine/reward/ppo settings byte-identical (structure
-# HP + HQ income 120 + unit cap 20 + max_flat 1024) and changes ONE axis: the
-# per-stage ent_coef schedule. Single attributable delta vs v53b = curriculum
-# entropy.
+# v53c keeps v53b's engine_overrides and reward byte-identical (structure HP +
+# HQ income 120 + unit cap 20 + hp_scaled) and changes the per-stage ent_coef
+# schedule (the primary lever, below) plus one env knob: max_flat_actions is
+# returned to the standard 512 (v52b's 1024 was there to absorb the *uncapped*
+# skirmish move-fan; with the 20-unit cap now bounding the army, the cap does
+# that job and 512 fits -- see the env block). So vs v53b the deltas are the
+# entropy schedule + max_flat 1024->512; vs the 512-era baselines it is the
+# standard action head.
 #
 # THE DIAGNOSIS (v52a run 20260601_172412): the curriculum is expensive not
 # because it has many stages, but because the drift-prone random_N stages
@@ -552,12 +556,19 @@ env:
   # max_steps with avg_turns < 5), set this back to 60.
   max_actions_per_turn: null
   action_space_type: flat_discrete
-  # v52b: max_flat_actions 512 (default) -> 1024. The v50 run hit 512 on
-  # skirmish (8x8, max_turns=120) -- legal actions exceeded the cap (warnings
-  # at 517/526/528) and were truncated, dropping legal moves/attacks at the
-  # skirmish_random_20 stall. 1024 gives headroom so no action is dropped on
-  # the bigger maps (the mask is sparse, so the larger Discrete head is cheap).
-  max_flat_actions: 1024
+  # v53c: max_flat_actions back to the standard 512 (v52b had bumped it to 1024
+  # to absorb the UNCAPPED skirmish move-fan, which hit 744). v53c carries the
+  # 20-unit cap (engine_overrides.max_units_per_player below), and the cap is
+  # the thing that bounds the action space at the source: ~20 units on the
+  # congested 8x8 keeps the legal set well under 512 in practice, so the cap and
+  # max_flat are substitutes -- with the cap on, the 1024 head is unnecessary
+  # overhead. 512 also keeps the action head warm-start-compatible with the
+  # earlier 512-trained checkpoints. v53c is validated on the beginner+
+  # intermediate ladder, where the legal set never approaches 512 regardless.
+  # If skirmish_random_20 ever truncates at 512 *with* the cap on (watch the
+  # warnings), that means 20 units still over-fill the board -- bump to 1024
+  # then, but the cap should make that unnecessary.
+  max_flat_actions: 512
   # v40 inherits v39's COST-ONLY Warrior nerf unchanged. Warrior keeps
   # every combat stat at default (atk=10 / def=6 / HP=15) so games end
   # normally; only the PRICE moves (200 -> 300, equal to Mage). v40's
