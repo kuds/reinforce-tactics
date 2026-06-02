@@ -274,3 +274,85 @@ def test_structure_health_regen_scales_off_override():
     hq.regenerating = True
     GameMechanics.regenerate_structures(gs.grid, [])
     assert hq.health == 20  # 5 + int(30 * 0.5)
+
+
+# --- Per-player unit cap -------------------------------------------------
+
+
+def test_max_units_default():
+    gs = GameState(_map(), num_players=2)
+    assert gs.max_units_per_player == C.MAX_UNITS_PER_PLAYER
+
+
+def test_max_units_override_applied():
+    gs = GameState(_map(), num_players=2, engine_overrides={"max_units_per_player": 3})
+    assert gs.max_units_per_player == 3
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_max_units_rejects_non_positive(bad):
+    with pytest.raises(ValueError):
+        GameState(_map(), num_players=2, engine_overrides={"max_units_per_player": bad})
+
+
+def test_create_unit_blocked_at_cap():
+    gs = GameState(_map(), num_players=2, engine_overrides={"max_units_per_player": 2})
+    gs.current_player = 1
+    gs.player_gold[1] = 10000
+    assert gs.create_unit("W", 0, 0, player=1) is not None
+    assert gs.create_unit("W", 0, 1, player=1) is not None
+    # Third creation is over the cap of 2 -> rejected even with gold to spare.
+    assert gs.create_unit("W", 0, 2, player=1) is None
+    assert sum(1 for u in gs.units if u.player == 1) == 2
+
+
+def test_engine_overrides_survive_reset():
+    # reset() must re-thread engine_overrides; otherwise the cap (and every
+    # other override) silently reverts to constants.py defaults.
+    ov = {"max_units_per_player": 7, "headquarters_income": 120, "damage_model": "hp_scaled"}
+    gs = GameState(_map(), num_players=2, engine_overrides=ov)
+    gs.reset(_map())
+    assert gs.max_units_per_player == 7
+    assert gs.income_rates["headquarters"] == 120
+    assert gs.damage_model == "hp_scaled"
+    assert gs.engine_overrides == ov
+
+
+def test_engine_overrides_round_trip_to_from_dict():
+    ov = {"max_units_per_player": 9, "starting_gold": 250, "damage_model": "hp_scaled"}
+    gs = GameState(_map(), num_players=2, engine_overrides=ov)
+    restored = GameState.from_dict(gs.to_dict(), _map())
+    assert restored.engine_overrides == ov
+    assert restored.max_units_per_player == 9
+    assert restored.starting_gold == 250  # economy resolved from the restored overlay
+    assert restored.damage_model == "hp_scaled"
+
+
+def test_from_dict_without_engine_overrides_is_backward_compatible():
+    # Pre-0.3.3 saves have no "engine_overrides" key -> defaults, no crash.
+    gs = GameState(_map(), num_players=2)
+    save = gs.to_dict()
+    del save["engine_overrides"]
+    restored = GameState.from_dict(save, _map())
+    assert restored.engine_overrides == {}
+    assert restored.max_units_per_player == C.MAX_UNITS_PER_PLAYER
+
+
+def test_legal_actions_hide_create_at_cap():
+    # Building lets player 1 create; at the cap the create_unit list empties
+    # so the action mask never offers an over-cap creation.
+    map_data = np.array([["p" for _ in range(8)] for _ in range(8)], dtype=object)
+    map_data[0][0] = "h_1"
+    map_data[1][1] = "b_1"
+    map_data[7][7] = "h_2"
+    gs = GameState(map_data, num_players=2, engine_overrides={"max_units_per_player": 1})
+    gs.current_player = 1
+    gs.player_gold[1] = 10000
+
+    # No units yet -> create offered at the building.
+    assert len(gs.get_legal_actions(player=1)["create_unit"]) > 0
+
+    # One unit on the board hits the cap of 1 -> create suppressed.
+    gs.create_unit("W", 5, 5, player=1)
+    gs._invalidate_cache()
+    assert gs.get_legal_actions(player=1)["create_unit"] == []

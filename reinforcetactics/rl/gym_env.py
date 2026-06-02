@@ -628,6 +628,20 @@ class StrategyGameEnv(gym.Env):
             #     max_flat_actions truncation and a proxy for army bloat.
             "seize_available_steps": 0,
             "max_legal_actions": 0,
+            # Army-economy diagnostics (see step()): these separate "the agent
+            # wins by massing a big slow army" from "the agent wins with a
+            # small precise force". ``peak_own_units`` / ``own_units_sum``
+            # (divided by length downstream -> mean) track the agent's army
+            # size over the episode; ``peak_gold_banked`` / ``gold_banked_sum``
+            # track unspent gold. A monotonically growing army with near-zero
+            # banked gold is the "convert-all-gold-to-permanent-free-units"
+            # signature -- i.e. the economy (uncapped income, no upkeep) is
+            # funding mass, not the reward. ``units_built`` (above) gives the
+            # composition.
+            "peak_own_units": 0,
+            "own_units_sum": 0,
+            "peak_gold_banked": 0.0,
+            "gold_banked_sum": 0.0,
         }
 
     def _get_action_space_size(self) -> int:
@@ -1535,6 +1549,17 @@ class StrategyGameEnv(gym.Env):
         self.episode_stats["max_legal_actions"] = max(self.episode_stats["max_legal_actions"], int(n_legal_actions))
         if seize_available:
             self.episode_stats["seize_available_steps"] += 1
+
+        # Army-economy diagnostics: sample the agent's army size and unspent
+        # gold at every decision point. Sampling per-action (not per game-turn)
+        # weights the mean toward busy turns, which is fine -- peak is the
+        # unambiguous signal and mean is a coarse trend proxy.
+        own_units = sum(1 for u in self.game_state.units if u.player == self.agent_player)
+        own_gold = float(self.game_state.player_gold.get(self.agent_player, 0))
+        self.episode_stats["peak_own_units"] = max(self.episode_stats["peak_own_units"], int(own_units))
+        self.episode_stats["own_units_sum"] += int(own_units)
+        self.episode_stats["peak_gold_banked"] = max(self.episode_stats["peak_gold_banked"], own_gold)
+        self.episode_stats["gold_banked_sum"] += own_gold
 
         # Get observation
         obs = self._get_obs()

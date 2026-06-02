@@ -67,6 +67,73 @@ class TestUnitCreationRestrictions:
         assert len(hq_actions) == 0, "HQ should not allow unit creation"
 
 
+class TestLegalActionSanity:
+    """Legal-action enumeration should not emit nonsensical actions.
+
+    Covers two fixes: (1) paralyze must not target an already-paralyzed
+    enemy, and (2) dead units (health <= 0) must never act nor be targeted,
+    even if they linger in ``self.units``.
+    """
+
+    def _ready(self, unit):
+        """Clear summoning sickness so a freshly created unit can act."""
+        unit.can_move = True
+        unit.can_attack = True
+
+    def _fund(self, game):
+        """Give both players enough gold to create any unit."""
+        for p in game.player_gold:
+            game.player_gold[p] = 1000
+
+    def test_paralyze_not_offered_for_already_paralyzed_enemy(self, simple_game):
+        game = simple_game
+        game.current_player = 1
+        self._fund(game)
+        mage = game.create_unit("M", 5, 5, player=1)
+        enemy = game.create_unit("W", 5, 6, player=2)  # adjacent (distance 1)
+        self._ready(mage)
+        game._invalidate_cache()
+
+        # Baseline: an un-paralyzed enemy in range yields both attack + paralyze.
+        actions = game.get_legal_actions(player=1)
+        assert any(a["target"] is enemy for a in actions["attack"])
+        assert any(a["target"] is enemy for a in actions["paralyze"])
+
+        # Once paralyzed, the enemy is still attackable but must NOT be
+        # offered as a paralyze target (re-cast is a wasteful near no-op).
+        enemy.paralyzed_turns = 2
+        game._invalidate_cache()
+        actions = game.get_legal_actions(player=1)
+        assert any(a["target"] is enemy for a in actions["attack"])
+        assert all(a["target"] is not enemy for a in actions["paralyze"])
+
+    def test_dead_target_not_offered_as_attack(self, simple_game):
+        game = simple_game
+        game.current_player = 1
+        self._fund(game)
+        attacker = game.create_unit("W", 5, 5, player=1)
+        enemy = game.create_unit("W", 5, 6, player=2)
+        self._ready(attacker)
+
+        enemy.health = 0  # corpse left in self.units
+        game._invalidate_cache()
+        actions = game.get_legal_actions(player=1)
+        assert all(a["target"] is not enemy for a in actions["attack"])
+
+    def test_dead_unit_generates_no_actions(self, simple_game):
+        game = simple_game
+        game.current_player = 1
+        self._fund(game)
+        unit = game.create_unit("W", 5, 5, player=1)
+        self._ready(unit)
+
+        unit.health = 0  # corpse left in self.units
+        game._invalidate_cache()
+        actions = game.get_legal_actions(player=1)
+        assert all(a["unit"] is not unit for a in actions["move"])
+        assert all(a["attacker"] is not unit for a in actions["attack"])
+
+
 class TestUnitEliminationWinCondition:
     """Test that eliminating all enemy units results in a win."""
 

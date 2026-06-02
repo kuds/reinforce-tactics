@@ -172,6 +172,17 @@ def evaluate_model(
     steps_total = 0
     max_legal_actions = 0
 
+    # Army-economy diagnostics aggregated from ``info["episode_stats"]``.
+    # Peaks take the max across the eval set; the *_sum totals are divided
+    # by ``steps_total`` for per-decision means. Together they answer "does
+    # the agent win by massing a big slow army or with a small precise
+    # force" -- a high peak army + near-zero banked gold is the
+    # economy-funds-mass signature.
+    peak_own_units = 0
+    own_units_sum_total = 0
+    peak_gold_banked = 0.0
+    gold_banked_sum_total = 0.0
+
     if track_breakdown:
         action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
         reward_components = {name: 0.0 for name in REWARD_COMPONENTS}
@@ -333,6 +344,11 @@ def evaluate_model(
         steps_total += ep_len
         max_legal_actions = max(max_legal_actions, int(episode_stats.get("max_legal_actions", 0) or 0))
 
+        peak_own_units = max(peak_own_units, int(episode_stats.get("peak_own_units", 0) or 0))
+        own_units_sum_total += int(episode_stats.get("own_units_sum", 0) or 0)
+        peak_gold_banked = max(peak_gold_banked, float(episode_stats.get("peak_gold_banked", 0.0) or 0.0))
+        gold_banked_sum_total += float(episode_stats.get("gold_banked_sum", 0.0) or 0.0)
+
     rewards_arr = np.array(rewards)
     lengths_arr = np.array(lengths)
     turns_arr = np.array(turns)
@@ -359,6 +375,10 @@ def evaluate_model(
         "captures_by_type": captures_by_type,
         "seize_available_rate": (seize_available_steps_total / steps_total) if steps_total > 0 else 0.0,
         "max_legal_actions": int(max_legal_actions),
+        "peak_own_units": int(peak_own_units),
+        "mean_own_units": (own_units_sum_total / steps_total) if steps_total > 0 else 0.0,
+        "peak_gold_banked": float(peak_gold_banked),
+        "mean_gold_banked": (gold_banked_sum_total / steps_total) if steps_total > 0 else 0.0,
     }
     if track_breakdown:
         result["action_counts"] = action_counts

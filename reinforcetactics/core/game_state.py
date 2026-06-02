@@ -17,6 +17,7 @@ from reinforcetactics.constants import (
     ALL_UNIT_TYPES,
     BUILDING_INCOME,
     HEADQUARTERS_INCOME,
+    MAX_UNITS_PER_PLAYER,
     STARTING_GOLD,
     TOWER_INCOME,
     UNIT_DATA,
@@ -81,6 +82,28 @@ class GameState:
                     )
                 unit_data[code][field] = value
         return unit_data, income_rates, starting_gold
+
+    @staticmethod
+    def _resolve_max_units_per_player(overrides: Dict[str, Any]) -> int:
+        """Resolve the per-player unit cap from the engine-override overlay.
+
+        Defaults to :data:`MAX_UNITS_PER_PLAYER`. A positive int is required
+        -- a cap <= 0 would forbid all unit creation, which is never the
+        intent and should fail loud rather than silently soft-lock a game.
+
+        The cap is a *creation gate*, not a retroactive trim: it blocks new
+        ``create_unit`` calls once a player is at the cap but never removes
+        existing units, so a scenario that starts a side at or above the cap
+        (or a sweep that sets the cap below the starting army) simply can't
+        grow until attrition drops the count. It is therefore a soft ceiling
+        on growth, not a hard guarantee of ``<= cap`` units at every instant.
+        """
+        if "max_units_per_player" not in (overrides or {}):
+            return MAX_UNITS_PER_PLAYER
+        val = int(overrides["max_units_per_player"])
+        if val <= 0:
+            raise ValueError(f"engine_overrides.max_units_per_player must be a positive int, got {val}")
+        return val
 
     @staticmethod
     def _resolve_damage_model(overrides: Dict[str, Any]) -> str:
@@ -171,6 +194,7 @@ class GameState:
                       "building_health": int,      #   (capture-difficulty lever)
                       "headquarters_health": int,
                       "damage_model": "flat" | "hp_scaled",  # combat model
+                      "max_units_per_player": int,  # per-player unit cap
                       "unit_data": {CODE: {field: value}},  # sparse deltas
                     }
 
@@ -209,6 +233,10 @@ class GameState:
         # verbatim engine_overrides log, same as damage_model / economy.
         self.structure_health: Dict[str, int] = self._resolve_structure_health(self.engine_overrides)
         self._apply_structure_health_overrides()
+        # Hard ceiling on units-per-player (action-space + economy guardrail).
+        # Enforced in both create_unit and get_legal_actions so the cap shows
+        # up in the action mask, not just as a rejected action.
+        self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
         self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: Optional[int] = None
@@ -281,7 +309,14 @@ class GameState:
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
-        self.__init__(map_data, self.num_players, self.max_turns, self.enabled_units, self.fog_of_war)
+        self.__init__(
+            map_data,
+            self.num_players,
+            self.max_turns,
+            self.enabled_units,
+            self.fog_of_war,
+            engine_overrides=self.engine_overrides,
+        )
 
     def set_map_metadata(
         self,
@@ -604,6 +639,14 @@ class GameState:
         """
         if player is None:
             player = self.current_player
+
+        # Enforce the per-player unit cap. Mirrored in get_legal_actions so
+        # the RL action mask hides create_unit at the cap rather than the
+        # agent issuing a rejected action and eating the invalid_action
+        # penalty.
+        if sum(1 for u in self.units if u.player == player) >= self.max_units_per_player:
+            logger.debug(f"Cannot create unit: player {player} at unit cap ({self.max_units_per_player})")
+            return None
 
         # Check if position is occupied
         if self.get_unit_at_position(x, y):
@@ -1244,16 +1287,24 @@ class GameState:
         }
 
         # Building units (only at Buildings, not HQ)
-        # Only include enabled unit types
-        for tile in self.grid.get_capturable_tiles(player):
-            if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                for unit_type in self.enabled_units:
-                    if self.player_gold[player] >= self.unit_data[unit_type]["cost"]:
-                        legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
+        # Only include enabled unit types. Suppressed entirely once the player
+        # is at the unit cap so the action mask matches create_unit's own
+        # enforcement (no offered-then-rejected create actions).
+        if sum(1 for u in self.units if u.player == player) < self.max_units_per_player:
+            for tile in self.grid.get_capturable_tiles(player):
+                if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
+                    for unit_type in self.enabled_units:
+                        if self.player_gold[player] >= self.unit_data[unit_type]["cost"]:
+                            legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
 
         # Unit actions
         for unit in self.units:
-            if unit.player == player and not unit.is_paralyzed():
+            # Guard on health: dead units are normally removed synchronously
+            # by ``attack`` (see self.units.remove), but the helpers below all
+            # filter on ``health > 0`` defensively -- mirror that here so a
+            # corpse left in ``self.units`` by any future deferred-removal path
+            # (AoE, end-of-turn DoT, status damage) can't emit phantom actions.
+            if unit.player == player and unit.health > 0 and not unit.is_paralyzed():
                 # Movement
                 if unit.can_move:
                     reachable = unit.get_reachable_positions(
@@ -1280,7 +1331,7 @@ class GameState:
                         on_mountain = unit_tile.type == "m"
 
                         for enemy in self.units:
-                            if enemy.player != player:
+                            if enemy.player != player and enemy.health > 0:
                                 # FOW: Skip enemies not attackable (checks pre-move snapshot)
                                 if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
                                     continue
@@ -1289,7 +1340,13 @@ class GameState:
                                 if damage > 0:
                                     legal_actions["attack"].append({"attacker": unit, "target": enemy})
 
-                                    if unit.type == "M" and unit.can_use_paralyze():
+                                    # Paralyze: skip already-paralyzed targets.
+                                    # Re-casting only refreshes the status (a
+                                    # near no-op) and inflates the action space,
+                                    # unlike heal/cure/buffs which all guard
+                                    # against re-applying to an already-affected
+                                    # ally.
+                                    if unit.type == "M" and unit.can_use_paralyze() and not enemy.is_paralyzed():
                                         # Mages can also paralyze at range (if not on cooldown)
                                         distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
                                         if distance <= 2:
@@ -1358,6 +1415,11 @@ class GameState:
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
+            # Persist the engine-constant overlay so a reloaded game runs under
+            # the same balance (damage_model, structure HP, economy, unit cap)
+            # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
+            # back to {} (== module defaults), preserving backward-compat.
+            "engine_overrides": self.engine_overrides,
             "units": [unit.to_dict() for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
             "action_history": self.action_history,
@@ -1630,8 +1692,17 @@ class GameState:
         fog_of_war_method = save_data.get("fog_of_war_method", "simple_radius" if fog_of_war else "none")
 
         max_turns = save_data.get("max_turns")
+        # Restore the engine-constant overlay (damage_model / structure HP /
+        # economy / unit cap). Absent in pre-0.3.3 saves -> {} == module
+        # defaults, byte-identical to the old load behaviour.
+        engine_overrides = save_data.get("engine_overrides") or {}
         game = cls(
-            map_data, save_data.get("num_players", 2), max_turns=max_turns, enabled_units=enabled_units, fog_of_war=fog_of_war
+            map_data,
+            save_data.get("num_players", 2),
+            max_turns=max_turns,
+            enabled_units=enabled_units,
+            fog_of_war=fog_of_war,
+            engine_overrides=engine_overrides,
         )
 
         # Restore the fog of war method

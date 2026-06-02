@@ -1847,3 +1847,405 @@ for mass) is queued to close out the cheap-lever sweep, but expectations are
 modest. The indicated escalation is **BC warm-start from a capture-using
 demonstrator** (keeping opponent diversity) — the only lever that has ever
 cleared r15 (v33), and the one that can teach the capture win directly.
+
+## ✅ BREAKTHROUGH — v49→v50: the reward landscape WAS the root; cold-start now reaches skirmish
+
+This is the chapter the v15–v45 sweep was circling. After the cheap config
+levers were exhausted (entropy, patience, capacity, opponent diversity,
+economy), a set of **diagnostics** built in this branch pinned the actual
+mechanism, and a **combined reward fix (v49) + decisive-combat engine change
+(v50)** took the modern cold-start line from "stalls at `beginner_random_15`"
+(every config since v17) to **~20 stages, reaching `skirmish_random_20`** —
+matching the historical deep config's frontier, from a cold start.
+
+### The diagnostics that cracked it
+
+The sweep had been guessing at *why* the policy stalls. Three additions made
+it observable (eval log + TensorBoard + per-step info):
+
+- **`seize_available_rate`** — fraction of decision points where a capture
+  action was legal. This separates "the policy never reaches a capturable
+  tile" (navigation/exploration) from "it reaches one and declines"
+  (reward). On the `beginner_random_15` stall it sat at **40–57% even at 0%
+  WR** → the agent *can* capture and *won't*. That ruled out BC/navigation as
+  the next lever and pointed squarely at the reward landscape.
+- **`max_legal_actions`** — peak legal-action-set size. Guardrail for the
+  `flat_discrete` `max_flat_actions` cap; later caught a real 512 overflow on
+  skirmish (see v52).
+- **`best_checkpoint_timestep` / stage-relative steps** — how far into a stage
+  the handed-forward best checkpoint actually was (the skip-ahead handoff
+  tell).
+
+A **latent truncation bug** surfaced alongside: `_build_flat_actions` appended
+`end_turn` *before* the `max_flat_actions` cap and head-truncated the
+overflow — silently dropping `end_turn` (appended last) and `seize`
+(action_type 3, built after create/move/attack). Fixed to always preserve
+both. Latent on 6×6; **load-bearing on skirmish** (v50 hit the cap).
+
+### v49 (run `20260531_051101`): the combined reward fix broke the r15 wall
+
+The decisive read from the v43a run: at 0% WR the policy drew 78–80/80 games
+to the 75-turn cap while collecting **+28..+55 reward** — *the draw was
+positively rewarded*. A safe paying harbor. v49 is the combined fix the
+single-axis sweep never tried (all off v43a's opponent-diversity base):
+
+1. **`draw: −10 → −50`** — remove the positive safe-harbor draw (== loss, so
+   never prefer losing to drawing).
+2. **`damage_taken_scale: −0.002` (NEW env term)** — charge for damage taken
+   so combat shaping is net-zero-sum; a mutual trade nets ~0, only decisive
+   combat pays. Kills the trade-to-the-clock farm without zeroing combat (v42's
+   combat-OFF over-sparsified r10).
+3. **`unit_diff: 0.3 → 0.0`** — stop paying per-unit-*count* (the confirmed
+   cheapest-unit-spam subsidy).
+4. **`hq_capture: 25 → 60`, `win_by_hq_capture: 50 → 80`** — the HQ was paying
+   *less* than a building (40); make it the best target and prefer the
+   transferable win.
+
+Result: draws flipped **negative** (0%-WR evals now −20..−48), mono-Warrior
+spam gone (Warrior share 23–65%, not 95–100%), and it **cleared `random_10`,
+`random_15`, `mixed_r15_simple`** and reached `beginner_random_20` (5 stages,
+best 0.7875) — the first modern config to get past the r15 wall. Wins were by
+**elimination** (HQ captures 0 past stage 1); the negative draw forced
+*finishing*, not *capturing*.
+
+### v50 (run `20260531_165459`): hp_scaled decisive combat → the breakthrough
+
+`v50 = v49 + damage_model: hp_scaled` (engine: outgoing damage and counters
+scale with the attacker's current HP fraction — consistent with seize, which
+was always HP-based; config-surfaced via `engine_overrides`, recorded in
+`config.json`).
+
+The flat-damage model is an **attrition** model — a 1-HP unit hits as hard as
+a full one, so armies grind down evenly and games drift to the max-turn draw
+*at the mechanics level*. HP-scaling makes combat **decisive** (focus-fire
+compounds, fights resolve). It also shrinks the farm on its own.
+
+Result — the deepest modern run by a wide margin:
+
+- `random_10` cleared **3× faster** (750k vs v49's ~2.3M) — decisiveness in
+  action.
+- Cleared the **entire beginner ladder** including beating Simple/Medium/
+  **Advanced** bots, then **transferred to intermediate (7×7)** and **skirmish
+  (8×8)**, clearing through `skirmish_random_15` and stalling at
+  `skirmish_random_20` (~20 stages) when Colab timed out at ~8M steps.
+
+**hp_scaled is a keeper.** It is the engine-side twin of v49's reward fix:
+v49 removed the safe draw, v50 made the agent win the fights it now has to.
+
+### v51 (run `20260601_031012`): budget floor + patience-2 — and a variance bombshell
+
+`v51 = v50 + 3M budget floor on every stage + uniform patience-2`. Motivation:
+v50's `intermediate_random_20` was budgeted **1.5M/patience-3** — half the
+budget and a stricter gate than `beginner_random_20` (3M/patience-2), the same
+drift-attractor stage type — and it cleared only via a late recovery right at
+its budget edge. The floor is a **ceiling** raise (allows recovery), *not* the
+`min_timesteps_before_promotion` gate that backfired (that forced
+overtraining); easy stages still promote early and ignore it.
+
+**But v51 stalled at `beginner_random_15` (3 stages, 0.6625)** — far worse than
+v50. This is **NOT a regression from the fix**, and the reason is the most
+important methodological lesson in this whole document:
+
+> **Run-to-run variance on this curriculum is enormous: the same config and
+> the same seed produced 14 stages (v50) vs 3 stages (v51).**
+
+Proof it's variance, not the change: (a) `random_15` had *identical* budget
+(3M) and patience (2) in both — the fix didn't touch it; (b) v50 and v51's
+**first eval (`@ step 8`) is byte-identical** (WR 0.5, reward 91.8589625) —
+same seed, same weight init; (c) they diverge by `@ 50k`. Everything is
+seeded — **opponent bots** (per-episode `random.Random(bot_seed)` from
+`np_random`), **weight init** (`MaskablePPO(seed=cfg.seed)` → `set_random_seed`
+before the policy is built), **eval RNG** — so the *only* uncontrolled variable
+is **CUDA floating-point non-determinism** (non-associative atomic adds),
+which the `random_10/15` drift attractor amplifies into completely different
+trajectories.
+
+**Consequences:**
+1. **Single-run comparisons across configs are unreliable.** v49's 5-stage
+   stall, v50's 20-stage run, and v51's 3-stage stall are samples of a
+   high-variance process. Conclusions need **2–3 seeds per config**.
+2. The doc's old "treat ±10% at a promote eval as noise" massively understated
+   it — here it's the difference between a stall and a breakthrough.
+3. If exact reproducibility is ever needed, also set
+   `torch.use_deterministic_algorithms(True)` + `CUBLAS_WORKSPACE_CONFIG` +
+   disable cuDNN autotune (slower, reproduces *one* path). For *comparison*,
+   do the opposite — vary the seed.
+4. One residual global-RNG leak: **Rogue evade uses `random.random()`** in
+   `mechanics.attack_unit` (not the env/bot rng). Minor (Rogues rarely built)
+   but worth closing for clean multi-seed work.
+
+### v52a / v52b (queued): the skirmish stall is draw-economy + truncation, not capture
+
+The v50 `skirmish_random_20` stall exposed two skirmish-specific (`max_turns=
+120`) blockers — and notably **`seize_avail` was *high* (75–82%) on skirmish**,
+so it is *not* the elimination-can't-transfer capture wall:
+
+1. **The negative-draw fix doesn't scale to the longer clock.** On skirmish the
+   per-step combat/seize farm scales with `max_turns` and the larger structure
+   count while `draw:-50` is fixed — so 0/0/80 draws returned to
+   break-even/positive (+19..+54). v49's draw fix was calibrated for
+   `max_turns=75`.
+2. **Truncation fired** — legal actions exceeded `max_flat_actions=512`
+   (warnings at 517/526/528; `max_legal` pinned at 512), dropping legal
+   moves/attacks. The diagnostic + truncation fix caught and contained it, but
+   the cap is genuinely too small for 8×8.
+
+Both off v51 (carry the budget/patience fix forward):
+- **v52a** = `turn_penalty −0.5 → −1.0`. `turn_penalty` is the natural
+  *max-turns scaler* (charged per `end_turn`, so a stall accrues
+  `turn_penalty × max_turns`): a 120-turn skirmish stall now costs −120 (was
+  −60), shifting expected draw return clearly negative, while fast wins end
+  early (+100..+220 reward) and stay positive. Isolates the reward fix.
+- **v52b** = v52a + `max_flat_actions 512 → 1024`. Adds the truncation fix.
+- Reading the A/B: v52a clears → draw economy was the blocker; v52b clears but
+  v52a doesn't → truncation contributed; neither → deeper capability wall →
+  structural v53.
+- Escalation if `−1.0` under-delivers: `turn_penalty −1.5` (wins have ample
+  headroom).
+
+### Reusable levers now on the config surface (default-inert)
+
+All snapshotted into `config.json`, all byte-identical to legacy when unset:
+- `reward_config.damage_taken_scale` — symmetric combat (kill the trade farm).
+- `engine_overrides.damage_model: flat|hp_scaled` — decisive combat.
+- `engine_overrides.{tower,building,headquarters}_health` — capture-difficulty
+  lever (e.g. HQ@30 = 2 Warrior-turns vs 4). The direct knob for the capture
+  problem when it becomes the binding wall.
+
+### What's still open (→ v53 structural)
+
+Across the whole arc, **wins are by elimination; HQ captures stay ~0 past the
+first easy stage.** The reward now *points* at capture (hq_capture 60, win 80)
+and the draw no longer pays — but the **capture gauntlet** is still
+mechanically hard: seize damage = the seizer's *current* HP (decays under
+fire), a defended HQ takes 3–4 uninterrupted turns to take, a garrison unit
+**physically blocks** the tile (you can't step onto an occupied tile) and
+**base-heals** on it, and a killed seizer lets the structure regen 50%/turn. So
+capture only happens once the fight is already won — i.e. it collapses into
+elimination, which doesn't transfer to bigger maps where elimination can't
+close in time.
+
+The structural levers (when capture becomes the binding wall, likely on
+skirmish+ after v52): **`headquarters_health` reduction** (make the HQ a 1–2
+turn act so it's reachable by exploration) and/or **BC warm-start from a
+capture-using demonstrator** (the only thing that ever taught capture, v33).
+Both now compose with a reward that finally rewards finishing-by-capture and a
+draw that no longer pays.
+
+### Lessons (this chapter)
+
+1. **Build the diagnostic before tuning the lever.** `seize_available_rate`
+   converted years of "is it can't-reach or won't-finish?" guessing into a
+   one-number answer (won't), which redirected effort from BC to reward.
+2. **The profitable draw was the root all along.** Every cheap lever (entropy,
+   patience, capacity, opponent diversity) failed because they nudged the
+   policy *around* an attractor the reward made positive. Pricing the draw
+   negative (v49) + decisive combat (v50) removed the attractor and 4× the
+   curriculum depth fell out.
+3. **A draw fix calibrated for one `max_turns` doesn't transfer to a longer
+   clock.** The farm scales with the clock; the penalty must too
+   (`turn_penalty` does this naturally — prefer it over a flat `draw` constant
+   on multi-`max_turns` curricula).
+4. **Run-to-run variance dwarfs most config deltas.** Same seed → 3 vs 14
+   stages from CUDA non-determinism alone. Compare configs across **multiple
+   seeds**, not single runs. This recontextualizes the *entire* v15–v48
+   single-run sweep: some "stalls" and "clears" were luck.
+5. **Budget is a ceiling, not a floor.** Raising `max_timesteps` lets a
+   stall-prone stage recover without forcing overtraining (unlike the
+   `min_timesteps` gate). Keep the random_N / drift-attractor stages at ≥3M.
+6. **Engine balance belongs on the config surface.** `damage_model`,
+   structure-HP, and `damage_taken_scale` close the last hardcoded confounds —
+   a balance change is now a recorded config delta, not a `constants.py` edit.
+
+## v52a complete run + the action-space / economy work (the skirmish_random_20 wall)
+
+The v52a run (`20260601_172412`, `turn_penalty −1.0`, `max_flat_actions 512`)
+ran to the Colab timeout and gave a decisive, *negative* result that reframes
+the remaining work: **skirmish_random_20 is a hard structural wall, and on
+512-cap it is truncation-saturated.**
+
+### What the finished run showed
+
+- **Deepest frontier yet**: cleared the entire beginner + intermediate ladders
+  and skirmish through `skirmish_random_15`, then stalled at
+  `skirmish_random_20`.
+- **Not a timing stall**: the policy sat on `skirmish_random_20` from ~5.85M to
+  the ~8.05M timeout — **~2.2M steps** — and never sustained ≥70%. WR
+  oscillated 0%↔37% indefinitely. A full stage budget could not crack it, so
+  the blocker is structural (capture/economy), not budget.
+- **Truncation saturated**: every warning reads `max_flat_actions (512)`;
+  demand at the stall ran **513–744 continuously**, so ~30–45% of the legal set
+  (moves/attacks) was dropped on most decisions, every game. This is the
+  cleanest proof yet that **512 is a real binding constraint on the 8×8 map** —
+  and the direct justification for `max_flat_actions: 1024` (v52b/v53/v53b).
+- **Policy-collapse signature**: eval @ 7.75M = `WR 0% / len 121 / turns 120 /
+  seize_avail 0% / max_legal 20` — the agent built ~1 unit and drew out, then
+  swung back to max_legal=512 a few evals later. Violent mass↔nothing swings =
+  late-stage entropy/drift instability (keeps the entropy-respike lever live).
+- **Drift confirmed system-wide**: several stages logged `restoring best
+  checkpoint … peak @ 8 stage steps` — the best policy for the stage was the
+  *transfer point*, and training drifted off it (beginner_random_10 needed
+  ~850k steps of 100%↔2% oscillation; intermediate_random_15 went fully to 0%
+  for ~800k before recovering).
+
+### The action-space balloon: diagnosed, not guessed
+
+Reviewing `get_legal_actions`, the balloon is **movement-dominated**, not
+ability/attack-dominated: moves are enumerated **one per (unit, reachable
+tile)**, so the legal-set size scales as `units × per-unit footprint`. A
+correction worth recording: the Mage/Sorcerer `{"adjacent","range"}` numbers
+are **damage at distance 1 / 2**, *not* a 12-tile reach — ranged attack range
+is only ≤2 (Archer 2–3/4). So ranged multi-target is a minor contributor;
+**army size × move-fan is the whole story.** 744 legal ≈ ~24 units on skirmish.
+
+### Board-density is the right lens for the unit cap
+
+`20 units/side` against per-map **walkable** tiles:
+
+| map | walkable | 20 = 1 side | both at 20 |
+|-----|------|------|------|
+| beginner 6×6 | 36 | 56% | 111% (impossible) |
+| intermediate 7×7 | 43 | 47% | 93% (gridlock) |
+| skirmish 8×8 | 62 | 32% (~⅓) | 65% |
+| corner_points 12×10 | 114 | 18% | 35% |
+
+So a cap of **20 is generous-to-free on the small maps** (they physically
+can't hold ~40 units — they self-cap ~15–18/side) and **bites only at genuine
+skirmish gridlock** (the ~24-unit peak the stall sat at) or to **force
+precision on corner_points** (the one map where 20 is an active downward
+constraint, and even there it's only 18% density — playable). The measured
+~24-unit skirmish peak is therefore the *pathology*, not normal play to
+preserve headroom for.
+
+### What shipped this session (all default-inert / config-surfaced)
+
+- **Legal-action correctness fixes** (`get_legal_actions`): paralyze no longer
+  offered against already-paralyzed enemies (matches heal/cure/buff guards);
+  `health > 0` guards on the source-unit loop and ranged-attack target loop
+  (safe today via synchronous removal, fragile otherwise).
+- **Army-economy telemetry**: per-episode `peak_own_units` / `mean_own_units` /
+  `peak_gold_banked` / `mean_gold_banked`, surfaced in eval results, tensorboard
+  (`eval/*`), and the eval print line (`army(pk/mn)=… gold(pk/mn)=…`). Separates
+  "economy funds mass" (high peak army + ~0 banked gold) from "reward funds
+  mass" — and the reward in this lineage already pays **nothing** for units
+  (`create_unit 0`, `unit_diff 0`, damage net-zero, `kill 0.2`), so a persistent
+  big army implicates the **economy** (uncapped per-turn income, no upkeep, free
+  structure-healing), not the reward.
+- **Per-player unit cap** (`constants.MAX_UNITS_PER_PLAYER = 50`, override
+  `engine_overrides.max_units_per_player`): enforced in **both** `create_unit`
+  and `get_legal_actions` so the cap shows up in the action mask (no
+  offered-then-rejected creates). Bounds both the action-space balloon and the
+  convert-all-gold economy.
+- **v53b config** = v53 structure-HP **+ economy lever**: `headquarters_income
+  150 → 120` (trim the largest gold faucet without touching relative unit value)
+  and `max_units_per_player 20` (active lever; code default stays 50 as a
+  never-bind guardrail). v53 (accommodate the army via `max_flat 1024`) vs v53b
+  (shrink the army via the economy) is the clean A/B.
+
+### Lessons (this chapter)
+
+1. **A saturated `max_legal` at the cap is a censored measurement.** Eval
+   `max_legal_actions` is `len(_current_actions)`, itself capped at `max_flat`,
+   so it pins at 512 and *hides* true demand — you must read the truncation
+   **warnings** (raw counts, up to 744) to see the real size. Don't infer army
+   size from the (censored) eval scalar.
+2. **The action-space balloon is `units × move-footprint`, dominated by
+   movement.** Nerfing a unit's *abilities* or *attack range* barely touches it;
+   only army size (economy) or per-unit move enumeration (action representation)
+   moves the needle.
+3. **Density, not a raw count, sizes a unit cap.** The same cap is free on a 6×6
+   board and binding on a 12×10 one. Size caps against **walkable tiles per
+   map**; ~⅓-board one-side coverage is the gridlock onset.
+4. **When the reward already de-subsidizes mass but the agent still masses, look
+   at the economy, not the reward.** Uncapped income + no upkeep + free healing
+   makes units a free-to-hold instrumental good; the policy converts all gold to
+   bodies even though nothing pays for bodies. Fix the *supply* (income/upkeep/
+   cap), not the reward weights.
+5. **A full-budget stall that never sustains is structural, not under-budgeting.**
+   2.2M steps on `skirmish_random_20` with no sustained promotion rules out
+   "needs more steps" — escalate to the structural lever (capture HP / economy),
+   not a bigger ceiling.
+6. **Full-ladder runs are the unit of cost.** Reaching skirmish consumes a whole
+   Colab session, so engine-only changes (structure HP, income, cap, damage
+   model) are warm-start-friendly from a near-skirmish checkpoint, but a
+   `max_flat` change resizes the `Discrete` action head and needs a fresh run.
+
+## Tuning roadmap — the levers worth pulling next (and their priority)
+
+After the v52a skirmish_random_20 wall, the open knobs sort into scalar *tunes*,
+structural *refactors*, and *methodology*. Ordered by expected leverage:
+
+### 1. `gamma` / effective horizon — the under-rated scalar (do this near-first)
+
+`gamma` is per **env-step**, not per game-turn. Episodes run to `max_steps=3000`
+(skirmish ≈ 20 env-steps/turn × 120 turns ≈ 2400 steps). At `gamma=0.99` the
+effective horizon is `1/(1−0.99)=100` env-steps ≈ **~5 game-turns**. So the
+terminal `hq_capture (+60)` / `win (+80)` rewards earned on turn ~50 of a
+capture push are discounted to **near-zero** by the time they reach the
+maneuvering that set them up — which is the cleanest mechanistic explanation
+for **"wins by elimination, HQ captures ≈ 0, can't close skirmish in the
+clock."** The dense potential terms (income/structure_control) carry local
+signal, but the big *terminal* capture incentives barely propagate.
+
+- Lever: `ppo.gamma 0.99 → 0.995–0.997` (horizon ~200–330 steps ≈ 10–17 turns),
+  optionally `gae_lambda → ~0.97`. One line; warm-startable from a near-skirmish
+  checkpoint so the effect shows fast.
+- Caveat: higher gamma raises value-function variance → interacts with the
+  drift instability (§ collapse @ 7.75M). Watch `explained_variance`/`value_loss`.
+- Rank this **above** starting-entropy: it's a root-cause lever for the capture
+  failure, not a stabilizer.
+
+### 2. Multi-seed — methodology, not a parameter (prerequisite for trusting 3–4)
+
+Run-to-run variance (CUDA non-determinism) dwarfs most config deltas (same seed
+→ 3 vs 14 stages). Until economy / entropy / HP / gamma are compared across
+**≥3 seeds**, any single-run "this helped" is suspect. Not a knob — the thing
+that makes every other knob's result trustworthy.
+
+### 3. Capture-reachability bundle (make a push able to *finish*)
+
+Capture is a two-part gauntlet; tune both, not just HP:
+- **Structure HP** (v53, config-surfaced): HQ@30 = ~2 Warrior-turns vs 4.
+- **Regen rate** (NOT yet surfaced — hardcoded 50%/turn in `mechanics`): a lone
+  seizer's damage = its *current* HP (decays under fire), so 50%/turn regen
+  often out-heals a single seizer — capture only lands once the fight is already
+  won. Lowering regen (≈25%/turn) or **suspending regen while an enemy occupies
+  the tile** is arguably more targeted than HP. Would need the same
+  `engine_overrides` treatment structure-HP got.
+- **Economy** (v53b, config-surfaced): `headquarters_income 150→120` + unit cap
+  shrink the army off the gridlock peak.
+
+### 4. Starting entropy re-spike (stabilizer, not a root fix)
+
+The 7.75M collapse (`max_legal=20`, built ~1 unit, drew out) and the
+system-wide `peak @ transfer-point` drift say late-stage instability is real.
+A gentle ent_coef re-spike when entering a new stage may keep the policy from
+drifting off the transferred competence — but it treats the *symptom*; rank it
+below gamma and the capture bundle.
+
+### 5. Action-representation refactor (kills the balloon at the source)
+
+`max_flat 1024` is a band-aid on a `units × move-footprint` balloon. The durable
+fix is changing how moves are represented — select-unit-then-direction, a
+per-tile move head, or top-K-destinations-per-unit pruning — which removes the
+truncation confound permanently and makes precise multi-unit play *learnable*
+(the policy can see all its options). A refactor, not a scalar, but the
+highest-leverage non-tuning change on the board.
+
+### Honorable mentions (lower priority)
+
+- **`win_speed_bonus` vs `turn_penalty`**: speed pressure is currently all in
+  `turn_penalty −1.0` (dense, per-turn). `win_speed_bonus` is terminal-only and
+  *can't* be farmed; it may be a cleaner "win fast" signal that doesn't also
+  punish legitimately long captures. Cheap A/B.
+- **Garrison / seize mechanics**: a defender physically blocks the tile *and*
+  base-heals on it, forcing kill-then-capture (→ elimination). Letting capture
+  progress while adjacent, or partial seize from multiple units, attacks the
+  gauntlet at the mechanic level — invasive; only if HP+regen aren't enough.
+- **Opponent strength at the wall**: skirmish_random_20 is vs `random@20`; not
+  the binding issue now (truncation/economy/horizon are) — leave it.
+
+### Suggested order
+
+`gamma`/horizon → multi-seed harness → (economy + structure-HP + regen) bundle
+→ entropy re-spike → action-representation refactor.

@@ -270,6 +270,13 @@ HEADQUARTERS_INCOME = 150
 BUILDING_INCOME = 100
 TOWER_INCOME = 50
 
+# Hard ceiling on how many units a single player may have on the board at
+# once. Caps both the action-space balloon (move enumeration scales with
+# army size) and the "convert-all-gold-to-permanent-free-units" economy --
+# once at the cap, extra gold has no unit sink. Config-surfaced via
+# engine_overrides["max_units_per_player"].
+MAX_UNITS_PER_PLAYER = 50
+
 # Structure health
 TOWER_MAX_HEALTH = 30
 BUILDING_MAX_HEALTH = 40
