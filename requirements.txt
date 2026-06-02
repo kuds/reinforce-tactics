@@ -19,3 +19,7 @@ PyYAML
 # openai          # For OpenAIBot
 # anthropic       # For ClaudeBot
 # google-genai    # For GeminiBot
+
+# Optional: Cloud training (uploads training artifacts to GCS for Vertex AI jobs)
+# Installed automatically in the Docker image via the [cloud] extra.
+# google-cloud-storage

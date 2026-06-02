@@ -1,0 +1,34 @@
+# Keep the Docker / Cloud Build context small and reproducible.
+.git
+.github
+**/__pycache__/
+*.pyc
+
+# Docs and site (not needed to train)
+docs-site/
+docs/
+assets/
+images/
+
+# Local/training artifacts (regenerated at runtime, never baked into the image)
+models/
+checkpoints/
+tensorboard/
+logs/
+saves/
+replays/
+videos/
+tournament_results/
+benchmarks/
+
+# Test/coverage and editor cruft
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.venv/
+*.egg-info/
+dist/
+build/
+settings.json
