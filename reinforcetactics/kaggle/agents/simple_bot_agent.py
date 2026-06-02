@@ -25,11 +25,11 @@ UNIT_COSTS = {
     "B": 400,
 }
 
-# Unit movement ranges
+# Unit movement ranges (must match the engine's UNIT_DATA movement values)
 UNIT_MOVEMENT = {
     "W": 3,
     "M": 2,
-    "C": 2,
+    "C": 3,
     "A": 3,
     "K": 4,
     "R": 4,
