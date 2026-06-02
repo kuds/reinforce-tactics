@@ -207,6 +207,16 @@ class PeriodicEvalCallback(BaseCallback):
             self.logger.record("eval/seize_available_rate", m["seize_available_rate"])
         if "max_legal_actions" in m:
             self.logger.record("eval/max_legal_actions", m["max_legal_actions"])
+        # Army-economy diagnostics: peak/mean army size and unspent gold.
+        # A high peak army with near-zero banked gold means the economy is
+        # funding mass (convert-all-gold-to-units) -- the "slow-walk a big
+        # army" signature -- vs. a small army winning with banked gold to
+        # spare, which is the precise/efficient regime.
+        if "peak_own_units" in m:
+            self.logger.record("eval/peak_own_units", m["peak_own_units"])
+            self.logger.record("eval/mean_own_units", m["mean_own_units"])
+            self.logger.record("eval/peak_gold_banked", m["peak_gold_banked"])
+            self.logger.record("eval/mean_gold_banked", m["mean_gold_banked"])
 
         if self.verbose:
             print(
@@ -217,7 +227,9 @@ class PeriodicEvalCallback(BaseCallback):
                 f"turns={m['avg_turns']:5.1f}  "
                 f"W/L/D={m['wins']}/{m['losses']}/{m['draws']}  "
                 f"seize_avail={m.get('seize_available_rate', 0.0) * 100:4.1f}%  "
-                f"max_legal={m.get('max_legal_actions', 0)}"
+                f"max_legal={m.get('max_legal_actions', 0)}  "
+                f"army(pk/mn)={m.get('peak_own_units', 0)}/{m.get('mean_own_units', 0.0):.1f}  "
+                f"gold(pk/mn)={m.get('peak_gold_banked', 0.0):.0f}/{m.get('mean_gold_banked', 0.0):.0f}"
             )
 
         # Save best by win rate, with avg_reward as a tiebreaker so we don't
