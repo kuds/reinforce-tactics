@@ -2169,3 +2169,83 @@ preserve headroom for.
    Colab session, so engine-only changes (structure HP, income, cap, damage
    model) are warm-start-friendly from a near-skirmish checkpoint, but a
    `max_flat` change resizes the `Discrete` action head and needs a fresh run.
+
+## Tuning roadmap — the levers worth pulling next (and their priority)
+
+After the v52a skirmish_random_20 wall, the open knobs sort into scalar *tunes*,
+structural *refactors*, and *methodology*. Ordered by expected leverage:
+
+### 1. `gamma` / effective horizon — the under-rated scalar (do this near-first)
+
+`gamma` is per **env-step**, not per game-turn. Episodes run to `max_steps=3000`
+(skirmish ≈ 20 env-steps/turn × 120 turns ≈ 2400 steps). At `gamma=0.99` the
+effective horizon is `1/(1−0.99)=100` env-steps ≈ **~5 game-turns**. So the
+terminal `hq_capture (+60)` / `win (+80)` rewards earned on turn ~50 of a
+capture push are discounted to **near-zero** by the time they reach the
+maneuvering that set them up — which is the cleanest mechanistic explanation
+for **"wins by elimination, HQ captures ≈ 0, can't close skirmish in the
+clock."** The dense potential terms (income/structure_control) carry local
+signal, but the big *terminal* capture incentives barely propagate.
+
+- Lever: `ppo.gamma 0.99 → 0.995–0.997` (horizon ~200–330 steps ≈ 10–17 turns),
+  optionally `gae_lambda → ~0.97`. One line; warm-startable from a near-skirmish
+  checkpoint so the effect shows fast.
+- Caveat: higher gamma raises value-function variance → interacts with the
+  drift instability (§ collapse @ 7.75M). Watch `explained_variance`/`value_loss`.
+- Rank this **above** starting-entropy: it's a root-cause lever for the capture
+  failure, not a stabilizer.
+
+### 2. Multi-seed — methodology, not a parameter (prerequisite for trusting 3–4)
+
+Run-to-run variance (CUDA non-determinism) dwarfs most config deltas (same seed
+→ 3 vs 14 stages). Until economy / entropy / HP / gamma are compared across
+**≥3 seeds**, any single-run "this helped" is suspect. Not a knob — the thing
+that makes every other knob's result trustworthy.
+
+### 3. Capture-reachability bundle (make a push able to *finish*)
+
+Capture is a two-part gauntlet; tune both, not just HP:
+- **Structure HP** (v53, config-surfaced): HQ@30 = ~2 Warrior-turns vs 4.
+- **Regen rate** (NOT yet surfaced — hardcoded 50%/turn in `mechanics`): a lone
+  seizer's damage = its *current* HP (decays under fire), so 50%/turn regen
+  often out-heals a single seizer — capture only lands once the fight is already
+  won. Lowering regen (≈25%/turn) or **suspending regen while an enemy occupies
+  the tile** is arguably more targeted than HP. Would need the same
+  `engine_overrides` treatment structure-HP got.
+- **Economy** (v53b, config-surfaced): `headquarters_income 150→120` + unit cap
+  shrink the army off the gridlock peak.
+
+### 4. Starting entropy re-spike (stabilizer, not a root fix)
+
+The 7.75M collapse (`max_legal=20`, built ~1 unit, drew out) and the
+system-wide `peak @ transfer-point` drift say late-stage instability is real.
+A gentle ent_coef re-spike when entering a new stage may keep the policy from
+drifting off the transferred competence — but it treats the *symptom*; rank it
+below gamma and the capture bundle.
+
+### 5. Action-representation refactor (kills the balloon at the source)
+
+`max_flat 1024` is a band-aid on a `units × move-footprint` balloon. The durable
+fix is changing how moves are represented — select-unit-then-direction, a
+per-tile move head, or top-K-destinations-per-unit pruning — which removes the
+truncation confound permanently and makes precise multi-unit play *learnable*
+(the policy can see all its options). A refactor, not a scalar, but the
+highest-leverage non-tuning change on the board.
+
+### Honorable mentions (lower priority)
+
+- **`win_speed_bonus` vs `turn_penalty`**: speed pressure is currently all in
+  `turn_penalty −1.0` (dense, per-turn). `win_speed_bonus` is terminal-only and
+  *can't* be farmed; it may be a cleaner "win fast" signal that doesn't also
+  punish legitimately long captures. Cheap A/B.
+- **Garrison / seize mechanics**: a defender physically blocks the tile *and*
+  base-heals on it, forcing kill-then-capture (→ elimination). Letting capture
+  progress while adjacent, or partial seize from multiple units, attacks the
+  gauntlet at the mechanic level — invasive; only if HP+regen aren't enough.
+- **Opponent strength at the wall**: skirmish_random_20 is vs `random@20`; not
+  the binding issue now (truncation/economy/horizon are) — leave it.
+
+### Suggested order
+
+`gamma`/horizon → multi-seed harness → (economy + structure-HP + regen) bundle
+→ entropy re-spike → action-representation refactor.
