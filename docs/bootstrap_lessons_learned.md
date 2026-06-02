@@ -2056,3 +2056,116 @@ draw that no longer pays.
 6. **Engine balance belongs on the config surface.** `damage_model`,
    structure-HP, and `damage_taken_scale` close the last hardcoded confounds —
    a balance change is now a recorded config delta, not a `constants.py` edit.
+
+## v52a complete run + the action-space / economy work (the skirmish_random_20 wall)
+
+The v52a run (`20260601_172412`, `turn_penalty −1.0`, `max_flat_actions 512`)
+ran to the Colab timeout and gave a decisive, *negative* result that reframes
+the remaining work: **skirmish_random_20 is a hard structural wall, and on
+512-cap it is truncation-saturated.**
+
+### What the finished run showed
+
+- **Deepest frontier yet**: cleared the entire beginner + intermediate ladders
+  and skirmish through `skirmish_random_15`, then stalled at
+  `skirmish_random_20`.
+- **Not a timing stall**: the policy sat on `skirmish_random_20` from ~5.85M to
+  the ~8.05M timeout — **~2.2M steps** — and never sustained ≥70%. WR
+  oscillated 0%↔37% indefinitely. A full stage budget could not crack it, so
+  the blocker is structural (capture/economy), not budget.
+- **Truncation saturated**: every warning reads `max_flat_actions (512)`;
+  demand at the stall ran **513–744 continuously**, so ~30–45% of the legal set
+  (moves/attacks) was dropped on most decisions, every game. This is the
+  cleanest proof yet that **512 is a real binding constraint on the 8×8 map** —
+  and the direct justification for `max_flat_actions: 1024` (v52b/v53/v53b).
+- **Policy-collapse signature**: eval @ 7.75M = `WR 0% / len 121 / turns 120 /
+  seize_avail 0% / max_legal 20` — the agent built ~1 unit and drew out, then
+  swung back to max_legal=512 a few evals later. Violent mass↔nothing swings =
+  late-stage entropy/drift instability (keeps the entropy-respike lever live).
+- **Drift confirmed system-wide**: several stages logged `restoring best
+  checkpoint … peak @ 8 stage steps` — the best policy for the stage was the
+  *transfer point*, and training drifted off it (beginner_random_10 needed
+  ~850k steps of 100%↔2% oscillation; intermediate_random_15 went fully to 0%
+  for ~800k before recovering).
+
+### The action-space balloon: diagnosed, not guessed
+
+Reviewing `get_legal_actions`, the balloon is **movement-dominated**, not
+ability/attack-dominated: moves are enumerated **one per (unit, reachable
+tile)**, so the legal-set size scales as `units × per-unit footprint`. A
+correction worth recording: the Mage/Sorcerer `{"adjacent","range"}` numbers
+are **damage at distance 1 / 2**, *not* a 12-tile reach — ranged attack range
+is only ≤2 (Archer 2–3/4). So ranged multi-target is a minor contributor;
+**army size × move-fan is the whole story.** 744 legal ≈ ~24 units on skirmish.
+
+### Board-density is the right lens for the unit cap
+
+`20 units/side` against per-map **walkable** tiles:
+
+| map | walkable | 20 = 1 side | both at 20 |
+|-----|------|------|------|
+| beginner 6×6 | 36 | 56% | 111% (impossible) |
+| intermediate 7×7 | 43 | 47% | 93% (gridlock) |
+| skirmish 8×8 | 62 | 32% (~⅓) | 65% |
+| corner_points 12×10 | 114 | 18% | 35% |
+
+So a cap of **20 is generous-to-free on the small maps** (they physically
+can't hold ~40 units — they self-cap ~15–18/side) and **bites only at genuine
+skirmish gridlock** (the ~24-unit peak the stall sat at) or to **force
+precision on corner_points** (the one map where 20 is an active downward
+constraint, and even there it's only 18% density — playable). The measured
+~24-unit skirmish peak is therefore the *pathology*, not normal play to
+preserve headroom for.
+
+### What shipped this session (all default-inert / config-surfaced)
+
+- **Legal-action correctness fixes** (`get_legal_actions`): paralyze no longer
+  offered against already-paralyzed enemies (matches heal/cure/buff guards);
+  `health > 0` guards on the source-unit loop and ranged-attack target loop
+  (safe today via synchronous removal, fragile otherwise).
+- **Army-economy telemetry**: per-episode `peak_own_units` / `mean_own_units` /
+  `peak_gold_banked` / `mean_gold_banked`, surfaced in eval results, tensorboard
+  (`eval/*`), and the eval print line (`army(pk/mn)=… gold(pk/mn)=…`). Separates
+  "economy funds mass" (high peak army + ~0 banked gold) from "reward funds
+  mass" — and the reward in this lineage already pays **nothing** for units
+  (`create_unit 0`, `unit_diff 0`, damage net-zero, `kill 0.2`), so a persistent
+  big army implicates the **economy** (uncapped per-turn income, no upkeep, free
+  structure-healing), not the reward.
+- **Per-player unit cap** (`constants.MAX_UNITS_PER_PLAYER = 50`, override
+  `engine_overrides.max_units_per_player`): enforced in **both** `create_unit`
+  and `get_legal_actions` so the cap shows up in the action mask (no
+  offered-then-rejected creates). Bounds both the action-space balloon and the
+  convert-all-gold economy.
+- **v53b config** = v53 structure-HP **+ economy lever**: `headquarters_income
+  150 → 120` (trim the largest gold faucet without touching relative unit value)
+  and `max_units_per_player 20` (active lever; code default stays 50 as a
+  never-bind guardrail). v53 (accommodate the army via `max_flat 1024`) vs v53b
+  (shrink the army via the economy) is the clean A/B.
+
+### Lessons (this chapter)
+
+1. **A saturated `max_legal` at the cap is a censored measurement.** Eval
+   `max_legal_actions` is `len(_current_actions)`, itself capped at `max_flat`,
+   so it pins at 512 and *hides* true demand — you must read the truncation
+   **warnings** (raw counts, up to 744) to see the real size. Don't infer army
+   size from the (censored) eval scalar.
+2. **The action-space balloon is `units × move-footprint`, dominated by
+   movement.** Nerfing a unit's *abilities* or *attack range* barely touches it;
+   only army size (economy) or per-unit move enumeration (action representation)
+   moves the needle.
+3. **Density, not a raw count, sizes a unit cap.** The same cap is free on a 6×6
+   board and binding on a 12×10 one. Size caps against **walkable tiles per
+   map**; ~⅓-board one-side coverage is the gridlock onset.
+4. **When the reward already de-subsidizes mass but the agent still masses, look
+   at the economy, not the reward.** Uncapped income + no upkeep + free healing
+   makes units a free-to-hold instrumental good; the policy converts all gold to
+   bodies even though nothing pays for bodies. Fix the *supply* (income/upkeep/
+   cap), not the reward weights.
+5. **A full-budget stall that never sustains is structural, not under-budgeting.**
+   2.2M steps on `skirmish_random_20` with no sustained promotion rules out
+   "needs more steps" — escalate to the structural lever (capture HP / economy),
+   not a bigger ceiling.
+6. **Full-ladder runs are the unit of cost.** Reaching skirmish consumes a whole
+   Colab session, so engine-only changes (structure HP, income, cap, damage
+   model) are warm-start-friendly from a near-skirmish checkpoint, but a
+   `max_flat` change resizes the `Discrete` action head and needs a fresh run.
