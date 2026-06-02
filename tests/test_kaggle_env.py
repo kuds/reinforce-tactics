@@ -288,8 +288,31 @@ class TestInitGame:
 class TestBuiltinMaps:
     """Tests for BUILTIN_MAPS catalog and _pad_map helper."""
 
-    def test_catalog_contains_three_maps(self):
-        assert set(BUILTIN_MAPS) == {"beginner", "crossroads", "tower_rush"}
+    def test_catalog_contains_all_1v1_maps(self):
+        # All two-player (1v1) maps from the repo are vendored, except
+        # demo_map_editor (25x25, which exceeds the env's 20x20 padding limit).
+        assert set(BUILTIN_MAPS) == {
+            "beginner",
+            "cavalry_charge",
+            "center_mountains",
+            "cleric_vigil",
+            "corner_points",
+            "crossroads",
+            "difficult_terrain",
+            "funnel_point",
+            "intermediate",
+            "island_fortress",
+            "last_stand",
+            "mage_showdown",
+            "mountain_snipers",
+            "rogue_flank",
+            "skirmish",
+            "sorcerer_cabal",
+            "starter",
+            "the_narrows",
+            "tower_rush",
+        }
+        assert "demo_map_editor" not in BUILTIN_MAPS
 
     def test_each_map_has_both_hqs(self):
         for name, rows in BUILTIN_MAPS.items():
