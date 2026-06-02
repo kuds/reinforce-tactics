@@ -1,0 +1,1384 @@
+# v53c -- entropy-schedule stability (stop the forget-and-relearn churn)
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v53b_capturable_structures_hq_income.yaml.
+# v53c keeps v53b's engine_overrides and reward byte-identical (structure HP +
+# HQ income 120 + unit cap 20 + hp_scaled) and changes the per-stage ent_coef
+# schedule (the primary lever, below) plus one env knob: max_flat_actions is
+# returned to the standard 512 (v52b's 1024 was there to absorb the *uncapped*
+# skirmish move-fan; with the 20-unit cap now bounding the army, the cap does
+# that job and 512 fits -- see the env block). So vs v53b the deltas are the
+# entropy schedule + max_flat 1024->512; vs the 512-era baselines it is the
+# standard action head.
+#
+# THE DIAGNOSIS (v52a run 20260601_172412): the curriculum is expensive not
+# because it has many stages, but because the drift-prone random_N stages
+# *forget and relearn*. The tell is all over the log: stages log
+# `restoring best checkpoint ... peak @ 8 stage steps` -- the policy arrives at
+# a new stage ALREADY competent (best WR at the very first eval), then drifts
+# OFF that competence and spends ~0.8-2.5M steps re-finding it
+# (beginner_random_10 oscillated 100%->2%->100% for ~850k; intermediate_random_15
+# hit 95% on the transfer eval, crashed to 0% for ~800k, then recovered). That
+# churn is the bulk of the ~5.85M climb to skirmish, and the same instability
+# makes skirmish_random_20 swing 0%<->37% instead of holding a winning line.
+#
+# TWO entropy mechanisms cause it; v53c fixes both via schedule SHAPE (it does
+# NOT crush entropy globally -- early exploration is load-bearing for the
+# composition diversity that beat the mono-Warrior attractor in v34-v40):
+#   1. The per-stage RE-SPIKE to ent_coef 0.10 at every transition injects fresh
+#      exploration noise exactly when the policy transfers in competent, knocking
+#      it off the composition it just arrived with (the "peak @ transfer, then
+#      drift" signature). Fix: lower the START to 0.05 on intra-map difficulty
+#      bumps (random_10/15/20) -- the policy already has the composition there,
+#      so don't re-explore. KEEP start 0.10 only where genuinely-new exploration
+#      is warranted: the 4 map-entry balanced_random stages (new map) and
+#      beginner_simple (first SimpleBot -- a new opponent class).
+#   2. The 0.03 end-of-schedule FLOOR is too high late in a stage, so the policy
+#      keeps abandoning a working composition (the v41 finding -- it dropped two
+#      stages to 0.01 and never propagated). Fix: lower the FLOOR to 0.01 on
+#      every scheduled stage ("commit hard late").
+#
+# WHY THIS IS THE CHEAP FIRST LEVER: the forget-and-relearn shows up on the
+# EARLY stages (beginner_random_10's ~850k oscillation), so v53c is validated on
+# just the beginner+intermediate ladder in a fraction of a session -- no
+# skirmish, no warm-start, no timeout. READ: watch the random_N stages promote
+# at/near the transfer eval (patience-2 ~ 100k) instead of oscillating for 1M+,
+# and `restoring best ... peak @ 8 stage steps` should largely disappear. If the
+# climb collapses to ~2-3M, the Colab-timeout problem mostly dissolves on its
+# own AND skirmish gets a policy that can hold a winning line.
+#
+# CAVEAT: stabler entropy will NOT by itself dissolve skirmish_random_20's
+# *structural* issues (truncation, capture-can't-close) -- gamma/economy/regen
+# still matter there. But it attacks the timeout at its root and compounds:
+# every later experiment runs on a cheaper, stabler climb. No engine dependency
+# (curriculum-only) -- runs on the same reinforcetactics >= 0.3.3 as v53b.
+#
+# Schedule summary (vs v53b):
+#   intra-map random_10/15/20 : start 0.10 -> 0.05 (no re-spike)
+#   all scheduled stages       : end 0.03 -> 0.01 (lower floor; stages already
+#                                at 0.01 unchanged)
+#   map-entry balanced_random + beginner_simple : start kept 0.10 (floor -> 0.01)
+#   flat-0.05 bridges (simple/medium/advanced/mixed_50) : unchanged
+# ----------------------------------------------------------------------------
+#
+# v53b -- capturable structures + economy throttle (lower HQ income) + unit cap
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v53_capturable_structures.yaml. v53b is the
+# ECONOMY-LEVER sibling of v53: it keeps v53's structure-HP changes (capture is
+# mechanically reachable) byte-identical and adds TWO supply-side knobs that
+# attack the "slow-walk a big army" failure mode from the economy rather than
+# the action-space ceiling.
+#
+# THE DIAGNOSIS (v52a skirmish_random_20 stall): the reward in this lineage
+# already de-subsidizes mass -- create_unit 0, unit_diff 0, damage net-zero
+# (0.002/-0.002), kill 0.2 -- and pays almost only for captures + fast wins
+# (turn_penalty -1.0). Yet the agent still masses a big slow army and draws to
+# the clock. The driver is NOT the reward; it is the ECONOMY: income is
+# per-turn and uncapped, there is no upkeep, and owned structures heal units
+# for free, so every banked gold piece becomes a permanent, free-to-maintain
+# unit. Units are an *instrumental* good (the only path to the capture rewards),
+# so the policy converts all gold into bodies even though nothing pays for the
+# bodies themselves -- and a 20-unit army then blows past the action-space cap
+# (legal actions hit 728 vs the 512 default), severing maneuver->seize.
+#
+# v53b's two deltas vs v53 (both in engine_overrides):
+#   1. headquarters_income 150 -> 120  ("slightly less gold for HQ"). The HQ is
+#      the single largest income source; trimming it ~20% reduces the gold
+#      supply that funds runaway mass without touching unit balance (relative
+#      per-unit value is unchanged -- this shrinks army SIZE, not composition).
+#      Deliberately gentle: a first probe, not a starvation. If armies stay
+#      bloated, step it toward 100 (== building_income) next.
+#   2. max_units_per_player 20 (the CODE default stays 50; 20 is set here as an
+#      active lever). Motivated by board density vs per-map walkable tiles: 20
+#      units is physically impossible/gridlock on beginner (both sides = 111%)
+#      and intermediate (93%), so it is free there; on skirmish it is exactly the
+#      ~1/3-board (32% one side, 65% both) congestion threshold the measured
+#      ~20-24 peak army sat at; only on corner_points (18% density) is it an
+#      active downward constraint, where it forces precision rather than gridlock.
+#
+# v53 vs v53b is a clean A/B on the central question raised by the v52a review:
+#   * v53 (max_flat 1024)    -> ACCOMMODATE the big army (raise the ceiling).
+#   * v53b (HQ income + cap) -> SHRINK the army via the economy (force the small,
+#     precise force the reward already prefers, which also fits under the cap).
+# READ with the NEW army-economy telemetry (eval: army(pk/mn), gold(pk/mn)): if
+# v53b's peak army drops toward ~12-15 with banked gold staying low, the economy
+# was funding mass and the throttle is working; if army stays ~20+ and gold piles
+# up, the cap/income aren't biting and the driver is exploration/credit-assignment
+# (escalate to entropy re-spike / smaller cap). Single supply-side axis vs v53.
+#
+# REQUIRES reinforcetactics >= 0.3.3 (the max_units_per_player override + the
+# army-economy eval telemetry; absent on the v53/v52 run code).
+# ----------------------------------------------------------------------------
+#
+# v53 -- capturable structures (lower tower/building/HQ max-HP)
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v52b_maxturn_scaled_draw_plus_maxflat.yaml
+# (= v50 hp_scaled + v49 reward + v51 budget floor/patience-2 + v52 turn_penalty
+# -1.0 + max_flat_actions 1024 -- all carried forward). v52b/v51/v50/v49
+# rationale preserved below.
+#
+# THE STRUCTURAL CAPTURE LEVER. Every prior config taught the agent to WIN BY
+# ELIMINATION (HQ captures ~0 past the first easy stage) because capture is a
+# 3-4 turn attrition gauntlet a defended structure rarely lets you finish. The
+# reward already points at capture (hq_capture 60, win_by_hq_capture 80) and
+# the draw no longer pays -- the missing piece is that capture must be
+# MECHANICALLY reachable. v53 lowers structure HP so a full-HP unit can take a
+# building in ~2 turns and the HQ in ~3 (seize damage = the seizer's current
+# HP, so turns = ceil(tile_HP / unit_HP)):
+#   tower_health        30 -> 20   (2 turns; 1 for Barbarian)
+#   building_health     40 -> 25   (2 turns for built units 15-20 HP; 3 for
+#                                   the rarely-built 10-12 HP casters)
+#   headquarters_health 50 -> 30   (2 turns for 15-20 HP units, 3 for 10-12 HP)
+#
+# WHY this is the indicated next lever: the v50 run (deepest ever, ~20 stages
+# to skirmish_random_20) confirmed elimination doesn't transfer to bigger maps
+# where it can't close in the clock. Capture is the win path that DOES
+# transfer, and the only thing blocking it is the gauntlet length. This makes
+# the HQ rush a 2-3 turn commitment instead of 4+, reachable by exploration --
+# and because the reward + negative draw are already in place, a learned
+# capture should STICK rather than erode back to elimination.
+#
+# READ: watch captures_by_type.hq / building climbing off 0 (especially on
+# intermediate/skirmish), end_reason shifting toward hq_capture, and turns
+# dropping. Caveats: this is a real balance change (the opponent's structures
+# are equally capturable, so games end faster both ways -- intended); it
+# invalidates the capture-difficulty assumptions; validate via RL/replay
+# deltas. REQUIRES reinforcetactics >= 0.3.2 (the structure_health override;
+# absent on the v50/v51 run code). Single structural variable vs v52b.
+# ----------------------------------------------------------------------------
+#
+# v52b -- max-turns-scaled draw deterrent + max_flat_actions 1024
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v51_budget_floor_patience2.yaml (= v50
+# hp_scaled + v49 reward + 3M budget floor / uniform patience-2). v51/v50
+# rationale preserved below.
+#
+# Two changes vs v51 (= v52a + the max_flat bump):
+#   1. reward_config.turn_penalty -0.5 -> -1.0  (see v52a header for the full
+#      rationale: max-turns-scaled draw deterrent for the skirmish stall).
+#   2. env.max_flat_actions 512 (default) -> 1024  (see the env block below:
+#      the v50 run truncated legal actions on skirmish, max_legal hit 512).
+#
+# v52b is the "fix both observed skirmish_random_20 blockers at once" config;
+# v52a (turn_penalty only) is the companion that isolates whether the draw
+# economy alone was sufficient. Running both separates the two causes:
+#   * v52a clears skirmish      -> the draw economy was the blocker; the 512
+#                                  truncation wasn't actually gating.
+#   * v52b clears but v52a doesn't -> truncation was a real contributor.
+#   * neither clears            -> skirmish_random_20 is a deeper wall (capture
+#                                  / capability) -> structural v53.
+# ----------------------------------------------------------------------------
+#
+# v51 -- curriculum budget floor (>=3M) + uniform patience-2
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v50_hp_scaled_damage.yaml (hp_scaled combat
+# on top of v49's reward fix). v50's rationale is preserved verbatim below.
+#
+# ONLY change vs v50: the curriculum schedule. No reward / engine / opponent /
+# net_arch deltas -- this is a curriculum-consistency fix, not a treatment.
+#   * Every stage's max_timesteps raised to a 3,000,000 floor (15 stages were
+#     1.5M-2.5M; stages already >=3M are untouched).
+#   * Every stage's patience set to 2 (3 stages were patience-3).
+#
+# WHY: the v50 run (20260531_165459) cleared ~14 stages but stalled at
+# intermediate_random_20, which was budgeted 1.5M / patience-3 -- HALF the
+# budget and a stricter gate than beginner_random_20 (3M / patience-2), the
+# SAME drift-attractor stage type. In that same run beginner_random_20 needed
+# ~2.1M steps of oscillation to escape the attractor, so a 1.5M ceiling times
+# out before recovery is even possible. The intermediate ladder's random_10/15
+# mirrored beginner but random_20 was never given beginner_random_20's
+# treatment -- an oversight. v51 makes the floor uniform so no stall-prone
+# stage can give up before the measured ~2M escape timescale.
+#
+# Budget is a CEILING, not a floor on training: easy stages still promote early
+# (the v50 run cleared most transfer stages in ~50k steps and will ignore the
+# 3M cap); only stall-prone stages use the headroom. This is NOT the
+# min_timesteps_before_promotion gate that backfired -- that forced
+# overtraining past the peak; raising the ceiling only allows recovery.
+#
+# DIAGNOSTIC value: if intermediate_random_20 now clears, it was a timing stall
+# (budget was the fix). If it still stalls at 3M with seize_avail ~27% and
+# all-draws, that is clean evidence of the elimination-can't-transfer capability
+# wall -> escalate to v52 (structural: headquarters_health to make capture a
+# viable win path, etc.). Either way v51 removes the under-budgeting confound
+# before the structural work.
+# ----------------------------------------------------------------------------
+#
+# v50 -- HP-scaled combat damage (engine-side, single delta vs v49)
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v49_symmetric_combat_negative_draw.yaml.
+# The ONLY change is engine_overrides.damage_model: flat -> hp_scaled (see the
+# engine_overrides block below). v49's rationale is preserved verbatim under
+# this banner.
+#
+# WHY v50: v49 attacks the profitable-draw farm from the REWARD side. v50 adds
+# the ENGINE-side fix for the same symptom: combat is currently a flat-damage
+# attrition model (a 1-HP unit hits as hard as a full one), so two armies
+# grind down at equal rates and games tend to the max-turn draw regardless of
+# reward. HP-scaled damage makes fights decisive -- focus-fire reduces enemy
+# output, engagements resolve -- which removes draws at the mechanics level
+# and shrinks the combat farm on its own.
+#
+# QUEUED, not auto-run. Only launch if v49's diagnostics show the attrition
+# stalemate PERSISTING with draws already priced negative (draw reward < 0 but
+# still W/L/D ~ 0/0/80 at turn cap). That's the signal the binding constraint
+# is mechanics, not reward. If v49 already fixes the draws, v50 is unnecessary.
+# Caveats (doc-derived): single variable vs v49; runs on beginner+ (never
+# starter -- combat-math changes collide with tight clocks, v38 lesson);
+# invalidates the tuned cost-efficiency tables so re-check balance; validate
+# via RL/replay deltas, not bot tournaments (scripted bots don't perceive it).
+# ----------------------------------------------------------------------------
+#
+# v49 -- symmetric combat + negative draw + no mass subsidy + HQ-best capture
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v43a_opponent_diversity.yaml (the modern
+# high-water mark: opponent diversity, net_arch [256,256], combat shaping on).
+# v43a's full rationale is preserved verbatim below this block.
+#
+# WHY v49: the v43a run (beginner_random_10 stall) gave a DECISIVE diagnosis
+# via the new eval diagnostics:
+#   * At 0% WR the agent draws 78-80/80 games to the 75-turn cap while
+#     collecting +28..+55 reward -- the draw is POSITIVELY rewarded. It is a
+#     safe paying harbor the policy drifts into (occasional win spikes to
+#     ~74% at turns~54 are pulled straight back).
+#   * seize_avail stays 40-57% even at 0% WR -- the agent CAN capture (a seize
+#     is legal ~half its decisions) and declines to. So this is the
+#     profitable-draw / reward-landscape root, NOT navigation/capacity/masking
+#     (max_legal peaked ~272, far under the 512 cap -- truncation never fired).
+#
+# v49 is the combined reward fix the single-axis sweep (v15-v48) never tried,
+# targeted at exactly that mechanism. Five deltas vs v43a (all in
+# reward_config; requires the new damage_taken_scale env term):
+#   1. damage_taken_scale: -0.002 (NEW) -- combat shaping becomes net-zero-sum
+#      so trading blows to the clock no longer farms; only decisive combat
+#      pays. Keeps the fast-early-ladder gradient v42's combat-OFF lost.
+#   2. draw: -10 -> -50 (== loss) -- removes the positive safe-harbor draw;
+#      win becomes the only positive-EV terminal. Not worse than loss, so the
+#      policy never prefers losing to drawing.
+#   3. unit_diff: 0.3 -> 0.0 -- stops paying per-unit-count (the confirmed
+#      cheapest-unit-spam subsidy that bloats the army funding the farm).
+#   4. hq_capture: 25 -> 60 -- the HQ was paying LESS than a building (40);
+#      now it is the single best capture target.
+#   5. win_by_hq_capture: 50 -> 80 -- prefer the intended (transferable) win
+#      path over elimination.
+# Everything else (opponent diversity, combat damage_scale, curriculum,
+# net_arch, schedules) is IDENTICAL to v43a so the deltas are attributable.
+#
+# READ when it runs: on beginner_random_10/15, draws should go NEGATIVE in
+# reward, the win<->draw oscillation should collapse toward sustained wins,
+# turns should drop toward ~55, and captures_by_type.hq should climb off 0.
+# If it still stalls with seize_avail ~50% and hq captures ~0, the reward
+# axis is genuinely spent and BC warm-start is the next lever.
+# ----------------------------------------------------------------------------
+#
+# v43a -- opponent diversity (anti-drift), net_arch [256,256]
+# ============================================================================
+# Base: configs/ppo/bootstrap_sweep/v41_r10_stability.yaml. Reward UNCHANGED
+# (combat shaping ON -- the fast-early-ladder setting). The ONLY change vs v41
+# is the opponent on the beginner random_{10,15,20} stages: a static RandomBot
+# is replaced with a per-episode-varied MixedBot(random@A, random@B) so the
+# in-stage gradient is multi-modal.
+#
+# WHY: v41 (combat shaping) and v42 (combat removed) BOTH stalled at
+# beginner_random_15 with the SAME signature -- PPO healthy
+# (explained_variance ~0.85, value_loss stable, approx_kl ~0.005) but the
+# policy DRIFTS off any winning composition and never sustains two evals
+# >= 0.70. The doc's "drift vs plateau" diagnostic says this is an
+# optimization/attractor problem, not capacity or reward: against a STATIC
+# stochastic opponent there is no in-stage gradient, so once PPO finds a
+# winning policy nothing pulls it back when it wanders. The reward axis is
+# exhausted (both directions stall), so v43 holds reward at v41's fast-ladder
+# setting and changes the non-reward lever the doc flagged as "the most
+# principled remaining lever" for drift: opponent diversity ("Option C").
+#
+# Realization (config-only -- MixedBot already forwards easy_kwargs/hard_kwargs
+# to RandomBot(max_actions=...); see game/bot.py:_build_inner):
+#   beginner_random_10 -> MixedBot(random@10, random@15), p_hard 0.5
+#   beginner_random_15 -> MixedBot(random@10, random@20), p_hard 0.5  (brackets
+#                         the static max_actions=15 it stalled on)
+#   beginner_random_20 -> MixedBot(random@15, random@20), p_hard 0.5
+# The per-episode coin flip means consecutive episodes face different opponent
+# strengths, so the policy can't settle into a single stalling groove.
+#
+# v43a vs v43b -- RUN BOTH IN PARALLEL. v43a keeps net_arch [256,256]; v43b is
+# identical except net_arch [512,512]. Reading the pair:
+#   * v43a clears r15            -> opponent diversity alone fixes the drift;
+#                                   capacity unnecessary (save ~1.5-2x compute).
+#   * v43b clears, v43a doesn't  -> capacity adds real value on top of the
+#                                   drift fix (composition-representation).
+#   * neither clears             -> drift+capacity aren't the cracks; escalate
+#                                   to BC warm-start (only lever to ever clear
+#                                   r15, v33).
+#
+# CAVEAT: v41's reward keeps a stalled draw marginally net-positive (combat +
+# potential farm ~+57/ep vs ~-47 draw penalty). Opponent diversity fixes the
+# no-in-stage-gradient root but NOT the profitable-draw root. If v43a/b still
+# draw at r15, the result implicates reward too, and the follow-up is opponent
+# diversity + v42's combat-OFF reward (draws net-negative).
+#
+# (v41 header below documents the inherited curriculum / triple-fix.)
+#
+# v41 -- r10 stability triple-fix (gate + budget + entropy floor)
+# =================================================================
+# Base: configs/ppo/bootstrap_sweep/v40_skip_starter.yaml.
+# v40 run 20260528_020718 stalled at `beginner_random_10` (stage 2 of
+# 33). Peak WR 77.5% at 1.55M (above the 0.75 gate) but failed to
+# sustain two consecutive evals at >= 0.75 within the 3M budget.
+# `run_status.json`: curriculum_stalled, achieved_win_rate 0.775,
+# threshold 0.75.
+#
+# Two things are now true that weren't before:
+#
+# 1. THE COST NERF WORKED. v40's per-stage composition summary
+#    shows Warrior share 41% on balanced_random (cleared) and 28%
+#    on r10 (stalled), down from v37b's 100% mono-W on every
+#    cleared stage. HQ captures: 9 on stage 1 (was 0). Paralyze
+#    used 28 times on stage 1, 9 on stage 2 (was 0). Rogues,
+#    Barbarians, Knights, Mages, Archers ALL appearing in builds
+#    across r10 evals. Status-effect observation channels finally
+#    have non-zero signal because the policy is finally building
+#    units that use them. Diversity goal: achieved.
+#
+# 2. r10 STALL IS A NEW WALL: COMPOSITION STABILITY. The policy
+#    discovers >=5 viable compositions across 3.2M steps but
+#    abandons each one within ~50-100k steps before the next:
+#
+#     1550k: 77.5% mass-Archer (W=206, A=4130, 3 HQ captures)
+#     1900k: 65.0% Warrior+Mage+Cleric (W=3331, M=544, C=604)
+#     2000k: 58.75% Warrior+Knight mix
+#     2050k: 58.75% Warrior+Cleric+Knight
+#     2850k: 61.25% Warrior+Knight (K=4755)
+#     2950k: 55.0% near-pure Knight (K=4867)
+#
+#    Each peak is a real winning policy at a single eval; none
+#    survive the next 50k steps of PPO updates. This is the
+#    draw-with-shaping policy-drift instability documented for
+#    the v17-v23 sweep and v35/v36 -- now manifesting at the
+#    composition layer, not just the value-function layer.
+#
+# v41 applies THREE stability levers simultaneously to
+# `beginner_random_10`, each targeting a different facet of the
+# drift problem. Stacking is deliberate: v34-v40 already isolated
+# the balance levers; v41 is engineering a stable promotion, not
+# a single-variable ablation. If r10 clears under the triple-fix,
+# follow-up runs can ablate to see which lever did the work.
+#
+# Lever A: promotion_win_rate 0.75 -> 0.65
+#   v40 hit 0.775 once (above the 0.75 gate) and ~0.55-0.65 at
+#   four other peaks. At 0.65, the second peak at 1900k (0.65)
+#   would itself have qualified, and any two of the multiple
+#   55-65% recoveries in 2.0-2.95M would have triggered patience-2
+#   promotion. The lever does NOT lower the bar for composition
+#   quality -- the cleared stages downstream still gate at 0.65-
+#   0.85, so a 0.65 r10 still produces a competent policy. It
+#   recognises that beating RandomBot at max_actions=10 with
+#   diverse composition is a different (harder) skill than
+#   beating RandomBot with mono-Warrior, and the threshold from
+#   v34 was calibrated against the mono-W policy class.
+#
+# Lever B: max_timesteps 3,000,000 -> 5,000,000
+#   v40's recovery cycle is real and ~1M steps long (peaks at
+#   ~1.55M, ~1.9-2.05M, ~2.85-2.95M). 5M gives the policy 5
+#   independent ~1M-cycle attempts to land 2 consecutive evals
+#   above 0.65, vs v40's 3 attempts. Cost: ~25 min of additional
+#   L4 wall-clock on this stage if it goes the distance.
+#
+# Lever C: ent_coef end 0.03 -> 0.01
+#   v40's r10 schedule is linear 0.10 -> 0.03 over the stage.
+#   With entropy floor 0.03, the policy is still injecting
+#   meaningful exploration noise at end of budget, which is
+#   exactly what makes the policy abandon a working composition
+#   for the next one. Dropping to 0.01 (matching v40's r20 floor)
+#   tightens commitment late in the stage without removing early
+#   exploration. v34/v17 used this floor on `beginner_random_20`
+#   for the same "convert recovery into clear" problem.
+#
+# Decision tree for v41 outcomes:
+#   * Clears r10 (>= 0.65 for 2 evals) -> apply the same triple-
+#     fix to r15 (also stochastic, same drift signature expected)
+#     and likely r20 in v42. Bias: if r10 needed all three levers,
+#     r15/r20 against harder opponents likely need at least
+#     two of them.
+#   * Stalls r10 again at similar 60-80% peaks -> r10 needs more
+#     than stability. Could be the cost nerf is on the right axis
+#     but too aggressive (W cost 300 -> 275 halfway). Could be
+#     capacity (net_arch [256,256] -> [512,512]).
+#   * Stalls r10 at LOWER peaks than v40 (< 0.55) -> lever C or
+#     the budget extension destabilised what was working. Roll
+#     back C first (return to ent_coef end 0.03), then B.
+#
+# What v41 carries forward from v40 (unchanged):
+#   * Skip starter; curriculum opens on beginner_balanced_random.
+#   * engine_overrides: W cost=300 (only override).
+#   * MixedBot bridge stage beginner_mixed_r15_simple.
+#   * Intermediate r10/r15 + intermediate max_turns=75.
+#   * v34 combat-shaping reward (damage_scale=0.002, kill=0.2).
+#   * Every other stage's threshold / budget / ent_coef.
+#
+# Only `beginner_random_10` changes vs v40. Three lines of delta.
+#
+# (v40 header below documents the skip-starter rationale.)
+#
+# v40 -- skip starter entirely (curriculum begins on beginner map)
+# =================================================================
+# Base: configs/ppo/bootstrap_sweep/v39_cost_only_nerf.yaml.
+# v39 run 20260528_005831 stalled at the first stage (starter_random,
+# best WR 35%) -- WORSE than v38 (51%) despite the surgical cost-only
+# nerf preserving every combat stat. Diagnosis: starter's economy is
+# the binding constraint, not the Warrior stat line.
+#
+# Starter map facts (maps/1v1/starter.csv, env defaults):
+#   * max_turns: 20      (hard cap; no other map is this tight)
+#   * Starting gold:     ~$250 per side
+#   * Map size:          small (4x5 effective)
+#   * Per-turn income:   ~$50 from owned HQ + ~$25/tower if held
+#
+# Under v39's W cost=300:
+#   * Round 1: $250 -> can't afford a Warrior at all (Mage also 300)
+#   * Round 2: $300 -> one Warrior, OR one Archer ($250) + $50 banked
+#   * Per-turn unit budget: ~1 unit per 2 turns at best
+# Net effect: by the time both sides have ~5 units the clock is near
+# expiry, and ~80% of evals end as max_turns draws regardless of who
+# was "winning". The price nerf is correct for beginner/intermediate
+# (where economy + clock support the strategic tradeoff) but
+# pathological on starter.
+#
+# v40 RESOLUTION: drop starter entirely.
+#
+# Curriculum now begins at beginner_balanced_random. Justification:
+#   1. Starter exists to teach navigation cheaply on a tiny map. By
+#      the time the policy reaches beginner_balanced_random it has
+#      cleared starter at 90%+ -- starter is a warm-up, not a skill
+#      gate. Removing it costs no transferable competence.
+#   2. beginner_balanced_random already uses an entropy schedule
+#      (0.10 -> 0.03) appropriate for cold-start exploration -- it
+#      can serve as stage 1 unchanged.
+#   3. beginner.csv (6x6) has $400 starting gold and max_turns=75
+#      (per-stage override), so Warrior cost=300 leaves real strategic
+#      headroom: 1 W on T1, 1 W on T2 from base income, etc.
+#   4. Side benefit: ~250k env steps and ~30 min of L4 wall-clock saved
+#      per run on the now-skipped starter ladder.
+#
+# What v40 inherits unchanged from v39:
+#   * Warrior cost=300 (only engine override).
+#   * MixedBot bridge stage beginner_mixed_r15_simple.
+#   * Intermediate r10/r15 + max_turns=75.
+#   * beginner_random_10 budget 3M.
+#   * v34 combat-shaping reward (damage_scale=0.002, kill=0.2).
+#
+# Decision tree for v40 outcomes:
+#   * Clears beginner_balanced_random + r10/r15/r20 with diverse
+#     composition -> the nerf works once economy is unconstrained;
+#     starter was the only blocker. Lock in production curriculum.
+#   * Clears starter-equivalent stages but still mono-W on r20 ->
+#     price isn't the binding lever even with enough budget. Falsifies
+#     "balance lever alone forces diversity"; next step is BC warm-
+#     start or explicit diversity-bonus reward term.
+#   * Stalls at beginner_balanced_random (high draw rate, low WR) ->
+#     the issue is deeper than starter economics. Most likely cause
+#     would be the cost change interacting with beginner's pre-owned
+#     buildings (different income curve from intermediate's neutral
+#     race). Roll back to W cost=250 (halfway).
+#   * Stalls at the v37b/v34 wall (intermediate_random_20) -> balance
+#     levers exhausted. Capacity bump or BC warm-start becomes the
+#     next escalation.
+#
+# (v39 header below documents the cost-only Warrior nerf rationale;
+# v40 inherits the engine override byte-identical, only the
+# curriculum's first three stages are removed.)
+#
+# v39 -- cost-only Warrior nerf (no combat stat changes)
+# ======================================================
+# Base: configs/ppo/bootstrap_sweep/v38_structural_warrior_nerf.yaml.
+# v38 run 20260527_200511 stalled at the first stage (starter_random,
+# 51.25% WR best vs 0.90 threshold) because its triple stat nerf
+# (atk 10->7, def 6->3, HP 15->13) made combat math too slow for
+# starter's max_turns=20 -- both sides took 3-4 turns per kill, games
+# ran out the clock as draws (50-70 draws per 80-episode eval). The
+# nerf broke "winning at all", not just mono-Warrior.
+#
+# v39 replaces the stat nerf with a SINGLE cost change:
+#
+# engine_overrides:
+#   unit_data:
+#     W: {cost: 300}    # 200 -> 300 (matches Mage cost)
+#
+# Warrior keeps every combat stat at default (atk=10, def=6, HP=15)
+# so games end normally. Only the opportunity cost of mono-Warrior
+# changes: at 300 gold per Warrior, the policy can build half as
+# many for the same income. Combined with Knight (cost 350) and Mage
+# (cost 300) now sharing or undercutting Warrior's per-gold value,
+# the mono-W local optimum loses its only remaining edge.
+#
+# Post-nerf cost-efficiency table:
+#   W: cost 300  HP/$ 0.050  Atk/$ 0.033  Def 6   (was cost 200 -> top of every axis)
+#   K: cost 350  HP/$ 0.051  Atk/$ 0.023  Def 5   (NOW wins HP/$; charge -> Atk/$ 0.034 wins too)
+#   M: cost 300  HP/$ 0.033  Atk/$ 0.040  Def 4   (wins Atk/$ at range, with paralyze)
+#   A: cost 250  HP/$ 0.060  Atk/$ 0.020  Def 1   (NOW wins HP/$ among ranged-or-cheap units)
+#
+# Three units now win cost-efficiency axes that Warrior used to
+# dominate: Knight on HP/$, Mage on Atk/$ at range, Archer on HP/$
+# at the cheapest tier. PPO can no longer point to "build cheapest
+# unit with best HP/$" -- there isn't one anymore.
+#
+# (Older v38/v37/v36/v35/v34 headers retained in v39 -- see that file
+# for the full nerf-iteration history.)
+algorithm: maskable_ppo
+seed: 42
+total_timesteps: 22_000_000  # informational; per-stage budgets drive run length
+
+env:
+  # 8 envs leaves headroom on a 12-vCPU machine for the main process
+  # (PPO update + eval) without contention. SubprocVecEnv is required
+  # for real CPU parallelism with n_envs > 1.
+  n_envs: 8
+  use_subprocess: true
+  # max_steps is uniform across stages: 3000 is well above any
+  # realistic game length (max_turns=120 * ~20 env-steps/turn ~ 2400)
+  # so truncation never fires under normal play. Per-stage max_turns
+  # still varies (75 / 120 / 200) to bound the natural game-clock.
+  max_steps: 3000
+  # v40: starter (max_turns=20) is no longer in the curriculum, so the
+  # env default tracks the new first stage (beginner_balanced_random,
+  # max_turns=75). Every remaining stage sets its own max_turns
+  # override anyway, so this only matters as a safety default.
+  max_turns: 75
+  # Per-game-turn hard cap on agent actions. When the policy has taken
+  # this many actions in a single game-turn without ending the turn,
+  # the action mask narrows to end_turn-only on subsequent steps,
+  # forcing the turn to close. Bounded blast-radius defense against
+  # the "never end the turn" attractor that re-emerges as max_steps
+  # is raised (eval signature: ``len`` near ``max_steps`` with
+  # ``turns`` very low).
+  #
+  # Disabled (``null``) here so per-stage stall traces capture the
+  # unmodified policy behaviour. If the v34 turn_penalty: -0.5 ever
+  # surfaces the never-end-turn signature in eval (avg_length near
+  # max_steps with avg_turns < 5), set this back to 60.
+  max_actions_per_turn: null
+  action_space_type: flat_discrete
+  # v53c: max_flat_actions back to the standard 512 (v52b had bumped it to 1024
+  # to absorb the UNCAPPED skirmish move-fan, which hit 744). v53c carries the
+  # 20-unit cap (engine_overrides.max_units_per_player below), and the cap is
+  # the thing that bounds the action space at the source: ~20 units on the
+  # congested 8x8 keeps the legal set well under 512 in practice, so the cap and
+  # max_flat are substitutes -- with the cap on, the 1024 head is unnecessary
+  # overhead. 512 also keeps the action head warm-start-compatible with the
+  # earlier 512-trained checkpoints. v53c is validated on the beginner+
+  # intermediate ladder, where the legal set never approaches 512 regardless.
+  # If skirmish_random_20 ever truncates at 512 *with* the cap on (watch the
+  # warnings), that means 20 units still over-fill the board -- bump to 1024
+  # then, but the cap should make that unnecessary.
+  max_flat_actions: 512
+  # v40 inherits v39's COST-ONLY Warrior nerf unchanged. Warrior keeps
+  # every combat stat at default (atk=10 / def=6 / HP=15) so games end
+  # normally; only the PRICE moves (200 -> 300, equal to Mage). v40's
+  # change from v39 is in the curriculum, not the unit balance.
+  engine_overrides:
+    unit_data:
+      W: {cost: 300}
+    # v53b NEW (economy throttle): trim the HQ's per-turn income to reduce the
+    # gold supply that funds runaway mass. HQ is the largest income source (150
+    # vs building 100, tower 50); -20% to 120 shrinks army SIZE without touching
+    # relative unit value (composition) or the capture economy. Gentle first
+    # probe; step toward 100 if the new army-economy telemetry still shows a
+    # bloated peak army with piled-up banked gold.
+    headquarters_income: 120     # was 150
+    # v53b NEW (active army-size lever, not just a guardrail): cap units-per-
+    # player at 20. Motivated by board DENSITY against per-map walkable tiles:
+    #   beginner 6x6   (36 walk): 20/side = 56%, both = 111% -> physically
+    #                             impossible; map self-caps ~15-18, so 20 is free
+    #   intermediate 7x7 (43)    : 20/side = 47%, both = 93%  -> gridlock; free
+    #   skirmish 8x8   (62 walk) : 20/side = 32% (~1/3 board), both = 65% -> THIS
+    #                             is the gridlock/slow-walk threshold the measured
+    #                             ~20-24 peak armies sat at; 20 catches it exactly
+    #   corner_points 12x10 (114): 20/side = 18% -> roomy; 20 is the only map
+    #                             where this is an active downward constraint, and
+    #                             there it forces precision rather than gridlock.
+    # So 20 is generous-to-free on the small maps and bites only at genuine
+    # congestion (skirmish) or to force a precise force on the big map. The CODE
+    # default stays 50 (a safe guardrail for arbitrary maps); 20 is set here as
+    # the deliberate experimental lever. WATCH corner_points: if it stalls with
+    # army pinned at 20 and banked gold piling up (army/gold telemetry), that map
+    # genuinely needed a bigger force -> per-stage cap, not a global loosen.
+    max_units_per_player: 20
+    # v53 NEW: lower structure max-HP so capture is a reachable win path, not a
+    # 3-4 turn attrition gauntlet. seize damage = the seizer's current HP, so a
+    # full-HP unit captures in ceil(tile_HP / unit_HP) turns:
+    #   Tower@20      -> 2 turns (1 for Barbarian); fast neutral grab
+    #   Building@25   -> 2 turns for the units the policy builds (A/W/K/B,
+    #                    15-20 HP); 3 for the rarely-built 10-12 HP casters
+    #   Headquarters@30 -> 2 turns for 15-20 HP units, 3 for the 10-12 HP ones
+    # Targets met: "most full-HP units capture a building in 2 turns; the HQ in
+    # 3 at most (2 ok)". Conservative spacing (20<25<30) vs an aggressive
+    # 15/20/30 -- if capture/pace is still too slow, drop building_health
+    # toward 20 and/or cut the 50% structure regen rate. Regen scales off
+    # max_health and capture resets to it, so both stay consistent.
+    tower_health: 20           # was 30
+    building_health: 25        # was 40
+    headquarters_health: 30    # was 50
+    # v50 SINGLE DELTA vs v49: HP-scaled combat damage. Outgoing damage (and
+    # counters) scale with the attacker's current HP fraction, so wounded
+    # units hit weaker -> focus-fire is decisive and the even-attrition
+    # stalemate that flat damage produces (a big driver of max-turn draws at
+    # the *mechanics* level) is broken. Engine-side twin of v49's reward
+    # changes; consistent with seize (already HP-scaled). QUEUED -- only run
+    # if v49's diagnostics show the attrition stalemate persisting even with
+    # draws priced negative (i.e. mechanics, not reward, are the binding
+    # constraint). NOTE: invalidates the tuned cost-efficiency tables, so
+    # expect to re-check balance; validate via RL/replay deltas, not bot
+    # tournaments (scripted bots don't perceive it).
+    damage_model: hp_scaled
+  reward_config:
+    # v49 changes vs v43a (4 reward edits + 1 new term). Diagnosis from the
+    # v43a run (beginner_random_10 stall): at 0% WR the agent draws 78-80/80
+    # games to the 75-turn cap while collecting +28..+55 reward -- the draw
+    # is positively rewarded -- and seize_avail stays 40-57%, so it CAN
+    # capture and declines to. This is the profitable-draw attractor, not a
+    # navigation/capacity problem. v49 removes the positive safe-harbor draw
+    # and the mass/farm subsidies that fund it, and makes the HQ the best
+    # target. Single attributable experiment off v43a.
+    win_by_hq_capture: 80.0  # v49: 50 -> 80. Prefer the intended win path
+                             # (HQ capture) over elimination, which doesn't
+                             # transfer to bigger maps.
+    win_by_elimination: 50.0
+    win: 50.0
+    loss: -50.0
+    draw: -50.0    # v49: -10 -> -50 (== loss). The v43a run proved the draw
+                   # was net-POSITIVE (+28..+55 at 0% WR), i.e. a safe paying
+                   # harbor the policy drifts into. Removing it leaves win as
+                   # the only positive-EV terminal. Held == loss (not worse)
+                   # so the policy never prefers losing to drawing.
+    income_diff: 0.05
+    unit_diff: 0.0   # v49: 0.3 -> 0.0. unit_diff pays per net unit (count,
+                     # not value), a standing subsidy for spamming the
+                     # cheapest unit. Confirmed driver of mass-spam +
+                     # army-bloat that fuels the draw farm.
+    structure_control: 1.0
+    create_unit: 0.0
+    move: 0.0
+    # Combat shaping re-enabled at reduced magnitude (scaled to current 1/100
+    # reward regime). Run 1 (damage_scale:0.5, kill:50 at old 5000-win scale)
+    # was the ONLY run to ever clear beginner_random_20 (76.7% WR). Runs 2-4
+    # with these zeroed stalled at 61-71%. Docs recommend lower magnitude:
+    # 0.2/20 at old scale -> 0.002/0.2 at current scale. Creates gradient to
+    # finish games (kills), not just avoid losing (draws).
+    damage_scale: 0.002
+    # v49 NEW TERM: charge for damage taken on the opponent's turn so combat
+    # shaping is net-zero-sum. The v43a farm was combat-dealt-damage-heavy
+    # (~+40/ep of the +100 gross): two armies trade blows to the clock and
+    # the agent banks only the dealt half. With this, a mutual trade nets
+    # ~0 (0.002 dealt - 0.002 taken) and only decisive combat -- killing
+    # without dying, i.e. actually winning fights -- pays. Magnitude matches
+    # damage_scale so the books balance. Keeps the fast-early-ladder combat
+    # gradient (unlike v42's combat-OFF, which over-sparsified r10).
+    damage_taken_scale: -0.002
+    kill: 0.2
+    seize_progress: 3.0
+    capture: 10.0            # back-compat fallback (no longer reached
+                             # when the per-type keys below are set)
+    # Per-structure capture differentiation. Hoisted to the global env
+    # config (rather than scoped to a single late stage) so every stage
+    # in the curriculum sees the same gradient: building captures are
+    # the highest per-turn payoff, HQ captures are a viable finisher,
+    # and neutral towers are positive-but-not-dominant. Rationale:
+    # introducing a new strategy mid-curriculum (only at random_20)
+    # asks the policy to discover and integrate it after entropy has
+    # already cooled to 0.03 and the value function has locked in on
+    # the warrior-spam-elimination attractor from earlier stages. Far
+    # easier to bake in the correct inductive bias from stage 1, when
+    # entropy is high and the value function is plastic. Both starter
+    # and beginner maps have HQs, buildings, and towers in equivalent
+    # layouts, so the gradient is meaningful on every stage.
+    tower_capture: 15.0      # neutral towers; modest downweight on the
+                             # local optimum the prior run converged to
+    building_capture: 40.0   # enemy economy; ~20.5/turn vs tower 8/turn
+                             # makes this the per-turn-best capture target
+    hq_capture: 60.0         # v49: 25 -> 60. Was BELOW building_capture (40),
+                             # so the reward steered AWAY from the win
+                             # condition. Now the HQ is the single best
+                             # capture target and stacks with win_by_hq_capture
+                             # (+80) for a decisive finisher payoff.
+    cure: 0.0
+    heal_scale: 0.0
+    paralyze: 0.0
+    haste: 0.0
+    defence_buff: 0.0
+    attack_buff: 0.0
+    invalid_action: -0.1
+    # v27 isolation: win_speed_bonus:50 and enemy_owned_capture:-15 are
+    # independently proven stall causes at beginner_random_15 (v27a/c).
+    # enemy_neutral_capture:-8 is benign (v27b cleared with it).
+    # turn_penalty:-0.5 stronger pressure to end games; -0.2 was insufficient
+    # to escape the draw attractor at beginner_random_15/20.
+    turn_penalty: -1.0
+    win_speed_bonus: 0.0
+    enemy_neutral_capture: -8.0
+    enemy_owned_capture: 0.0
+
+
+ppo:
+  learning_rate: 3.0e-4
+  n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
+  batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.05
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
+    # CNN trunk over the (grid, units) spatial planes. Without this SB3's
+    # default ``CombinedExtractor`` flattens both planes — the policy
+    # then has to relearn map adjacency from a flat vector and pays a
+    # large parameter cost on the first Linear layer (input grows with
+    # H * W * channels). ``pool: masked_avg`` makes the trunk's output
+    # size independent of ``pad_to_size`` *and* skips padded cells in
+    # the spatial average, which matters because early-curriculum stages
+    # train on 6x6 maps padded up to (10, 12) — under plain ``avg`` the
+    # global average pool would be ~70% zero-padding noise on those
+    # stages. ``coord_conv`` prepends two normalized (y, x) channels so
+    # the policy can reason about absolute position (HQ corner, etc.)
+    # without spending conv capacity rediscovering it. ``extra_conv``
+    # adds a 4th 3x3 conv block, lifting the receptive field from ~7x7
+    # to ~9x9 — most of corner_points (10x12) in one CNN look.
+    features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
+    features_extractor_kwargs:
+      features_dim: 256
+      pool: masked_avg
+      coord_conv: true
+      extra_conv: true
+
+eval:
+  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
+  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=50000
+  # fires ~once per 3 PPO updates -- the efficient ratio for production
+  # runs. (20000 was used during the reward-rescale validation runs to
+  # catch value-head / reward-signal regressions early; once those were
+  # confirmed healthy the eval overhead at that cadence -- ~half of
+  # wall-clock -- stopped being worth it.) Per-stage
+  # CurriculumStage.n_eval_episodes overrides this default for stages
+  # that need tighter CIs.
+  eval_freq: 50_000
+  n_eval_episodes: 80
+
+curriculum:
+  stages:
+    # v40: starter_random / starter_simple / starter_medium REMOVED.
+    # Curriculum now opens directly on beginner_balanced_random.
+    # Rationale documented in the v40 header above. The beginner-
+    # balanced-random stage already carries an entropy schedule
+    # appropriate for cold-start (0.10 -> 0.03), so no adjustment
+    # is needed to make it a viable stage 1.
+
+    - name: beginner_balanced_random
+      map_file: maps/1v1/beginner.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    # v36 budget bump on this stage only (1.5M -> 3M). v35 run
+    # 20260526_205537 stalled here at the end of the 1.5M budget with WR
+    # trending upward: last 5 evals were 44% / 19% / 15% / 36% / 51%.
+    # The trajectory shows the policy was recovering from the
+    # draw-with-shaping attractor (final 200k delta: +16pp WR with
+    # diversified composition + 2 HQ captures appearing for the first
+    # time in any run). Doubling the budget gives the recovery another
+    # ~1M steps to consolidate. If 3M still isn't enough, the next
+    # iteration is a smaller Warrior nerf (atk 10->9 instead of 8) --
+    # the current nerf works for composition but destabilises the
+    # transfer policy. Other random_N stages (15/20 here, and the
+    # intermediate ones) are left at their v35 budgets so this
+    # experiment isolates the single-stage budget delta -- if v36
+    # clears r10 cleanly we can decide whether to pre-bump the others.
+    # v41 triple-fix on this stage only (gate + budget + entropy floor).
+    # See header for full rationale. Delta vs v40:
+    #   promotion_win_rate  0.75       -> 0.65       (lever A)
+    #   max_timesteps       3_000_000  -> 5_000_000  (lever B)
+    #   ent_coef end        0.03       -> 0.01       (lever C)
+    # Stack is deliberate; ablation deferred to a follow-up if it
+    # clears. v40 showed five viable compositions (peak 77.5% at
+    # 1.55M, then 65%/59%/59%/61%/55%) but never two evals in a row
+    # above the old 0.75 gate.
+    - name: beginner_random_10
+      map_file: maps/1v1/beginner.csv
+      # v43: opponent diversity. Per-episode-varied RandomBot (max_actions 10
+      # or 15, 50/50) instead of a static max_actions=10. The multi-modal
+      # opponent gives an in-stage gradient that resists the draw-with-shaping
+      # drift (the policy can't settle into one stalling groove when the
+      # opponent strength changes episode to episode).
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: random
+        p_hard: 0.5
+        easy_kwargs:
+          max_actions: 10
+        hard_kwargs:
+          max_actions: 15
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 5_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: beginner_random_15
+      map_file: maps/1v1/beginner.csv
+      # v43: opponent diversity at THE WALL. Per-episode-varied RandomBot
+      # (max_actions 10 or 20, 50/50) brackets the static max_actions=15 that
+      # both v41 and v42 stalled on. The multi-modal opponent is the doc's
+      # "Option C" anti-drift lever: a static stochastic opponent gives no
+      # in-stage gradient, so PPO drifts off any winning policy; varying the
+      # opponent per episode supplies one.
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: random
+        p_hard: 0.5
+        easy_kwargs:
+          max_actions: 10
+        hard_kwargs:
+          max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    # v37a NEW: MixedBot bridge between random_15 and random_20. 50%
+    # of episodes face SimpleBot (capture-greedy, bot.py:423-426 sorts
+    # by structure-then-enemy priority) which punishes mono-Warrior
+    # elimination plays -- if the policy is still all-W after r10/r15,
+    # SimpleBot will out-capture it and force structure-defence
+    # priority. The other 50% face random_15 so the policy doesn't
+    # un-learn its random_N competence. Mirrors the beginner_mixed_50
+    # / beginner_mixed_med_adv_50 / intermediate_mixed_random_simple
+    # pattern that bootstrap.yaml already uses to bridge harder
+    # opponent transitions. Threshold 0.65 / patience 2 / budget 2.5M
+    # match beginner_mixed_50's settings. Requires PR #383's MixedBot
+    # easy_kwargs forwarding so max_actions=15 propagates to the
+    # RandomBot side.
+    - name: beginner_mixed_r15_simple
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.5
+        easy_kwargs:
+          max_actions: 15
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.07
+        end: 0.01
+        schedule: linear
+
+    - name: beginner_random_20
+      map_file: maps/1v1/beginner.csv
+      # v43: opponent diversity. Per-episode-varied RandomBot (max_actions 15
+      # or 20, 50/50) instead of static max_actions=20 -- keeps the difficulty
+      # ramp (avg ~17.5, above r15's ~15) while supplying the in-stage gradient.
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: random
+        p_hard: 0.5
+        easy_kwargs:
+          max_actions: 15
+        hard_kwargs:
+          max_actions: 20
+      # Hardest random stage. Lower bar than random_15 (0.65 vs 0.70)
+      # because run 4 plateaued at ~62% WR against this opponent on the
+      # prior reward shape and was still budget-limited; 0.65 leaves room
+      # for the policy to clear without requiring runs to outperform that
+      # baseline by more than a few points.
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
+      # this is the longest stage at 3M steps and the policy needs to
+      # commit during the last ~1M to convert draws into wins. A 0.03
+      # floor was still injecting meaningful exploration noise at the
+      # end of run 4's budget when the policy was structurally tying.
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: beginner_simple
+      map_file: maps/1v1/beginner.csv
+      opponent: simple
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    - name: beginner_mixed_50
+      # Bridge stage between simple and medium. MixedBot samples
+      # SimpleBot or MediumBot per episode with p_hard=0.5, so half the
+      # episodes mirror beginner_simple (which the policy just cleared at
+      # 0.70 WR) and half preview beginner_medium. Mirrors the
+      # random_10 -> 15 -> 20 ladder: budget sits halfway between the
+      # flanking stages (3.5M steps); threshold held at 0.70 to match.
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: simple
+        hard: medium
+        p_hard: 0.5
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_500_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    - name: beginner_medium
+      map_file: maps/1v1/beginner.csv
+      opponent: medium
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 4_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    - name: beginner_mixed_med_adv_50
+      # Bridge stage between medium and advanced. MixedBot samples
+      # MediumBot or AdvancedBot per episode with p_hard=0.5: half the
+      # episodes mirror beginner_medium (just cleared at 0.70 WR) and
+      # half preview beginner_advanced. Threshold (0.65) and budget
+      # (4.5M) sit halfway between the flanking stages, mirroring the
+      # simple -> mixed_50 -> medium spacing.
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: medium
+        hard: advanced
+        p_hard: 0.5
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 4_500_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    - name: beginner_advanced
+      # AdvancedBot extends MediumBot with map analysis and enhanced
+      # tactics (bot.py). Caps the descending-threshold / rising-budget
+      # ladder: simple 0.70/3M -> mixed_50 0.70/3.5M -> medium 0.70/4M ->
+      # mixed_med_adv_50 0.65/4.5M -> advanced 0.60/5M. The extra ~1M
+      # budget accounts for AdvancedBot's tighter play forcing the
+      # policy to convert draws into wins on the same map geometry.
+      map_file: maps/1v1/beginner.csv
+      opponent: advanced
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 5_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    # Bridge between beginner (6x6, 0 neutral buildings) and skirmish (8x8,
+    # 4 neutral buildings). A run trained through beginner_advanced collapsed
+    # at skirmish_simple (0% WR, deterministic +186 reward plateau) because
+    # the agent never had to compete for neutral structures: every beginner
+    # stage starts with all buildings pre-owned, and the random opponents
+    # used in the earlier skirmish stages don't capture aggressively. By the
+    # time SimpleBot's land-grab tempo shows up, the policy has already
+    # converged on "spawn warriors near HQ, march outward" and can't relearn
+    # map control on the larger board.
+    #
+    # The 7x7 intermediate.csv has 3 neutrals on the anti-diagonal (1 b at
+    # center, 2 t flanking), two forests covering each player's push toward
+    # their *far* tower, and water in the off-corners (top-right and
+    # bottom-left). The water corners eliminate the flank-around option so
+    # both players must engage through the centre -- exactly the lesson the
+    # earlier random-opponent stages don't teach.
+    # v35: all intermediate stages get max_turns 60 -> 75 (matching
+    # beginner). v34 run 20260526_145412 hit avg_turns=60.0 (the cap)
+    # on every stalled eval at intermediate_random_20 -- the 7x7 map
+    # structurally takes longer to traverse than 6x6 beginner but had
+    # the smaller clock, so games ran out as draws. 75 turns gives the
+    # policy room to commit to multi-turn attacks / HQ rushes without
+    # the clock forcing draws first.
+    - name: intermediate_balanced_random
+      map_file: maps/1v1/intermediate.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    # v35 NEW: intermediate_random_10 + intermediate_random_15 inserted
+    # between balanced_random and random_20 to mirror the beginner_random_
+    # ladder. v34's curriculum jumped balanced_random -> random_20 in a
+    # single step (an 8x difficulty cliff: balanced_random does ~1
+    # action per owned unit per turn, random_20 does up to 20 actions).
+    # The cliff was a contributing factor to the v34 stall: the policy
+    # had no chance to incrementally adapt to RandomBot pressure on the
+    # bigger map. Thresholds / budgets / patience mirror beginner_random_
+    # 10/15 for cross-curriculum consistency.
+    - name: intermediate_random_10
+      map_file: maps/1v1/intermediate.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: intermediate_random_15
+      map_file: maps/1v1/intermediate.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 15
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: intermediate_random_20
+      map_file: maps/1v1/intermediate.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    # Bridge between intermediate_random_20 (78% WR) and intermediate_simple
+    # (which collapsed in run 20260512). Random bot is degenerate on a map
+    # with neutral buildings -- it scatters units instead of competing for
+    # the centre -- so the policy promotes through random_20 without learning
+    # the capture race, then face-plants on simple. MixedBot(random, simple,
+    # p_hard=0.5) keeps half the episodes winnable while previewing simple's
+    # land-grab tempo. Mirrors the beginner_mixed_50 pattern that already
+    # bridges beginner_simple -> beginner_medium successfully.
+    - name: intermediate_mixed_random_simple
+      map_file: maps/1v1/intermediate.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef:
+        start: 0.07
+        end: 0.01
+        schedule: linear
+
+    # The real test: capture-greedy opponent on a board with contested
+    # neutrals. Promotion threshold sits at 0.65 (lower than beginner_simple's
+    # 0.70) because this is the first stage where the agent has to learn a
+    # genuinely new skill (map control), not just transfer an existing one.
+    - name: intermediate_simple
+      map_file: maps/1v1/intermediate.csv
+      opponent: simple
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    - name: intermediate_medium
+      map_file: maps/1v1/intermediate.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 75
+      ent_coef: 0.05
+
+    - name: skirmish_balanced_random
+      map_file: maps/1v1/skirmish.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    - name: skirmish_random_10
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: skirmish_random_15
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 15
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: skirmish_random_20
+      map_file: maps/1v1/skirmish.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    # Two-stage bridge between skirmish_random_20 and skirmish_simple.
+    # On the 8x8 skirmish map the random -> simple difficulty gap is much
+    # wider than on smaller maps: random units scatter into empty space and
+    # never compete for the 4 neutral buildings, while SimpleBot's
+    # closest-structure logic gets *more* effective with map area (more
+    # buildings to greedily seize). A single mixed_50 isn't enough surface
+    # area to teach the policy how to win on this map -- it needs gradual
+    # exposure starting with mostly-random episodes (p_hard=0.25), then a
+    # standard 50/50 mix.
+    - name: skirmish_mixed_25
+      map_file: maps/1v1/skirmish.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.25
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef:
+        start: 0.07
+        end: 0.01
+        schedule: linear
+
+    - name: skirmish_mixed_50
+      map_file: maps/1v1/skirmish.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef: 0.05
+
+    - name: skirmish_simple
+      map_file: maps/1v1/skirmish.csv
+      opponent: simple
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef: 0.05
+
+    - name: skirmish_medium
+      map_file: maps/1v1/skirmish.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 4_000_000
+      n_eval_episodes: 80
+      max_turns: 120
+      ent_coef: 0.05
+
+    - name: corner_points_balanced_random
+      map_file: maps/1v1/corner_points.csv
+      opponent: balanced_random
+      promotion_win_rate: 0.85
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef:
+        start: 0.10
+        end: 0.01
+        schedule: linear
+
+    - name: corner_points_random_10
+      map_file: maps/1v1/corner_points.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 10
+      promotion_win_rate: 0.75
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: corner_points_random_15
+      map_file: maps/1v1/corner_points.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 15
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    - name: corner_points_random_20
+      map_file: maps/1v1/corner_points.csv
+      opponent: random
+      opponent_kwargs:
+        max_actions: 20
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef:
+        start: 0.05
+        end: 0.01
+        schedule: linear
+
+    # Two-stage bridge between corner_points_random_20 and
+    # corner_points_simple. The random -> simple gap on a 12x10 map is so
+    # wide that RandomBot is essentially useless as the easy half of a
+    # MixedBot: its units scatter into 120 tiles of empty space and never
+    # press on the agent's structures. BalancedRandomBot scales its action
+    # throughput with army size (one build + one random action per owned
+    # unit per turn), so it stays competitive on big maps where plain
+    # RandomBot degrades. Substituting balanced_random for random on the
+    # easy side keeps the mixed-bot signal meaningful at this scale.
+    - name: corner_points_mixed_25
+      map_file: maps/1v1/corner_points.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: balanced_random
+        hard: simple
+        p_hard: 0.25
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef:
+        start: 0.07
+        end: 0.01
+        schedule: linear
+
+    - name: corner_points_mixed_50
+      map_file: maps/1v1/corner_points.csv
+      opponent: mixed
+      opponent_kwargs:
+        easy: balanced_random
+        hard: simple
+        p_hard: 0.5
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef: 0.05
+
+    - name: corner_points_simple
+      map_file: maps/1v1/corner_points.csv
+      opponent: simple
+      promotion_win_rate: 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef: 0.05
+
+    - name: corner_points_medium
+      map_file: maps/1v1/corner_points.csv
+      opponent: medium
+      promotion_win_rate: 0.65
+      patience: 2
+      max_timesteps: 4_000_000
+      n_eval_episodes: 80
+      max_turns: 200
+      ent_coef: 0.05
