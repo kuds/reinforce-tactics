@@ -33,6 +33,26 @@ _games = {}
 
 
 # ---------------------------------------------------------------------------
+# Engine balance overrides
+# Applied to every game so the competition environment matches the balance the
+# reference agents were trained under -- the engine_overrides block of
+# configs/ppo/bootstrap_sweep/v52a_maxturn_scaled_draw.yaml:
+#   * Warrior cost 200 -> 300 (economy; equalises it with the Mage so the
+#     mono-Warrior local optimum loses its cost-efficiency edge)
+#   * damage_model "flat" -> "hp_scaled" (a wounded unit deals proportionally
+#     less, so focus-fire is decisive and the even-attrition stalemate that
+#     drives max-turn draws is broken)
+# Starting gold and income are left at the engine defaults (v52a does not
+# override them). Resolved by GameState through the same engine_overrides path
+# the trainer uses, so the vendored constants.py stays a faithful copy.
+# ---------------------------------------------------------------------------
+ENGINE_OVERRIDES = {
+    "unit_data": {"W": {"cost": 300}},
+    "damage_model": "hp_scaled",
+}
+
+
+# ---------------------------------------------------------------------------
 # Specification (loaded from JSON)
 # ---------------------------------------------------------------------------
 _dirpath = path.dirname(__file__)
@@ -688,6 +708,7 @@ def _init_game(config):
         max_turns=config.episodeSteps,
         enabled_units=enabled_units,
         fog_of_war=fog_of_war,
+        engine_overrides=ENGINE_OVERRIDES,
     )
 
     # Override starting gold if configured

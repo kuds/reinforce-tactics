@@ -243,6 +243,16 @@ class TestInitGame:
         game = _init_game(config)
         assert game.fog_of_war is False
 
+    def test_applies_v52a_engine_overrides(self):
+        # The adapter pins competition balance to v52a's engine_overrides
+        # (configs/ppo/bootstrap_sweep/v52a_maxturn_scaled_draw.yaml): Warrior
+        # cost 200 -> 300 and hp_scaled combat. Other unit costs and the economy
+        # defaults (e.g. Archer cost, starting gold) are left untouched.
+        game = _init_game(_make_config())
+        assert game.unit_data["W"]["cost"] == 300
+        assert game.damage_model == "hp_scaled"
+        assert game.unit_data["A"]["cost"] == 250
+
     def test_builtin_map_beginner_loads(self):
         """mapName='beginner' should load the built-in map padded to >=20."""
         config = _make_config(mapName="beginner")

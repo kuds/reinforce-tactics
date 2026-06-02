@@ -49,14 +49,20 @@ Gold is spent to recruit units at buildings or the headquarters.
 
 | Code | Unit      | Cost | HP | ATK   | DEF | Move | Special Ability |
 |------|-----------|------|----|-------|-----|------|-----------------|
-| W    | Warrior   | 200  | 15 | 10    | 6   | 3    | Reliable melee fighter |
+| W    | Warrior   | 300  | 15 | 10    | 6   | 3    | Reliable melee fighter |
 | M    | Mage      | 300  | 10 | 8/12  | 4   | 2    | Paralyze enemy (range 2, 3 turns) |
-| C    | Cleric    | 200  | 8  | 2     | 4   | 2    | Heal and cure allies (range 2) |
+| C    | Cleric    | 200  | 10 | 2     | 4   | 3    | Heal and cure allies (range 3) |
 | A    | Archer    | 250  | 15 | 5     | 1   | 3    | Ranged attack 2-3 tiles (+1 on mountain) |
 | K    | Knight    | 350  | 18 | 8     | 5   | 4    | Charge: +50% damage after moving 3+ tiles |
 | R    | Rogue     | 350  | 12 | 9     | 3   | 4    | Flank: +50% damage; 15% evasion (30% in forest) |
-| S    | Sorcerer  | 400  | 10 | 6/8   | 3   | 2    | Haste, Attack Buff, Defence Buff (+35%, range 2) |
+| S    | Sorcerer  | 350  | 12 | 6/8   | 3   | 2    | Haste, Attack Buff, Defence Buff (+50%, range 2) |
 | B    | Barbarian | 400  | 20 | 10    | 2   | 5    | High mobility, high HP melee |
+
+> **Competition balance:** the environment applies the v52a engine overrides —
+> the Warrior costs **300** (raised from the engine default of 200) and combat
+> uses **HP-scaled damage** (a unit's outgoing damage scales with its current
+> HP fraction, so wounded units hit softer). All other stats above are engine
+> defaults.
 
 ### Turn Structure
 
