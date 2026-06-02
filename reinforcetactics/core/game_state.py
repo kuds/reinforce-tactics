@@ -1253,7 +1253,12 @@ class GameState:
 
         # Unit actions
         for unit in self.units:
-            if unit.player == player and not unit.is_paralyzed():
+            # Guard on health: dead units are normally removed synchronously
+            # by ``attack`` (see self.units.remove), but the helpers below all
+            # filter on ``health > 0`` defensively -- mirror that here so a
+            # corpse left in ``self.units`` by any future deferred-removal path
+            # (AoE, end-of-turn DoT, status damage) can't emit phantom actions.
+            if unit.player == player and unit.health > 0 and not unit.is_paralyzed():
                 # Movement
                 if unit.can_move:
                     reachable = unit.get_reachable_positions(
@@ -1280,7 +1285,7 @@ class GameState:
                         on_mountain = unit_tile.type == "m"
 
                         for enemy in self.units:
-                            if enemy.player != player:
+                            if enemy.player != player and enemy.health > 0:
                                 # FOW: Skip enemies not attackable (checks pre-move snapshot)
                                 if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
                                     continue
@@ -1289,7 +1294,13 @@ class GameState:
                                 if damage > 0:
                                     legal_actions["attack"].append({"attacker": unit, "target": enemy})
 
-                                    if unit.type == "M" and unit.can_use_paralyze():
+                                    # Paralyze: skip already-paralyzed targets.
+                                    # Re-casting only refreshes the status (a
+                                    # near no-op) and inflates the action space,
+                                    # unlike heal/cure/buffs which all guard
+                                    # against re-applying to an already-affected
+                                    # ally.
+                                    if unit.type == "M" and unit.can_use_paralyze() and not enemy.is_paralyzed():
                                         # Mages can also paralyze at range (if not on cooldown)
                                         distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
                                         if distance <= 2:
