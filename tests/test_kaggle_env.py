@@ -859,29 +859,31 @@ class TestInterpreterFlow:
         interpreter(state, env)
         assert state[0].status == "ACTIVE"
 
-    def test_invalid_action_loses(self):
+    def test_malformed_action_loses(self):
         state, env = self._setup_interpreter_game()
         env.done = False
 
-        # Agent sends a non-dict action
+        # A malformed action (not a dict) is treated as a broken agent -> forfeit.
         state[0].action = ["not_a_dict"]
         result = interpreter(state, env)
 
-        # Agent 0 should lose
         assert result[0].status == "DONE"
         assert result[0].reward == -1
         assert result[1].reward == 1
 
-    def test_invalid_action_type_loses(self):
+    def test_illegal_action_is_skipped(self):
         state, env = self._setup_interpreter_game()
         env.done = False
 
-        # Agent sends invalid action type
+        # A well-formed but illegal action (unknown type) is skipped as a no-op;
+        # the turn ends normally and play passes to the opponent -- not a forfeit.
         state[0].action = [{"type": "invalid_nonsense"}]
         result = interpreter(state, env)
 
-        assert result[0].status == "DONE"
-        assert result[0].reward == -1
+        assert result[0].reward == 0
+        assert result[1].reward == 0
+        assert result[0].status == "INACTIVE"
+        assert result[1].status == "ACTIVE"
 
     def test_game_state_cleaned_up_on_game_over(self):
         """Module-level _games dict should be cleaned up when the game ends."""
