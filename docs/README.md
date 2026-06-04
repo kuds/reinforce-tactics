@@ -18,6 +18,7 @@ part of the published user manual.
 | [`REVIEW_maintainability.md`](REVIEW_maintainability.md) | Contributors | Code-quality review: duplication, bugs, refactor priorities |
 | [`REVIEW_advancedbot.md`](REVIEW_advancedbot.md) | Contributors | Code review of the advanced rule-based bot |
 | [`feudal_rl_review.md`](feudal_rl_review.md) | Contributors | Code review of the feudal RL implementation |
+| [`kaggle_competition.md`](kaggle_competition.md) | Competitors | Competition overview: rules, combat/seize equations, agent API, and config for the Kaggle Environments adapter |
 
 ## When to add a doc here vs. in `docs-site/`
 
