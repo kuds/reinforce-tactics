@@ -2,54 +2,69 @@
 
 *A two-player, turn-based tactical strategy game for the [Kaggle Environments](https://github.com/Kaggle/kaggle-environments) framework.*
 
+---
+
+## Overview
+
 Command an army on a grid battlefield. Recruit units, march them across forests
-and mountains, trade blows, and storm the enemy headquarters. Your job is to
-write an **agent** — a Python function that reads the board and returns a list
-of orders each turn. The agent that out-thinks its opponent over many matches
-climbs the leaderboard.
+and mountains, trade blows, and storm the enemy headquarters. You won't play by
+hand — you'll write an **agent**: a Python function that reads the board each
+turn and returns a list of orders. The agent that out-thinks its opponent over
+many matches climbs the leaderboard.
+
+Two armies start from opposite corners with a little gold and no units. From
+there it's a race to build an economy, win the fights that matter, and **either
+capture the enemy Headquarters or wipe out every enemy unit** before the turn
+limit. Simple win conditions, deep tactics: terrain, eight distinct unit types,
+HP-scaled combat, paralysis, buffs, and structure sieges all interact.
 
 > **At a glance**
 >
 > | | |
 > |---|---|
-> | **Players** | 2 (you vs. one opponent) |
-> | **Format** | Turn-based, players alternate submitting a *list* of orders |
-> | **Goal** | Capture the enemy HQ **or** wipe out every enemy unit |
+> | **Players** | 2 (your agent vs. one opponent) |
+> | **Format** | Turn-based; players alternate submitting a *list* of orders |
+> | **Goal** | Capture the enemy HQ **or** eliminate every enemy unit |
 > | **Episode length** | 200 turns by default, then a draw |
-> | **Reward** | `+1` win · `0` draw · `-1` loss |
-> | **Action timeout** | 5 s per turn · 1200 s per episode |
-> | **Engine** | Fully self-contained, no pygame/UI deps — vendored like Lux AI S3 |
+> | **Score** | `+1` win · `0` draw · `-1` loss, fed into a skill-rating leaderboard |
+> | **Limits** | 5 s per turn · 1200 s per episode |
+> | **Engine** | Self-contained, no pygame/UI deps — vendored like Lux AI S3 |
 
----
+### What you'll build
 
-## 1. Objective
-
-There are three ways a match can end:
-
-| Outcome | Condition | Your reward |
-|---|---|---|
-| **Win** | You **seize the enemy Headquarters**, or **eliminate all enemy units** | `+1` |
-| **Loss** | The opponent does either of the above to you | `-1` |
-| **Draw** | Neither happens within the turn limit (`episodeSteps`, default 200) | `0` |
-
-Everything below is in service of one of those two win conditions: **break
-their HQ** or **break their army**.
-
----
-
-## 2. Match Flow
-
-Players act in strict alternation. On your turn you submit a **list of orders**,
-all resolved in the order you give them, then control passes to your opponent. A
-unit can normally **move once and act once per turn** (Haste is the exception).
+Your submission is a single function. It's handed the current `observation` and
+the match `configuration`, and it returns the orders to issue this turn:
 
 ```python
 def my_agent(observation, configuration):
     actions = []
-    # ... decide your orders ...
+    # ... read the board, decide your moves ...
     actions.append({"type": "end_turn"})   # always finish with end_turn
     return actions
 ```
+
+### Quick start
+
+```python
+from kaggle_environments import make
+
+env = make("reinforce_tactics", configuration={"mapName": "beginner"})
+env.run([my_agent, "simple_bot"])     # play a match against the strategic baseline
+print(env.render(mode="ansi"))         # ASCII view of the board
+```
+
+The full game systems are in **Description** below; how submissions are ranked
+is in **Evaluation**.
+
+---
+
+## Description
+
+### 1. Turn flow & orders
+
+Players act in strict alternation. On your turn you submit a **list of orders**,
+all resolved in the order you give them, then control passes to your opponent. A
+unit can normally **move once and act once per turn** (Haste is the exception).
 
 Each order is a dict with a `"type"` key. The legal order types are:
 
@@ -72,9 +87,7 @@ your list does **not** forfeit the game. Only a *malformed* order (not a dict)
 counts as a broken agent and loses. Coordinates are `(x, y)` with `x` = column,
 `y` = row, origin top-left.
 
----
-
-## 3. Economy
+### 2. Economy
 
 Each player starts with **250 gold** and **no units**. At the start of every
 turn you collect **income** from each structure you own:
@@ -95,9 +108,7 @@ where $n_h, n_b, n_t$ are the headquarters, buildings, and towers you currently
 control. **Map control is economy** — every neutral tower you seize is a
 permanent +50/turn and one fewer for the enemy.
 
----
-
-## 4. The Map & Terrain
+### 3. The map & terrain
 
 Maps are 2-D grids of single-character tile codes. Terrain changes how units
 move, see, and fight:
@@ -121,9 +132,7 @@ You can play on one of **19 built-in 1v1 maps** (e.g. `beginner`, `crossroads`,
 `tower_rush`, `mountain_snipers`) or on a **randomly generated** map by setting
 `mapName=""` with a `mapSeed` for reproducibility.
 
----
-
-## 5. The Roster
+### 4. The roster
 
 Eight unit types, each with a distinct role. **These are the competition (v52a)
 values** — see §9 for what differs from the raw engine defaults.
@@ -146,9 +155,7 @@ Notes on ranged units:
 - **Archer** *cannot* hit adjacent (distance 1) — it attacks at distance
   **2–3** (2–**4** from a mountain) and is almost never counter-attacked.
 
----
-
-## 6. Combat
+### 5. Combat
 
 When unit $a$ attacks target $t$, damage is computed in four stages. Let
 $\text{ATK}_a$ be the attacker's base attack for that distance,
@@ -176,7 +183,7 @@ again:
 
 $$D_\text{final} \;=\; \max\!\big(1,\; \lfloor 0.5\,D\rfloor\big) \quad\text{(else } D_\text{final}=D)$$
 
-### Counter-attacks
+#### Counter-attacks
 
 If the target survives, isn't paralyzed, and is allowed to retaliate, it hits
 back at **80%** strength, again HP-scaled and run through the *attacker's*
@@ -198,9 +205,7 @@ Counters are **denied** when:
 > decisive**, and the even-trade stalemates of flat damage disappear. This is
 > the single most important strategic consequence of the `hp_scaled` model.
 
----
-
-## 7. Seizing Structures
+### 6. Seizing structures
 
 To capture a structure, stand a unit on it and issue `seize`. Each seize
 subtracts the **unit's current HP** from the structure's HP:
@@ -222,9 +227,7 @@ and stacking the assault matters. If a partly-damaged structure's occupant is
 turn** until a unit stands on it again — so an interrupted siege can heal back
 fast. Plan to capture with bodies to spare.
 
----
-
-## 8. Abilities & Status Effects
+### 7. Abilities & status effects
 
 | Ability | Caster | Range | Effect | Cooldown |
 |---|---|---|---|---|
@@ -240,9 +243,15 @@ double-moves for reach or burst; buffs swing a key fight. Healing/curing feeds
 directly back into the HP-scaling loop — keeping a unit topped up keeps it
 hitting at full power.
 
----
+### 8. Fog of war (optional)
 
-## 9. Configuration & Competition Balance
+When `fogOfWar` is enabled, the **`units`** list in your observation is filtered
+to only the enemies your units can currently see; the **board and structures
+stay fully visible**. Mountains grant +1 vision and forests block ranged
+line-of-sight, so scouting and positioning carry information value. Fog is
+**off** by default.
+
+### 9. Configuration & competition balance
 
 The environment is created with `make("reinforce_tactics", configuration={...})`:
 
@@ -262,13 +271,11 @@ The environment is created with `make("reinforce_tactics", configuration={...})`
 >
 > - **Warrior cost is 300** (raised from the engine default of 200).
 > - **Combat uses the `hp_scaled` damage model** (wounded units hit softer — see
->   §6).
+>   §5).
 >
-> All other unit stats in §5 are engine defaults.
+> All other unit stats in §4 are engine defaults.
 
----
-
-## 10. The Agent Interface
+### 10. The agent interface
 
 Your agent is called once per turn as `agent(observation, configuration)` and
 returns the order list. The `observation` exposes:
@@ -282,10 +289,7 @@ returns the order list. The `observation` exposes:
 | `player` | — | Your index, `0` or `1` (engine players are 1-indexed, so `owner = player + 1`) |
 | `turnNumber`, `mapWidth`, `mapHeight` | yes | Game clock and board dimensions |
 
-Under **fog of war**, only the `units` list is filtered to your vision — board
-and structures stay fully visible.
-
-### A minimal agent
+#### A minimal agent
 
 ```python
 def my_agent(observation, configuration):
@@ -308,30 +312,7 @@ def my_agent(observation, configuration):
     return actions
 ```
 
----
-
-## 11. Scoring & Leaderboard
-
-Every episode returns `+1 / 0 / -1` (win / draw / loss). As in other Kaggle
-Simulation competitions, agents are continuously matched against one another and
-the per-episode results feed a **skill-rating leaderboard** — consistent winners
-rise, so the goal is a policy that **beats a wide field of opponents**, not just
-one. Two baseline agents ship with the environment to test against:
-
-- **`random`** — ends its turn immediately; a sanity-check floor.
-- **`simple_bot`** — a strategic baseline that recruits, advances, attacks, and
-  seizes.
-
-```python
-from kaggle_environments import make
-env = make("reinforce_tactics", configuration={"mapName": "beginner"})
-env.run([my_agent, "simple_bot"])      # play a match
-print(env.render(mode="ansi"))          # ASCII board
-```
-
----
-
-## 12. Strategy Primer
+### 11. Strategy primer
 
 - **Grab towers early** — economy compounds; +50/turn now is a unit later.
 - **Focus fire.** Under HP-scaling, two units killing one beats two units
@@ -344,6 +325,71 @@ print(env.render(mode="ansi"))          # ASCII board
   a 50%/turn heal.
 - **Buffs and Haste win the decisive fight**, not the whole game — spend them
   when a trade actually swings the match.
+
+---
+
+## Evaluation
+
+### Match outcome → score
+
+Every episode is a 1v1 match. At the end, each agent receives one of three
+rewards:
+
+| Outcome | Condition | Reward |
+|---|---|---|
+| **Win** | You **seize the enemy Headquarters**, or **eliminate all enemy units** | `+1` |
+| **Loss** | The opponent does either of the above to you | `-1` |
+| **Draw** | Neither happens within the turn limit (`episodeSteps`, default 200) | `0` |
+
+The result is strictly zero-sum: one agent's `+1` is the other's `-1`, and a
+draw is `0` for both.
+
+### Leaderboard & ranking
+
+As in other Kaggle **Simulation** competitions, your agent is continuously
+matched against other submissions, and the per-episode results feed a
+**skill-rating leaderboard**. Ratings rise after wins and fall after losses, so
+the objective is a policy that **beats a wide field of opponents across many
+maps**, not one that overfits to a single matchup. Because maps and (optionally)
+the opening can vary between episodes, a robust agent that wins consistently
+outranks a brittle one that only wins specific setups.
+
+### Constraints
+
+- **Per-turn time limit:** 5 s (`actTimeout`). Returning your order list slower
+  than this risks a timeout.
+- **Per-episode time limit:** 1200 s (`runTimeout`).
+- **Robustness:** a *malformed* action (not a dict) forfeits the match, so guard
+  your output. Merely *illegal* orders are safely ignored as no-ops, so you
+  never need to perfectly validate every move yourself.
+
+### Baselines
+
+Two reference agents ship with the environment so you can benchmark before
+submitting:
+
+- **`random`** — ends its turn immediately; a sanity-check floor.
+- **`simple_bot`** — a strategic baseline that recruits, advances, attacks, and
+  seizes. Beating it consistently is a reasonable first milestone.
+
+```python
+from kaggle_environments import make, evaluate
+
+# One match, rendered
+env = make("reinforce_tactics", configuration={"mapName": "beginner"})
+env.run([my_agent, "simple_bot"])
+print(env.render(mode="ansi"))
+
+# Win rate over several maps
+rewards = evaluate(
+    "reinforce_tactics",
+    [my_agent, "simple_bot"],
+    num_episodes=10,
+    configuration={"mapName": ""},   # random maps
+)
+wins = sum(1 for r in rewards if r[0] == 1)
+print(f"{wins}/{len(rewards)} wins as Player 0")
+```
 
 ---
 
