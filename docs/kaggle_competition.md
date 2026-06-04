@@ -134,7 +134,7 @@ You can play on one of **19 built-in 1v1 maps** (e.g. `beginner`, `crossroads`,
 
 ### 4. The roster
 
-Eight unit types, each with a distinct role. **These are the competition (v52a)
+Eight unit types, each with a distinct role. **These are the competition
 values** — see §9 for what differs from the raw engine defaults.
 
 | Code | Unit | Cost | HP | ATK | DEF | Move | Range | Signature ability |
@@ -265,9 +265,8 @@ The environment is created with `make("reinforce_tactics", configuration={...})`
 | `fogOfWar` | `false` | Hide enemy units outside vision |
 | `startingGold` | 250 | Gold each player begins with |
 
-> **⚠️ Competition balance (v52a overrides).** The competition environment
-> applies two balance changes on top of the base engine, and your agent should
-> assume them:
+> **⚠️ Competition balance.** The competition environment applies two balance
+> changes on top of the base engine, and your agent should assume them:
 >
 > - **Warrior cost is 300** (raised from the engine default of 200).
 > - **Combat uses the `hp_scaled` damage model** (wounded units hit softer — see
@@ -404,7 +403,7 @@ print(f"{wins}/{len(rewards)} wins as Player 0")
 **Resources:** [Source on GitHub](https://github.com/kuds/reinforce-tactics) ·
 [reinforcetactics.com](https://reinforcetactics.com) · License: Apache 2.0
 
-> The unit stats and formulas above reflect the **v52a competition overrides**
+> The unit stats and formulas above reflect the **competition overrides**
 > the Kaggle adapter actually applies (`Warrior cost 300`, `hp_scaled` combat),
 > drawn from the vendored engine (`reinforcetactics/kaggle/`) — the
 > interpreter, `reinforce_tactics.json` spec, combat/seize in `mechanics.py`,
