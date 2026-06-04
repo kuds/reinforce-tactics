@@ -27,7 +27,7 @@ HP-scaled combat, paralysis, buffs, and structure sieges all interact.
 > | **Goal** | Capture the enemy HQ **or** eliminate every enemy unit |
 > | **Episode length** | 200 turns by default, then a draw |
 > | **Score** | `+1` win · `0` draw · `-1` loss, fed into a skill-rating leaderboard |
-> | **Limits** | 5 s per turn · 1200 s per episode |
+> | **Limits (default)** | 5 s per turn · 1200 s per episode (enforced by the Kaggle harness; host-configurable) |
 > | **Engine** | Self-contained, no pygame/UI deps — vendored like Lux AI S3 |
 
 ### What you'll build
@@ -356,9 +356,17 @@ outranks a brittle one that only wins specific setups.
 
 ### Constraints
 
-- **Per-turn time limit:** 5 s (`actTimeout`). Returning your order list slower
-  than this risks a timeout.
-- **Per-episode time limit:** 1200 s (`runTimeout`).
+Time limits are enforced by the **Kaggle Environments harness**, not the game
+engine, and are set by the competition host — the values below are the
+environment defaults:
+
+- **Per-turn time limit:** 5 s (`actTimeout`). Each agent also has an **overage
+  bank** (`remainingOverageTime`, 60 s by default) it can draw from when a turn
+  runs over budget; exhaust it and a slow turn flips your `status` to
+  `TIMEOUT`, which is scored as a loss. (Local in-process `env.run` calls are
+  timed but not hard-interrupted — enforcement bites in the sandboxed
+  competition runner.)
+- **Per-episode time limit:** 1200 s (`runTimeout`) of total wall-clock.
 - **Robustness:** a *malformed* action (not a dict) forfeits the match, so guard
   your output. Merely *illegal* orders are safely ignored as no-ops, so you
   never need to perfectly validate every move yourself.
