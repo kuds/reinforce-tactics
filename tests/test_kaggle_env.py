@@ -677,6 +677,23 @@ class TestActionExecution:
         assert second is False
         assert game.get_unit_at_position(6, 5).health == hp_after_first  # second attack was a no-op
 
+    def test_unit_cannot_heal_twice_in_one_turn(self):
+        # Ability actions (heal/cure/paralyze/haste/buffs) go through
+        # _get_source_target, which is gated on can_attack too -- so a Cleric
+        # can't heal more than once per turn.
+        game = _create_test_game()
+        game.player_gold[1] = 1000
+        cleric = game.create_unit("C", 5, 5, player=1)
+        cleric.can_attack = True
+        target = game.create_unit("W", 6, 5, player=1)
+        target.health = 1  # damaged enough that a second heal would also help
+        first = _execute_action(game, {"type": "heal", "from_x": 5, "from_y": 5, "to_x": 6, "to_y": 5}, player=1)
+        hp_after_first = target.health
+        second = _execute_action(game, {"type": "heal", "from_x": 5, "from_y": 5, "to_x": 6, "to_y": 5}, player=1)
+        assert first is True
+        assert second is False
+        assert target.health == hp_after_first  # second heal was a no-op
+
     def test_heal_action(self):
         game = _create_test_game()
         game.player_gold[1] = 1000
