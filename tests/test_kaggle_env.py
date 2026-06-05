@@ -651,6 +651,32 @@ class TestActionExecution:
         )
         assert result is False
 
+    def test_unit_cannot_seize_twice_in_one_turn(self):
+        # A unit gets one can_attack-action per turn: the second seize is a
+        # no-op, so a structure can't be captured to completion in one turn.
+        game = _create_test_game()
+        unit = game.create_unit("W", 9, 9, player=1)  # P1 unit on the P2 HQ
+        unit.can_attack = True
+        first = _execute_action(game, {"type": "seize", "x": 9, "y": 9}, player=1)
+        second = _execute_action(game, {"type": "seize", "x": 9, "y": 9}, player=1)
+        assert first is True
+        assert second is False
+        assert game.grid.get_tile(9, 9).player == 2  # not captured
+        assert game.game_over is False
+
+    def test_unit_cannot_attack_twice_in_one_turn(self):
+        game = _create_test_game()
+        attacker = game.create_unit("W", 5, 5, player=1)
+        attacker.can_attack = True
+        game.create_unit("W", 6, 5, player=2)  # adjacent enemy
+        first = _execute_action(game, {"type": "attack", "from_x": 5, "from_y": 5, "to_x": 6, "to_y": 5}, player=1)
+        target = game.get_unit_at_position(6, 5)
+        hp_after_first = target.health
+        second = _execute_action(game, {"type": "attack", "from_x": 5, "from_y": 5, "to_x": 6, "to_y": 5}, player=1)
+        assert first is True
+        assert second is False
+        assert game.get_unit_at_position(6, 5).health == hp_after_first  # second attack was a no-op
+
     def test_heal_action(self):
         game = _create_test_game()
         game.player_gold[1] = 1000
