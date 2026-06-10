@@ -1788,3 +1788,168 @@ class TestStepInfoDiagnostics:
         # Sanity: the *pre-step* mask had `expected` legal actions
         assert expected >= 1
         env.close()
+
+
+# ==============================================================================
+# SELF-PLAY OPPONENT DISPATCH (opponent="self" + factory)
+# ==============================================================================
+
+
+class _SpyEndTurnBot:
+    """Minimal opponent: records each take_turn call, then ends its turn."""
+
+    def __init__(self, game_state, player):
+        self.game_state = game_state
+        self.player = player
+        self.turns_taken = 0
+
+    def take_turn(self):
+        self.turns_taken += 1
+        self.game_state.end_turn()
+
+
+class TestSelfPlayOpponentDispatch:
+    """With ``opponent='self'``, the factory-built opponent must actually play.
+
+    Regression tests for the bug where ``_execute_action`` skipped
+    ``_opponent_turn()`` for ``opponent_type == 'self'``, so the
+    factory-bound opponent (feudal self-play snapshots / ModelBot) never
+    took a turn and "self-play" silently trained against an inert opponent.
+    """
+
+    def test_factory_opponent_takes_turn_on_agent_end_turn(self):
+        env = StrategyGameEnv(map_file=None, opponent="self", render_mode=None, max_steps=20)
+        spies = []
+
+        def factory(game_state, opponent_player):
+            bot = _SpyEndTurnBot(game_state, opponent_player)
+            spies.append(bot)
+            return bot
+
+        env.set_self_play_opponent_factory(factory)
+        env.reset(seed=0)
+        assert spies, "factory should be invoked on reset"
+        assert env.game_state.current_player == env.agent_player
+
+        _obs, _reward, terminated, _truncated, _info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+
+        # The opponent acted exactly once, during its own turn, and play
+        # returned to the agent.
+        assert spies[-1].turns_taken == 1
+        if not terminated:
+            assert env.game_state.current_player == env.agent_player
+        env.close()
+
+    def test_self_without_factory_returns_turn_to_agent(self):
+        # No factory bound -> ``self.opponent`` is None -> ``_opponent_turn``
+        # no-ops, and the safety net must end the empty opponent turn so
+        # play (and the action masks) return to the agent instead of
+        # sticking on the opponent.
+        env = StrategyGameEnv(map_file=None, opponent="self", render_mode=None, max_steps=20)
+        env.reset(seed=0)
+
+        _obs, _reward, terminated, _truncated, _info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+
+        assert not terminated
+        assert env.game_state.current_player == env.agent_player
+        env.close()
+
+
+# ==============================================================================
+# MASK PLAYER CONSISTENCY
+# ==============================================================================
+
+
+class TestMaskPlayerConsistency:
+    """Every mask builder must describe the *agent's* legal actions.
+
+    Regression test for ``_build_masks`` / ``_build_structured_masks``
+    querying ``get_legal_actions(player=current_player)``: whenever a
+    caller queried masks while it was not the agent's turn (e.g. manual
+    opponent=None driving, or between end_turn and the opponent turn
+    completing), the masks silently described the opponent's actions.
+    """
+
+    def test_masks_query_agent_player_even_off_turn(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None, max_steps=20)
+        env.reset(seed=0)
+        # Manual mode (opponent=None): the agent's end_turn hands play to
+        # player 2 with nobody driving it.
+        env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert env.game_state.current_player != env.agent_player
+
+        queried_players = []
+        original = env.game_state.get_legal_actions
+
+        def spy(player=None, **kwargs):
+            queried_players.append(player)
+            return original(player=player, **kwargs)
+
+        env.game_state.get_legal_actions = spy
+
+        env.action_masks()
+        env.structured_action_masks()
+
+        assert queried_players, "mask builders should query legal actions"
+        assert all(p == env.agent_player for p in queried_players)
+        env.close()
+
+
+# ==============================================================================
+# POTENTIAL-BASED SHAPING WEIGHT GATES
+# ==============================================================================
+
+
+class TestPotentialNegativeWeights:
+    """Negative shaping weights are legitimate config and must not be
+    silently dropped by the zero-skip gates in ``_compute_potential``."""
+
+    def test_negative_unit_diff_weight_is_applied(self):
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent=None,
+            render_mode=None,
+            reward_config={"income_diff": 0.0, "unit_diff": -1.0, "structure_control": 0.0},
+        )
+        env.reset(seed=0)
+
+        from reinforcetactics.core.unit import Unit
+
+        env.game_state.units.append(Unit("W", 1, 1, env.agent_player))
+        # Agent has one more unit than the opponent: potential must be
+        # unit_diff * (+1) = -1.0, not gated to 0 by a ``> 0`` check.
+        assert env._compute_potential() == pytest.approx(-1.0)
+        env.close()
+
+
+# ==============================================================================
+# ENGINE RNG SEEDING (Rogue evade reproducibility)
+# ==============================================================================
+
+
+class TestEngineRngSeeding:
+    """``reset(seed=...)`` must control engine-side combat randomness.
+
+    The Rogue evade roll in ``mechanics.attack_unit`` reads
+    ``game_state.rng``; the env derives that generator from ``np_random``
+    on every reset so seeded episodes reproduce combat outcomes too.
+    """
+
+    def test_reset_seeds_engine_rng_deterministically(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        env.reset(seed=123)
+        assert env.game_state.rng is not None
+        first_stream = [env.game_state.rng.random() for _ in range(5)]
+
+        env.reset(seed=123)
+        assert [env.game_state.rng.random() for _ in range(5)] == first_stream
+        env.close()
+
+    def test_different_seeds_give_different_engine_streams(self):
+        env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
+        env.reset(seed=123)
+        stream_a = [env.game_state.rng.random() for _ in range(5)]
+        env.reset(seed=456)
+        stream_b = [env.game_state.rng.random() for _ in range(5)]
+        assert stream_a != stream_b
+        env.close()

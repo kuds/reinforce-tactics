@@ -334,7 +334,7 @@ class GameMechanics:
         return int(base)
 
     @staticmethod
-    def attack_unit(attacker, target, grid=None, units=None, damage_model="flat"):
+    def attack_unit(attacker, target, grid=None, units=None, damage_model="flat", rng=None):
         """
         Execute an attack from attacker to target.
 
@@ -346,6 +346,13 @@ class GameMechanics:
             damage_model: "flat" (HP-independent, legacy) or "hp_scaled"
                 (outgoing damage scaled by the attacker's current HP
                 fraction). Applies symmetrically to the counter-attack.
+            rng: Optional random source exposing ``random()`` (e.g. a
+                ``random.Random`` instance) used for the Rogue evade roll —
+                the only stochastic outcome in combat. ``None`` falls back
+                to the module-global ``random`` (legacy behaviour). Callers
+                that need reproducible combat (the RL env, seeded evals)
+                should pass a seeded instance; ``GameState.attack`` forwards
+                ``GameState.rng`` automatically.
 
         Returns:
             dict with 'attacker_alive', 'target_alive', 'damage', 'counter_damage',
@@ -419,7 +426,8 @@ class GameMechanics:
                     rogue_tile = grid.get_tile(attacker.x, attacker.y)
                     if rogue_tile.type == "f":  # Forest tile
                         evade_chance += ROGUE_FOREST_EVADE_BONUS
-                if random.random() < evade_chance:
+                evade_rng = rng if rng is not None else random
+                if evade_rng.random() < evade_chance:
                     can_counter = False
                     evade_applied = True
 

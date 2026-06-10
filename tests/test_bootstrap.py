@@ -266,6 +266,31 @@ class TestPromotionCallback:
         assert _step_promote(cb, num_timesteps=700_000) is False
         assert cb.promoted is True
 
+    def test_min_timesteps_is_stage_relative_under_cumulative_counter(self):
+        # The bootstrap runner trains with ``reset_num_timesteps=False``, so
+        # ``num_timesteps`` is cumulative across stages. A stage entered at
+        # 2M cumulative steps with min_timesteps=500k must still gate its
+        # first 500k *stage* steps -- under the old absolute comparison the
+        # gate was a silent no-op on every stage after the first (the exact
+        # stages the v31 sweep added it for).
+        eval_cb = _make_eval_stub()
+        cb = PromotionCallback(eval_cb, threshold=0.9, patience=2, min_timesteps=500_000, verbose=0)
+        cb.num_timesteps = 2_000_000  # carried in from prior stages
+        cb._on_training_start()  # SB3 fires this at the top of learn()
+        _append_eval(eval_cb, 0.95)
+        _append_eval(eval_cb, 0.95)
+        # 100k into the stage: still pre-window despite 2.1M absolute steps.
+        assert _step_promote(cb, num_timesteps=2_100_000) is True
+        assert cb.promoted is False
+        assert cb._streak == 0
+        # Window opens at stage-relative 500k; the streak builds fresh.
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=2_600_000) is True
+        assert cb._streak == 1
+        _append_eval(eval_cb, 0.95)
+        assert _step_promote(cb, num_timesteps=2_650_000) is False
+        assert cb.promoted is True
+
 
 # ---------------------------------------------------------------------------
 # Curriculum loading and validation via TrainingConfig
@@ -821,8 +846,13 @@ class _FakeModel:
         # SB3 wires up callbacks before _on_step; mimic the parts we use.
         # Don't set ``cb.logger`` directly: BaseCallback.logger is a
         # read-only property that delegates to ``self.model.logger``.
+        # SB3 also fires _on_training_start at the top of every learn()
+        # call; stage-relative callbacks (PromotionCallback's min_timesteps
+        # gate, the schedule callbacks) snapshot their stage offset there.
         for cb in callback:
             cb.model = self
+            cb.num_timesteps = self.num_timesteps
+            cb._on_training_start()
 
         # Each programmed entry simulates one eval block. We append directly
         # to PeriodicEvalCallback.results (bypassing the real evaluate_model
@@ -837,6 +867,10 @@ class _FakeModel:
         for win_rate in program:
             eval_cb.results.append({"win_rate": win_rate, "avg_reward": 0.0})
             self.num_timesteps += 1
+            # BaseCallback.on_step syncs num_timesteps from the model
+            # before calling _on_step; mirror that so the stage-relative
+            # min_timesteps gate sees the live counter.
+            promote_cb.num_timesteps = self.num_timesteps
             if not promote_cb._on_step():
                 self.learn_calls.append(
                     {
@@ -971,6 +1005,32 @@ class TestRunCurriculum:
         # All envs were closed.
         assert all(e.closed for e in train_envs)
         assert all(e.closed for e in eval_envs)
+
+    def test_min_timesteps_gate_is_stage_relative_in_curriculum(self, tmp_path):
+        # Stage 'b' requires 3 stage-relative steps before promotion can
+        # fire. The fake model advances num_timesteps by 1 per eval and
+        # never resets it between stages (mirroring
+        # ``reset_num_timesteps=False``). Stage 'a' promotes after 1 eval,
+        # so the cumulative counter is 1 entering 'b'; 'b' then sees two
+        # passing evals at stage-relative steps 1 and 2 -- both inside the
+        # pre-window, so 'b' must stall. Under the old cumulative
+        # comparison the gate would have opened at absolute step 3 and
+        # wrongly promoted on the second eval.
+        stage_a = _stage("a", patience=1)
+        stage_b = _stage("b", "simple", patience=1)
+        stage_b.min_timesteps_before_promotion = 3
+        program = {"a": [0.95], "b": [0.95, 0.95]}
+        cfg, mf, tef, eef, *_ = _setup_run([stage_a, stage_b], program, tmp_path)
+
+        with pytest.raises(CurriculumStalled) as excinfo:
+            run_curriculum(
+                cfg,
+                output_dir=tmp_path,
+                train_env_factory=tef,
+                eval_env_factory=eef,
+                model_factory=mf,
+            )
+        assert excinfo.value.stage_name == "b"
 
     def _run_with_best_saving_model(self, cfg, tmp_path):
         program = {"a": [0.95, 0.95], "b": [0.92, 0.93]}

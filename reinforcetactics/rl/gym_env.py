@@ -730,7 +730,12 @@ class StrategyGameEnv(gym.Env):
             ut_mask[0] = True
             return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
 
-        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+        # Masks always describe the *agent's* legal actions (matching
+        # ``_build_flat_actions`` and the obs contract). Using
+        # ``current_player`` here would silently mask for the opponent
+        # whenever a caller queries between the agent's end_turn and the
+        # opponent's turn completing.
+        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
 
         width = self.grid_width
         height = self.grid_height
@@ -812,8 +817,10 @@ class StrategyGameEnv(gym.Env):
         the source cell is the building / canonical (0, 0). For end_turn (atype=5) a
         single trivial (sx, sy, tx, ty) = (0, 0, 0, 0) entry is recorded so callers
         do not need a special case.
+
+        Masks describe the *agent's* legal actions (see ``_build_masks``).
         """
-        legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
 
         H, W = self.grid_height, self.grid_width
         num_action_types = 10
@@ -1251,8 +1258,16 @@ class StrategyGameEnv(gym.Env):
                     reward += result_info["heal_amount"] * rc.get("heal_scale", 0.5)
             elif action_type == 5:
                 reward += self.reward_config["turn_penalty"]
-                # Opponent plays (dispatch on opponent_type, not opponent object)
-                if self.opponent_type and self.opponent_type != "self":
+                # Opponent plays (dispatch on opponent_type, not opponent object).
+                # ``"self"`` is dispatched like any scripted bot: reset() bound a
+                # factory-built opponent (ModelBot / snapshot) to the live
+                # game_state, and ``_opponent_turn`` runs its take_turn() here.
+                # With no factory bound, ``self.opponent`` is None,
+                # ``_opponent_turn`` no-ops, and the safety net below hands the
+                # turn straight back to the agent. (The SelfPlayEnv wrapper is
+                # unaffected: it constructs the base env with ``opponent=None``
+                # and executes the opponent turn itself after step() returns.)
+                if self.opponent_type:
                     if not self.game_state.game_over:
                         # Snapshot agent unit HP by id() so we can attribute
                         # the opponent turn's damage to the agent. Tracks
@@ -1325,7 +1340,9 @@ class StrategyGameEnv(gym.Env):
         """Execute opponent's turn."""
         if self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent is not None:
             self.opponent.take_turn()
-        # 'self' mode is handled externally by the training script
+        # 'self' with no factory leaves ``self.opponent`` as None, so this
+        # safely no-ops (the SelfPlayEnv wrapper drives its own opponent and
+        # constructs the base env with ``opponent=None`` instead).
 
     def _compute_potential(self) -> float:
         """
@@ -1338,17 +1355,21 @@ class StrategyGameEnv(gym.Env):
         ap = self.agent_player
         opp = 3 - ap
 
-        if self.reward_config.get("income_diff", 0) > 0:
+        # Gates use ``!= 0`` (not ``> 0``): a zero weight skips the term's
+        # computation entirely (the income calc in particular is the
+        # expensive one), while a *negative* weight is a legitimate config
+        # choice and must not be silently dropped.
+        if self.reward_config.get("income_diff", 0) != 0:
             income_agent = self.game_state.mechanics.calculate_income(ap, self.game_state.grid, self.game_state.income_rates)
             income_opp = self.game_state.mechanics.calculate_income(opp, self.game_state.grid, self.game_state.income_rates)
             potential += (income_agent["total"] - income_opp["total"]) * self.reward_config["income_diff"]
 
-        if self.reward_config.get("unit_diff", 0) > 0:
+        if self.reward_config.get("unit_diff", 0) != 0:
             units_agent = sum(1 for u in self.game_state.units if u.player == ap)
             units_opp = sum(1 for u in self.game_state.units if u.player == opp)
             potential += (units_agent - units_opp) * self.reward_config["unit_diff"]
 
-        if self.reward_config.get("structure_control", 0) > 0:
+        if self.reward_config.get("structure_control", 0) != 0:
             structures_agent = len(self.game_state.grid.get_capturable_tiles(player=ap))
             structures_opp = len(self.game_state.grid.get_capturable_tiles(player=opp))
             potential += (structures_agent - structures_opp) * self.reward_config["structure_control"]
@@ -1537,7 +1558,7 @@ class StrategyGameEnv(gym.Env):
             n_legal_actions = len(self._current_actions)
             seize_available = any(int(a[0]) == 3 for a in self._current_actions)
         else:
-            legal_actions = self.game_state.get_legal_actions(player=self.game_state.current_player)
+            legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
             # get_legal_actions returns lists of action dicts plus a boolean
             # "end_turn" flag — count list lengths, then +1 for end_turn.
             n_legal_actions = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
@@ -1591,6 +1612,14 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
+        # Engine-side combat RNG (currently only the Rogue evade roll in
+        # mechanics.attack_unit). Derived from np_random so reset(seed=...)
+        # controls combat stochasticity the same way it controls bot
+        # tiebreaks below — without this the evade roll reads the module-
+        # global ``random``, which the episode seed never touches (and which
+        # forked SubprocVecEnv workers inherit in identical states).
+        engine_rng = random.Random(int(self.np_random.integers(0, 2**31 - 1)))
+
         # Reset game state (preserving enabled_units, fog_of_war, max_turns
         # and the engine-constant overlay)
         self.game_state = GameState(
@@ -1600,6 +1629,7 @@ class StrategyGameEnv(gym.Env):
             enabled_units=self.enabled_units,
             fog_of_war=self.fog_of_war,
             engine_overrides=self.engine_overrides,
+            rng=engine_rng,
         )
         self.current_step = 0
         self._actions_this_turn = 0
