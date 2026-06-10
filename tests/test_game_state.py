@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from reinforcetactics.core.game_state import GameState
+from reinforcetactics.core.unit import Unit
 
 
 @pytest.fixture
@@ -269,3 +270,62 @@ class TestUnitEliminationWinCondition:
         assert result["target_alive"] is False
         assert simple_game.game_over is True
         assert simple_game.winner == 1
+
+
+class _ScriptedRng:
+    """Random source returning a fixed value; counts how often it's read."""
+
+    def __init__(self, value: float):
+        self.value = value
+        self.calls = 0
+
+    def random(self) -> float:
+        self.calls += 1
+        return self.value
+
+
+class TestEngineRngInjection:
+    """``GameState.rng`` must drive the Rogue evade roll and survive reset().
+
+    Regression tests for the evade roll reading the module-global
+    ``random`` regardless of seeding -- which made seeded episodes
+    non-reproducible whenever a Rogue attacked into a counter.
+    """
+
+    @staticmethod
+    def _attack_with_rng(rng):
+        map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+        map_data[0][0] = "h_1"
+        map_data[9][9] = "h_2"
+        gs = GameState(map_data, num_players=2, rng=rng)
+        rogue = Unit("R", 5, 5, 1)
+        target = Unit("W", 6, 5, 2)
+        gs.units.extend([rogue, target])
+        return gs, gs.attack(rogue, target)
+
+    def test_injected_rng_forces_evade(self):
+        rng = _ScriptedRng(0.0)  # below any evade threshold
+        _gs, result = self._attack_with_rng(rng)
+        assert rng.calls == 1, "the evade roll must come from the injected rng"
+        assert result["evade"] is True
+        assert result["counter_damage"] == 0
+
+    def test_injected_rng_suppresses_evade(self):
+        rng = _ScriptedRng(0.999)  # above any evade threshold
+        _gs, result = self._attack_with_rng(rng)
+        assert rng.calls == 1
+        assert result["evade"] is False
+        assert result["counter_damage"] > 0
+
+    def test_rng_preserved_across_reset(self):
+        rng = _ScriptedRng(0.0)
+        gs, _result = self._attack_with_rng(rng)
+        gs.reset(np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object))
+        assert gs.rng is rng
+
+    def test_default_rng_is_none_module_global_fallback(self):
+        # No rng -> legacy behaviour (module-global random); the attribute
+        # must exist and be None so mechanics falls back cleanly.
+        map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
+        gs = GameState(map_data, num_players=2)
+        assert gs.rng is None

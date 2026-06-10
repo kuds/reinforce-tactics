@@ -171,6 +171,7 @@ class GameState:
         enabled_units: Optional[List[str]] = None,
         fog_of_war: bool = False,
         engine_overrides: Optional[Dict[str, Any]] = None,
+        rng: Optional[Any] = None,
     ) -> None:
         """
         Initialize the game state.
@@ -181,6 +182,16 @@ class GameState:
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
             fog_of_war: Enable fog of war (default False for backward compatibility)
+            rng: Optional random source exposing ``random()`` (e.g. a seeded
+                ``random.Random``) used for engine-side stochastic outcomes —
+                currently only the Rogue evade roll in
+                ``mechanics.attack_unit``. ``None`` (default) falls back to
+                the module-global ``random``, preserving legacy behaviour.
+                The RL env passes a generator derived from its episode seed
+                so ``reset(seed=...)`` controls combat randomness too.
+                Replays are unaffected either way: they apply recorded
+                outcomes directly instead of re-rolling
+                (``utils/replay_actions.py``).
             engine_overrides: Optional sparse overlay over the non-YAML
                 engine constants (``constants.py``), so balance can be
                 varied/recorded as config instead of a code edit. Shape::
@@ -253,6 +264,10 @@ class GameState:
         self.game_over_action_index: Optional[int] = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
+        # Engine-side RNG for stochastic combat outcomes (Rogue evade).
+        # ``None`` = module-global ``random`` (legacy / GUI play); seeded
+        # callers (the RL env) inject a ``random.Random`` for reproducibility.
+        self.rng: Optional[Any] = rng
 
         # Fog of war settings
         self.fog_of_war: bool = fog_of_war
@@ -316,6 +331,7 @@ class GameState:
             self.enabled_units,
             self.fog_of_war,
             engine_overrides=self.engine_overrides,
+            rng=self.rng,
         )
 
     def set_map_metadata(
@@ -787,7 +803,9 @@ class GameState:
                 "defence_buff": False,
             }
 
-        result = self.mechanics.attack_unit(attacker, target, self.grid, self.units, damage_model=self.damage_model)
+        result = self.mechanics.attack_unit(
+            attacker, target, self.grid, self.units, damage_model=self.damage_model, rng=self.rng
+        )
 
         # Record action. The extra fields (attacker_killed, counter_damage,
         # *_hp_after, evade, *_bonus) are what makes the replay

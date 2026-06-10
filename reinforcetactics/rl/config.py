@@ -234,19 +234,22 @@ class CurriculumStage:
     promotion_win_rate: float = 0.9
     patience: int = 2
     max_timesteps: int = 1_000_000
-    # Minimum env-steps the stage MUST train before promotion can fire.
-    # Defends against the "skip-ahead" failure where a strong carry-in
-    # policy (e.g. from the prior stage's best-checkpoint handoff) passes
-    # the WR threshold on the very first eval -- so the stage promotes
-    # immediately, contributing ~0 stage-specific learning, and the next
-    # harder stage inherits an under-trained policy that collapses (the
-    # v28 20260522_163958 random_15 stall: random_10 promoted from a
-    # @250k snapshot that was essentially balanced_random's best with
-    # no random_10 refinement). When > 0, the promotion callback resets
-    # its streak counter and ignores eval results until
-    # ``model.num_timesteps >= min_timesteps_before_promotion``. Default
-    # 0 preserves legacy behaviour; set on the noisy ``*_random_N``
-    # stages where it matters most.
+    # Minimum env-steps the stage MUST train before promotion can fire,
+    # measured *within the stage* (from the start of the stage's
+    # ``learn()`` call — ``num_timesteps`` itself is cumulative across
+    # stages under ``reset_num_timesteps=False``). Defends against the
+    # "skip-ahead" failure where a strong carry-in policy (e.g. from the
+    # prior stage's best-checkpoint handoff) passes the WR threshold on
+    # the very first eval -- so the stage promotes immediately,
+    # contributing ~0 stage-specific learning, and the next harder stage
+    # inherits an under-trained policy that collapses (the v28
+    # 20260522_163958 random_15 stall: random_10 promoted from a @250k
+    # snapshot that was essentially balanced_random's best with no
+    # random_10 refinement). When > 0, the promotion callback resets its
+    # streak counter and ignores eval results until the stage has trained
+    # ``min_timesteps_before_promotion`` env steps. Default 0 preserves
+    # legacy behaviour; set on the noisy ``*_random_N`` stages where it
+    # matters most.
     min_timesteps_before_promotion: int = 0
     n_eval_episodes: int = 30
     # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.

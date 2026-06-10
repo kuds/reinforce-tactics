@@ -258,6 +258,13 @@ class PromotionCallback(BaseCallback):
     return by exiting the current ``learn()`` call cleanly. The bootstrap
     curriculum runner inspects :attr:`promoted` afterwards to decide whether
     to advance to the next stage or raise ``CurriculumStalled``.
+
+    ``min_timesteps`` is *stage-relative*: it counts env steps since this
+    stage's ``learn()`` call began (the offset is captured in
+    ``_on_training_start``), not against the cumulative ``num_timesteps``
+    counter — the bootstrap runner trains with ``reset_num_timesteps=False``,
+    so the absolute counter at stage entry already exceeds any reasonable
+    per-stage minimum from the second stage onward.
     """
 
     def __init__(
@@ -282,6 +289,22 @@ class PromotionCallback(BaseCallback):
         self._consumed: int = 0
         self._streak: int = 0
         self.promoted: bool = False
+        # Timestep count at the start of this stage's ``learn()`` call.
+        # ``num_timesteps`` is cumulative across stages (the bootstrap
+        # runner passes ``reset_num_timesteps=False``), so ``min_timesteps``
+        # must be measured stage-relative — comparing against the absolute
+        # counter would make the gate a silent no-op on every stage after
+        # the first (cumulative steps at stage entry already exceed any
+        # plausible per-stage minimum). Captured in ``_on_training_start``;
+        # initialized to 0 so direct ``_on_step`` driving (unit tests)
+        # keeps from-zero semantics.
+        self._stage_start_step: int = 0
+
+    def _on_training_start(self) -> None:
+        # See ``EntropyScheduleCallback._on_training_start`` — same pattern:
+        # snapshot the cumulative counter so the pre-window gate below
+        # measures steps trained *within this stage*.
+        self._stage_start_step = int(self.num_timesteps)
 
     def _on_step(self) -> bool:
         # Pre-window: stage hasn't trained enough yet for promotion to
@@ -290,8 +313,10 @@ class PromotionCallback(BaseCallback):
         # the streak so post-window counting starts fresh. Guards against
         # the "skip-ahead" failure where a strong carry-in policy passes
         # threshold on the first eval and promotes a stage with ~0
-        # stage-specific learning.
-        if self.min_timesteps > 0 and self.num_timesteps < self.min_timesteps:
+        # stage-specific learning. ``min_timesteps`` is stage-relative
+        # (steps since this stage's learn() began), not cumulative.
+        stage_elapsed = int(self.num_timesteps) - self._stage_start_step
+        if self.min_timesteps > 0 and stage_elapsed < self.min_timesteps:
             self._consumed = len(self.eval_callback.results)
             self._streak = 0
             return True

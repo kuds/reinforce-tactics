@@ -1075,6 +1075,66 @@ class TestRogueForestEvadeBonus:
         assert rogue.health < 12
 
 
+class _ScriptedEvadeRng:
+    """Random source returning a fixed value; counts how often it's read."""
+
+    def __init__(self, value):
+        self.value = value
+        self.calls = 0
+
+    def random(self):
+        self.calls += 1
+        return self.value
+
+
+class TestRogueEvadeRngInjection:
+    """The evade roll must come from the injected ``rng`` when one is given.
+
+    Regression tests for the roll reading the module-global ``random``
+    unconditionally, which made seeded games (env ``reset(seed=...)``)
+    non-reproducible whenever a Rogue attacked into a counter. ``rng=None``
+    keeps the module-global fallback (covered by the monkeypatch tests
+    above).
+    """
+
+    def test_injected_rng_forces_evade(self, simple_grid):
+        rogue = Unit("R", 5, 5, 1)
+        target = Unit("W", 6, 5, 2)
+        rng = _ScriptedEvadeRng(0.0)  # below any evade threshold
+
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=rng)
+
+        assert rng.calls == 1
+        assert result["evade"] is True
+        assert result["counter_damage"] == 0
+
+    def test_injected_rng_suppresses_evade(self, simple_grid):
+        rogue = Unit("R", 5, 5, 1)
+        target = Unit("W", 6, 5, 2)
+        rng = _ScriptedEvadeRng(0.999)  # above any evade threshold
+
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=rng)
+
+        assert rng.calls == 1
+        assert result["evade"] is False
+        assert result["counter_damage"] > 0
+
+    def test_injected_rng_takes_precedence_over_global_random(self, simple_grid, monkeypatch):
+        # Global random says "evade", the injected rng says "no evade": the
+        # injected source must win, otherwise seeded games silently depend
+        # on unseeded module state.
+        import reinforcetactics.game.mechanics as mechanics_module
+
+        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.0)
+
+        rogue = Unit("R", 5, 5, 1)
+        target = Unit("W", 6, 5, 2)
+
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.999))
+
+        assert result["evade"] is False
+
+
 class TestSorcererDefenceBuff:
     """Test Sorcerer's Defence Buff ability."""
 
