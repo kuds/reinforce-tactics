@@ -169,9 +169,10 @@ class GameSession:  # pylint: disable=too-few-public-methods
         """Render a single frame."""
         self.renderer.render()
 
-        # Draw movement overlay if unit selected
+        # Draw movement overlay and pulsing highlight if unit selected
         if self.input_handler.selected_unit:
             self.renderer.draw_movement_overlay(self.input_handler.selected_unit)
+            self.renderer.draw_selected_unit_highlight(self.input_handler.selected_unit)
 
         # Draw attack range preview if right-clicking on a unit
         if self.input_handler.right_click_preview_active and self.input_handler.preview_positions:

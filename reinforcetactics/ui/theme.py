@@ -83,7 +83,15 @@ OVERLAY_TARGET = (255, 100, 100)
 OVERLAY_TARGET_BORDER = (255, 0, 0)
 OVERLAY_ATTACK_RANGE = (255, 150, 50)
 OVERLAY_ATTACK_RANGE_BORDER = (255, 100, 0)
-OVERLAY_FOG = (0, 0, 0, 128)
+# Two-tier fog of war: unexplored tiles are darker than tiles that were
+# seen before but are currently out of sight (shrouded).
+OVERLAY_FOG_UNEXPLORED = (0, 0, 0, 175)
+OVERLAY_FOG_SHROUDED = (0, 0, 0, 110)
+
+# ── Animation timing (ms) ────────────────────────────────────────────
+OVERLAY_FADE_MS = 150
+SELECTION_PULSE_MS = 360
+STATUS_PULSE_MS = 300
 
 # ── Dimensions ───────────────────────────────────────────────────────
 BORDER_RADIUS = 8

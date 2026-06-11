@@ -144,7 +144,10 @@ class SpriteAnimator:
         cw = unit_cfg.get("crop_width", ANIMATION_CONFIG.get("crop_width", fw))
         ch = unit_cfg.get("crop_height", ANIMATION_CONFIG.get("crop_height", fh))
 
-        sprite_size = TILE_SIZE - 4
+        # Render frames at full tile size: cropped frames are typically
+        # exactly TILE_SIZE already, so this avoids a non-integer downscale
+        # that made the pixel art look ragged.
+        sprite_size = TILE_SIZE
 
         frame_map = ANIMATION_CONFIG.get("frame_map", {})
 
@@ -159,7 +162,8 @@ class SpriteAnimator:
                         cx = (fw - cw) // 2
                         cy = (fh - ch) // 2
                         frame = frame.subsurface(pygame.Rect(cx, cy, cw, ch)).copy()
-                    frame = pygame.transform.scale(frame, (sprite_size, sprite_size))
+                    if frame.get_size() != (sprite_size, sprite_size):
+                        frame = pygame.transform.scale(frame, (sprite_size, sprite_size))
                     state_frames.append(frame)
 
             if state_frames:

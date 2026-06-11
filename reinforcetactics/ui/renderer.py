@@ -2,6 +2,7 @@
 Pygame rendering for the strategy game.
 """
 
+import math
 import os
 import random
 import time
@@ -25,8 +26,38 @@ from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.sprite_animator import SpriteAnimator
 from reinforcetactics.utils.clipboard import init_clipboard
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.fonts import get_display_font, get_font
+from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.settings import get_settings
+
+
+def scale_unit_sprite(image, size):
+    """Scale a unit sprite to ``size`` x ``size`` preserving pixel-art quality.
+
+    Uses nearest-neighbour scaling when the source is the target size or an
+    integer multiple of it (keeps pixels crisp), and smooth scaling for
+    non-integer ratios (avoids ragged pixels).
+    """
+    width, height = image.get_size()
+    if (width, height) == (size, size):
+        return image
+    if width % size == 0 and height % size == 0:
+        return pygame.transform.scale(image, (size, size))
+    try:
+        return pygame.transform.smoothscale(image, (size, size))
+    except (pygame.error, ValueError):
+        # smoothscale requires a 24/32-bit surface; fall back if unsupported
+        return pygame.transform.scale(image, (size, size))
+
+
+def _pulse(period_ms):
+    """Return a 0..1 sine pulse based on the current tick count."""
+    return 0.5 + 0.5 * math.sin(pygame.time.get_ticks() / period_ms)
+
+
+def _lerp_color(a, b, t):
+    """Linearly interpolate between two RGB colors."""
+    return tuple(int(ca + (cb - ca) * t) for ca, cb in zip(a, b))
 
 
 def _resolve_bundled_sprites_path():
@@ -128,9 +159,13 @@ class Renderer:
         self.last_frame_time = time.time()
         self.delta_time = 0.0
 
-        # Pre-allocate tile-sized overlay surfaces used every frame
-        self._fog_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-        self._fog_overlay.fill(theme.OVERLAY_FOG)
+        # Pre-allocate tile-sized overlay surfaces used every frame.
+        # Fog is two-tier: unexplored tiles are darker than shrouded ones
+        # (seen before, currently out of sight).
+        self._fog_unexplored = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        self._fog_unexplored.fill(theme.OVERLAY_FOG_UNEXPLORED)
+        self._fog_shrouded = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        self._fog_shrouded.fill(theme.OVERLAY_FOG_SHROUDED)
 
         self._move_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
         self._move_overlay.set_alpha(100)
@@ -146,6 +181,16 @@ class Renderer:
 
         # Blend overlay cache (for unit tinting)
         self._overlay_cache = {}
+
+        # Rendered-text caches: pygame text rendering is expensive, so HUD
+        # text, tooltips, status indicators, and letter fallbacks are only
+        # re-rendered when their content changes.
+        self._text_cache = {}
+        self._tooltip_cache = None
+        self._letter_cache = {}
+
+        # Per-overlay fade-in state: kind -> (signature, start_ticks)
+        self._overlay_anim = {}
 
         # UI elements
         self._setup_ui_elements()
@@ -296,9 +341,9 @@ class Renderer:
                 try:
                     full_path = os.path.join(unit_sprites_path, static_path)
                     image = pygame.image.load(full_path)
-                    # Scale to fit within tile, leaving room for health bar
-                    sprite_size = TILE_SIZE - 4  # Slightly smaller than tile
-                    unit_images[unit_type] = pygame.transform.scale(image, (sprite_size, sprite_size))
+                    if not self.headless:
+                        image = image.convert_alpha()
+                    unit_images[unit_type] = scale_unit_sprite(image, TILE_SIZE)
                 except (pygame.error, FileNotFoundError):
                     unit_images[unit_type] = None
 
@@ -323,11 +368,30 @@ class Renderer:
         self.animator = self._init_animator()
 
     def _setup_ui_elements(self):
-        """Setup UI elements like buttons."""
+        """Setup UI elements like buttons (localized, sized to their labels)."""
         screen_width = self.game_state.grid.width * TILE_SIZE
+        lang = get_language()
 
-        self.end_turn_button = pygame.Rect(screen_width - 150, 10, 140, 40)
-        self.resign_button = pygame.Rect(screen_width - 150, 60, 140, 40)
+        self._hud_font = get_font(28)
+        self._hud_button_font = get_display_font(24)
+        self._hud_badge_font = get_font(20)
+
+        self._hud_player_label = lang.get("player", "Player")
+        self._hud_gold_label = lang.get("gold", "Gold")
+        self._hud_turn_label = lang.get("turn", "Turn")
+
+        # Pre-render the static button labels and size buttons to fit them.
+        self._end_turn_label = self._hud_button_font.render(lang.get("end_turn", "End Turn"), True, theme.TEXT)
+        self._resign_label = self._hud_button_font.render(lang.get("resign", "Resign"), True, theme.TEXT)
+        button_height = 40
+        button_width = max(140, self._end_turn_label.get_width() + 28, self._resign_label.get_width() + 28)
+        self.end_turn_button = pygame.Rect(screen_width - button_width - 10, 10, button_width, button_height)
+        self.resign_button = pygame.Rect(screen_width - button_width - 10, 60, button_width, button_height)
+
+        # Pre-render the fog-of-war badge
+        self._fow_label = self._hud_badge_font.render(
+            lang.get("player_config.fog_of_war", "Fog of War"), True, theme.HUD_FOW_TEXT
+        )
 
     def render(self):
         """Render the entire game state."""
@@ -463,9 +527,11 @@ class Renderer:
             if vis_state == VISIBLE:
                 self._draw_structure_health_bar(tile)
 
-        # Apply fog overlay for unexplored and shrouded tiles (50% black)
-        if vis_state in (UNEXPLORED, SHROUDED):
-            self.screen.blit(self._fog_overlay, rect)
+        # Apply fog overlay: unexplored tiles are darker than shrouded ones
+        if vis_state == UNEXPLORED:
+            self.screen.blit(self._fog_unexplored, rect)
+        elif vis_state == SHROUDED:
+            self.screen.blit(self._fog_shrouded, rect)
 
     def _draw_structure_health_bar(self, tile):
         """Draw health bar for structures."""
@@ -549,15 +615,17 @@ class Renderer:
         self._draw_unit_health_bar(unit)
 
     def _draw_paralysis_indicator(self, unit):
-        """Draw paralysis indicator if unit is paralyzed."""
+        """Draw paralysis indicator if unit is paralyzed (pulsing border)."""
         if not unit.is_paralyzed():
             return
 
         tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-        pygame.draw.rect(self.screen, theme.STATUS_PARALYSIS, tile_rect, 3)
+        border_color = _lerp_color(theme.STATUS_PARALYSIS, theme.STATUS_PARALYSIS_TINT, _pulse(theme.STATUS_PULSE_MS))
+        pygame.draw.rect(self.screen, border_color, tile_rect, 3)
 
-        indicator_font = get_font(24)
-        indicator_text = indicator_font.render(f"P:{unit.paralyzed_turns}", True, theme.STATUS_PARALYSIS)
+        indicator_text = self._cached_text(
+            f"paralysis_{unit.paralyzed_turns}", f"P:{unit.paralyzed_turns}", get_font(24), theme.STATUS_PARALYSIS
+        )
         indicator_rect = indicator_text.get_rect(topright=(unit.x * TILE_SIZE + TILE_SIZE - 2, unit.y * TILE_SIZE + 2))
         bg_rect = indicator_rect.inflate(4, 2)
         pygame.draw.rect(self.screen, theme.TEXT, bg_rect)
@@ -569,8 +637,7 @@ class Renderer:
         if not unit.is_hasted:
             return
 
-        indicator_font = get_font(16)
-        indicator_text = indicator_font.render("h", True, theme.STATUS_HASTE)
+        indicator_text = self._cached_text("haste", "h", get_font(16), theme.STATUS_HASTE)
         indicator_rect = indicator_text.get_rect(bottomleft=(unit.x * TILE_SIZE + 2, unit.y * TILE_SIZE + TILE_SIZE - 2))
         bg_rect = indicator_rect.inflate(4, 2)
         pygame.draw.rect(self.screen, theme.TEXT, bg_rect)
@@ -624,7 +691,6 @@ class Renderer:
 
     def _draw_unit_letter(self, unit):
         """Draw a unit using its letter representation (fallback)."""
-        font = get_font(28)
         color = UNIT_COLORS[unit.type]
 
         # Gray out if can't act
@@ -635,8 +701,16 @@ class Renderer:
         if unit.is_paralyzed():
             color = tuple(min(int(c * 0.6 + 128 * 0.4), 255) for c in color)
 
-        # Draw unit letter with outline
-        text = font.render(unit.type, True, color)
+        # Letter + outline surfaces are cached per (type, color); rendering
+        # them fresh every frame for every unit is expensive.
+        key = (unit.type, color)
+        cached = self._letter_cache.get(key)
+        if cached is None:
+            font = get_font(28)
+            cached = (font.render(unit.type, True, color), font.render(unit.type, True, (0, 0, 0)))
+            self._letter_cache[key] = cached
+        text, outline_text = cached
+
         text_rect = text.get_rect(center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2))
 
         # Black outline
@@ -644,7 +718,6 @@ class Renderer:
             outline_rect = text_rect.copy()
             outline_rect.x += dx
             outline_rect.y += dy
-            outline_text = font.render(unit.type, True, (0, 0, 0))
             self.screen.blit(outline_text, outline_rect)
 
         self.screen.blit(text, text_rect)
@@ -674,6 +747,15 @@ class Renderer:
         pygame.draw.rect(self.screen, health_color, (bar_x, bar_y, current_bar_width, bar_height))
         pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_width, bar_height), 1)
 
+    def _cached_text(self, key, text, font, color):
+        """Render text through a cache, re-rendering only when it changes."""
+        cached = self._text_cache.get(key)
+        if cached is not None and cached[0] == (text, color):
+            return cached[1]
+        surface = font.render(text, True, color)
+        self._text_cache[key] = ((text, color), surface)
+        return surface
+
     def _draw_ui(self):
         """Draw UI elements."""
         # In headless mode the screen is exactly the grid size, so any HUD
@@ -681,14 +763,12 @@ class Renderer:
         if self.headless:
             return
 
-        font = get_font(28)
         player_color = PLAYER_COLORS.get(self.game_state.current_player, theme.TEXT)
 
         # Draw player info and gold
-        gold_text = (
-            f"Player {self.game_state.current_player} Gold: ${self.game_state.player_gold[self.game_state.current_player]}"
-        )
-        text_surface = font.render(gold_text, True, theme.HUD_GOLD_TEXT)
+        gold = self.game_state.player_gold[self.game_state.current_player]
+        gold_text = f"{self._hud_player_label} {self.game_state.current_player} {self._hud_gold_label}: ${gold}"
+        text_surface = self._cached_text("gold", gold_text, self._hud_font, theme.HUD_GOLD_TEXT)
         text_rect = text_surface.get_rect(topleft=(10, 10))
         bg_rect = text_rect.inflate(10, 5)
 
@@ -697,10 +777,10 @@ class Renderer:
         self.screen.blit(text_surface, text_rect)
 
         # Draw turn counter
-        turn_text = f"Turn: {self.game_state.turn_number + 1}"
+        turn_text = f"{self._hud_turn_label}: {self.game_state.turn_number + 1}"
         if self.game_state.max_turns:
             turn_text += f" / {self.game_state.max_turns}"
-        turn_surface = font.render(turn_text, True, theme.TEXT)
+        turn_surface = self._cached_text("turn", turn_text, self._hud_font, theme.TEXT)
         turn_rect = turn_surface.get_rect(topleft=(10, bg_rect.bottom + 5))
         turn_bg_rect = turn_rect.inflate(10, 5)
 
@@ -719,11 +799,7 @@ class Renderer:
 
         pygame.draw.rect(self.screen, button_color, self.end_turn_button, border_radius=theme.BORDER_RADIUS)
         pygame.draw.rect(self.screen, theme.TEXT, self.end_turn_button, 2, border_radius=theme.BORDER_RADIUS)
-
-        button_font = get_font(32)
-        button_text = button_font.render("End Turn", True, theme.TEXT)
-        button_text_rect = button_text.get_rect(center=self.end_turn_button.center)
-        self.screen.blit(button_text, button_text_rect)
+        self.screen.blit(self._end_turn_label, self._end_turn_label.get_rect(center=self.end_turn_button.center))
 
         # Draw Resign button
         rs_hover = self.resign_button.collidepoint(mouse_pos)
@@ -731,23 +807,46 @@ class Renderer:
 
         pygame.draw.rect(self.screen, resign_color, self.resign_button, border_radius=theme.BORDER_RADIUS)
         pygame.draw.rect(self.screen, theme.BTN_RESIGN_BORDER, self.resign_button, 2, border_radius=theme.BORDER_RADIUS)
-
-        resign_text = button_font.render("Resign", True, theme.TEXT)
-        resign_text_rect = resign_text.get_rect(center=self.resign_button.center)
-        self.screen.blit(resign_text, resign_text_rect)
+        self.screen.blit(self._resign_label, self._resign_label.get_rect(center=self.resign_button.center))
 
         # Draw fog of war indicator if enabled
         if self.game_state.fog_of_war:
-            fow_font = get_font(20)
-            fow_text = fow_font.render("FOW", True, theme.HUD_FOW_TEXT)
-            fow_rect = fow_text.get_rect(topright=(self.screen.get_width() - 10, self.resign_button.bottom + 10))
+            fow_rect = self._fow_label.get_rect(topright=(self.screen.get_width() - 10, self.resign_button.bottom + 10))
             fow_bg = fow_rect.inflate(8, 4)
             pygame.draw.rect(self.screen, theme.HUD_FOW_BG, fow_bg, border_radius=theme.BORDER_RADIUS_SMALL)
             pygame.draw.rect(self.screen, theme.HUD_FOW_BORDER, fow_bg, width=1, border_radius=theme.BORDER_RADIUS_SMALL)
-            self.screen.blit(fow_text, fow_rect)
+            self.screen.blit(self._fow_label, fow_rect)
+
+    def _overlay_alpha(self, kind, signature, base_alpha):
+        """Fade an overlay in over OVERLAY_FADE_MS when its target changes.
+
+        Args:
+            kind: Overlay identifier ('move', 'target', 'attack_range').
+            signature: Hashable describing what the overlay currently shows;
+                a change restarts the fade.
+            base_alpha: Alpha once fully faded in.
+
+        Returns:
+            Alpha (0..base_alpha) to use this frame.
+        """
+        now = pygame.time.get_ticks()
+        previous = self._overlay_anim.get(kind)
+        if previous is None or previous[0] != signature:
+            self._overlay_anim[kind] = (signature, now)
+            return 0
+        progress = (now - previous[1]) / theme.OVERLAY_FADE_MS
+        if progress >= 1.0:
+            return base_alpha
+        return int(base_alpha * progress)
+
+    def draw_selected_unit_highlight(self, unit):
+        """Draw a pulsing highlight around the currently selected unit."""
+        rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        color = _lerp_color(theme.OVERLAY_MOVEMENT_BORDER, theme.TEXT, _pulse(theme.SELECTION_PULSE_MS))
+        pygame.draw.rect(self.screen, color, rect, 3)
 
     def draw_movement_overlay(self, unit):
-        """Draw movement range overlay for a unit."""
+        """Draw movement range overlay for a unit (fades in on selection)."""
         if not unit.can_move:
             return
 
@@ -760,6 +859,8 @@ class Renderer:
         )
 
         if movement_positions:
+            alpha = self._overlay_alpha("move", (id(unit), unit.x, unit.y), 100)
+            self._move_overlay.set_alpha(alpha)
             for x, y in movement_positions:
                 self.screen.blit(self._move_overlay, (x * TILE_SIZE, y * TILE_SIZE))
                 rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
@@ -772,6 +873,9 @@ class Renderer:
         Args:
             valid_targets: List of unit objects that are valid targets
         """
+        signature = tuple(sorted((t.x, t.y) for t in valid_targets))
+        alpha = self._overlay_alpha("target", signature, 120)
+        self._target_overlay.set_alpha(alpha)
         for target in valid_targets:
             self.screen.blit(self._target_overlay, (target.x * TILE_SIZE, target.y * TILE_SIZE))
             rect = pygame.Rect(target.x * TILE_SIZE, target.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
@@ -784,6 +888,8 @@ class Renderer:
         Args:
             positions: List of (x, y) tuples for positions that can be attacked
         """
+        alpha = self._overlay_alpha("attack_range", tuple(sorted(positions)), 100)
+        self._attack_range_overlay.set_alpha(alpha)
         for x, y in positions:
             self.screen.blit(self._attack_range_overlay, (x * TILE_SIZE, y * TILE_SIZE))
             rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
@@ -840,15 +946,22 @@ class Renderer:
         if status_parts:
             lines.append(" | ".join(status_parts))
 
-        # Calculate tooltip dimensions
-        font = get_font(20)
+        # Render the lines through a cache: re-render only when the hovered
+        # unit (or its stats) changes, not on every mouse-motion frame.
+        player_color = PLAYER_COLORS.get(unit.player, theme.TEXT)
+        cache_key = (tuple(lines), unit.player)
+        if self._tooltip_cache is not None and self._tooltip_cache[0] == cache_key:
+            line_surfaces = self._tooltip_cache[1]
+        else:
+            font = get_font(20)
+            line_surfaces = [
+                font.render(line, True, player_color if i == 0 else theme.TEXT_SECONDARY) for i, line in enumerate(lines)
+            ]
+            self._tooltip_cache = (cache_key, line_surfaces)
+
         padding = 8
         line_height = 22
-        max_width = 0
-
-        for line in lines:
-            text_surface = font.render(line, True, (255, 255, 255))
-            max_width = max(max_width, text_surface.get_width())
+        max_width = max(surface.get_width() for surface in line_surfaces)
 
         tooltip_width = max_width + 2 * padding
         tooltip_height = len(lines) * line_height + 2 * padding
@@ -874,18 +987,10 @@ class Renderer:
         pygame.draw.rect(self.screen, theme.TOOLTIP_BG, tooltip_rect, border_radius=6)
 
         # Draw player-colored border
-        player_color = PLAYER_COLORS.get(unit.player, theme.TEXT)
         pygame.draw.rect(self.screen, player_color, tooltip_rect, width=2, border_radius=6)
 
         # Draw text lines
-        for i, line in enumerate(lines):
-            # First line (unit name) uses player color
-            if i == 0:
-                text_color = player_color
-            else:
-                text_color = theme.TEXT_SECONDARY
-
-            text_surface = font.render(line, True, text_color)
+        for i, text_surface in enumerate(line_surfaces):
             text_y = tooltip_y + padding + i * line_height
             self.screen.blit(text_surface, (tooltip_x + padding, text_y))
 
