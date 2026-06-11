@@ -164,6 +164,14 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
 
         grid_shape = obs_space.spaces["grid"].shape  # (H, W, C)
         units_shape = obs_space.spaces["units"].shape
+        # Box.shape is Optional in gymnasium's typing; a Dict-of-Box obs
+        # space from a real checkpoint always carries concrete 3-D shapes,
+        # so anything else is a malformed/foreign checkpoint.
+        if grid_shape is None or len(grid_shape) != 3 or units_shape is None or len(units_shape) != 3:
+            raise ValueError(
+                f"Checkpoint grid/units spaces have unexpected shapes ({grid_shape}, {units_shape}); "
+                "expected (H, W, C) Boxes from StrategyGameEnv."
+            )
         if grid_shape[2] != GRID_CHANNELS or units_shape[2] != UNIT_CHANNELS:
             raise ValueError(
                 f"Checkpoint obs channels (grid={grid_shape[2]}, units={units_shape[2]}) do not match this "
@@ -366,6 +374,10 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         # Lazy import: mirrors _get_observation (reinforcetactics.game loads
         # before reinforcetactics.rl during package init).
         from reinforcetactics.rl.gym_env import build_flat_actions, build_per_dim_masks
+
+        # take_turn guards this already; the assert narrows the Optional for
+        # mypy and for any direct callers.
+        assert self.model is not None
 
         predict_kwargs: dict = {"deterministic": True}
 

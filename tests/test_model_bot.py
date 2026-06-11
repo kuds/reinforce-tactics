@@ -45,7 +45,7 @@ def _make_game_state(fog_of_war: bool = False) -> GameState:
 
 def _obs_space(h: int, w: int, fog: bool = False, grid_channels: int = GRID_CHANNELS) -> spaces.Dict:
     """Observation space mirroring StrategyGameEnv's contract at (h, w)."""
-    d = {
+    d: dict[str, spaces.Space] = {
         "grid": spaces.Box(low=0.0, high=1.0, shape=(h, w, grid_channels), dtype=np.float32),
         "units": spaces.Box(low=0.0, high=1.0, shape=(h, w, UNIT_CHANNELS), dtype=np.float32),
         "global_features": spaces.Box(low=0.0, high=1.0, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
