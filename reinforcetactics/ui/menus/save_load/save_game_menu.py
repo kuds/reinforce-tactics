@@ -7,7 +7,7 @@ from typing import Any, Optional
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
-from reinforcetactics.utils.clipboard import get_clipboard_text
+from reinforcetactics.ui.widgets import TextInput
 from reinforcetactics.utils.language import get_language
 
 
@@ -24,8 +24,12 @@ class SaveGameMenu(Menu):
         """
         super().__init__(screen, get_language().get("save_game.title", "Save Game"))
         self.game = game
-        self.input_text = f"save_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.input_active = True
+        self.name_input = TextInput(text=f"save_{datetime.now().strftime('%Y%m%d_%H%M%S')}", max_length=50)
+
+    @property
+    def input_text(self) -> str:
+        """Current save-name text (kept for backward compatibility)."""
+        return self.name_input.text
 
     def handle_input(self, event: pygame.event.Event) -> Optional[str]:
         """Handle keyboard input for filename entry."""
@@ -35,25 +39,8 @@ class SaveGameMenu(Menu):
                     return self._save_game()
             elif event.key == pygame.K_ESCAPE:
                 self.running = False
-            elif event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
-                # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
-                clipboard_text = get_clipboard_text()
-                if clipboard_text:
-                    # Filter to only include printable characters and respect max length
-                    remaining = 50 - len(self.input_text)
-                    filtered = "".join(c for c in clipboard_text[:remaining] if c.isprintable())
-                    self.input_text += filtered
-            elif event.key == pygame.K_BACKSPACE:
-                self.input_text = self.input_text[:-1]
             else:
-                # Add character if printable and no modifier keys are pressed
-                # This prevents Cmd+V from adding 'v' on macOS
-                if (
-                    event.unicode.isprintable()
-                    and len(self.input_text) < 50
-                    and not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT))
-                ):
-                    self.input_text += event.unicode
+                self.name_input.handle_key(event)
 
         return None
 
@@ -93,22 +80,10 @@ class SaveGameMenu(Menu):
         self.screen.blit(prompt_surface, prompt_rect)
 
         # Draw input box
-        input_width = 400
-        input_height = 40
+        input_width = 500
+        input_height = 44
         input_rect = pygame.Rect((screen_width - input_width) // 2, screen_height // 3 + 50, input_width, input_height)
-        pygame.draw.rect(self.screen, (50, 50, 60), input_rect)
-        pygame.draw.rect(self.screen, self.selected_color, input_rect, 2)
-
-        # Draw input text
-        text_surface = self.option_font.render(self.input_text, True, self.text_color)
-        text_rect = text_surface.get_rect(midleft=(input_rect.x + 10, input_rect.centery))
-        self.screen.blit(text_surface, text_rect)
-
-        # Draw cursor
-        cursor_x = text_rect.right + 2
-        pygame.draw.line(
-            self.screen, self.text_color, (cursor_x, input_rect.y + 5), (cursor_x, input_rect.y + input_height - 5), 2
-        )
+        self.name_input.draw(self.screen, input_rect, self.indicator_font)
 
         # Draw instructions
         lang = get_language()

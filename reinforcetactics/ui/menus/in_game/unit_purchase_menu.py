@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pygame
 
 from reinforcetactics.constants import TILE_SIZE, UNIT_DATA
-from reinforcetactics.ui import theme
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.ui import theme, widgets
+from reinforcetactics.utils.fonts import get_display_font, get_font
 
 
 class UnitPurchaseMenu:
@@ -29,15 +29,10 @@ class UnitPurchaseMenu:
         # Colors (from shared theme)
         self.bg_color = theme.PANEL_BG
         self.text_color = theme.TEXT
-        self.hover_color = theme.HOVER
-        self.disabled_color = theme.DISABLED
-        self.disabled_bg_color = (60, 60, 70)
         self.border_color = theme.BORDER
-        self.close_button_color = theme.BTN_CLOSE
-        self.close_button_hover_color = theme.BTN_CLOSE_HOVER
 
         # Fonts
-        self.title_font = get_font(28)
+        self.title_font = get_display_font(24)
         self.option_font = get_font(24)
 
         # Unit types to display (filtered by enabled units)
@@ -61,7 +56,7 @@ class UnitPurchaseMenu:
     def _calculate_menu_rect(self) -> None:
         """Calculate the menu rectangle position and size."""
         # Menu dimensions - adjust height for number of units
-        menu_width = 220
+        menu_width = 240
         menu_height = 50 + len(self.unit_types) * 35 + 20  # header + units + padding
 
         # Convert building position to screen coordinates
@@ -221,35 +216,10 @@ class UnitPurchaseMenu:
         screen.blit(title_surface, title_rect)
 
         # Draw close button (X) in upper right
-        close_button_size = 20
-        close_button_x = self.menu_rect.right - close_button_size - 10
-        close_button_y = self.menu_rect.y + 10
-        close_button_rect = pygame.Rect(close_button_x, close_button_y, close_button_size, close_button_size)
-
-        # Check if hovering over close button
-        is_close_hover = self.hover_element and self.hover_element.get("type") == "close_button"
-        close_color = self.close_button_hover_color if is_close_hover else self.close_button_color
-
-        pygame.draw.rect(screen, close_color, close_button_rect, border_radius=3)
-
-        # Draw X
-        x_margin = 4
-        pygame.draw.line(
-            screen,
-            (255, 255, 255),
-            (close_button_rect.left + x_margin, close_button_rect.top + x_margin),
-            (close_button_rect.right - x_margin, close_button_rect.bottom - x_margin),
-            2,
-        )
-        pygame.draw.line(
-            screen,
-            (255, 255, 255),
-            (close_button_rect.right - x_margin, close_button_rect.top + x_margin),
-            (close_button_rect.left + x_margin, close_button_rect.bottom - x_margin),
-            2,
-        )
-
-        self.interactive_elements.append({"type": "close_button", "rect": close_button_rect})
+        close_button = widgets.CloseButton(self.menu_rect.right - widgets.CloseButton.SIZE - 10, self.menu_rect.y + 10)
+        is_close_hover = bool(self.hover_element and self.hover_element.get("type") == "close_button")
+        close_button.draw(screen, hovered=is_close_hover)
+        self.interactive_elements.append({"type": "close_button", "rect": close_button.rect})
 
         # Draw unit options
         start_y = self.menu_rect.y + 50
@@ -265,40 +235,18 @@ class UnitPurchaseMenu:
             # Check if player can afford
             can_afford = player_gold >= unit_cost
 
-            y_pos = start_y + i * spacing
+            button_rect = pygame.Rect(self.menu_rect.x + 15, start_y + i * spacing, 190, 28)
+            button = widgets.Button(
+                button_rect,
+                f"{unit_name} - {unit_cost}g",
+                self.option_font,
+                style=widgets.MENU_OPTION_SMALL,
+                enabled=can_afford,
+                text_align="left",
+            )
 
-            # Draw unit option
-            button_width = 190
-            button_height = 28
-            button_x = self.menu_rect.x + 15
-            button_rect = pygame.Rect(button_x, y_pos, button_width, button_height)
-
-            # Check if hovering or keyboard-selected
-            is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect and can_afford
-            is_selected = i == self.selected_index and can_afford
-
-            # Choose colors
-            if not can_afford:
-                bg_color = self.disabled_bg_color
-                text_color = self.disabled_color
-            elif is_hovered or is_selected:
-                bg_color = (70, 70, 90)
-                text_color = self.hover_color
-            else:
-                bg_color = (50, 50, 65)
-                text_color = self.text_color
-
-            # Draw button background
-            pygame.draw.rect(screen, bg_color, button_rect, border_radius=5)
-
-            if is_hovered or is_selected:
-                pygame.draw.rect(screen, self.hover_color, button_rect, width=2, border_radius=5)
-
-            # Draw text: "Unit Name - Cost"
-            text = f"{unit_name} - {unit_cost}g"
-            text_surface = self.option_font.render(text, True, text_color)
-            text_rect = text_surface.get_rect(left=button_rect.left + 10, centery=button_rect.centery)
-            screen.blit(text_surface, text_rect)
+            is_hovered = bool(self.hover_element and self.hover_element.get("rect") == button_rect)
+            button.draw(screen, hovered=is_hovered, selected=i == self.selected_index)
 
             # Register as interactive element
             self.interactive_elements.append(
