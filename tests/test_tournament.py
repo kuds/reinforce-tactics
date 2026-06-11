@@ -63,18 +63,38 @@ class TestModelBot:
         except ImportError:
             pytest.skip("stable-baselines3 not installed")
 
+        import numpy as np
+        from gymnasium import spaces as gym_spaces
+
         from reinforcetactics.game.model_bot import ModelBot
+        from reinforcetactics.rl.observation import (
+            GLOBAL_FEATURES_DIM,
+            GRID_CHANNELS,
+            UNIT_CHANNELS,
+        )
+
+        map_data = FileIO.generate_random_map(10, 10, num_players=2)
+        game_state = GameState(map_data, num_players=2)
+        game_state.current_player = 2
+        h, w = game_state.grid.height, game_state.grid.width
 
         with patch("stable_baselines3.PPO") as mock_ppo_class:
-            # Create mock model
+            # Create mock model. ModelBot derives its decode mode / padding
+            # from the checkpoint's saved spaces at load time (and rejects
+            # models that don't carry the StrategyGameEnv contract), so the
+            # mock must expose real spaces matching the live map's dims.
             mock_model = Mock()
+            mock_model.observation_space = gym_spaces.Dict(
+                {
+                    "grid": gym_spaces.Box(low=0.0, high=1.0, shape=(h, w, GRID_CHANNELS), dtype=np.float32),
+                    "units": gym_spaces.Box(low=0.0, high=1.0, shape=(h, w, UNIT_CHANNELS), dtype=np.float32),
+                    "global_features": gym_spaces.Box(low=0.0, high=1.0, shape=(GLOBAL_FEATURES_DIM,), dtype=np.float32),
+                }
+            )
+            mock_model.action_space = gym_spaces.MultiDiscrete([10, 8, w, h, w, h])
             mock_model.predict.return_value = ([5, 0, 0, 0, 0, 0], None)  # End turn action
             mock_ppo_class.load.return_value = mock_model
             mock_ppo_class.__name__ = "PPO"  # Add this line to fix the AttributeError
-
-            map_data = FileIO.generate_random_map(10, 10, num_players=2)
-            game_state = GameState(map_data, num_players=2)
-            game_state.current_player = 2
 
             # Create a dummy model file path
             with patch("pathlib.Path.exists", return_value=True):
@@ -83,6 +103,7 @@ class TestModelBot:
                         bot = ModelBot(game_state, player=2, model_path="test_model.zip")
 
             assert bot.model is not None
+            assert bot._action_mode == "multi_discrete"
 
             bot.take_turn()
 

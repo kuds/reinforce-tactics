@@ -220,6 +220,88 @@ def build_structured_masks(
     return StructuredActionMasks(atype=atype, source=source, target=target, unit_type=unit_type)
 
 
+def build_flat_actions(
+    game_state: "GameState",
+    player: int,
+    max_flat_actions: int,
+) -> List[np.ndarray]:
+    """Build the ordered flat legal-action list for a ``Discrete`` policy.
+
+    Pure-function port of ``StrategyGameEnv._build_flat_actions`` (minus the
+    per-game-turn action-budget gate, which is env state). The returned list
+    is the decode table for ``flat_discrete`` checkpoints: a sampled
+    ``Discrete`` index ``i`` means "execute ``actions[i]``", where each entry
+    is a 6-element int array ``[action_type, unit_type, from_x, from_y,
+    to_x, to_y]`` — the same layout as a MultiDiscrete action.
+
+    Shared by ``StrategyGameEnv`` and ``ModelBot`` so a flat_discrete
+    checkpoint can be played against an arbitrary live ``game_state``
+    (GUI / tournament) without constructing an env around it. The exact
+    per-index legality mask is "first ``len(actions)`` entries True".
+
+    End turn is always present as the last action. When the legal set
+    exceeds ``max_flat_actions``, the list is truncated while preserving
+    seize (action_type 3) and end_turn (action_type 5) — see the inline
+    comment for why naive head-truncation would drop exactly those two.
+    """
+    legal_actions = game_state.get_legal_actions(player=player)
+
+    actions: List[np.ndarray] = []
+    seen = set()
+
+    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+        for action in legal_actions.get(key, []):
+            tx, ty = _action_pos(action, tgt_fields)
+
+            if src_fields is not None:
+                fx, fy = _action_pos(action, src_fields)
+            else:
+                fx, fy = tx, ty  # create_unit: from = building position
+
+            ut_idx = 0
+            if key == "create_unit":
+                ut_idx = UNIT_TYPE_TO_IDX.get(action["unit_type"], 0)
+
+            action_key = (at_idx, ut_idx, fx, fy, tx, ty)
+            if action_key not in seen:
+                seen.add(action_key)
+                actions.append(np.array(action_key, dtype=np.int32))
+
+    # End turn is always valid (last entry)
+    end_turn_key = (5, 0, 0, 0, 0, 0)
+    if end_turn_key not in seen:
+        seen.add(end_turn_key)
+        actions.append(np.array(end_turn_key, dtype=np.int32))
+
+    if len(actions) > max_flat_actions:
+        logger.warning(
+            "Legal actions (%d) exceed max_flat_actions (%d); truncating "
+            "while preserving seize and end_turn. Consider increasing "
+            "max_flat_actions.",
+            len(actions),
+            max_flat_actions,
+        )
+        # Naive head-truncation would silently drop the tail of the list
+        # -- which is exactly end_turn (appended last) and seize
+        # (action_type 3, built after create/move/attack). Losing
+        # end_turn can strand the agent for the rest of the game-turn
+        # when ``max_actions_per_turn`` is disabled; losing seize drops
+        # the rare, high-value capture action. So always keep those two
+        # action types and fill the remaining budget with the rest in
+        # their original order.
+        protected = [a for a in actions if int(a[0]) in (3, 5)]
+        others = [a for a in actions if int(a[0]) not in (3, 5)]
+        budget = max(0, max_flat_actions - len(protected))
+        actions = others[:budget] + protected
+        # Pathological fallback: if the protected set alone exceeds the
+        # cap, hard-truncate but keep end_turn (last protected entry) by
+        # trimming from the front of the seize block.
+        if len(actions) > max_flat_actions:
+            actions = actions[-max_flat_actions:]
+
+    return actions
+
+
 class StrategyGameEnv(gym.Env):
     """
     Gymnasium environment for turn-based strategy game.
@@ -917,9 +999,10 @@ class StrategyGameEnv(gym.Env):
 
         Each action is stored as a numpy array [action_type, unit_type, from_x,
         from_y, to_x, to_y] — the same format as MultiDiscrete actions — so that
-        ``_encode_action`` and ``_execute_action`` work unchanged.
-
-        End turn is always appended as the last action.
+        ``_encode_action`` and ``_execute_action`` work unchanged. The list
+        itself comes from the shared :func:`build_flat_actions` (also used by
+        ``ModelBot`` to decode flat_discrete checkpoints); only the per-turn
+        action-budget gate below is env-specific.
         """
         # Per-turn action budget: once the agent has taken
         # ``max_actions_per_turn`` actions in the current game-turn,
@@ -932,69 +1015,7 @@ class StrategyGameEnv(gym.Env):
             self._current_actions = [np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)]
             return
 
-        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
-
-        actions = []
-        seen = set()
-        unit_type_to_idx = UNIT_TYPE_TO_IDX
-
-        def _pos(obj_or_dict, fields):
-            if isinstance(fields, str):
-                o = obj_or_dict[fields]
-                return o.x, o.y
-            return obj_or_dict[fields[0]], obj_or_dict[fields[1]]
-
-        for key, (at_idx, src_fields, tgt_fields) in self._ACTION_KEY_MAP.items():
-            for action in legal_actions.get(key, []):
-                tx, ty = _pos(action, tgt_fields)
-
-                if src_fields is not None:
-                    fx, fy = _pos(action, src_fields)
-                else:
-                    fx, fy = tx, ty  # create_unit: from = building position
-
-                ut_idx = 0
-                if key == "create_unit":
-                    ut_idx = unit_type_to_idx.get(action["unit_type"], 0)
-
-                action_key = (at_idx, ut_idx, fx, fy, tx, ty)
-                if action_key not in seen:
-                    seen.add(action_key)
-                    actions.append(np.array(action_key, dtype=np.int32))
-
-        # End turn is always valid (last entry)
-        end_turn_key = (5, 0, 0, 0, 0, 0)
-        if end_turn_key not in seen:
-            seen.add(end_turn_key)
-            actions.append(np.array(end_turn_key, dtype=np.int32))
-
-        if len(actions) > self.max_flat_actions:
-            logger.warning(
-                "Legal actions (%d) exceed max_flat_actions (%d); truncating "
-                "while preserving seize and end_turn. Consider increasing "
-                "max_flat_actions.",
-                len(actions),
-                self.max_flat_actions,
-            )
-            # Naive head-truncation would silently drop the tail of the list
-            # -- which is exactly end_turn (appended last) and seize
-            # (action_type 3, built after create/move/attack). Losing
-            # end_turn can strand the agent for the rest of the game-turn
-            # when ``max_actions_per_turn`` is disabled; losing seize drops
-            # the rare, high-value capture action. So always keep those two
-            # action types and fill the remaining budget with the rest in
-            # their original order.
-            protected = [a for a in actions if int(a[0]) in (3, 5)]
-            others = [a for a in actions if int(a[0]) not in (3, 5)]
-            budget = max(0, self.max_flat_actions - len(protected))
-            actions = others[:budget] + protected
-            # Pathological fallback: if the protected set alone exceeds the
-            # cap, hard-truncate but keep end_turn (last protected entry) by
-            # trimming from the front of the seize block.
-            if len(actions) > self.max_flat_actions:
-                actions = actions[-self.max_flat_actions :]
-
-        self._current_actions = actions
+        self._current_actions = build_flat_actions(self.game_state, self.agent_player, self.max_flat_actions)
 
     def _get_action_mask(self) -> np.ndarray:
         """
