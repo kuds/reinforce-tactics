@@ -80,6 +80,13 @@ exclude = ["tests*", "docs*", "docs-site*", "examples*", "notebooks*", "scripts*
 [tool.ruff]
 target-version = "py310"
 line-length = 127
+extend-exclude = [
+    # Vendored snapshot of Kaggle/kaggle-environments (staged for copy-paste
+    # into that repo) — must stay byte-identical to upstream, which has its
+    # own lint rules.
+    "kaggle-environments-update/kaggle_environments",
+    "kaggle-environments-update/tests",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "C90", "I"]
@@ -124,6 +131,9 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 addopts = "--cov=reinforcetactics --cov-fail-under=65"
+# Keep collection out of the vendored kaggle-environments snapshot
+# (kaggle-environments-update/), whose tests target that repo's layout.
+testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["reinforcetactics"]
