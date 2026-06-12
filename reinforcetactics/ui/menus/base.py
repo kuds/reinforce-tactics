@@ -12,7 +12,7 @@ import pygame
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.utils.clipboard import init_clipboard
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import TRANSLATIONS, get_language
 
 # Cache all "Back" button translations from the language system
@@ -84,8 +84,8 @@ class Menu:
         self.option_bg_selected_color = theme.OPTION_BG_SELECTED
         self.option_bg_disabled_color = theme.OPTION_BG_DISABLED
 
-        # Fonts
-        self.title_font = get_font(theme.FONT_SIZE_TITLE)
+        # Fonts (titles use the pixel-styled display font)
+        self.title_font = get_display_font(theme.FONT_SIZE_TITLE)
         self.option_font = get_font(theme.FONT_SIZE_OPTION)
         self.indicator_font = get_font(theme.FONT_SIZE_INDICATOR)
 
@@ -96,7 +96,10 @@ class Menu:
         # Scrolling support
         self.scroll_offset = 0
         self.max_visible_options = 8  # Maximum options visible at once
-        self.option_spacing = theme.MENU_OPTION_SPACING
+        # Guarantee rows never overlap even if the option font is taller
+        # than the theme's nominal spacing allows for.
+        row_height = self.option_font.get_height()
+        self.option_spacing = max(theme.MENU_OPTION_SPACING, row_height + 2 * theme.OPTION_PADDING_Y + 4)
 
         # Get language instance
         self.lang = get_language()
@@ -223,6 +226,14 @@ class Menu:
         elif self.selected_index >= self.scroll_offset + self.max_visible_options:
             self.scroll_offset = self.selected_index - self.max_visible_options + 1
 
+    def _options_start_y(self) -> int:
+        """Y coordinate where the option list starts.
+
+        Subclasses that draw custom content above the options (e.g. the
+        credits screen) can override this to push the list down.
+        """
+        return self.screen.get_height() // 3
+
     def _layout_visible_options(self) -> List[Tuple[int, str, pygame.Rect]]:
         """Compute the on-screen layout for the currently visible options.
 
@@ -236,9 +247,8 @@ class Menu:
             empty string (pygame raises on zero-width text).
         """
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
-        start_y = screen_height // 3
+        start_y = self._options_start_y()
         spacing = self.option_spacing
         padding_x = theme.OPTION_PADDING_X
         padding_y = theme.OPTION_PADDING_Y
@@ -338,7 +348,7 @@ class Menu:
             self.screen.blit(text_surface, text_rect)
 
         # Data needed for the scroll indicator below.
-        start_y = screen_height // 3
+        start_y = self._options_start_y()
         spacing = self.option_spacing
         total_options = len(self.options)
         end_index = min(total_options, self.scroll_offset + self.max_visible_options)

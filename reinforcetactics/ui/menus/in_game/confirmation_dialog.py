@@ -1,14 +1,12 @@
 """Confirmation dialog for critical actions."""
 
-from typing import Optional
-
 import pygame
 
-from reinforcetactics.ui import theme
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.ui import widgets
+from reinforcetactics.ui.widgets.dialog import Dialog
 
 
-class ConfirmationDialog:
+class ConfirmationDialog(Dialog):
     """A modal confirmation dialog for critical actions like resign."""
 
     def __init__(
@@ -24,188 +22,19 @@ class ConfirmationDialog:
             confirm_text: Text for confirm button
             cancel_text: Text for cancel button
         """
-        self.screen = screen
-        self.title = title
-        self.message = message
-        self.confirm_text = confirm_text
-        self.cancel_text = cancel_text
-        self.running = True
-        self.result: Optional[bool] = None
-
-        # Colors (from shared theme)
-        self.bg_color = theme.PANEL_BG
-        self.text_color = theme.TEXT
-        self.title_color = theme.SELECTED
-        self.border_color = theme.BORDER
-        self.confirm_color = theme.BTN_CONFIRM
-        self.confirm_hover_color = theme.BTN_CONFIRM_HOVER
-        self.cancel_color = theme.BTN_CANCEL
-        self.cancel_hover_color = theme.BTN_CANCEL_HOVER
-
-        # Fonts (cached on the instance — never call get_font() in draw())
-        self.title_font = get_font(theme.FONT_SIZE_HEADING)
-        self.message_font = get_font(theme.FONT_SIZE_BODY)
-        self.button_font = get_font(28)
-        self.hint_font = get_font(theme.FONT_SIZE_HINT)
-
-        # Cached overlay surface to avoid per-frame allocation
-        self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-        self._overlay.fill(theme.DIALOG_OVERLAY_COLOR)
-
-        # Calculate dialog dimensions
-        self._calculate_dialog_rect()
-
-        # Button rects (will be set in _calculate_dialog_rect)
-        self.confirm_rect: Optional[pygame.Rect] = None
-        self.cancel_rect: Optional[pygame.Rect] = None
-        self.hover_button: Optional[str] = None
-
-    def _calculate_dialog_rect(self) -> None:
-        """Calculate the dialog rectangle position and size."""
-        screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
-
-        # Dialog dimensions
-        dialog_width = 400
-        dialog_height = 200
-
-        # Center dialog on screen
-        dialog_x = (screen_width - dialog_width) // 2
-        dialog_y = (screen_height - dialog_height) // 2
-
-        self.dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
-
-        # Calculate button positions
-        button_width = 120
-        button_height = 40
-        button_y = self.dialog_rect.bottom - button_height - 20
-        button_spacing = 30
-
-        total_buttons_width = 2 * button_width + button_spacing
-        buttons_start_x = self.dialog_rect.centerx - total_buttons_width // 2
-
-        self.cancel_rect = pygame.Rect(buttons_start_x, button_y, button_width, button_height)
-        self.confirm_rect = pygame.Rect(buttons_start_x + button_width + button_spacing, button_y, button_width, button_height)
-
-    def handle_event(self, event: pygame.event.Event) -> Optional[bool]:
-        """
-        Handle pygame events.
-
-        Args:
-            event: Pygame event
-
-        Returns:
-            True if confirmed, False if cancelled, None if still running
-        """
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.result = False
-                self.running = False
-                return False
-            elif event.key == pygame.K_RETURN:
-                self.result = True
-                self.running = False
-                return True
-            elif event.key == pygame.K_y:
-                self.result = True
-                self.running = False
-                return True
-            elif event.key == pygame.K_n:
-                self.result = False
-                self.running = False
-                return False
-
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left click
-                mouse_pos = event.pos
-                if self.confirm_rect and self.confirm_rect.collidepoint(mouse_pos):
-                    self.result = True
-                    self.running = False
-                    return True
-                elif self.cancel_rect and self.cancel_rect.collidepoint(mouse_pos):
-                    self.result = False
-                    self.running = False
-                    return False
-                # Click outside dialog - treat as cancel
-                elif not self.dialog_rect.collidepoint(mouse_pos):
-                    self.result = False
-                    self.running = False
-                    return False
-
-        elif event.type == pygame.MOUSEMOTION:
-            mouse_pos = event.pos
-            if self.confirm_rect and self.confirm_rect.collidepoint(mouse_pos):
-                self.hover_button = "confirm"
-            elif self.cancel_rect and self.cancel_rect.collidepoint(mouse_pos):
-                self.hover_button = "cancel"
-            else:
-                self.hover_button = None
-
-        return None
-
-    def draw(self) -> None:
-        """Draw the confirmation dialog."""
-        # Draw cached semi-transparent overlay
-        self.screen.blit(self._overlay, (0, 0))
-
-        # Draw dialog background
-        pygame.draw.rect(self.screen, self.bg_color, self.dialog_rect, border_radius=theme.BORDER_RADIUS_DIALOG)
-        pygame.draw.rect(
-            self.screen,
-            self.border_color,
-            self.dialog_rect,
-            width=theme.BORDER_WIDTH_DIALOG,
-            border_radius=theme.BORDER_RADIUS_DIALOG,
+        super().__init__(
+            screen,
+            title,
+            message,
+            buttons=[
+                (cancel_text, False, widgets.CANCEL),
+                (confirm_text, True, widgets.CONFIRM),
+            ],
+            hint="Press Y to confirm, N or ESC to cancel",
+            keymap={pygame.K_RETURN: True, pygame.K_y: True, pygame.K_n: False},
+            cancel_value=False,
+            quit_value=False,
         )
-
-        # Draw title
-        title_surface = self.title_font.render(self.title, True, self.title_color)
-        title_rect = title_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 20)
-        self.screen.blit(title_surface, title_rect)
-
-        # Draw message
-        message_surface = self.message_font.render(self.message, True, self.text_color)
-        message_rect = message_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 70)
-        self.screen.blit(message_surface, message_rect)
-
-        # Draw hint
-        hint_surface = self.hint_font.render("Press Y to confirm, N or ESC to cancel", True, theme.TEXT_MUTED)
-        hint_rect = hint_surface.get_rect(centerx=self.dialog_rect.centerx, y=self.dialog_rect.y + 105)
-        self.screen.blit(hint_surface, hint_rect)
-
-        # Draw cancel button
-        if self.cancel_rect:
-            cancel_color = self.cancel_hover_color if self.hover_button == "cancel" else self.cancel_color
-            pygame.draw.rect(self.screen, cancel_color, self.cancel_rect, border_radius=theme.BORDER_RADIUS)
-            if self.hover_button == "cancel":
-                pygame.draw.rect(
-                    self.screen,
-                    theme.BTN_CANCEL_BORDER_HOVER,
-                    self.cancel_rect,
-                    width=theme.BORDER_WIDTH_HOVER,
-                    border_radius=theme.BORDER_RADIUS,
-                )
-
-            cancel_surface = self.button_font.render(self.cancel_text, True, theme.TEXT)
-            cancel_text_rect = cancel_surface.get_rect(center=self.cancel_rect.center)
-            self.screen.blit(cancel_surface, cancel_text_rect)
-
-        # Draw confirm button
-        if self.confirm_rect:
-            confirm_color = self.confirm_hover_color if self.hover_button == "confirm" else self.confirm_color
-            pygame.draw.rect(self.screen, confirm_color, self.confirm_rect, border_radius=theme.BORDER_RADIUS)
-            if self.hover_button == "confirm":
-                pygame.draw.rect(
-                    self.screen,
-                    theme.BTN_CONFIRM_BORDER_HOVER,
-                    self.confirm_rect,
-                    width=theme.BORDER_WIDTH_HOVER,
-                    border_radius=theme.BORDER_RADIUS,
-                )
-
-            confirm_surface = self.button_font.render(self.confirm_text, True, theme.TEXT)
-            confirm_text_rect = confirm_surface.get_rect(center=self.confirm_rect.center)
-            self.screen.blit(confirm_surface, confirm_text_rect)
 
     def run(self) -> bool:
         """
@@ -214,21 +43,4 @@ class ConfirmationDialog:
         Returns:
             True if confirmed, False if cancelled
         """
-        clock = pygame.time.Clock()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.result = False
-                    self.running = False
-                    break
-
-                result = self.handle_event(event)
-                if result is not None:
-                    return result
-
-            self.draw()
-            pygame.display.flip()
-            clock.tick(theme.MENU_FRAMERATE)
-
-        return self.result if self.result is not None else False
+        return bool(super().run())

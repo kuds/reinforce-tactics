@@ -1,12 +1,13 @@
 """Menu for configuring players."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pygame
 
-from reinforcetactics.ui import theme
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.ui import theme, widgets
+from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
 
 # Import tkinter optionally for file dialog
@@ -65,7 +66,7 @@ class PlayerConfigMenu:
         self.disabled_color = theme.DISABLED
 
         # Fonts
-        self.title_font = get_font(48)
+        self.title_font = get_display_font(theme.FONT_SIZE_TITLE)
         self.label_font = get_font(32)
         self.option_font = get_font(28)
 
@@ -485,54 +486,21 @@ class PlayerConfigMenu:
         Returns:
             Button rect
         """
-        padding_x = 20
-        padding_y = 10
         # Container width for centered buttons
         button_container_width = 200
 
-        # Render text
-        text_color = self.disabled_color if disabled else self.text_color
-        text_surface = self.option_font.render(text, True, text_color)
-        text_rect = text_surface.get_rect()
-
-        # Calculate button dimensions
-        button_width = text_rect.width + 2 * padding_x
-        button_height = text_rect.height + 2 * padding_y
-
-        # Adjust position if centered
+        button = widgets.Button.with_label(x, y, text, self.option_font, enabled=not disabled)
         if centered:
-            button_x = x + (button_container_width - button_width) // 2
-        else:
-            button_x = x
+            button.rect.x = x + (button_container_width - button.rect.width) // 2
 
-        button_rect = pygame.Rect(button_x, y, button_width, button_height)
-
-        # Determine styling
-        is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect and not disabled
-
-        if is_hovered:
-            bg_color = self.option_bg_hover_color
-            border_color = self.hover_color
-        else:
-            bg_color = self.option_bg_color
-            border_color = self.option_bg_color if disabled else (60, 60, 80)
-
-        # Draw button background
-        pygame.draw.rect(self.screen, bg_color, button_rect, border_radius=8)
-
-        # Draw border
-        if is_hovered:
-            pygame.draw.rect(self.screen, border_color, button_rect, width=2, border_radius=8)
-
-        # Draw text
-        text_rect.center = button_rect.center
-        self.screen.blit(text_surface, text_rect)
+        is_hovered = bool(self.hover_element and self.hover_element.get("rect") == button.rect and not disabled)
+        button.draw(self.screen, hovered=is_hovered)
 
         # Register as interactive element if not disabled
         if not disabled:
-            self.interactive_elements.append({"type": element_type, "rect": button_rect, "player_idx": player_idx})
+            self.interactive_elements.append({"type": element_type, "rect": button.rect, "player_idx": player_idx})
 
-        return button_rect
+        return button.rect
 
     def _draw_toggle_button(
         self, x: int, y: int, text: str, element_type: str, text_color: tuple = (255, 255, 255)
@@ -550,41 +518,16 @@ class PlayerConfigMenu:
         Returns:
             Button rect
         """
-        padding_x = 15
-        padding_y = 8
+        style = replace(widgets.PANEL_BUTTON, text_color=text_color, text_hover_color=text_color)
+        button = widgets.Button.with_label(x, y, text, self.option_font, padding_x=15, padding_y=8, style=style)
 
-        # Render text
-        text_surface = self.option_font.render(text, True, text_color)
-        text_rect = text_surface.get_rect()
-
-        # Calculate button dimensions
-        button_width = text_rect.width + 2 * padding_x
-        button_height = text_rect.height + 2 * padding_y
-
-        button_rect = pygame.Rect(x, y, button_width, button_height)
-
-        # Determine styling
-        is_hovered = self.hover_element and self.hover_element.get("rect") == button_rect
-
-        if is_hovered:
-            bg_color = self.option_bg_hover_color
-            border_color = self.hover_color
-        else:
-            bg_color = self.option_bg_color
-            border_color = (60, 60, 80)
-
-        # Draw button background
-        pygame.draw.rect(self.screen, bg_color, button_rect, border_radius=6)
-        pygame.draw.rect(self.screen, border_color, button_rect, width=1, border_radius=6)
-
-        # Draw text
-        text_rect.center = button_rect.center
-        self.screen.blit(text_surface, text_rect)
+        is_hovered = bool(self.hover_element and self.hover_element.get("rect") == button.rect)
+        button.draw(self.screen, hovered=is_hovered)
 
         # Register as interactive element
-        self.interactive_elements.append({"type": element_type, "rect": button_rect, "player_idx": -1})
+        self.interactive_elements.append({"type": element_type, "rect": button.rect, "player_idx": -1})
 
-        return button_rect
+        return button.rect
 
     def run(self) -> Optional[Dict[str, Any]]:
         """

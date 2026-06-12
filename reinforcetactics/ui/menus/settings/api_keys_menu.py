@@ -4,9 +4,11 @@ from typing import Optional
 
 import pygame
 
+from reinforcetactics.ui import theme, widgets
 from reinforcetactics.ui.icons import get_checkmark_icon, get_x_icon
-from reinforcetactics.utils.clipboard import get_clipboard_text, init_clipboard
-from reinforcetactics.utils.fonts import get_font
+from reinforcetactics.ui.widgets import TextInput
+from reinforcetactics.utils.clipboard import init_clipboard
+from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
 
 
@@ -35,17 +37,14 @@ class APIKeysMenu:
 
         self.running = True
 
-        # Colors
-        self.bg_color = (30, 30, 40)
-        self.text_color = (255, 255, 255)
-        self.title_color = (100, 200, 255)
-        self.input_bg_color = (50, 50, 65)
-        self.input_active_color = (70, 70, 90)
+        # Colors (from shared theme)
+        self.bg_color = theme.BG
+        self.text_color = theme.TEXT
+        self.title_color = theme.TITLE
         self.button_color = (60, 60, 80)
-        self.button_hover_color = (80, 80, 100)
 
         # Fonts
-        self.title_font = get_font(48)
+        self.title_font = get_display_font(theme.FONT_SIZE_TITLE)
         self.label_font = get_font(28)
         self.input_font = get_font(24)
 
@@ -57,10 +56,10 @@ class APIKeysMenu:
 
         self.settings = get_settings()
 
-        self.api_keys = {
-            "openai": self.settings.get_api_key("openai"),
-            "anthropic": self.settings.get_api_key("anthropic"),
-            "google": self.settings.get_api_key("google"),
+        self.key_inputs = {
+            "openai": TextInput(text=self.settings.get_api_key("openai")),
+            "anthropic": TextInput(text=self.settings.get_api_key("anthropic")),
+            "google": TextInput(text=self.settings.get_api_key("google")),
         }
 
         # Input tracking
@@ -96,24 +95,11 @@ class APIKeysMenu:
                 return True
             elif self.active_input is not None:
                 # Typing in an input field
-                # Check for paste first (before other key handlers)
-                if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL or event.mod & pygame.KMOD_META):
-                    # Handle Ctrl+V (Windows/Linux) or Cmd+V (macOS) for paste
-                    clipboard_text = get_clipboard_text()
-                    if clipboard_text:
-                        # Filter to only include printable characters
-                        filtered = "".join(c for c in clipboard_text if c.isprintable())
-                        self.api_keys[self.active_input] += filtered
-                elif event.key == pygame.K_RETURN or event.key == pygame.K_TAB:
+                if event.key in (pygame.K_RETURN, pygame.K_TAB):
                     # Move to next field or finish
                     self.active_input = None
-                elif event.key == pygame.K_BACKSPACE:
-                    self.api_keys[self.active_input] = self.api_keys[self.active_input][:-1]
-                elif event.unicode and event.unicode.isprintable():
-                    # Only add regular characters if no modifier keys are pressed
-                    # This prevents Cmd+V from adding 'v' on macOS
-                    if not (event.mod & (pygame.KMOD_CTRL | pygame.KMOD_META | pygame.KMOD_ALT)):
-                        self.api_keys[self.active_input] += event.unicode
+                else:
+                    self.key_inputs[self.active_input].handle_key(event)
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button
@@ -211,33 +197,14 @@ class APIKeysMenu:
             input_rect = pygame.Rect(input_x, input_y, input_width, input_height)
             self.input_rects[provider_key] = input_rect
 
-            # Background color based on active state
-            bg_color = self.input_active_color if self.active_input == provider_key else self.input_bg_color
-            pygame.draw.rect(self.screen, bg_color, input_rect, border_radius=5)
-            pygame.draw.rect(self.screen, self.button_color, input_rect, width=2, border_radius=5)
+            # Display masked key (show only last 4 chars) when not editing
+            key_input = self.key_inputs[provider_key]
+            is_active = self.active_input == provider_key
+            display_text = None
+            if len(key_input.text) > 8 and not is_active:
+                display_text = "*" * (len(key_input.text) - 4) + key_input.text[-4:]
 
-            # Display masked key (show only last 4 chars)
-            display_text = self.api_keys[provider_key]
-            if len(display_text) > 8 and self.active_input != provider_key:
-                display_text = "*" * (len(display_text) - 4) + display_text[-4:]
-
-            # Render text
-            if display_text or self.active_input == provider_key:
-                text_surface = self.input_font.render(display_text, True, self.text_color)
-                text_rect = text_surface.get_rect(x=input_x + 10, centery=input_rect.centery)
-                # Clip text if too long
-                if text_rect.width > input_width - 20:
-                    self.screen.set_clip(pygame.Rect(input_x + 10, input_rect.y, input_width - 20, input_height))
-                    text_rect.right = input_x + input_width - 10
-                self.screen.blit(text_surface, text_rect)
-                self.screen.set_clip(None)
-
-            # Draw cursor if active
-            if self.active_input == provider_key:
-                cursor_x = input_x + 10 + self.input_font.size(display_text)[0] + 2
-                cursor_y1 = input_rect.centery - 10
-                cursor_y2 = input_rect.centery + 10
-                pygame.draw.line(self.screen, self.text_color, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 2)
+            key_input.draw(self.screen, input_rect, self.input_font, active=is_active, display_text=display_text)
 
             # Draw Test Connection button
             test_button_x = input_x + input_width - 100
@@ -291,25 +258,9 @@ class APIKeysMenu:
 
     def _draw_button(self, x: int, y: int, text: str, button_name: str) -> pygame.Rect:
         """Draw a button and return its rect."""
-        padding_x = 20
-        padding_y = 10
-
-        text_surface = self.label_font.render(text, True, self.text_color)
-        text_rect = text_surface.get_rect()
-
-        button_width = text_rect.width + 2 * padding_x
-        button_height = text_rect.height + 2 * padding_y
-        button_rect = pygame.Rect(x, y, button_width, button_height)
-
-        # Button color based on hover state
-        bg_color = self.button_hover_color if self.hover_element == button_name else self.button_color
-        pygame.draw.rect(self.screen, bg_color, button_rect, border_radius=8)
-
-        # Draw text
-        text_rect.center = button_rect.center
-        self.screen.blit(text_surface, text_rect)
-
-        return button_rect
+        button = widgets.Button.with_label(x, y, text, self.label_font)
+        button.draw(self.screen, hovered=self.hover_element == button_name)
+        return button.rect
 
     def _draw_test_button(
         self, x: int, y: int, text: str, button_name: str, bg_color: tuple, icon: pygame.Surface = None
@@ -359,7 +310,7 @@ class APIKeysMenu:
         Args:
             provider: Provider name ('openai', 'anthropic', 'google')
         """
-        api_key = self.api_keys[provider]
+        api_key = self.key_inputs[provider].text
         if not api_key:
             self.test_status[provider] = "failed"
             self.test_messages[provider] = "No API key provided"
@@ -455,8 +406,8 @@ class APIKeysMenu:
                 if result is not None:
                     if result:
                         # Save the API keys
-                        for provider, key in self.api_keys.items():
-                            self.settings.set_api_key(provider, key)
+                        for provider, key_input in self.key_inputs.items():
+                            self.settings.set_api_key(provider, key_input.text)
                         print("✅ API keys saved")
                     self.running = False
                     return result
