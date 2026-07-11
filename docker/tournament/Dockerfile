@@ -11,30 +11,35 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
+# Pre-install the heavy dependencies in their own layers so source-only
+# changes don't invalidate the download cache. CPU-only torch keeps the
+# image lightweight (tournaments need no GPU).
+RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install Python dependencies (without GUI/GPU packages)
+# Remaining base dependencies of the package (without GUI packages)
 RUN pip3 install --no-cache-dir \
     gymnasium \
     pettingzoo \
+    stable-baselines3 \
+    sb3-contrib \
     numpy \
-    pandas
+    pandas \
+    tensorboard \
+    PyYAML
 
-# Install LLM provider SDKs
+# LLM provider SDKs and Google Cloud Storage for GCS upload support
 RUN pip3 install --no-cache-dir \
     openai \
     anthropic \
-    google-genai
-
-# Install Google Cloud Storage for GCS upload support
-RUN pip3 install --no-cache-dir google-cloud-storage
+    google-genai \
+    google-cloud-storage
 
 # Copy the game code
 COPY . .
 
-# Install the game package
-RUN pip3 install -e .
+# Install the game package (dependencies above already satisfy its
+# requirements; the extras make the LLM/GCS support explicit)
+RUN pip3 install --no-cache-dir -e ".[llm,cloud]"
 
 # Create output directories
 RUN mkdir -p /app/output/results /app/output/conversations /app/output/replays /app/config

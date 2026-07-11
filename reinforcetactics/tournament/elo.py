@@ -6,6 +6,7 @@ bot performance across tournament games.
 """
 
 import json
+from typing import Self
 
 
 class EloRatingSystem:
@@ -210,7 +211,7 @@ class EloRatingSystem:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "EloRatingSystem":
+    def from_dict(cls, data: dict) -> Self:
         """
         Create EloRatingSystem from dictionary.
 

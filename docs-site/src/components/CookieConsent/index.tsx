@@ -9,7 +9,7 @@ export default function CookieConsent(): JSX.Element | null {
   useEffect(() => {
     // Only run in browser environment
     if (typeof window === 'undefined') return;
-    
+
     try {
       // Check if user has already made a choice
       const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
@@ -76,12 +76,12 @@ export default function CookieConsent(): JSX.Element | null {
         <div className={styles.cookieConsentText}>
           <strong>🍪 Cookie Notice</strong>
           <p>
-            We use cookies and analytics to improve your experience on our site. 
+            We use cookies and analytics to improve your experience on our site.
             This includes Google Analytics to understand how visitors interact with our documentation.
             {' '}
-            <a 
-              href="https://policies.google.com/technologies/cookies" 
-              target="_blank" 
+            <a
+              href="https://policies.google.com/technologies/cookies"
+              target="_blank"
               rel="noopener noreferrer"
               className={styles.cookieConsentLink}
             >
@@ -90,14 +90,14 @@ export default function CookieConsent(): JSX.Element | null {
           </p>
         </div>
         <div className={styles.cookieConsentButtons}>
-          <button 
+          <button
             onClick={handleDecline}
             className={styles.cookieConsentButtonDecline}
             aria-label="Decline cookies"
           >
             Decline
           </button>
-          <button 
+          <button
             onClick={handleAccept}
             className={styles.cookieConsentButtonAccept}
             aria-label="Accept cookies"

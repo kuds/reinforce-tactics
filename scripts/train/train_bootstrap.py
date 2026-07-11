@@ -102,7 +102,7 @@ def _apply_set_overrides(cfg, set_items):
     """Apply ``--set key=value`` overrides (values parsed as YAML scalars/lists)."""
     if not set_items:
         return cfg
-    import yaml  # type: ignore[import-untyped]
+    import yaml
 
     from reinforcetactics.rl.config import apply_overrides
 

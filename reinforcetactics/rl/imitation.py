@@ -1232,7 +1232,7 @@ def load_scenarios_from_yaml(path: str) -> list[DemonstrationScenario]:
     Unknown keys raise ``ValueError`` so typos surface immediately.
     """
     try:
-        import yaml  # type: ignore
+        import yaml
     except ImportError as exc:
         raise ImportError("PyYAML is required to load scenario configs") from exc
 

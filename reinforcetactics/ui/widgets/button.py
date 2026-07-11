@@ -8,7 +8,7 @@ the state into :meth:`Button.draw`.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 import pygame
 
@@ -111,7 +111,7 @@ class Button:
         padding_x: int = 20,
         padding_y: int = 10,
         **kwargs: Any,
-    ) -> "Button":
+    ) -> Self:
         """Create a button sized to fit its label plus padding at (x, y)."""
         width, height = font.size(text)
         rect = pygame.Rect(x, y, width + 2 * padding_x, height + 2 * padding_y)

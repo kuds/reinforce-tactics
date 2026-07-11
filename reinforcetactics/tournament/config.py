@@ -7,7 +7,7 @@ This module provides a unified configuration class for tournament settings.
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from .bots import BotDescriptor, BotType
 from .schedule import MapConfig
@@ -103,7 +103,7 @@ class TournamentConfig:
             self.conversation_log_dir = str(Path(self.output_dir) / "llm_conversations")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TournamentConfig":
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """
         Create TournamentConfig from dictionary.
 
@@ -163,7 +163,7 @@ class TournamentConfig:
         )
 
     @classmethod
-    def from_json(cls, filepath: str) -> "TournamentConfig":
+    def from_json(cls, filepath: str) -> Self:
         """
         Load configuration from JSON file.
 
@@ -240,7 +240,7 @@ class TournamentConfig:
 
         return errors
 
-    def add_map(self, path: str, max_turns: int | None = None) -> "TournamentConfig":
+    def add_map(self, path: str, max_turns: int | None = None) -> Self:
         """
         Add a map to the configuration.
 
@@ -254,7 +254,7 @@ class TournamentConfig:
         self.maps.append(MapConfig(path=path, max_turns=max_turns or self.max_turns))
         return self
 
-    def add_maps_from_directory(self, directory: str, max_turns: int | None = None) -> "TournamentConfig":
+    def add_maps_from_directory(self, directory: str, max_turns: int | None = None) -> Self:
         """
         Add all CSV maps from a directory.
 

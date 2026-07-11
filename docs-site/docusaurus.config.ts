@@ -84,13 +84,13 @@ const config: Config = {
         },
         // Configure Google Analytics plugin
         // IMPORTANT: Replace 'G-XXXXXXXXXX' with your actual Google Analytics 4 (GA4) Measurement ID
-        // 
+        //
         // To get your tracking ID:
         // 1. Go to Google Analytics (https://analytics.google.com/)
         // 2. Navigate to Admin > Data Streams
         // 3. Select your web stream
         // 4. Copy the Measurement ID (format: G-XXXXXXXXXX)
-        // 
+        //
         // Note: If you don't replace this placeholder, analytics tracking will not work,
         // but the site will still function normally.
         gtag: {

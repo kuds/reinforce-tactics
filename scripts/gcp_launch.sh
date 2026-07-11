@@ -33,9 +33,9 @@ docker push gcr.io/${PROJECT_ID}/rl-trainer:latest
 # Launch training instances (one per seed)
 for seed in $(seq 0 $((SEEDS-1))); do
     INSTANCE_NAME="rl-trainer-${MODE}-seed${seed}-$(date +%s)"
-    
+
     echo "Launching instance: $INSTANCE_NAME"
-    
+
     gcloud compute instances create $INSTANCE_NAME \
         --project=$PROJECT_ID \
         --zone=$ZONE \
@@ -50,7 +50,7 @@ for seed in $(seq 0 $((SEEDS-1))); do
             # Install Docker
             apt-get update
             apt-get install -y docker.io
-            
+
             # Pull and run training container
             docker pull gcr.io/${PROJECT_ID}/rl-trainer:latest
             docker run --gpus all \
@@ -65,11 +65,11 @@ for seed in $(seq 0 $((SEEDS-1))); do
                     --n-envs 4 \
                     --device cuda \
                     --wandb
-            
+
             # Shutdown instance after training
             shutdown -h now
         "
-    
+
     echo "✅ Instance $INSTANCE_NAME launched"
 done
 

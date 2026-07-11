@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from reinforcetactics.rl.bootstrap import (
     CurriculumStalled,

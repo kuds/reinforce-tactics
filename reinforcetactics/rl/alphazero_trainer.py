@@ -20,7 +20,7 @@ import random
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 import torch
@@ -592,7 +592,7 @@ class AlphaZeroTrainer:
         logger.info("Saved training history: %s", path)
 
     @classmethod
-    def load_checkpoint(cls, path: str, device: str = "cpu", **kwargs) -> "AlphaZeroTrainer":
+    def load_checkpoint(cls, path: str, device: str = "cpu", **kwargs) -> Self:
         """
         Load a trainer from a checkpoint.
 

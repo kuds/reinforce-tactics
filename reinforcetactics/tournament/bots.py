@@ -10,7 +10,7 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 if TYPE_CHECKING:
     from reinforcetactics.core.game_state import GameState
@@ -68,22 +68,22 @@ class BotDescriptor:
             self.bot_type = BotType(self.bot_type)
 
     @classmethod
-    def simple_bot(cls, name: str = "SimpleBot") -> "BotDescriptor":
+    def simple_bot(cls, name: str = "SimpleBot") -> Self:
         """Create a SimpleBot descriptor."""
         return cls(name=name, bot_type=BotType.SIMPLE)
 
     @classmethod
-    def medium_bot(cls, name: str = "MediumBot") -> "BotDescriptor":
+    def medium_bot(cls, name: str = "MediumBot") -> Self:
         """Create a MediumBot descriptor."""
         return cls(name=name, bot_type=BotType.MEDIUM)
 
     @classmethod
-    def advanced_bot(cls, name: str = "AdvancedBot") -> "BotDescriptor":
+    def advanced_bot(cls, name: str = "AdvancedBot") -> Self:
         """Create an AdvancedBot descriptor."""
         return cls(name=name, bot_type=BotType.ADVANCED)
 
     @classmethod
-    def master_bot(cls, name: str = "MasterBot") -> "BotDescriptor":
+    def master_bot(cls, name: str = "MasterBot") -> Self:
         """Create a MasterBot descriptor."""
         return cls(name=name, bot_type=BotType.MASTER)
 
@@ -97,7 +97,7 @@ class BotDescriptor:
         max_tokens: int = 8000,
         api_key: str | None = None,
         **kwargs,
-    ) -> "BotDescriptor":
+    ) -> Self:
         """
         Create an LLM bot descriptor.
 
@@ -122,7 +122,7 @@ class BotDescriptor:
         )
 
     @classmethod
-    def model_bot(cls, name: str, model_path: str) -> "BotDescriptor":
+    def model_bot(cls, name: str, model_path: str) -> Self:
         """
         Create a trained model bot descriptor.
 
@@ -133,7 +133,7 @@ class BotDescriptor:
         return cls(name=name, bot_type=BotType.MODEL, model_path=model_path)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BotDescriptor":
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """
         Create BotDescriptor from dictionary.
 
