@@ -133,7 +133,9 @@ class TestSelfPlayOpponentFactory:
         from reinforcetactics.game.bot import RandomBot
 
         def factory(game_state, opponent_player):
-            calls.append((id(game_state), opponent_player))
+            # Keep a real reference to game_state (not just its id) so CPython
+            # cannot recycle a freed object's address between resets.
+            calls.append((game_state, opponent_player))
             return RandomBot(game_state, player=opponent_player)
 
         env.set_self_play_opponent_factory(factory)
@@ -146,7 +148,7 @@ class TestSelfPlayOpponentFactory:
         assert all(p == 2 for _, p in calls)
         # The three game_state instances should all be distinct objects (each
         # reset rebuilds GameState from initial_map_data).
-        assert len({gs_id for gs_id, _ in calls}) == 3
+        assert len({id(gs) for gs, _ in calls}) == 3
 
     def test_self_opponent_type_no_factory_is_safe(self):
         """If no factory is set, self-play env reset should leave opponent=None
