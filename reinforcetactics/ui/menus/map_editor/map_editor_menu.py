@@ -1,6 +1,6 @@
 """Map editor menu - entry point for creating or editing maps."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -17,7 +17,7 @@ from reinforcetactics.utils.language import get_language
 class MapEditorMenu(Menu):
     """Menu for map editor options."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize the map editor menu.
 
@@ -35,7 +35,7 @@ class MapEditorMenu(Menu):
         self.add_option(lang.get("map_editor.edit_map", "Edit Existing Map"), self._edit_map)
         self.add_option(lang.get("common.back", "Back"), lambda: None)
 
-    def _new_map(self) -> Optional[Dict[str, Any]]:
+    def _new_map(self) -> dict[str, Any] | None:
         """
         Create a new map.
 
@@ -83,7 +83,7 @@ class MapEditorMenu(Menu):
 
         return editor_result
 
-    def _edit_map(self) -> Optional[Dict[str, Any]]:
+    def _edit_map(self) -> dict[str, Any] | None:
         """
         Edit an existing map.
 
@@ -145,7 +145,7 @@ class MapEditorMenu(Menu):
         # Default to 2 if no headquarters found
         return max(2, max_player)
 
-    def run(self) -> Optional[Dict[str, Any]]:
+    def run(self) -> dict[str, Any] | None:
         """
         Run the map editor menu loop.
 

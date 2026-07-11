@@ -1,6 +1,6 @@
 """Game over screen."""
 
-from typing import Any, Optional
+from typing import Any
 
 import pygame
 
@@ -14,7 +14,7 @@ from reinforcetactics.utils.language import get_language
 class GameOverMenu(Menu):
     """Game over screen."""
 
-    def __init__(self, winner: int, game_state: Any, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, winner: int, game_state: Any, screen: pygame.Surface | None = None) -> None:
         """
         Initialize game over menu.
 
@@ -40,7 +40,7 @@ class GameOverMenu(Menu):
         self.add_option(lang.get("game_over.main_menu", "Main Menu"), lambda: "main_menu")
         self.add_option(lang.get("game_over.quit", "Quit"), lambda: "quit")
 
-    def _save_replay(self) -> Optional[str]:
+    def _save_replay(self) -> str | None:
         """Save game replay."""
         return self.game_state.save_replay_to_file()
 

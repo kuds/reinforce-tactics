@@ -3,7 +3,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pygame
 
@@ -19,7 +19,7 @@ from reinforcetactics.utils.language import get_language
 class ReplaySelectionMenu(Menu):
     """Menu for selecting a replay to watch with visual previews and info."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, replays_dir: str = "replays") -> None:
+    def __init__(self, screen: pygame.Surface | None = None, replays_dir: str = "replays") -> None:
         """
         Initialize replay selection menu.
 
@@ -29,8 +29,8 @@ class ReplaySelectionMenu(Menu):
         """
         super().__init__(screen, get_language().get("replay.title", "Select Replay"))
         self.replays_dir = replays_dir
-        self.replay_files: List[str] = []
-        self.replay_metadata: Dict[str, Dict[str, Any]] = {}
+        self.replay_files: list[str] = []
+        self.replay_metadata: dict[str, dict[str, Any]] = {}
         self._load_replays()
         self._setup_options()
 
@@ -38,7 +38,7 @@ class ReplaySelectionMenu(Menu):
         self.preview_generator = MapPreviewGenerator()
 
         # Cache for replay map previews
-        self._preview_cache: Dict[str, pygame.Surface] = {}
+        self._preview_cache: dict[str, pygame.Surface] = {}
 
     def _load_replays(self) -> None:
         """Load available replay files and their metadata."""
@@ -67,7 +67,7 @@ class ReplaySelectionMenu(Menu):
     def _load_replay_metadata(self, filepath: str) -> None:
         """Load metadata from a replay file."""
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
 
             game_info = data.get("game_info", {})
@@ -125,7 +125,7 @@ class ReplaySelectionMenu(Menu):
                 "max_turns": game_info.get("max_turns"),
             }
 
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             # Store minimal metadata for failed loads
             self.replay_metadata[filepath] = {
                 "date": self._extract_date_from_filename(os.path.basename(filepath)),
@@ -145,7 +145,7 @@ class ReplaySelectionMenu(Menu):
         """Extract date from replay filename."""
         return extract_date_from_filename(filename)
 
-    def _get_player_display_name(self, player_configs: List[Dict], player_idx: int) -> str:
+    def _get_player_display_name(self, player_configs: list[dict], player_idx: int) -> str:
         """Get a display name for a player from config."""
         return get_player_display_name(player_configs, player_idx)
 
@@ -211,7 +211,7 @@ class ReplaySelectionMenu(Menu):
             )
             self.option_rects.append(item_rect)
 
-    def _generate_replay_map_preview(self, filepath: str, width: int, height: int) -> Optional[pygame.Surface]:
+    def _generate_replay_map_preview(self, filepath: str, width: int, height: int) -> pygame.Surface | None:
         """Generate a map preview from replay's initial map data."""
         cache_key = f"{filepath}_{width}_{height}"
         if cache_key in self._preview_cache:
@@ -253,7 +253,7 @@ class ReplaySelectionMenu(Menu):
         except Exception:
             return None
 
-    def _get_tile_color(self, tile: str) -> Tuple[int, int, int]:
+    def _get_tile_color(self, tile: str) -> tuple[int, int, int]:
         """Get the color for a tile type."""
         return get_tile_color(tile)
 
@@ -528,7 +528,7 @@ class ReplaySelectionMenu(Menu):
         self.screen.blit(date_label, (info_x, info_y))
         self.screen.blit(date_value, (info_x + date_label.get_width(), info_y))
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """
         Run replay selection menu.
 

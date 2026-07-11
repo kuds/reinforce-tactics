@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
@@ -63,8 +63,8 @@ class TrainingMetricsCallback(BaseCallback):
 
     def __init__(self) -> None:
         super().__init__()
-        self.records: List[dict] = []
-        self._pending: Optional[dict] = None
+        self.records: list[dict] = []
+        self._pending: dict | None = None
 
     def _on_step(self) -> bool:
         return True
@@ -147,7 +147,7 @@ class PeriodicEvalCallback(BaseCallback):
         # dumped, so healthy evals leave no artefacts on disk.
         self.trace_dir = Path(trace_dir) if trace_dir is not None else None
 
-        self.results: List[dict] = []
+        self.results: list[dict] = []
         self.best_win_rate: float = -1.0
         self._best_reward: float = float("-inf")
         # Cumulative ``num_timesteps`` at which the current best_model.zip was
@@ -171,7 +171,7 @@ class PeriodicEvalCallback(BaseCallback):
 
     def _do_eval(self) -> None:
         eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
-        eval_kwargs: Dict[str, Any] = {}
+        eval_kwargs: dict[str, Any] = {}
         if self.trace_dir is not None:
             # One subdir per eval block, named by the timestep at which
             # the block fires, so traces from different evals don't
@@ -269,7 +269,7 @@ class PromotionCallback(BaseCallback):
 
     def __init__(
         self,
-        eval_callback: "PeriodicEvalCallback",
+        eval_callback: PeriodicEvalCallback,
         threshold: float,
         patience: int = 2,
         verbose: int = 1,
@@ -396,7 +396,7 @@ class EntropyScheduleCallback(BaseCallback):
         self.end = float(end)
         self.total_timesteps = int(total_timesteps)
         self.schedule = schedule
-        self._stage_start_step: Optional[int] = None
+        self._stage_start_step: int | None = None
 
     def _on_training_start(self) -> None:
         # ``num_timesteps`` is cumulative across stages because the

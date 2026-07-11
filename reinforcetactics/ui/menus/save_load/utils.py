@@ -2,7 +2,6 @@
 
 import re
 from datetime import datetime
-from typing import Dict, List
 
 
 def extract_date_from_filename(filename: str) -> str:
@@ -29,7 +28,7 @@ def extract_date_from_filename(filename: str) -> str:
     return "Unknown Date"
 
 
-def get_player_display_name(player_configs: List[Dict], player_idx: int) -> str:
+def get_player_display_name(player_configs: list[dict], player_idx: int) -> str:
     """Get a display name for a player from config.
 
     Args:

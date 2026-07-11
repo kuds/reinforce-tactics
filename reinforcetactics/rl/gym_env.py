@@ -7,7 +7,7 @@ import logging
 import random
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -56,8 +56,8 @@ class StructuredActionMasks:
 
     atype: np.ndarray
     source: np.ndarray
-    target: Dict[Tuple[int, int, int], np.ndarray] = field(default_factory=dict)
-    unit_type: Dict[Tuple[int, int], np.ndarray] = field(default_factory=dict)
+    target: dict[tuple[int, int, int], np.ndarray] = field(default_factory=dict)
+    unit_type: dict[tuple[int, int], np.ndarray] = field(default_factory=dict)
 
 
 # Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
@@ -105,9 +105,9 @@ def build_per_dim_masks(
     game_state: "GameState",
     grid_width: int,
     grid_height: int,
-    enabled_units: Optional[List[str]] = None,
-    flat_action_size: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    enabled_units: list[str] | None = None,
+    flat_action_size: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Pure-function port of ``StrategyGameEnv._build_masks``.
 
     Used by ``StrategyGameEnv`` itself and by ``ModelBot`` so a feudal /
@@ -181,8 +181,8 @@ def build_structured_masks(
 
     atype = np.zeros(num_action_types, dtype=bool)
     source = np.zeros((num_action_types, H, W), dtype=bool)
-    target: Dict[Tuple[int, int, int], np.ndarray] = {}
-    unit_type: Dict[Tuple[int, int], np.ndarray] = {}
+    target: dict[tuple[int, int, int], np.ndarray] = {}
+    unit_type: dict[tuple[int, int], np.ndarray] = {}
 
     def _mark_target(at_idx: int, sx: int, sy: int, tx: int, ty: int) -> None:
         key = (at_idx, sx, sy)
@@ -224,7 +224,7 @@ def build_flat_actions(
     game_state: "GameState",
     player: int,
     max_flat_actions: int,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """Build the ordered flat legal-action list for a ``Discrete`` policy.
 
     Pure-function port of ``StrategyGameEnv._build_flat_actions`` (minus the
@@ -246,7 +246,7 @@ def build_flat_actions(
     """
     legal_actions = game_state.get_legal_actions(player=player)
 
-    actions: List[np.ndarray] = []
+    actions: list[np.ndarray] = []
     seen = set()
 
     for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
@@ -335,26 +335,26 @@ class StrategyGameEnv(gym.Env):
 
     def __init__(
         self,
-        map_file: Optional[str] = None,
-        opponent: Optional[str] = "bot",  # 'bot', 'random', 'noop', 'self', or None
-        render_mode: Optional[str] = None,
+        map_file: str | None = None,
+        opponent: str | None = "bot",  # 'bot', 'random', 'noop', 'self', or None
+        render_mode: str | None = None,
         max_steps: int = 200,
-        max_turns: Optional[int] = None,
-        reward_config: Optional[Dict[str, float]] = None,
+        max_turns: int | None = None,
+        reward_config: dict[str, float] | None = None,
         hierarchical: bool = False,  # Enable for HRL
         goal_space_size: int = 64,  # For HRL goal space
-        enabled_units: Optional[List[str]] = None,  # List of enabled unit types
+        enabled_units: list[str] | None = None,  # List of enabled unit types
         fog_of_war: bool = False,  # Enable fog of war
         action_space_type: str = "multi_discrete",  # 'multi_discrete' or 'flat_discrete'
         max_flat_actions: int = 512,  # Max actions for flat_discrete mode
-        max_actions_per_turn: Optional[int] = None,  # Hard cap on agent actions per game-turn (None = unlimited)
-        opponent_kwargs: Optional[Dict[str, Any]] = None,  # Extra kwargs forwarded to the opponent constructor
+        max_actions_per_turn: int | None = None,  # Hard cap on agent actions per game-turn (None = unlimited)
+        opponent_kwargs: dict[str, Any] | None = None,  # Extra kwargs forwarded to the opponent constructor
         gamma: float = 0.99,  # Discount used by potential-based shaping; should match the trainer's gamma
-        pad_to_size: Optional[Tuple[int, int]] = None,  # (pad_h, pad_w) for cross-stage obs-shape unification
+        pad_to_size: tuple[int, int] | None = None,  # (pad_h, pad_w) for cross-stage obs-shape unification
         gold_scale: float = GOLD_SCALE,  # tanh divisor for own_gold/opp_gold in global_features
         turn_scale: float = TURN_SCALE,  # tanh divisor for turn_number in global_features
         unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
-        engine_overrides: Optional[Dict[str, Any]] = None,  # sparse overlay over constants.py (balance sweeps)
+        engine_overrides: dict[str, Any] | None = None,  # sparse overlay over constants.py (balance sweeps)
     ):
         """
         Initialize environment.
@@ -454,13 +454,13 @@ class StrategyGameEnv(gym.Env):
         if fog_of_war:
             self.game_state.update_visibility()
         self.opponent_type = opponent
-        self.opponent_kwargs: Dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
-        self.opponent: Optional[Any] = None
+        self.opponent_kwargs: dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
+        self.opponent: Any | None = None
         # Self-play hook: when ``opponent_type == "self"``, reset() rebinds the
         # opponent by calling ``factory(game_state, opponent_player) -> Bot``.
         # The training script provides it via ``set_self_play_opponent_factory``.
         # ``None`` keeps the slot empty (no-op opponent turn).
-        self._self_play_opponent_factory: Optional[Any] = None
+        self._self_play_opponent_factory: Any | None = None
         self.max_steps = max_steps
         self.current_step = 0
         # Hard per-game-turn action budget. When the agent has executed
@@ -678,7 +678,7 @@ class StrategyGameEnv(gym.Env):
         # Episode statistics
         self.episode_stats: dict[str, Any] = self._new_episode_stats()
 
-    def _new_episode_stats(self) -> Dict[str, Any]:
+    def _new_episode_stats(self) -> dict[str, Any]:
         return {
             "reward": 0.0,
             "length": 0,
@@ -732,14 +732,14 @@ class StrategyGameEnv(gym.Env):
             return self.max_flat_actions
         return 10 * self.grid_width * self.grid_height
 
-    def _get_obs(self) -> Dict[str, np.ndarray]:
+    def _get_obs(self) -> dict[str, np.ndarray]:
         """Get current observation from the agent's perspective.
 
         The action mask is intentionally not included in the returned dict;
         callers needing it should use :meth:`action_masks` (MaskablePPO) or
         :meth:`get_action_mask_flat` (for diagnostics).
         """
-        pad_to: Optional[Tuple[int, int]] = None
+        pad_to: tuple[int, int] | None = None
         if self.pad_height != self.grid_height or self.pad_width != self.grid_width:
             pad_to = (self.pad_height, self.pad_width)
         return build_observation(
@@ -771,7 +771,7 @@ class StrategyGameEnv(gym.Env):
 
     def _build_masks(
         self,
-    ) -> Tuple[
+    ) -> tuple[
         np.ndarray,  # flat mask  (10*W*H,)
         np.ndarray,
         np.ndarray,  # action_type (10,), unit_type (8,)
@@ -910,8 +910,8 @@ class StrategyGameEnv(gym.Env):
 
         atype = np.zeros(num_action_types, dtype=bool)
         source = np.zeros((num_action_types, H, W), dtype=bool)
-        target: Dict[Tuple[int, int, int], np.ndarray] = {}
-        unit_type: Dict[Tuple[int, int], np.ndarray] = {}
+        target: dict[tuple[int, int, int], np.ndarray] = {}
+        unit_type: dict[tuple[int, int], np.ndarray] = {}
 
         unit_type_to_idx = UNIT_TYPE_TO_IDX
 
@@ -1035,7 +1035,7 @@ class StrategyGameEnv(gym.Env):
         flat_mask, *_ = self._build_masks()
         return flat_mask
 
-    def action_masks(self) -> Tuple[np.ndarray, ...]:
+    def action_masks(self) -> tuple[np.ndarray, ...]:
         """
         Get action masks for MaskablePPO (sb3-contrib).
 
@@ -1065,7 +1065,7 @@ class StrategyGameEnv(gym.Env):
         """
         return self._get_action_mask()
 
-    def _encode_action(self, action: np.ndarray) -> Dict[str, Any]:
+    def _encode_action(self, action: np.ndarray) -> dict[str, Any]:
         """
         Encode action array into game action.
 
@@ -1085,7 +1085,7 @@ class StrategyGameEnv(gym.Env):
 
         return {"action_type": action_type, "unit_type": unit_type, "from_pos": (from_x, from_y), "to_pos": (to_x, to_y)}
 
-    def execute_game_action(self, action_dict: Dict[str, Any], player: int) -> Tuple[Dict[str, Any], bool]:
+    def execute_game_action(self, action_dict: dict[str, Any], player: int) -> tuple[dict[str, Any], bool]:
         """
         Execute an encoded action for the given player.
 
@@ -1104,7 +1104,7 @@ class StrategyGameEnv(gym.Env):
         action_type = action_dict["action_type"]
         from_pos = action_dict["from_pos"]
         to_pos = action_dict["to_pos"]
-        result_info: Dict[str, Any] = {"action_type": action_type}
+        result_info: dict[str, Any] = {"action_type": action_type}
         is_valid = True
 
         try:
@@ -1219,7 +1219,7 @@ class StrategyGameEnv(gym.Env):
 
         return result_info, is_valid
 
-    def _execute_action(self, action_dict: Dict[str, Any]) -> Tuple[float, bool]:
+    def _execute_action(self, action_dict: dict[str, Any]) -> tuple[float, bool]:
         """
         Execute encoded action for the agent and compute reward.
 
@@ -1399,7 +1399,7 @@ class StrategyGameEnv(gym.Env):
 
     def _calculate_reward(
         self, action_reward: float, is_valid: bool, terminal: bool = False
-    ) -> Tuple[float, Dict[str, float]]:
+    ) -> tuple[float, dict[str, float]]:
         """Calculate total reward including potential-based shaping terms.
 
         Args:
@@ -1444,7 +1444,7 @@ class StrategyGameEnv(gym.Env):
 
         return reward, breakdown
 
-    def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
+    def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         """
         Execute one step.
 
@@ -1512,7 +1512,7 @@ class StrategyGameEnv(gym.Env):
         #                    line 825-827 sets game_over with winner=None).
         #   max_steps_truncate - env step counter hit max_steps before the
         #                    game produced a terminal state.
-        end_reason: Optional[str] = None
+        end_reason: str | None = None
         if terminated:
             winner = self.game_state.winner
             if winner is None:
@@ -1629,7 +1629,7 @@ class StrategyGameEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
         """Reset environment."""
         super().reset(seed=seed)
 

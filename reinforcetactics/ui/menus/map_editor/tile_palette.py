@@ -1,7 +1,5 @@
 """Tile palette component for the map editor."""
 
-from typing import Tuple
-
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
@@ -58,7 +56,7 @@ class TilePalette:
         self.tile_rects: dict[str, pygame.Rect] = {}  # tile_code -> rect
         self.player_rects: dict[int, pygame.Rect] = {}  # player_num -> rect
 
-    def handle_click(self, mouse_pos: Tuple[int, int]) -> bool:
+    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
         """
         Handle mouse click on the palette.
 

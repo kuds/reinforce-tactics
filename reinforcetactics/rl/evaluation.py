@@ -15,7 +15,7 @@ import inspect
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -88,9 +88,9 @@ def evaluate_model(
     deterministic: bool = True,
     seed: Any = None,
     track_breakdown: bool = False,
-    trace_dir: Optional[Union[str, Path]] = None,
-    trace_end_reasons: Optional[tuple] = ("max_steps_truncate",),
-) -> Dict[str, Any]:
+    trace_dir: str | Path | None = None,
+    trace_end_reasons: tuple | None = ("max_steps_truncate",),
+) -> dict[str, Any]:
     """
     Evaluate a trained model and return summary statistics.
 
@@ -197,7 +197,7 @@ def evaluate_model(
     # without any trigger-matching episodes leave no empty folders
     # behind (relevant for Google-Drive-backed run dirs where empty
     # subfolders pile up across eval cadence).
-    trace_dir_path: Optional[Path] = Path(trace_dir) if trace_dir is not None else None
+    trace_dir_path: Path | None = Path(trace_dir) if trace_dir is not None else None
     trace_paths: list[str] = []
     trace_triggers = set(trace_end_reasons or ())
     if not trace_triggers:
@@ -211,10 +211,10 @@ def evaluate_model(
         done = False
         ep_reward = 0.0
         ep_len = 0
-        ep_trace: Optional[list[dict]] = [] if trace_dir_path is not None else None
+        ep_trace: list[dict] | None = [] if trace_dir_path is not None else None
 
         while not done:
-            predict_kwargs: Dict[str, Any] = {"deterministic": deterministic}
+            predict_kwargs: dict[str, Any] = {"deterministic": deterministic}
             if has_action_masks:
                 masks = env.action_masks()
                 # MaskablePPO expects a flat concatenated mask
@@ -353,7 +353,7 @@ def evaluate_model(
     lengths_arr = np.array(lengths)
     turns_arr = np.array(turns)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "win_rate": wins / n_episodes if n_episodes > 0 else 0.0,
         "avg_reward": float(rewards_arr.mean()) if n_episodes > 0 else 0.0,
         "std_reward": float(rewards_arr.std()) if n_episodes > 0 else 0.0,

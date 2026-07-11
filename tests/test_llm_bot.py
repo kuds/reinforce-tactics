@@ -414,7 +414,7 @@ class TestConversationLogging:
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 log_data = json.load(f)
 
             # Verify structure
@@ -513,7 +513,7 @@ class TestConversationLogging:
             assert custom_session_id in log_files[0].name
 
             # Verify session ID is in the log data
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 log_data = json.load(f)
             assert log_data["game_session_id"] == custom_session_id
 
@@ -566,7 +566,7 @@ class TestConversationLogging:
             # Verify they have different session IDs
             session_ids = set()
             for log_file in log_files:
-                with open(log_file, "r", encoding="utf-8") as f:
+                with open(log_file, encoding="utf-8") as f:
                     log_data = json.load(f)
                     session_ids.add(log_data["game_session_id"])
 
@@ -594,7 +594,7 @@ class TestConversationLogging:
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 content = f.read()
 
             # Pretty-printed JSON should have newlines and indentation
@@ -621,7 +621,7 @@ class TestConversationLogging:
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 content = f.read()
 
             # Compact JSON should be mostly on one line (no indentation)
@@ -665,7 +665,7 @@ class TestConversationLogging:
             assert len(log_files) == 1
 
             # Verify it contains two turns
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 log_data = json.load(f)
 
             assert "turns" in log_data
@@ -1031,7 +1031,7 @@ class TestMapCoordinateConversion:
             log_files = list(Path(tmpdir).glob("*.json"))
             assert len(log_files) == 1
 
-            with open(log_files[0], "r", encoding="utf-8") as f:
+            with open(log_files[0], encoding="utf-8") as f:
                 log_data = json.load(f)
 
             # Verify map metadata is present

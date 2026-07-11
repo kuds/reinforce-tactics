@@ -30,8 +30,9 @@ from __future__ import annotations
 
 import logging
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -69,7 +70,7 @@ END_TURN_ACTION_IDX = 5
 
 
 # Ordered list of per-dimension sizes for the MaskablePPO MultiDiscrete head.
-def _per_dim_sizes(width: int, height: int) -> Tuple[int, ...]:
+def _per_dim_sizes(width: int, height: int) -> tuple[int, ...]:
     return (NUM_ACTION_TYPES, NUM_UNIT_TYPES, width, height, width, height)
 
 
@@ -81,9 +82,9 @@ BotFactory = Callable[[GameState, int], Any]
 
 def _make_bot(
     name: str,
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
     stochastic_tiebreak: bool = False,
-    tiebreak_rng: Optional[random.Random] = None,
+    tiebreak_rng: random.Random | None = None,
 ) -> BotFactory:
     """Return a factory that builds the named bot for a (gs, player) pair.
 
@@ -142,7 +143,7 @@ def _make_bot(
 class Demonstration:
     """A single (obs, action, mask) triple captured from a demonstrator turn."""
 
-    obs: Dict[str, np.ndarray]
+    obs: dict[str, np.ndarray]
     action: np.ndarray  # shape (6,), int64
     # Per-dimension boolean masks, same layout MaskablePPO consumes.
     at_mask: np.ndarray  # (10,)
@@ -163,8 +164,8 @@ class EpisodeOutcome:
     """
 
     demonstrator_player: int
-    winner: Optional[int]  # 1, 2, or None for draw / unresolved
-    end_reason: Optional[str]
+    winner: int | None  # 1, 2, or None for draw / unresolved
+    end_reason: str | None
     n_turns: int
     n_demos: int
 
@@ -196,7 +197,7 @@ class ScenarioStats:
     name: str
     demonstrator: str
     opponent: str
-    map_file: Optional[str] = None
+    map_file: str | None = None
     n_episodes: int = 0
     demo_wins: int = 0
     demo_losses: int = 0
@@ -210,7 +211,7 @@ class ScenarioStats:
     step_budget_exhausted: int = 0
     total_demos: int = 0
     total_turns: int = 0
-    end_reasons: Dict[str, int] = field(default_factory=dict)
+    end_reasons: dict[str, int] = field(default_factory=dict)
 
     @property
     def total_games(self) -> int:
@@ -253,28 +254,28 @@ class ScenarioStats:
 class DemonstrationDataset:
     """Stacked demonstrations as numpy arrays ready for batched BC training."""
 
-    obs: Dict[str, np.ndarray]
+    obs: dict[str, np.ndarray]
     actions: np.ndarray  # (N, 6), int64
     masks_concat: np.ndarray  # (N, 10+8+W+H+W+H), bool
     # Dimension sizes used to split ``masks_concat`` back per-dim if needed.
-    dim_sizes: Tuple[int, ...] = field(default_factory=tuple)
+    dim_sizes: tuple[int, ...] = field(default_factory=tuple)
     # Per-scenario outcomes. Empty when the dataset is built by
     # ``from_list`` alone; populated by ``collect_demonstrations`` /
     # ``collect_demonstrations_multi`` so callers can plot demonstrator
     # win-rates alongside BC training curves.
-    scenario_stats: List[ScenarioStats] = field(default_factory=list)
+    scenario_stats: list[ScenarioStats] = field(default_factory=list)
 
     def __len__(self) -> int:
         return int(self.actions.shape[0])
 
     @classmethod
-    def from_list(cls, demos: List[Demonstration]) -> "DemonstrationDataset":
+    def from_list(cls, demos: list[Demonstration]) -> DemonstrationDataset:
         if not demos:
             raise ValueError("Cannot build dataset from empty demonstration list")
 
         # Stack observation dict (assumes consistent key set).
         keys = list(demos[0].obs.keys())
-        obs_stacked: Dict[str, np.ndarray] = {k: np.stack([d.obs[k] for d in demos], axis=0) for k in keys}
+        obs_stacked: dict[str, np.ndarray] = {k: np.stack([d.obs[k] for d in demos], axis=0) for k in keys}
 
         actions = np.stack([d.action for d in demos], axis=0).astype(np.int64)
 
@@ -312,8 +313,8 @@ def _compute_masks(
     game_state: GameState,
     width: int,
     height: int,
-    enabled_units: List[str],
-) -> Tuple[
+    enabled_units: list[str],
+) -> tuple[
     np.ndarray,  # flat (10*W*H,) for obs.action_mask
     np.ndarray,  # at_mask (10,)
     np.ndarray,  # ut_mask (8,)
@@ -341,7 +342,7 @@ def _compute_masks(
     # (action_key, action_type_idx, src_field, tgt_field) — same map as gym_env.
     action_map = StrategyGameEnv._ACTION_KEY_MAP
 
-    def _pos(action: Dict[str, Any], fields: Any) -> Tuple[int, int]:
+    def _pos(action: dict[str, Any], fields: Any) -> tuple[int, int]:
         if isinstance(fields, str):
             o = action[fields]
             return o.x, o.y
@@ -427,7 +428,7 @@ class _ActionRecorder:
         demonstrator_player: int,
         width: int,
         height: int,
-        enabled_units: List[str],
+        enabled_units: list[str],
         fog_of_war: bool,
     ) -> None:
         self.game_state = game_state
@@ -436,8 +437,8 @@ class _ActionRecorder:
         self.height = height
         self.enabled_units = enabled_units
         self.fog_of_war = fog_of_war
-        self.demos: List[Demonstration] = []
-        self._originals: Dict[str, Callable[..., Any]] = {}
+        self.demos: list[Demonstration] = []
+        self._originals: dict[str, Callable[..., Any]] = {}
         self._installed = False
 
     # -- snapshot helpers --------------------------------------------------
@@ -667,14 +668,14 @@ class _ActionRecorder:
 def _play_episode(
     demonstrator: str,
     opponent: str,
-    map_file: Optional[str],
-    enabled_units: Optional[List[str]],
+    map_file: str | None,
+    enabled_units: list[str] | None,
     max_turns: int,
     fog_of_war: bool,
-    seed: Optional[int],
+    seed: int | None,
     demonstrator_player: int,
     stochastic_tiebreak: bool = False,
-) -> Tuple[List[Demonstration], EpisodeOutcome]:
+) -> tuple[list[Demonstration], EpisodeOutcome]:
     """Internal driver. Plays one game, returns demos plus end-state outcome.
 
     ``record_episode`` is the public façade that returns only the demos
@@ -793,14 +794,14 @@ def _play_episode(
 def record_episode(
     demonstrator: str = "medium",
     opponent: str = "medium",
-    map_file: Optional[str] = None,
-    enabled_units: Optional[List[str]] = None,
+    map_file: str | None = None,
+    enabled_units: list[str] | None = None,
     max_turns: int = 200,
     fog_of_war: bool = False,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     demonstrator_player: int = 1,
     stochastic_tiebreak: bool = False,
-) -> List[Demonstration]:
+) -> list[Demonstration]:
     """Play one bot-vs-bot game and return demos from ``demonstrator_player``.
 
     The demonstrator and opponent share the same ``GameState``. The
@@ -831,14 +832,14 @@ def collect_demonstrations(
     n_episodes: int = 50,
     demonstrator: str = "medium",
     opponent: str = "medium",
-    map_file: Optional[str] = None,
-    enabled_units: Optional[List[str]] = None,
+    map_file: str | None = None,
+    enabled_units: list[str] | None = None,
     max_turns: int = 200,
     fog_of_war: bool = False,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     demonstrator_player: int = 1,
     progress: bool = False,
-    scenario_name: Optional[str] = None,
+    scenario_name: str | None = None,
     stochastic_tiebreak: bool = False,
 ) -> DemonstrationDataset:
     """Collect demonstrations from ``n_episodes`` bot-vs-bot games.
@@ -854,7 +855,7 @@ def collect_demonstrations(
     episode gets a different ``seed + ep`` rng, so N episodes produce
     N distinct trajectories instead of N copies of the same game.
     """
-    all_demos: List[Demonstration] = []
+    all_demos: list[Demonstration] = []
     stats = ScenarioStats(
         name=scenario_name or f"{demonstrator}_vs_{opponent}",
         demonstrator=demonstrator,
@@ -941,8 +942,8 @@ class DemonstrationScenario:
             compatibility (existing tests / tournaments unchanged).
     """
 
-    map_file: Optional[str] = None
-    enabled_units: Optional[List[str]] = None
+    map_file: str | None = None
+    enabled_units: list[str] | None = None
     demonstrator: str = "medium"
     opponent: str = "medium"
     n_episodes: int = 10
@@ -950,11 +951,11 @@ class DemonstrationScenario:
     fog_of_war: bool = False
     demonstrator_player: int = 1
     weight: float = 1.0
-    name: Optional[str] = None  # Free-form label used in logs only
+    name: str | None = None  # Free-form label used in logs only
     stochastic_tiebreak: bool = False
 
 
-def _grid_dims_from_map(map_file: Optional[str]) -> Tuple[int, int]:
+def _grid_dims_from_map(map_file: str | None) -> tuple[int, int]:
     """Return (width, height) for a map source matching the env's logic."""
     if map_file:
         map_data = FileIO.load_map(map_file)
@@ -1010,7 +1011,7 @@ def _resample_dataset(
     )
 
 
-def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
+def _concat_datasets(parts: list[DemonstrationDataset]) -> DemonstrationDataset:
     """Concatenate datasets that share the same dim_sizes and obs key set."""
     if not parts:
         raise ValueError("No datasets to concatenate")
@@ -1037,7 +1038,7 @@ def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
     obs = {k: np.concatenate([p.obs[k] for p in parts], axis=0) for k in ref.obs}
     actions = np.concatenate([p.actions for p in parts], axis=0)
     masks_concat = np.concatenate([p.masks_concat for p in parts], axis=0)
-    merged_stats: List[ScenarioStats] = []
+    merged_stats: list[ScenarioStats] = []
     for p in parts:
         merged_stats.extend(p.scenario_stats)
     return DemonstrationDataset(
@@ -1050,7 +1051,7 @@ def _concat_datasets(parts: List[DemonstrationDataset]) -> DemonstrationDataset:
 
 
 def collect_demonstrations_multi(
-    scenarios: List[DemonstrationScenario],
+    scenarios: list[DemonstrationScenario],
     seed: int = 0,
     progress: bool = False,
     shuffle: bool = True,
@@ -1094,7 +1095,7 @@ def collect_demonstrations_multi(
             )
 
     rng = np.random.default_rng(seed)
-    parts: List[DemonstrationDataset] = []
+    parts: list[DemonstrationDataset] = []
     for i, sc in enumerate(scenarios):
         scenario_seed = seed + 10_000 * (i + 1)
         if progress:
@@ -1160,7 +1161,7 @@ def collect_demonstrations_multi(
     return combined
 
 
-def format_scenario_stats_table(stats: List[ScenarioStats]) -> str:
+def format_scenario_stats_table(stats: list[ScenarioStats]) -> str:
     """Render a per-scenario W/L/D + avg_turns table as plain text.
 
     Designed for direct ``print()`` in notebooks. Columns: scenario name,
@@ -1212,7 +1213,7 @@ def format_scenario_stats_table(stats: List[ScenarioStats]) -> str:
     return "\n".join(lines)
 
 
-def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
+def load_scenarios_from_yaml(path: str) -> list[DemonstrationScenario]:
     """Parse a YAML file into a list of ``DemonstrationScenario``.
 
     Schema:
@@ -1235,7 +1236,7 @@ def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
     except ImportError as exc:
         raise ImportError("PyYAML is required to load scenario configs") from exc
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
 
     raw_list = cfg.get("scenarios", [])
@@ -1243,7 +1244,7 @@ def load_scenarios_from_yaml(path: str) -> List[DemonstrationScenario]:
         raise ValueError(f"{path}: top-level 'scenarios' must be a non-empty list")
 
     valid_keys = {f for f in DemonstrationScenario.__dataclass_fields__}
-    scenarios: List[DemonstrationScenario] = []
+    scenarios: list[DemonstrationScenario] = []
     for i, entry in enumerate(raw_list):
         if not isinstance(entry, dict):
             raise ValueError(f"{path}: scenarios[{i}] must be a mapping")
@@ -1288,8 +1289,8 @@ def behavior_clone(
     learning_rate: float = 3e-4,
     seed: int = 0,
     log_every: int = 1,
-    end_turn_weight: Optional[float] = None,
-) -> List[BCStats]:
+    end_turn_weight: float | None = None,
+) -> list[BCStats]:
     """Behavior-clone ``model.policy`` on ``dataset`` via masked cross-entropy.
 
     Only the policy (action) head is updated. The value head is left alone —
@@ -1357,7 +1358,7 @@ def behavior_clone(
     def _to_tensor(arr: np.ndarray) -> th.Tensor:
         return th.as_tensor(arr, device=device)
 
-    stats: List[BCStats] = []
+    stats: list[BCStats] = []
     for epoch in range(n_epochs):
         epoch_loss = 0.0
         epoch_correct_atype = 0
@@ -1443,18 +1444,18 @@ def make_warm_started_model(
     n_epochs: int = 5,
     demonstrator: str = "medium",
     opponent: str = "medium",
-    map_file: Optional[str] = None,
-    enabled_units: Optional[List[str]] = None,
+    map_file: str | None = None,
+    enabled_units: list[str] | None = None,
     max_turns: int = 200,
     fog_of_war: bool = False,
     batch_size: int = 64,
     learning_rate: float = 3e-4,
     seed: int = 0,
-    ppo_kwargs: Optional[Dict[str, Any]] = None,
-    scenarios: Optional[List[DemonstrationScenario]] = None,
-    end_turn_weight: Optional[float] = None,
+    ppo_kwargs: dict[str, Any] | None = None,
+    scenarios: list[DemonstrationScenario] | None = None,
+    end_turn_weight: float | None = None,
     stochastic_tiebreak: bool = False,
-) -> Tuple[Any, DemonstrationDataset, List[BCStats]]:
+) -> tuple[Any, DemonstrationDataset, list[BCStats]]:
     """Build a MaskablePPO model and warm-start it via behavior cloning.
 
     The ``env`` argument is the environment MaskablePPO will be trained on
@@ -1504,7 +1505,7 @@ def make_warm_started_model(
         )
         logger.info("Collected %d demonstrations across %d episodes", len(dataset), n_episodes)
 
-    default_ppo: Dict[str, Any] = {
+    default_ppo: dict[str, Any] = {
         "learning_rate": 3e-4,
         "n_steps": 2048,
         "batch_size": 64,
@@ -1555,10 +1556,10 @@ def evaluate_bc_against_bot_ladder(
     cfg: Any,
     *,
     n_episodes: int = 30,
-    opponents: Tuple[str, ...] = ("simple", "medium", "advanced"),
-    seed: Optional[int] = None,
+    opponents: tuple[str, ...] = ("simple", "medium", "advanced"),
+    seed: int | None = None,
     deterministic: bool = True,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Evaluate a BC checkpoint against scripted bots on the first stage's env.
 
     Designed to be called right after BC training to surface the BC
@@ -1609,7 +1610,7 @@ def evaluate_bc_against_bot_ladder(
 
     eval_seed = seed if seed is not None else cfg.seed + 7777
 
-    results: Dict[str, Dict[str, Any]] = {}
+    results: dict[str, dict[str, Any]] = {}
     for opp in opponents:
         env = make_stage_env(first_stage, cfg.env, opponent=opp, seed=eval_seed)
         try:

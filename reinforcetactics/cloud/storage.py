@@ -13,21 +13,22 @@ module without the optional dependency installed.
 
 import logging
 import os
+from collections.abc import Iterable, Mapping, MutableMapping
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Local output directories produced by the training entry points. These are all
 # git-ignored at the repo root; see ``.gitignore``.
-DEFAULT_OUTPUT_DIRS: Tuple[str, ...] = ("models", "checkpoints", "tensorboard", "logs")
+DEFAULT_OUTPUT_DIRS: tuple[str, ...] = ("models", "checkpoints", "tensorboard", "logs")
 
 # A manifest maps a local file path to its (mtime, size) signature so repeated
 # syncs can skip files that have not changed since the last upload.
-Manifest = MutableMapping[str, Tuple[float, int]]
+Manifest = MutableMapping[str, tuple[float, int]]
 
 
-def parse_gcs_uri(uri: str) -> Tuple[str, str]:
+def parse_gcs_uri(uri: str) -> tuple[str, str]:
     """Split a ``gs://bucket/prefix`` URI into ``(bucket, prefix)``.
 
     The returned prefix has no leading or trailing slash. Raises ``ValueError``
@@ -43,7 +44,7 @@ def parse_gcs_uri(uri: str) -> Tuple[str, str]:
     return bucket, prefix.strip("/")
 
 
-def resolve_output_base(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+def resolve_output_base(env: Mapping[str, str] | None = None) -> str | None:
     """Determine the GCS base URI to sync outputs to, or ``None`` if unset.
 
     Resolution order:
@@ -94,7 +95,7 @@ class GCSUploader:
         self,
         bucket_name: str,
         prefix: str = "",
-        credentials_file: Optional[str] = None,
+        credentials_file: str | None = None,
         client: Any = None,
     ):
         self.bucket_name = bucket_name
@@ -118,7 +119,7 @@ class GCSUploader:
             self._bucket = self._client.bucket(self.bucket_name)
         return self._bucket
 
-    def upload_file(self, local_path: str, remote_path: Optional[str] = None) -> Optional[str]:
+    def upload_file(self, local_path: str, remote_path: str | None = None) -> str | None:
         """Upload a single file, returning its ``gs://`` URI or ``None`` on failure."""
         try:
             bucket = self._get_bucket()
@@ -134,8 +135,8 @@ class GCSUploader:
     def upload_directory(
         self,
         local_dir: str,
-        remote_prefix: Optional[str] = None,
-        manifest: Optional[Manifest] = None,
+        remote_prefix: str | None = None,
+        manifest: Manifest | None = None,
     ) -> int:
         """Recursively upload files under ``local_dir``; return the count uploaded.
 
@@ -165,7 +166,7 @@ class GCSUploader:
         return uploaded
 
 
-def _file_signature(path: Path) -> Optional[Tuple[float, int]]:
+def _file_signature(path: Path) -> tuple[float, int] | None:
     """Return a cheap ``(mtime, size)`` change-signature for ``path``."""
     try:
         st = path.stat()
@@ -175,10 +176,10 @@ def _file_signature(path: Path) -> Optional[Tuple[float, int]]:
 
 
 def _make_uploader(
-    base_uri: Optional[str],
-    credentials_file: Optional[str],
+    base_uri: str | None,
+    credentials_file: str | None,
     client: Any,
-) -> Optional[GCSUploader]:
+) -> GCSUploader | None:
     """Build a :class:`GCSUploader` for ``base_uri`` or return ``None`` to skip.
 
     Returns ``None`` (a no-op for callers) when ``base_uri`` is falsy, not a valid
@@ -199,13 +200,13 @@ def _make_uploader(
 
 
 def sync_directories(
-    base_uri: Optional[str],
+    base_uri: str | None,
     dirs: Iterable[str] = DEFAULT_OUTPUT_DIRS,
     root: str = ".",
-    credentials_file: Optional[str] = None,
+    credentials_file: str | None = None,
     client: Any = None,
-    manifest: Optional[Manifest] = None,
-) -> Dict[str, int]:
+    manifest: Manifest | None = None,
+) -> dict[str, int]:
     """Upload local output directories to ``base_uri/<dir>/``.
 
     Each entry in ``dirs`` is uploaded (if it exists locally) to a same-named
@@ -219,7 +220,7 @@ def sync_directories(
     if uploader is None:
         return {}
 
-    results: Dict[str, int] = {}
+    results: dict[str, int] = {}
     for name in dirs:
         local_dir = os.path.join(root, name)
         if not os.path.isdir(local_dir):
@@ -232,8 +233,8 @@ def sync_directories(
 
 def upload_tree(
     local_dir: str,
-    dest_uri: Optional[str],
-    credentials_file: Optional[str] = None,
+    dest_uri: str | None,
+    credentials_file: str | None = None,
     client: Any = None,
 ) -> int:
     """Upload an entire local directory tree to a ``gs://`` destination.

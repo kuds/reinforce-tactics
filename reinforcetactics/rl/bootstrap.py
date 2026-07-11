@@ -35,14 +35,15 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any
 
 from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
 
-ConfigPath = Union[str, Path]
+ConfigPath = str | Path
 
 
 class CurriculumStalled(RuntimeError):
@@ -73,8 +74,8 @@ class CurriculumStalled(RuntimeError):
         achieved_win_rate: float,
         threshold: float,
         timesteps: int,
-        history: Optional[List[Dict[str, Any]]] = None,
-        final_model_path: Optional[str] = None,
+        history: list[dict[str, Any]] | None = None,
+        final_model_path: str | None = None,
         metrics_callback: Any = None,
     ) -> None:
         self.stage_name = stage_name
@@ -90,7 +91,7 @@ class CurriculumStalled(RuntimeError):
             f"threshold {threshold:.1%}"
         )
 
-    def partial_result(self) -> Dict[str, Any]:
+    def partial_result(self) -> dict[str, Any]:
         """Return the same dict shape ``run_curriculum`` returns on success.
 
         Notebook diagnostics / video helpers consume that shape, so
@@ -189,7 +190,7 @@ def _read_map_dims(map_file: str) -> tuple[int, int]:
     return int(height), int(width)
 
 
-def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> Optional[tuple[int, int]]:
+def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> tuple[int, int] | None:
     """Resolve ``cfg.env.pad_to_size`` for cross-stage obs unification.
 
     Behaviour:
@@ -257,7 +258,7 @@ def _resolve_dotted(path: str) -> Any:
     return getattr(module, attr)
 
 
-def _resolve_policy_kwargs(policy_kwargs: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _resolve_policy_kwargs(policy_kwargs: dict[str, Any] | None) -> dict[str, Any] | None:
     """Resolve any string-valued class references inside ``policy_kwargs``.
 
     Currently handles ``features_extractor_class`` (the only key whose
@@ -292,7 +293,7 @@ def _default_model_factory(vec_env, cfg: TrainingConfig, output_dir: Path):
     )
 
 
-def _print_policy_summary(model: Any, output_dir: Optional[Path] = None) -> None:
+def _print_policy_summary(model: Any, output_dir: Path | None = None) -> None:
     """One-time diagnostic: report what the SB3 ``MultiInputPolicy`` actually
     built so we can verify the post-#268 (6, 6, 12) observation isn't being
     flattened past its spatial structure.
@@ -315,7 +316,7 @@ def _print_policy_summary(model: Any, output_dir: Optional[Path] = None) -> None
     """
     try:
         policy = model.policy
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "policy_class": type(policy).__name__,
             "extractors": {},
             "param_counts": {},
@@ -339,7 +340,7 @@ def _print_policy_summary(model: Any, output_dir: Optional[Path] = None) -> None
             summary["param_counts"]["features_extractor"] = ext_params
             print(f"  features_extractor params: {ext_params:,}")
 
-        def _count(module_attr: str) -> Optional[int]:
+        def _count(module_attr: str) -> int | None:
             module = getattr(policy, module_attr, None)
             if module is None:
                 return None
@@ -417,7 +418,7 @@ def _write_run_status(
     try:
         payload = {
             "status": status,
-            "written_at": datetime.now(timezone.utc).isoformat(),
+            "written_at": datetime.now(UTC).isoformat(),
             **fields,
         }
         (Path(output_dir) / "run_status.json").write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -433,9 +434,9 @@ def _write_stage_config(
     output_dir: Path,
     promoted: bool,
     best_win_rate: float,
-    best_checkpoint_timestep: Optional[int] = None,
-    best_checkpoint_stage_steps: Optional[int] = None,
-    warm_start_info: Optional[Dict[str, Any]] = None,
+    best_checkpoint_timestep: int | None = None,
+    best_checkpoint_stage_steps: int | None = None,
+    warm_start_info: dict[str, Any] | None = None,
 ) -> None:
     """Write ``stage_dir / config.json`` describing the stage's resolved settings.
 
@@ -455,7 +456,7 @@ def _write_stage_config(
     if purchase_eps_schedule is not None:
         ppo_resolved["purchase_explore_eps_schedule"] = purchase_eps_schedule
 
-    env_resolved: Dict[str, Any] = {
+    env_resolved: dict[str, Any] = {
         "map_file": stage.map_file,
         "max_steps": stage.resolve_max_steps(cfg.env),
         "max_turns": stage.resolve_max_turns(cfg.env),
@@ -533,7 +534,7 @@ _RESULTS_CSV_COLUMNS = (
 )
 
 
-def _write_results_csv(history: Sequence[Dict[str, Any]], csv_path: Path) -> None:
+def _write_results_csv(history: Sequence[dict[str, Any]], csv_path: Path) -> None:
     """Flatten ``history`` into ``bootstrap_results.csv``.
 
     One row per (stage, eval): the stage's ``map_file`` and ``opponent`` are
@@ -562,11 +563,11 @@ def run_curriculum(
     cfg: TrainingConfig,
     output_dir: ConfigPath,
     *,
-    train_env_factory: Optional[Callable[[CurriculumStage, TrainingConfig], Any]] = None,
-    eval_env_factory: Optional[Callable[[CurriculumStage, TrainingConfig], Any]] = None,
-    model_factory: Optional[Callable[..., Any]] = None,
+    train_env_factory: Callable[[CurriculumStage, TrainingConfig], Any] | None = None,
+    eval_env_factory: Callable[[CurriculumStage, TrainingConfig], Any] | None = None,
+    model_factory: Callable[..., Any] | None = None,
     progress_bar: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Train through every stage in ``cfg.curriculum.stages``.
 
     Args:
@@ -622,7 +623,7 @@ def run_curriculum(
     model_factory = model_factory or _default_model_factory
 
     metrics_callback = TrainingMetricsCallback()
-    history: List[Dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
     model = None
     # Provenance of the warm-start checkpoint, filled in the first time
     # the model is built. Captured here (rather than re-derived at each
@@ -631,7 +632,7 @@ def run_curriculum(
     # run_status.json. ``used`` distinguishes "no warm_start_path set"
     # from "warm_start_path set but load skipped" -- if either grows a
     # branch, the metadata stays accurate without code changes here.
-    warm_start_info: Dict[str, Any] = {"used": False, "path": None, "sha256": None}
+    warm_start_info: dict[str, Any] = {"used": False, "path": None, "sha256": None}
 
     for stage in cfg.curriculum.stages:
         stage_dir = output_dir / stage.name
@@ -752,7 +753,7 @@ def run_curriculum(
             patience=stage.patience,
             min_timesteps=stage.min_timesteps_before_promotion,
         )
-        callbacks: List[Any] = [metrics_callback, eval_cb, promote_cb]
+        callbacks: list[Any] = [metrics_callback, eval_cb, promote_cb]
         if ent_schedule is not None:
             # Schedule annealing covers the full stage budget; if the
             # stage promotes early ``learn()`` returns before the
@@ -910,7 +911,7 @@ def run_curriculum(
             # eval / hand-off, the same way they'd load a finished
             # ``final_model.zip``. Best-effort: a save failure here
             # shouldn't mask the underlying stall reason.
-            stalled_final_path: Optional[str] = None
+            stalled_final_path: str | None = None
             try:
                 final_path = output_dir / "final_model.zip"
                 assert model is not None
@@ -1016,8 +1017,8 @@ def make_stage_env(
     env_cfg: Any,
     *,
     seed: int,
-    opponent: Optional[str] = None,
-    opponent_kwargs: Optional[Dict[str, Any]] = None,
+    opponent: str | None = None,
+    opponent_kwargs: dict[str, Any] | None = None,
 ) -> Any:
     """Build a ``make_maskable_env`` matching the production env for a stage.
 
@@ -1081,8 +1082,8 @@ def make_stage_env(
 
 def record_curriculum_replays(
     cfg: TrainingConfig,
-    stage_checkpoints: Dict[str, Dict[str, Any]],
-    videos_dir: Union[str, Path],
+    stage_checkpoints: dict[str, dict[str, Any]],
+    videos_dir: str | Path,
     *,
     seed_offset: int = 12345,
     fps: int = 4,
@@ -1090,7 +1091,7 @@ def record_curriculum_replays(
     use_pixel_art: bool = True,
     deterministic: bool = True,
     prefer_best: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Record one replay video per stage checkpoint on the stage's env.
 
     For each entry in ``stage_checkpoints`` (the dict produced by the
@@ -1150,7 +1151,7 @@ def record_curriculum_replays(
     videos_dir.mkdir(parents=True, exist_ok=True)
 
     stages_by_name = {s.name: s for s in cfg.curriculum.stages}
-    summaries: List[Dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
 
     for stage_name, meta in stage_checkpoints.items():
         # Prefer the best-by-WR snapshot when available; the final

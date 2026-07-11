@@ -30,8 +30,9 @@ Usage:
 import logging
 import random
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -61,7 +62,7 @@ class OpponentPool:
         selection_strategy: How to select opponents ('uniform', 'recent', 'prioritized')
     """
 
-    def __init__(self, max_size: int = 10, selection_strategy: str = "uniform", save_dir: Optional[str] = None):
+    def __init__(self, max_size: int = 10, selection_strategy: str = "uniform", save_dir: str | None = None):
         """
         Initialize the opponent pool.
 
@@ -76,7 +77,7 @@ class OpponentPool:
         self.save_dir = Path(save_dir) if save_dir else None
         self.models: deque = deque(maxlen=max_size)
         self.metadata: deque = deque(maxlen=max_size)
-        self._selection_weights: List[float] = []
+        self._selection_weights: list[float] = []
 
         if self.save_dir:
             self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -108,7 +109,7 @@ class OpponentPool:
             except Exception as exc:
                 logger.warning("Failed to save opponent to disk: %s", exc)
 
-    def _copy_model_params(self, model: Any) -> Dict[str, np.ndarray]:
+    def _copy_model_params(self, model: Any) -> dict[str, np.ndarray]:
         """Create a lightweight copy of model parameters."""
         try:
             # For SB3 models, get policy parameters
@@ -120,7 +121,7 @@ class OpponentPool:
             logger.warning("Could not copy model params: %s", exc)
             return {}
 
-    def _load_model_params(self, model: Any, params: Dict[str, np.ndarray]) -> None:
+    def _load_model_params(self, model: Any, params: dict[str, np.ndarray]) -> None:
         """Load parameters into a model's policy."""
         try:
             import torch
@@ -154,7 +155,7 @@ class OpponentPool:
             total = sum(weights)
             self._selection_weights = [w / total for w in weights]
 
-    def sample_opponent(self) -> Optional[Dict[str, np.ndarray]]:
+    def sample_opponent(self) -> dict[str, np.ndarray] | None:
         """
         Sample an opponent from the pool.
 
@@ -168,7 +169,7 @@ class OpponentPool:
 
         return self.models[idx]
 
-    def sample_opponent_with_metadata(self) -> Optional[Tuple[Dict, Dict]]:
+    def sample_opponent_with_metadata(self) -> tuple[dict, dict] | None:
         """Sample an opponent and return with metadata."""
         if not self.models:
             return None
@@ -244,8 +245,8 @@ class SelfPlayEnv(gym.Wrapper):
     def __init__(
         self,
         env: StrategyGameEnv,
-        opponent_model: Optional[Any] = None,
-        opponent_pool: Optional[OpponentPool] = None,
+        opponent_model: Any | None = None,
+        opponent_pool: OpponentPool | None = None,
         swap_players: bool = True,
         opponent_deterministic: bool = False,
     ):
@@ -267,7 +268,7 @@ class SelfPlayEnv(gym.Wrapper):
 
         # Track which player the learning agent controls
         self.agent_player = 1
-        self._opponent_params: Optional[Dict] = None
+        self._opponent_params: dict | None = None
 
         # Statistics
         self.stats = {"agent_wins": 0, "opponent_wins": 0, "draws": 0, "total_games": 0}
@@ -299,7 +300,7 @@ class SelfPlayEnv(gym.Wrapper):
             except Exception as exc:
                 logger.warning("Could not copy current model params: %s", exc)
 
-    def _get_opponent_action(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
+    def _get_opponent_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
         """
         Get opponent's action using the opponent model.
 
@@ -367,7 +368,7 @@ class SelfPlayEnv(gym.Wrapper):
 
         return np.array(action)
 
-    def _flip_observation(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def _flip_observation(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """
         Build an observation from the opponent's perspective.
 
@@ -394,7 +395,7 @@ class SelfPlayEnv(gym.Wrapper):
         del obs  # See docstring; rebuilt from game state instead.
         return self._build_obs_for_player(3 - self.agent_player)
 
-    def _build_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
+    def _build_obs_for_player(self, player: int) -> dict[str, np.ndarray]:
         """Build a fresh observation from ``player``'s perspective.
 
         Delegates to the shared ``build_observation`` helper so FOW handling
@@ -470,7 +471,7 @@ class SelfPlayEnv(gym.Wrapper):
         if game_state.current_player == opponent_player and not game_state.game_over:
             game_state.end_turn()
 
-    def _get_obs_for_player(self, player: int) -> Dict[str, np.ndarray]:
+    def _get_obs_for_player(self, player: int) -> dict[str, np.ndarray]:
         """Get observation from a specific player's perspective.
 
         For the agent, this returns the env's standard observation. For the
@@ -482,7 +483,7 @@ class SelfPlayEnv(gym.Wrapper):
             return self.env._get_obs()
         return self._build_obs_for_player(player)
 
-    def step(self, action) -> Tuple[Dict, float, bool, bool, Dict]:
+    def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         """
         Execute agent's action and then opponent's turn.
 
@@ -523,7 +524,7 @@ class SelfPlayEnv(gym.Wrapper):
 
         return obs, reward, terminated, truncated, info
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict, Dict]:
+    def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
         """
         Reset the environment.
 
@@ -548,7 +549,7 @@ class SelfPlayEnv(gym.Wrapper):
 
         return obs, info
 
-    def action_masks(self) -> Tuple[np.ndarray, ...]:
+    def action_masks(self) -> tuple[np.ndarray, ...]:
         """Get action masks for agent."""
         # Check if wrapped env has get_action_masks_tuple (ActionMaskedEnv)
         if hasattr(self.env, "get_action_masks_tuple"):
@@ -593,7 +594,7 @@ def _make_callback_class():
 
         def __init__(
             self,
-            env: Union[SelfPlayEnv, Any],
+            env: SelfPlayEnv | Any,
             update_freq: int = 10000,
             add_to_pool_freq: int = 50000,
             min_win_rate_for_pool: float = 0.55,
@@ -623,7 +624,7 @@ def _make_callback_class():
             self.add_to_pool_freq = add_to_pool_freq
             self.min_win_rate_for_pool = min_win_rate_for_pool
 
-        def _get_self_play_envs(self) -> List[SelfPlayEnv]:
+        def _get_self_play_envs(self) -> list[SelfPlayEnv]:
             """Get all SelfPlayEnv instances from the environment."""
             envs = []
 
@@ -697,12 +698,12 @@ SelfPlayCallback = _make_callback_class()
 
 
 def make_self_play_env(
-    map_file: Optional[str] = None,
+    map_file: str | None = None,
     max_steps: int = 500,
-    reward_config: Optional[Dict[str, float]] = None,
-    opponent_pool: Optional[OpponentPool] = None,
+    reward_config: dict[str, float] | None = None,
+    opponent_pool: OpponentPool | None = None,
     swap_players: bool = True,
-    enabled_units: Optional[List[str]] = None,
+    enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
 ) -> SelfPlayEnv:
@@ -757,12 +758,12 @@ def make_self_play_env(
 def _make_self_play_env_fn(
     rank: int,
     seed: int,
-    map_file: Optional[str],
+    map_file: str | None,
     max_steps: int,
-    reward_config: Optional[Dict[str, float]],
-    opponent_pool: Optional[OpponentPool],
+    reward_config: dict[str, float] | None,
+    opponent_pool: OpponentPool | None,
     swap_players: bool,
-    enabled_units: Optional[List[str]],
+    enabled_units: list[str] | None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
 ) -> Callable[[], SelfPlayEnv]:
@@ -791,14 +792,14 @@ def _make_self_play_env_fn(
 
 def make_self_play_vec_env(
     n_envs: int = 4,
-    map_file: Optional[str] = None,
+    map_file: str | None = None,
     max_steps: int = 500,
-    reward_config: Optional[Dict[str, float]] = None,
+    reward_config: dict[str, float] | None = None,
     seed: int = 0,
     use_subprocess: bool = True,
-    opponent_pool: Optional[OpponentPool] = None,
+    opponent_pool: OpponentPool | None = None,
     swap_players: bool = True,
-    enabled_units: Optional[List[str]] = None,
+    enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
 ):

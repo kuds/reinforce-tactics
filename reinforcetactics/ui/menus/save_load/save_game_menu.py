@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pygame
 
@@ -14,7 +14,7 @@ from reinforcetactics.utils.language import get_language
 class SaveGameMenu(Menu):
     """Menu for saving the game."""
 
-    def __init__(self, game: Any, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, game: Any, screen: pygame.Surface | None = None) -> None:
         """
         Initialize save game menu.
 
@@ -31,7 +31,7 @@ class SaveGameMenu(Menu):
         """Current save-name text (kept for backward compatibility)."""
         return self.name_input.text
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[str]:
+    def handle_input(self, event: pygame.event.Event) -> str | None:
         """Handle keyboard input for filename entry."""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
@@ -44,7 +44,7 @@ class SaveGameMenu(Menu):
 
         return None
 
-    def _save_game(self) -> Optional[str]:
+    def _save_game(self) -> str | None:
         """Save the game with current filename."""
         # Ensure saves directory exists
         saves_dir = Path("saves")
@@ -53,7 +53,7 @@ class SaveGameMenu(Menu):
         filepath = self.game.save_to_file(f"saves/{self.input_text}.json")
         return filepath
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """
         Run save game menu.
 

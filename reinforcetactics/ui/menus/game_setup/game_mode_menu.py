@@ -1,7 +1,6 @@
 """Menu for selecting game mode."""
 
 import os
-from typing import List, Optional
 
 import pygame
 
@@ -12,7 +11,7 @@ from reinforcetactics.utils.language import get_language
 class GameModeMenu(Menu):
     """Menu for selecting game mode (1v1 or 2v2)."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps") -> None:
+    def __init__(self, screen: pygame.Surface | None = None, maps_dir: str = "maps") -> None:
         """
         Initialize game mode menu.
 
@@ -22,7 +21,7 @@ class GameModeMenu(Menu):
         """
         super().__init__(screen, get_language().get("new_game.select_mode", "Select Game Mode"))
         self.maps_dir = maps_dir
-        self.available_modes: List[str] = []
+        self.available_modes: list[str] = []
         self._load_modes()
         self._setup_options()
 
@@ -51,7 +50,7 @@ class GameModeMenu(Menu):
             self.add_option(mode, make_callback)
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """
         Run game mode selection menu.
 

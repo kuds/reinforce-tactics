@@ -8,7 +8,7 @@ version = "0.3.3"
 description = "A turn-based strategy game built with Pygame and Gymnasium for reinforcement learning research"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "kuds" },
 ]
@@ -17,9 +17,9 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Games/Entertainment :: Turn Based Strategy",
 ]
@@ -78,11 +78,11 @@ include = ["reinforcetactics*"]
 exclude = ["tests*", "docs*", "docs-site*", "examples*", "notebooks*", "scripts*", "docker*", "maps*"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 127
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "C90", "I"]
+select = ["E", "F", "W", "C90", "I", "UP"]
 ignore = [
     "E501",   # line too long (handled by formatter)
     "C901",   # function complexity - tracked but not blocking
@@ -95,7 +95,7 @@ ignore = [
 max-complexity = 10
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false

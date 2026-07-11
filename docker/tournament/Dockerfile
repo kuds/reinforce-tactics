@@ -1,7 +1,7 @@
 # Dockerfile for Reinforce Tactics Tournament Runner
 # This is a lightweight container for running bot tournaments (no GPU required)
 
-FROM python:3.10-slim
+FROM python:3.13-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -19,9 +19,7 @@ RUN pip3 install --no-cache-dir \
     gymnasium \
     pettingzoo \
     numpy \
-    pandas \
-    argparse \
-    typing-extensions
+    pandas
 
 # Install LLM provider SDKs
 RUN pip3 install --no-cache-dir \

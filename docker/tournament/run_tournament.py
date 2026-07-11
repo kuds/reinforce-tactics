@@ -26,7 +26,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, "/app")
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class GCSUploader:
     """Handles uploading files to Google Cloud Storage."""
 
-    def __init__(self, bucket_name: str, prefix: str = "", credentials_file: Optional[str] = None):
+    def __init__(self, bucket_name: str, prefix: str = "", credentials_file: str | None = None):
         """
         Initialize GCS uploader.
 
@@ -84,7 +84,7 @@ class GCSUploader:
                 raise
         return self._client
 
-    def upload_file(self, local_path: str, remote_path: Optional[str] = None) -> Optional[str]:
+    def upload_file(self, local_path: str, remote_path: str | None = None) -> str | None:
         """Upload a file to GCS."""
         try:
             self._get_client()
@@ -104,7 +104,7 @@ class GCSUploader:
             logger.warning(f"Failed to upload {local_path} to GCS: {e}")
             return None
 
-    def upload_directory(self, local_dir: str, remote_prefix: Optional[str] = None) -> int:
+    def upload_directory(self, local_dir: str, remote_prefix: str | None = None) -> int:
         """Upload all files in a directory to GCS."""
         uploaded = 0
         local_path = Path(local_dir)
@@ -128,7 +128,7 @@ class GCSUploader:
         return uploaded
 
 
-def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchInfo]]:
+def scan_completed_matches(resume_folder: str) -> dict[str, list[CompletedMatchInfo]]:
     """
     Scan a folder for completed match replay files.
 
@@ -138,7 +138,7 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
     Returns:
         Dictionary mapping matchup keys to list of completed matches
     """
-    completed: Dict[str, List[CompletedMatchInfo]] = defaultdict(list)
+    completed: dict[str, list[CompletedMatchInfo]] = defaultdict(list)
     resume_path = Path(resume_folder)
 
     if not resume_path.exists():
@@ -152,7 +152,7 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
         resume_path / "output" / "replays",
     ]
 
-    replay_files: List[Path] = []
+    replay_files: list[Path] = []
     for search_path in search_paths:
         if search_path.exists():
             replay_files.extend(search_path.rglob("game_*.json"))
@@ -161,7 +161,7 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
 
     for replay_file in replay_files:
         try:
-            with open(replay_file, "r") as f:
+            with open(replay_file) as f:
                 data = json.load(f)
 
             game_info = data.get("game_info", {})
@@ -195,9 +195,9 @@ def scan_completed_matches(resume_folder: str) -> Dict[str, List[CompletedMatchI
     return completed
 
 
-def load_config(config_path: str) -> Dict[str, Any]:
+def load_config(config_path: str) -> dict[str, Any]:
     """Load and validate tournament configuration."""
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
 
     if "tournament" not in config:
@@ -210,7 +210,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
-def create_bots_from_config(config: Dict[str, Any]) -> List[BotDescriptor]:
+def create_bots_from_config(config: dict[str, Any]) -> list[BotDescriptor]:
     """Create BotDescriptor instances from config."""
     bots = []
 

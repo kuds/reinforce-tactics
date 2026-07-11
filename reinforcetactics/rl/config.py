@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any
 
 try:
     import yaml  # type: ignore
@@ -33,19 +34,19 @@ except ImportError:  # pragma: no cover - yaml is a required dev dep
     yaml = None
 
 
-ConfigPath = Union[str, Path]
+ConfigPath = str | Path
 
 
 @dataclass
 class EnvConfig:
     """Environment construction parameters."""
 
-    map_file: Optional[str] = None
+    map_file: str | None = None
     opponent: str = "bot"
     max_steps: int = 200
-    max_turns: Optional[int] = None
+    max_turns: int | None = None
     fog_of_war: bool = False
-    enabled_units: Optional[List[str]] = None
+    enabled_units: list[str] | None = None
     action_space_type: str = "multi_discrete"
     max_flat_actions: int = 512
     # Optional hard cap on agent actions per game-turn. When set, the
@@ -55,8 +56,8 @@ class EnvConfig:
     # legal-but-unproductive actions until ``max_steps`` truncates the
     # episode. ``None`` (default) disables the cap. See
     # :class:`reinforcetactics.rl.gym_env.StrategyGameEnv` for details.
-    max_actions_per_turn: Optional[int] = None
-    reward_config: Optional[Dict[str, float]] = None
+    max_actions_per_turn: int | None = None
+    reward_config: dict[str, float] | None = None
     # Optional sparse overlay over the non-YAML engine constants
     # (``constants.py``): ``starting_gold``, ``headquarters_income``,
     # ``building_income``, ``tower_income``, and ``unit_data``
@@ -66,7 +67,7 @@ class EnvConfig:
     # an invisible engine constant that only a git checkout could change.
     # Resolved by ``GameState`` (its tables are the per-game source of
     # truth) and snapshotted into ``config.json``.
-    engine_overrides: Optional[Dict[str, Any]] = None
+    engine_overrides: dict[str, Any] | None = None
     n_envs: int = 4
     use_subprocess: bool = True
     # Optional ``(pad_h, pad_w)`` for cross-stage observation-shape unification.
@@ -75,7 +76,7 @@ class EnvConfig:
     # train across all stages without an observation-space mismatch. Set
     # explicitly to override the auto-computed value (e.g. to leave headroom
     # for a future larger map). Only honoured by ``flat_discrete``.
-    pad_to_size: Optional[Tuple[int, int]] = None
+    pad_to_size: tuple[int, int] | None = None
     # ``global_features`` tanh normalization divisors. Defaults match the
     # module-level constants in ``reinforcetactics.rl.observation`` and
     # are tuned for the current curriculum's gold / turn / army-size
@@ -90,7 +91,7 @@ class EnvConfig:
     # p_hard: 0.5}`` for ``MixedBot``). For the curriculum bootstrap path the
     # per-stage :attr:`CurriculumStage.opponent_kwargs` takes precedence; for
     # non-curriculum runs (feudal, flat baseline) this is the only knob.
-    opponent_kwargs: Optional[Dict[str, Any]] = None
+    opponent_kwargs: dict[str, Any] | None = None
 
 
 @dataclass
@@ -117,7 +118,7 @@ class PPOConfig:
     # ``net_arch`` (e.g. ``{"net_arch": {"pi": [256, 256], "vf": [256, 256]}}``)
     # or wire in a custom features extractor. ``None`` keeps SB3's defaults
     # (MlpPolicy: ``[64, 64]``; CombinedExtractor for Dict obs spaces).
-    policy_kwargs: Optional[Dict[str, Any]] = None
+    policy_kwargs: dict[str, Any] | None = None
     # Probability with which a sampled ``create_unit`` action has its
     # ``unit_type`` sub-action resampled uniformly over the env's
     # currently-legal (enabled + affordable) unit types. Pure exploration
@@ -128,7 +129,7 @@ class PPOConfig:
     # Per-stage overrides live on :class:`CurriculumStage`.
     purchase_explore_eps: float = 0.0
 
-    def as_sb3_kwargs(self) -> Dict[str, Any]:
+    def as_sb3_kwargs(self) -> dict[str, Any]:
         """Return the subset of fields accepted by PPO/MaskablePPO __init__."""
         # Both feudal-only (``lr_schedule``) and PPO-bootstrap-only
         # (``purchase_explore_eps``) fields need to be filtered before
@@ -253,15 +254,15 @@ class CurriculumStage:
     min_timesteps_before_promotion: int = 0
     n_eval_episodes: int = 30
     # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
-    max_steps: Optional[int] = None
-    max_turns: Optional[int] = None
-    ent_coef: Optional[Union[float, Dict[str, Any]]] = None
-    reward_config: Optional[Dict[str, float]] = None
-    opponent_kwargs: Optional[Dict[str, Any]] = None
+    max_steps: int | None = None
+    max_turns: int | None = None
+    ent_coef: float | dict[str, Any] | None = None
+    reward_config: dict[str, float] | None = None
+    opponent_kwargs: dict[str, Any] | None = None
     # Per-stage override for ``ppo.purchase_explore_eps``. Constant float
     # or a ``{start, end, schedule}`` mapping (same layout as ``ent_coef``)
     # that drives :class:`PurchaseExploreScheduleCallback`.
-    purchase_explore_eps: Optional[Union[float, Dict[str, Any]]] = None
+    purchase_explore_eps: float | dict[str, Any] | None = None
 
     def validate(self) -> None:
         if not self.name:
@@ -364,13 +365,13 @@ class CurriculumStage:
                 f"stage '{self.name}': opponent_kwargs override must be a mapping, got {type(self.opponent_kwargs).__name__}"
             )
 
-    def resolve_max_steps(self, env: "EnvConfig") -> int:
+    def resolve_max_steps(self, env: EnvConfig) -> int:
         return self.max_steps if self.max_steps is not None else env.max_steps
 
-    def resolve_max_turns(self, env: "EnvConfig") -> Optional[int]:
+    def resolve_max_turns(self, env: EnvConfig) -> int | None:
         return self.max_turns if self.max_turns is not None else env.max_turns
 
-    def resolve_ent_coef(self, ppo: "PPOConfig") -> float:
+    def resolve_ent_coef(self, ppo: PPOConfig) -> float:
         """Return the *initial* entropy coefficient for the stage.
 
         For a constant override this is the value itself; for a schedule
@@ -383,7 +384,7 @@ class CurriculumStage:
             return float(self.ent_coef["start"])
         return float(self.ent_coef)
 
-    def resolve_ent_coef_schedule(self) -> Optional[Dict[str, Any]]:
+    def resolve_ent_coef_schedule(self) -> dict[str, Any] | None:
         """Return ``{start, end, schedule}`` if ``ent_coef`` is a mapping, else ``None``.
 
         ``None`` means a constant coefficient (no callback installed); a
@@ -398,7 +399,7 @@ class CurriculumStage:
             }
         return None
 
-    def resolve_purchase_explore_eps(self, ppo: "PPOConfig") -> float:
+    def resolve_purchase_explore_eps(self, ppo: PPOConfig) -> float:
         """Return the *initial* purchase-exploration ε for the stage.
 
         Mirrors :meth:`resolve_ent_coef`: a constant override returns its
@@ -412,7 +413,7 @@ class CurriculumStage:
             return float(self.purchase_explore_eps["start"])
         return float(self.purchase_explore_eps)
 
-    def resolve_purchase_explore_eps_schedule(self) -> Optional[Dict[str, Any]]:
+    def resolve_purchase_explore_eps_schedule(self) -> dict[str, Any] | None:
         """Return ``{start, end, schedule}`` if the override is a mapping, else ``None``."""
         if isinstance(self.purchase_explore_eps, Mapping):
             return {
@@ -422,7 +423,7 @@ class CurriculumStage:
             }
         return None
 
-    def resolve_reward_config(self, env: "EnvConfig") -> Optional[Dict[str, float]]:
+    def resolve_reward_config(self, env: EnvConfig) -> dict[str, float] | None:
         """Return the reward config to use for this stage.
 
         Per-stage overrides are merged on top of ``env.reward_config``,
@@ -440,7 +441,7 @@ class CurriculumStage:
 class CurriculumConfig:
     """Curriculum-bootstrap configuration: an ordered list of stages."""
 
-    stages: List[CurriculumStage] = field(default_factory=list)
+    stages: list[CurriculumStage] = field(default_factory=list)
     # When True (default), after a stage promotes its best-by-WR
     # checkpoint (``<stage>/best_model.zip``) is reloaded into the
     # in-memory model before the next stage starts, instead of
@@ -487,7 +488,7 @@ class LoggingConfig:
     log_dir: str = "./logs"
     wandb: bool = False
     wandb_project: str = "reinforcetactics"
-    wandb_entity: Optional[str] = None
+    wandb_entity: str | None = None
     tensorboard: bool = True
 
 
@@ -506,7 +507,7 @@ class TrainingConfig:
     # observation/action spaces must match the curriculum's resolved
     # spaces (same pad_to_size, same enabled_units, same
     # action_space_type). None = cold start from random init.
-    warm_start_path: Optional[str] = None
+    warm_start_path: str | None = None
     env: EnvConfig = field(default_factory=EnvConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
     feudal: FeudalConfig = field(default_factory=FeudalConfig)
@@ -548,7 +549,7 @@ class TrainingConfig:
             raise ValueError("self_play.min_win_rate_for_pool must be in [0, 1]")
         self.curriculum.validate()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict (suitable for JSON/YAML dumping)."""
         return asdict(self)
 
@@ -579,7 +580,7 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
     if not isinstance(raw_stages, list):
         raise TypeError(f"'curriculum.stages' must be a list, got {type(raw_stages).__name__}")
     stage_fields = {f.name for f in fields(CurriculumStage)}
-    stages: List[CurriculumStage] = []
+    stages: list[CurriculumStage] = []
     for i, s in enumerate(raw_stages):
         if not isinstance(s, Mapping):
             raise TypeError(f"curriculum.stages[{i}] must be a mapping, got {type(s).__name__}")
@@ -589,7 +590,7 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
                 f"Unknown keys for CurriculumStage at index {i}: {sorted(unknown_stage)}. Valid keys: {sorted(stage_fields)}"
             )
         stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
-    kwargs: Dict[str, Any] = {"stages": stages}
+    kwargs: dict[str, Any] = {"stages": stages}
     if "restore_best_checkpoint_between_stages" in raw:
         kwargs["restore_best_checkpoint_between_stages"] = bool(raw["restore_best_checkpoint_between_stages"])
     return CurriculumConfig(**kwargs)
@@ -622,7 +623,7 @@ def config_from_dict(data: Mapping[str, Any]) -> TrainingConfig:
     if unknown:
         raise ValueError(f"Unknown top-level keys: {sorted(unknown)}. Valid keys: {sorted(valid_keys)}")
 
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     for key in top_level_scalars:
         if key in data:
             kwargs[key] = data[key]
@@ -634,7 +635,7 @@ def config_from_dict(data: Mapping[str, Any]) -> TrainingConfig:
     return cfg
 
 
-def _read_config_file(path: Path) -> Dict[str, Any]:
+def _read_config_file(path: Path) -> dict[str, Any]:
     """Read a YAML or JSON config file into a dict."""
     text = path.read_text(encoding="utf-8")
     suffix = path.suffix.lower()
@@ -720,7 +721,7 @@ def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
 def config_to_argparse_defaults(
     cfg: TrainingConfig,
     mapping: Mapping[str, str],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Flatten a config to a dict suitable for ``parser.set_defaults(**d)``.
 
     Args:
@@ -731,7 +732,7 @@ def config_to_argparse_defaults(
     Missing paths are silently skipped so scripts can share a mapping but
     declare only a subset of fields.
     """
-    defaults: Dict[str, Any] = {}
+    defaults: dict[str, Any] = {}
     for arg_name, dotted_path in mapping.items():
         parts = dotted_path.split(".")
         try:
@@ -746,7 +747,7 @@ def config_to_argparse_defaults(
 
 def apply_overrides(
     cfg: TrainingConfig,
-    overrides: Optional[Mapping[str, Any]] = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> TrainingConfig:
     """Return a copy of ``cfg`` with dotted-key overrides applied.
 

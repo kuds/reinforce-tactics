@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 import yaml  # type: ignore[import-untyped]
@@ -41,9 +41,9 @@ class _StubLogger:
     """Minimal stand-in for sb3 Logger; only tracks .record calls."""
 
     def __init__(self) -> None:
-        self.records: Dict[str, Any] = {}
+        self.records: dict[str, Any] = {}
         # TrainingMetricsCallback reads ``self.model.logger.name_to_value``.
-        self.name_to_value: Dict[str, Any] = {}
+        self.name_to_value: dict[str, Any] = {}
 
     def record(self, key: str, value: Any) -> None:
         self.records[key] = value
@@ -76,7 +76,7 @@ class _BestStubModel:
     def __init__(self) -> None:
         self.num_timesteps = 0
         self.logger = _StubLogger()
-        self.saved: List[str] = []
+        self.saved: list[str] = []
 
     def save(self, path: str) -> None:
         self.saved.append(path)
@@ -297,7 +297,7 @@ class TestPromotionCallback:
 # ---------------------------------------------------------------------------
 
 
-VALID_DICT: Dict[str, Any] = {
+VALID_DICT: dict[str, Any] = {
     "algorithm": "maskable_ppo",
     "seed": 7,
     "env": {
@@ -638,7 +638,7 @@ class TestBootstrapStagesAreConstructible:
         # which left ~32% miss probability -- enough to silently regress
         # CI runs.
         seeds = list(range(8))
-        failures: List[str] = []
+        failures: list[str] = []
         for stage in shipped_cfg.curriculum.stages:
             for seed in seeds:
                 env = None
@@ -803,10 +803,10 @@ class _FakeModel:
     so PromotionCallback drives the loop the same way it would in real
     training."""
 
-    win_rate_program: Dict[str, List[float]] = field(default_factory=dict)
-    learn_calls: List[Dict[str, Any]] = field(default_factory=list)
-    save_calls: List[str] = field(default_factory=list)
-    set_env_calls: List[Any] = field(default_factory=list)
+    win_rate_program: dict[str, list[float]] = field(default_factory=dict)
+    learn_calls: list[dict[str, Any]] = field(default_factory=list)
+    save_calls: list[str] = field(default_factory=list)
+    set_env_calls: list[Any] = field(default_factory=list)
     num_timesteps: int = 0
     # SB3's BaseCallback exposes ``self.logger`` as a read-only property
     # that delegates to ``self.model.logger``; we satisfy that by exposing
@@ -816,14 +816,14 @@ class _FakeModel:
     # Tracks the value of ``ent_coef`` that the runner set immediately
     # before each ``learn()`` call, parallel to ``learn_calls``.
     ent_coef: float = 0.0
-    ent_coef_at_learn: List[float] = field(default_factory=list)
+    ent_coef_at_learn: list[float] = field(default_factory=list)
     # The full callback list passed to each ``learn()`` invocation,
     # so tests can assert which callbacks the runner installed for a
     # given stage (notably whether ``EntropyScheduleCallback`` was
     # added when the stage's ``ent_coef`` is a schedule mapping).
-    callbacks_at_learn: List[List[Any]] = field(default_factory=list)
+    callbacks_at_learn: list[list[Any]] = field(default_factory=list)
     _current_stage_idx: int = 0
-    _stage_names: List[str] = field(default_factory=list)
+    _stage_names: list[str] = field(default_factory=list)
 
     def set_env(self, env: Any) -> None:
         self.set_env_calls.append(env)
@@ -832,7 +832,7 @@ class _FakeModel:
     def learn(
         self,
         total_timesteps: int,
-        callback: List[Any],
+        callback: list[Any],
         reset_num_timesteps: bool = True,
         progress_bar: bool = False,
     ) -> None:
@@ -883,7 +883,7 @@ class _FakeModel:
         # No early exit -> stage exhausted its budget without promoting.
         self.learn_calls.append({"stage": stage_name, "total_timesteps": total_timesteps, "exited_early": False})
 
-    set_parameters_calls: List[str] = field(default_factory=list)
+    set_parameters_calls: list[str] = field(default_factory=list)
 
     def save(self, path: str) -> None:
         self.save_calls.append(path)
@@ -907,7 +907,7 @@ class _FakeModelSavesBest(_FakeModel):
     def learn(
         self,
         total_timesteps: int,
-        callback: List[Any],
+        callback: list[Any],
         reset_num_timesteps: bool = True,
         progress_bar: bool = False,
     ) -> None:
@@ -918,7 +918,7 @@ class _FakeModelSavesBest(_FakeModel):
         super().learn(total_timesteps, callback, reset_num_timesteps, progress_bar)
 
 
-def _make_cfg(stages: List[CurriculumStage]) -> TrainingConfig:
+def _make_cfg(stages: list[CurriculumStage]) -> TrainingConfig:
     cfg = TrainingConfig(
         algorithm="maskable_ppo",
         seed=0,
@@ -946,7 +946,7 @@ def _stage(name: str, opp: str = "random", patience: int = 2, threshold: float =
 def _setup_run(stages, win_rate_program, tmp_path):
     cfg = _make_cfg(stages)
 
-    fake_model: Optional[_FakeModel] = None
+    fake_model: _FakeModel | None = None
 
     def model_factory(vec_env, cfg_arg, output_dir):
         nonlocal fake_model
@@ -956,8 +956,8 @@ def _setup_run(stages, win_rate_program, tmp_path):
         )
         return fake_model
 
-    train_envs: List[_FakeEnv] = []
-    eval_envs: List[_FakeEnv] = []
+    train_envs: list[_FakeEnv] = []
+    eval_envs: list[_FakeEnv] = []
 
     def train_env_factory(stage, cfg_arg):
         env = _FakeEnv()
@@ -1034,7 +1034,7 @@ class TestRunCurriculum:
 
     def _run_with_best_saving_model(self, cfg, tmp_path):
         program = {"a": [0.95, 0.95], "b": [0.92, 0.93]}
-        holder: Dict[str, Any] = {}
+        holder: dict[str, Any] = {}
 
         def model_factory(vec_env, cfg_arg, output_dir):
             m = _FakeModelSavesBest(
@@ -1097,7 +1097,7 @@ class TestRunCurriculum:
         ]
         program = {"a": [0.95, 0.95], "b": [0.95, 0.95]}
 
-        train_calls: List[Dict[str, Any]] = []
+        train_calls: list[dict[str, Any]] = []
 
         def train_env_factory(stage, cfg_arg):
             # Mirror what the default factory does: resolve via the
@@ -1519,8 +1519,8 @@ class TestResolveCurriculumPadSize:
             n_eval_episodes=1,
         )
 
-    def _cfg(self, stages: List[CurriculumStage], **env_kwargs: Any) -> TrainingConfig:
-        env_defaults: Dict[str, Any] = {"n_envs": 1, "max_steps": 1, "action_space_type": "flat_discrete"}
+    def _cfg(self, stages: list[CurriculumStage], **env_kwargs: Any) -> TrainingConfig:
+        env_defaults: dict[str, Any] = {"n_envs": 1, "max_steps": 1, "action_space_type": "flat_discrete"}
         env_defaults.update(env_kwargs)
         return TrainingConfig(
             env=EnvConfig(**env_defaults),

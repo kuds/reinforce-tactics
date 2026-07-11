@@ -1,7 +1,5 @@
 """Units settings menu for enabling/disabling unit types."""
 
-from typing import Optional
-
 import pygame
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
@@ -15,7 +13,7 @@ class UnitsMenu(Menu):
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize units menu.
 
@@ -99,7 +97,7 @@ class UnitsMenu(Menu):
         self._refresh_options()
         return "toggled"
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """Run the units menu loop."""
         result = None
         clock = pygame.time.Clock()

@@ -7,7 +7,6 @@ tournaments, human-vs-AI games, and evaluation.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import torch
 
@@ -29,7 +28,7 @@ class AlphaZeroBot(BaseBot):
         self,
         game_state,
         player: int = 2,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         num_simulations: int = 100,
         c_puct: float = 1.5,
         temperature: float = 0.0,

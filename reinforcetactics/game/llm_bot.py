@@ -11,7 +11,7 @@ import time
 from abc import abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from reinforcetactics import __version__
 from reinforcetactics.constants import UNIT_DATA
@@ -86,18 +86,18 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         self,
         game_state,
         player: int = 2,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
         max_retries: int = 3,
         log_conversations: bool = False,
-        conversation_log_dir: Optional[str] = None,
-        game_session_id: Optional[str] = None,
+        conversation_log_dir: str | None = None,
+        game_session_id: str | None = None,
         pretty_print_logs: bool = True,
         stateful: bool = False,
         should_reason: bool = False,
-        max_tokens: Optional[int] = 8_000,
-        temperature: Optional[float] = None,
-        system_prompt: Optional[str] = None,
+        max_tokens: int | None = 8_000,
+        temperature: float | None = None,
+        system_prompt: str | None = None,
         two_phase_planning: bool = False,
     ):
         """
@@ -192,9 +192,9 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
     # Subclasses must define these class attributes:
     _env_var_name: str = ""  # e.g., "OPENAI_API_KEY"
     _default_model_name: str = ""  # e.g., "gpt-5-mini-2025-08-07"
-    _supported_model_list: List[str] = []  # e.g., OPENAI_MODELS
+    _supported_model_list: list[str] = []  # e.g., OPENAI_MODELS
 
-    def _get_api_key_from_env(self) -> Optional[str]:
+    def _get_api_key_from_env(self) -> str | None:
         """Get API key from environment variable."""
         return os.getenv(self._env_var_name)
 
@@ -206,12 +206,12 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         """Get the default model name."""
         return self._default_model_name
 
-    def _get_supported_models(self) -> List[str]:
+    def _get_supported_models(self) -> list[str]:
         """Get the list of supported models for this provider."""
         return self._supported_model_list
 
     @abstractmethod
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+    def _call_llm(self, messages: list[dict[str, str]]) -> str:
         """Call the LLM API and return the response text."""
 
     @abstractmethod
@@ -233,7 +233,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
                 ", ".join(supported_models[:5]) + "...",
             )
 
-    def get_token_usage(self) -> Dict[str, int]:
+    def get_token_usage(self) -> dict[str, int]:
         """
         Get unified token usage statistics across all providers.
 
@@ -351,7 +351,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             # Check if file exists
             if filepath.exists():
                 # Load existing data and append new turn
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     log_data = json.load(f)
 
                 # Append new turn
@@ -463,7 +463,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         if not self.game_state.game_over:
             self.game_state.end_turn()
 
-    def _call_llm_with_retry(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+    def _call_llm_with_retry(self, system_prompt: str, user_prompt: str) -> str | None:
         """
         Call LLM with retry logic and exponential backoff.
 
@@ -505,7 +505,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
 
         return response_text
 
-    def _run_planning_phase(self, game_state_json: Dict[str, Any]) -> Optional[Dict]:
+    def _run_planning_phase(self, game_state_json: dict[str, Any]) -> dict | None:
         """
         Run the planning phase for two-phase planning mode.
 
@@ -561,7 +561,7 @@ Respond with your strategic plan in JSON format."""
 
         return None
 
-    def _serialize_game_state(self) -> Dict[str, Any]:
+    def _serialize_game_state(self) -> dict[str, Any]:
         """
         Serialize the current game state to a dictionary.
 
@@ -684,8 +684,8 @@ Respond with your strategic plan in JSON format."""
         return state
 
     def _compute_move_then_actions(
-        self, unit, unit_id: int, reachable_positions: List[tuple]
-    ) -> Dict[str, List[Dict[str, Any]]]:
+        self, unit, unit_id: int, reachable_positions: list[tuple]
+    ) -> dict[str, list[dict[str, Any]]]:
         """
         Compute actions that become available after moving to reachable positions.
 
@@ -780,7 +780,7 @@ Respond with your strategic plan in JSON format."""
 
         return result
 
-    def _format_legal_actions(self, legal_actions: Dict[str, List[Any]], unit_id_map: Dict) -> Dict[str, List[Dict[str, Any]]]:
+    def _format_legal_actions(self, legal_actions: dict[str, list[Any]], unit_id_map: dict) -> dict[str, list[dict[str, Any]]]:
         """Format legal actions for LLM consumption with original map coordinates."""
         formatted: dict[str, list[dict[str, Any]]] = {
             "create_unit": [],
@@ -854,7 +854,7 @@ Respond with your strategic plan in JSON format."""
 
         # Compute move-then-action combinations for units that can move
         # Group move actions by unit to get all reachable positions per unit
-        unit_reachable_positions: Dict[Any, List[tuple]] = {}
+        unit_reachable_positions: dict[Any, list[tuple]] = {}
         for action in legal_actions["move"]:
             unit = action["unit"]
             if unit not in unit_reachable_positions:
@@ -873,7 +873,7 @@ Respond with your strategic plan in JSON format."""
 
         return formatted
 
-    def _format_prompt(self, game_state_json: Dict[str, Any], strategic_plan: Optional[Dict] = None) -> str:
+    def _format_prompt(self, game_state_json: dict[str, Any], strategic_plan: dict | None = None) -> str:
         """
         Format the game state into a prompt for the LLM.
 
@@ -983,7 +983,7 @@ Use RESIGN only as a last resort when victory is impossible."""
         except Exception as e:
             logger.error("Error parsing/executing LLM response: %s", e)
 
-    def _extract_json(self, text: str) -> Optional[Dict]:
+    def _extract_json(self, text: str) -> dict | None:
         """Extract JSON from response text, handling markdown code blocks."""
         # Try to parse the whole response as JSON
         try:
@@ -1009,7 +1009,7 @@ Use RESIGN only as a last resort when victory is impossible."""
 
         return None
 
-    def _get_unit_by_id(self) -> Dict[int, Any]:
+    def _get_unit_by_id(self) -> dict[int, Any]:
         """Create a mapping from unit IDs to unit objects."""
         unit_map = {}
         unit_id = 0
@@ -1019,7 +1019,7 @@ Use RESIGN only as a last resort when victory is impossible."""
                 unit_id += 1
         return unit_map
 
-    def _execute_create_unit(self, action: Dict[str, Any]):
+    def _execute_create_unit(self, action: dict[str, Any]):
         """Execute a CREATE_UNIT action (converts from original to padded coordinates)."""
         unit_type = action.get("unit_type")
         position = action.get("position")
@@ -1043,7 +1043,7 @@ Use RESIGN only as a last resort when victory is impossible."""
         self.game_state.create_unit(unit_type, x, y, self.bot_player)
         logger.info("Created %s at original coords (%s, %s) / padded coords (%s, %s)", unit_type, orig_x, orig_y, x, y)
 
-    def _execute_move(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_move(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute a MOVE action (converts from original to padded coordinates)."""
         unit_id = action.get("unit_id")
         to_pos = action.get("to")
@@ -1067,7 +1067,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             "Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)", unit_id, orig_to_x, orig_to_y, to_x, to_y
         )
 
-    def _execute_attack(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_attack(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute an ATTACK action (converts from original to padded coordinates)."""
         unit_id = action.get("unit_id")
         target_pos = action.get("target_position")
@@ -1097,7 +1097,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             target_y,
         )
 
-    def _execute_paralyze(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_paralyze(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute a PARALYZE action (converts from original to padded coordinates)."""
         unit_id = action.get("unit_id")
         target_pos = action.get("target_position")
@@ -1131,7 +1131,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             target_y,
         )
 
-    def _execute_heal(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_heal(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute a HEAL action (converts from original to padded coordinates)."""
         unit_id = action.get("unit_id")
         target_pos = action.get("target_position")
@@ -1165,7 +1165,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             target_y,
         )
 
-    def _execute_cure(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_cure(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute a CURE action (converts from original to padded coordinates)."""
         unit_id = action.get("unit_id")
         target_pos = action.get("target_position")
@@ -1199,7 +1199,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             target_y,
         )
 
-    def _execute_seize(self, action: Dict[str, Any], unit_map: Dict[int, Any]):
+    def _execute_seize(self, action: dict[str, Any], unit_map: dict[int, Any]):
         """Execute a SEIZE action."""
         unit_id = action.get("unit_id")
 
@@ -1245,7 +1245,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         except (ImportError, AttributeError):
             return "openai==unknown"
 
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+    def _call_llm(self, messages: list[dict[str, str]]) -> str:
         """Call OpenAI API."""
         try:
             import openai
@@ -1314,7 +1314,7 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         except (ImportError, AttributeError):
             return "anthropic==unknown"
 
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+    def _call_llm(self, messages: list[dict[str, str]]) -> str:
         """Call Anthropic API."""
         try:
             import anthropic
@@ -1412,7 +1412,7 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+    def _call_llm(self, messages: list[dict[str, str]]) -> str:
         """Call Google Gemini API using the new google-genai SDK."""
         try:
             from google.genai import types

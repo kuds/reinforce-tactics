@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from typing import Optional
 
 import pygame
 
@@ -21,7 +20,7 @@ def init_clipboard() -> None:
         pass
 
 
-def get_clipboard_text() -> Optional[str]:
+def get_clipboard_text() -> str | None:
     """
     Get text from the system clipboard.
 

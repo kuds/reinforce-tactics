@@ -1,13 +1,11 @@
 """Text layout helpers shared by the widget library and menu screens."""
 
-from typing import List
-
 import pygame
 
 ELLIPSIS = "..."
 
 
-def wrap_text(text: str, font: pygame.font.Font, max_width: int) -> List[str]:
+def wrap_text(text: str, font: pygame.font.Font, max_width: int) -> list[str]:
     """Wrap ``text`` into lines that each fit within ``max_width`` pixels.
 
     Splits on whitespace and preserves explicit newlines. Words wider than
@@ -21,7 +19,7 @@ def wrap_text(text: str, font: pygame.font.Font, max_width: int) -> List[str]:
     Returns:
         List of lines. Always contains at least one (possibly empty) line.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     for paragraph in text.split("\n"):
         words = paragraph.split(" ")
         current = ""

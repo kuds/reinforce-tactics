@@ -2,7 +2,6 @@
 
 import os
 import re
-from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import pygame
@@ -25,7 +24,7 @@ TERRAIN_DISPLAY_NAMES = {
 }
 
 
-def get_tile_color(tile: str) -> Tuple[int, int, int]:
+def get_tile_color(tile: str) -> tuple[int, int, int]:
     """
     Get the display color for a tile type code.
 
@@ -53,11 +52,11 @@ class MapPreviewGenerator:
 
     def __init__(self):
         """Initialize the map preview generator."""
-        self._cache: Dict[str, Tuple[pygame.Surface, dict]] = {}
+        self._cache: dict[str, tuple[pygame.Surface, dict]] = {}
 
     def generate_preview(
         self, map_path: str, width: int = 150, height: int = 150, force_regenerate: bool = False
-    ) -> Tuple[Optional[pygame.Surface], dict]:
+    ) -> tuple[pygame.Surface | None, dict]:
         """
         Generate a preview thumbnail and metadata for a map.
 
@@ -267,7 +266,7 @@ class MapPreviewGenerator:
 
         return preview
 
-    def _get_tile_color(self, tile: str) -> Tuple[int, int, int]:
+    def _get_tile_color(self, tile: str) -> tuple[int, int, int]:
         """Get the color for a tile type."""
         return get_tile_color(tile)
 

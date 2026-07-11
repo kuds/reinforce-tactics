@@ -23,7 +23,7 @@ record and playback must not change the outcome.
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -37,7 +37,7 @@ from reinforcetactics.utils.replay_actions import get_schema_version  # noqa: E4
 from reinforcetactics.utils.video import _execute_replay_action  # noqa: E402
 
 
-def _translate(x: int, y: int) -> Tuple[int, int]:
+def _translate(x: int, y: int) -> tuple[int, int]:
     """Identity coord translator (tests use unpadded maps directly)."""
     return (x, y)
 
@@ -72,7 +72,7 @@ def _save_replay(game: GameState, tmp_path: Path) -> str:
     """Serialise a game's action history with the full v2 game_info."""
     final_p1 = [u for u in game.units if u.player == 1]
     final_p2 = [u for u in game.units if u.player == 2]
-    game_info: Dict[str, Any] = {
+    game_info: dict[str, Any] = {
         "winner": game.winner,
         "winner_name": "P1" if game.winner == 1 else ("P2" if game.winner == 2 else "Draw"),
         "turns": game.turn_number,
@@ -96,11 +96,11 @@ def _save_replay(game: GameState, tmp_path: Path) -> str:
     return path
 
 
-def _replay(path: str) -> Tuple[GameState, Dict[str, Any]]:
+def _replay(path: str) -> tuple[GameState, dict[str, Any]]:
     """Run a saved replay through the v2 executor and return final state."""
     data = FileIO.load_replay(path)
     game_info = data["game_info"]
-    actions: List[Dict[str, Any]] = data["actions"]
+    actions: list[dict[str, Any]] = data["actions"]
     schema = get_schema_version(game_info)
 
     replay_game = GameState(SMALL_MAP, num_players=2)
@@ -156,7 +156,7 @@ def _assert_replay_matches(original: GameState, replay_path: str) -> None:
         )
 
 
-def _load_actions(path: str) -> List[Dict[str, Any]]:
+def _load_actions(path: str) -> list[dict[str, Any]]:
     return FileIO.load_replay(path)["actions"]
 
 

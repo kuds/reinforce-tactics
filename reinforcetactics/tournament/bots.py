@@ -10,7 +10,7 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from reinforcetactics.core.game_state import GameState
@@ -51,16 +51,16 @@ class BotDescriptor:
 
     name: str
     bot_type: BotType
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    model_path: Optional[str] = None
-    temperature: Optional[float] = None
+    model: str | None = None
+    provider: str | None = None
+    model_path: str | None = None
+    temperature: float | None = None
     max_tokens: int = 8000
-    api_key: Optional[str] = None
-    extra_kwargs: Dict[str, Any] = field(default_factory=dict)
+    api_key: str | None = None
+    extra_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Class-level cache for bot classes
-    _bot_classes: Dict[str, Type] = field(default_factory=dict, repr=False)
+    _bot_classes: dict[str, type] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
         """Validate the descriptor after initialization."""
@@ -93,9 +93,9 @@ class BotDescriptor:
         name: str,
         provider: str,
         model: str,
-        temperature: Optional[float] = None,
+        temperature: float | None = None,
         max_tokens: int = 8000,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         **kwargs,
     ) -> "BotDescriptor":
         """
@@ -133,7 +133,7 @@ class BotDescriptor:
         return cls(name=name, bot_type=BotType.MODEL, model_path=model_path)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BotDescriptor":
+    def from_dict(cls, data: dict[str, Any]) -> "BotDescriptor":
         """
         Create BotDescriptor from dictionary.
 
@@ -156,9 +156,9 @@ class BotDescriptor:
             extra_kwargs=data.get("extra_kwargs", {}),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "name": self.name,
             "type": self.bot_type.value,
         }
@@ -196,10 +196,10 @@ def create_bot_instance(
     game_state: "GameState",
     player: int,
     log_conversations: bool = False,
-    conversation_log_dir: Optional[str] = None,
-    game_session_id: Optional[str] = None,
+    conversation_log_dir: str | None = None,
+    game_session_id: str | None = None,
     should_reason: bool = False,
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
 ) -> Any:
     """
     Create a bot instance from a descriptor.
@@ -272,8 +272,8 @@ def _create_llm_bot(
     game_state: "GameState",
     player: int,
     log_conversations: bool,
-    conversation_log_dir: Optional[str],
-    game_session_id: Optional[str],
+    conversation_log_dir: str | None,
+    game_session_id: str | None,
     should_reason: bool,
 ) -> Any:
     """Create an LLM bot instance."""
@@ -322,7 +322,7 @@ def _create_llm_bot(
         raise ValueError(f"Unknown LLM provider: {provider}")
 
 
-def discover_builtin_bots() -> List[BotDescriptor]:
+def discover_builtin_bots() -> list[BotDescriptor]:
     """
     Discover built-in rule-based bots.
 
@@ -340,8 +340,8 @@ def discover_builtin_bots() -> List[BotDescriptor]:
 def discover_llm_bots(
     test_keys: bool = True,
     log_conversations: bool = False,
-    conversation_log_dir: Optional[str] = None,
-) -> List[BotDescriptor]:
+    conversation_log_dir: str | None = None,
+) -> list[BotDescriptor]:
     """
     Discover available LLM bots based on configured API keys.
 
@@ -403,7 +403,7 @@ def discover_llm_bots(
     return bots
 
 
-def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDescriptor]:
+def discover_model_bots(models_dir: str, test_models: bool = True) -> list[BotDescriptor]:
     """
     Discover trained model bots from a directory.
 
@@ -417,7 +417,7 @@ def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDe
     Returns:
         List of BotDescriptors for valid model bots
     """
-    bots: List[BotDescriptor] = []
+    bots: list[BotDescriptor] = []
     models_path = Path(models_dir)
 
     if not models_path.exists():
@@ -436,12 +436,12 @@ def discover_model_bots(models_dir: str, test_models: bool = True) -> List[BotDe
 
 
 def discover_all_bots(
-    models_dir: Optional[str] = None,
+    models_dir: str | None = None,
     test_keys: bool = True,
     test_models: bool = True,
     include_llm: bool = True,
     include_models: bool = True,
-) -> List[BotDescriptor]:
+) -> list[BotDescriptor]:
     """
     Discover all available bots.
 

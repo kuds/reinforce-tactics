@@ -26,17 +26,18 @@ stay in sync.
 """
 
 import logging
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def get_schema_version(game_info: Dict[str, Any]) -> int:
+def get_schema_version(game_info: dict[str, Any]) -> int:
     """Return the replay schema version, defaulting to 1 for older replays."""
     return int(game_info.get("replay_schema_version", 1))
 
 
-def find_unit_by_id(game_state, unit_id: Optional[int]):
+def find_unit_by_id(game_state, unit_id: int | None):
     """Locate a unit in ``game_state.units`` by its stable id.
 
     Returns ``None`` for missing or null ids -- the v3 dispatchers
@@ -61,10 +62,10 @@ def find_unit_by_id(game_state, unit_id: Optional[int]):
 
 def _apply_attack_outcome(
     game_state,
-    action: Dict[str, Any],
+    action: dict[str, Any],
     attacker,
     target,
-    attacker_player: Optional[int],
+    attacker_player: int | None,
 ) -> None:
     """Apply the recorded attack outcome to (optionally-found) units."""
     attacker_killed = bool(action.get("attacker_killed", False))
@@ -116,7 +117,7 @@ def _apply_attack_outcome(
     game_state._invalidate_cache()
 
 
-def _apply_seize_outcome(game_state, action: Dict[str, Any], position, unit) -> None:
+def _apply_seize_outcome(game_state, action: dict[str, Any], position, unit) -> None:
     """Apply the recorded seize outcome at ``position`` with (optional) ``unit``."""
     tile = game_state.grid.get_tile(*position)
 
@@ -138,7 +139,7 @@ def _apply_seize_outcome(game_state, action: Dict[str, Any], position, unit) -> 
     game_state._invalidate_cache()
 
 
-def _apply_heal_outcome(game_state, action: Dict[str, Any], healer, target) -> None:
+def _apply_heal_outcome(game_state, action: dict[str, Any], healer, target) -> None:
     if healer is None or target is None:
         return
     if "target_hp_after" in action:
@@ -148,7 +149,7 @@ def _apply_heal_outcome(game_state, action: Dict[str, Any], healer, target) -> N
     game_state._invalidate_cache()
 
 
-def _apply_move_outcome(game_state, action: Dict[str, Any], unit, to_x: int, to_y: int) -> None:
+def _apply_move_outcome(game_state, action: dict[str, Any], unit, to_x: int, to_y: int) -> None:
     """Apply a recorded move directly to ``unit``.
 
     Unlike v1/v2 (which call ``game_state.move_unit``), the v3 path
@@ -186,7 +187,7 @@ def _apply_move_outcome(game_state, action: Dict[str, Any], unit, to_x: int, to_
 # ---------------------------------------------------------------------------
 
 
-def apply_recorded_attack(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_attack(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v2: locate attacker/target by recorded position, then apply outcome."""
     attacker_pos = translate_fn(*action["attacker_pos"])
     target_pos = translate_fn(*action["target_pos"])
@@ -195,14 +196,14 @@ def apply_recorded_attack(game_state, action: Dict[str, Any], translate_fn: Call
     _apply_attack_outcome(game_state, action, attacker, target, action.get("player"))
 
 
-def apply_recorded_seize(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_seize(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v2: tile state is positional regardless of schema."""
     position = translate_fn(*action["position"])
     unit = game_state.get_unit_at_position(*position)
     _apply_seize_outcome(game_state, action, position, unit)
 
 
-def apply_recorded_heal(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_heal(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v2: locate healer/target by recorded position, then apply outcome."""
     healer_pos = translate_fn(*action["healer_pos"])
     target_pos = translate_fn(*action["target_pos"])
@@ -219,7 +220,7 @@ def apply_recorded_heal(game_state, action: Dict[str, Any], translate_fn: Callab
 # ---------------------------------------------------------------------------
 
 
-def _resolve_or_warn(game_state, unit_id: Optional[int], position, label: str):
+def _resolve_or_warn(game_state, unit_id: int | None, position, label: str):
     """Find unit by id; warn and fall back to position lookup on miss."""
     unit = find_unit_by_id(game_state, unit_id)
     if unit is not None:
@@ -239,7 +240,7 @@ def _resolve_or_warn(game_state, unit_id: Optional[int], position, label: str):
     return None
 
 
-def apply_recorded_attack_v3(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_attack_v3(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v3: locate attacker/target by ``attacker_unit_id``/``target_unit_id``."""
     attacker_pos = translate_fn(*action["attacker_pos"])
     target_pos = translate_fn(*action["target_pos"])
@@ -248,14 +249,14 @@ def apply_recorded_attack_v3(game_state, action: Dict[str, Any], translate_fn: C
     _apply_attack_outcome(game_state, action, attacker, target, action.get("player"))
 
 
-def apply_recorded_seize_v3(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_seize_v3(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v3: tile state is positional but the seizer lockout is id-based."""
     position = translate_fn(*action["position"])
     unit = _resolve_or_warn(game_state, action.get("actor_unit_id"), position, "seize actor")
     _apply_seize_outcome(game_state, action, position, unit)
 
 
-def apply_recorded_heal_v3(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_heal_v3(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v3: locate healer/target by id."""
     healer_pos = translate_fn(*action["healer_pos"])
     target_pos = translate_fn(*action["target_pos"])
@@ -264,7 +265,7 @@ def apply_recorded_heal_v3(game_state, action: Dict[str, Any], translate_fn: Cal
     _apply_heal_outcome(game_state, action, healer, target)
 
 
-def apply_recorded_move_v3(game_state, action: Dict[str, Any], translate_fn: Callable) -> None:
+def apply_recorded_move_v3(game_state, action: dict[str, Any], translate_fn: Callable) -> None:
     """v3: locate mover by id, set position directly.
 
     Sidesteps the engine's ``can_move`` / reachable / occupancy

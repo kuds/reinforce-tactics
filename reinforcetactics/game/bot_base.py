@@ -19,21 +19,21 @@ Provides:
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from reinforcetactics.constants import UNIT_DATA
 
 # Strategic categories used by bot decision logic to bucket unit types by
 # role. Kept as tuples so they're immutable shared constants.
-MELEE_UNITS: Tuple[str, ...] = ("W", "K", "R", "B")
-RANGED_UNITS: Tuple[str, ...] = ("A", "M", "S")
-SUPPORT_UNITS: Tuple[str, ...] = ("C", "S")
+MELEE_UNITS: tuple[str, ...] = ("W", "K", "R", "B")
+RANGED_UNITS: tuple[str, ...] = ("A", "M", "S")
+SUPPORT_UNITS: tuple[str, ...] = ("C", "S")
 
 # Maps a named strategic ability to the unit-type letter that provides it.
 # Bots query this via ``has_units_with_ability(name)`` instead of hardcoding
 # unit letters at the call site, so a unit-roster change touches one row
 # here rather than every ``has_X_units`` predicate in the codebase.
-ABILITY_PROVIDERS: Dict[str, str] = {
+ABILITY_PROVIDERS: dict[str, str] = {
     "charge": "K",  # Knight charge bonus on long-distance approach
     "flank": "R",  # Rogue flank bonus when attacking from behind
     "buff": "S",  # Sorcerer haste / attack-buff / defence-buff
@@ -91,13 +91,13 @@ class BaseBot(ABC):
         """
         if n == 0:
             return
-        counters: Optional[Dict[str, int]] = getattr(self, "capabilities_fired", None)
+        counters: dict[str, int] | None = getattr(self, "capabilities_fired", None)
         if counters is None:
             counters = {}
             self.capabilities_fired = counters
         counters[name] = counters.get(name, 0) + n
 
-    def get_capabilities_fired(self) -> Dict[str, int]:
+    def get_capabilities_fired(self) -> dict[str, int]:
         """Return per-game capability counters (empty if nothing recorded)."""
         return dict(getattr(self, "capabilities_fired", {}) or {})
 
@@ -136,7 +136,7 @@ class BotUnitMixin:
     # restored.
     _rng: Any = None
 
-    def _maybe_shuffle(self, items: List[Any]) -> List[Any]:
+    def _maybe_shuffle(self, items: list[Any]) -> list[Any]:
         """Shuffle ``items`` in place when ``self._rng`` is set.
 
         Returns ``items`` (the same list) for chained use. With
@@ -158,7 +158,7 @@ class BotUnitMixin:
     # ------------------------------------------------------------------
     # Enabled-unit queries
     # ------------------------------------------------------------------
-    def get_enabled_units(self) -> List[str]:
+    def get_enabled_units(self) -> list[str]:
         """Get list of currently enabled unit types."""
         return self.game_state.enabled_units
 
@@ -166,19 +166,19 @@ class BotUnitMixin:
         """Check if a specific unit type is enabled."""
         return self.game_state.is_unit_type_enabled(unit_type)
 
-    def get_enabled_units_in(self, unit_types) -> List[str]:
+    def get_enabled_units_in(self, unit_types) -> list[str]:
         """Filter ``unit_types`` down to the ones currently enabled."""
         return [u for u in unit_types if self.is_unit_enabled(u)]
 
-    def get_enabled_melee_units(self) -> List[str]:
+    def get_enabled_melee_units(self) -> list[str]:
         """Get enabled melee unit types (W, K, R, B)."""
         return self.get_enabled_units_in(MELEE_UNITS)
 
-    def get_enabled_ranged_units(self) -> List[str]:
+    def get_enabled_ranged_units(self) -> list[str]:
         """Get enabled ranged unit types (A, M, S)."""
         return self.get_enabled_units_in(RANGED_UNITS)
 
-    def get_enabled_support_units(self) -> List[str]:
+    def get_enabled_support_units(self) -> list[str]:
         """Get enabled support unit types (C, S)."""
         return self.get_enabled_units_in(SUPPORT_UNITS)
 
@@ -249,12 +249,12 @@ class BotUnitMixin:
         """True if the unit currently stands on one of our heal-providing tiles."""
         return self.heal_amount_at(unit.x, unit.y) > 0
 
-    def count_enemy_units_by_type(self) -> Dict[str, int]:
+    def count_enemy_units_by_type(self) -> dict[str, int]:
         """Tally living enemy units by type (e.g. ``{'W': 3, 'A': 2}``).
 
         Used by counter-composition logic; SimpleBot does not call this so
         purchasing remains static at that tier."""
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for u in self.game_state.units:
             if u.player == self.bot_player or u.player is None:
                 continue

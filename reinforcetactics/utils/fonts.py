@@ -16,7 +16,6 @@ system-font chain is also the fallback when the bundled files are missing
 """
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import pygame
 
@@ -64,9 +63,9 @@ CJK_FONT_CANDIDATES = [
 ]
 
 # Cache key is (kind, size) where kind is "body", "display", or "system".
-_font_cache: Dict[Tuple[str, int], pygame.font.Font] = {}
-_available_fonts_cache: Optional[list] = None
-_bundled_fonts_dir: Optional[Path] = None
+_font_cache: dict[tuple[str, int], pygame.font.Font] = {}
+_available_fonts_cache: list | None = None
+_bundled_fonts_dir: Path | None = None
 _bundled_fonts_dir_resolved = False
 _quit_hook_registered = False
 
@@ -84,7 +83,7 @@ def _clear_caches_on_quit() -> None:
     _quit_hook_registered = False
 
 
-def _resolve_bundled_fonts_dir() -> Optional[Path]:
+def _resolve_bundled_fonts_dir() -> Path | None:
     """Locate the bundled ``assets/fonts`` directory.
 
     Walks up from this file (the repo ships ``assets/fonts/`` at the root)
@@ -143,7 +142,7 @@ def _ensure_font_init() -> None:
         _quit_hook_registered = True
 
 
-def _get_cached(kind: str, size: int) -> Optional[pygame.font.Font]:
+def _get_cached(kind: str, size: int) -> pygame.font.Font | None:
     """Return a cached font if present and still valid."""
     font = _font_cache.get((kind, size))
     if font is None:
@@ -156,7 +155,7 @@ def _get_cached(kind: str, size: int) -> Optional[pygame.font.Font]:
         return None
 
 
-def _load_bundled(kind: str, filename: str, size: int) -> Optional[pygame.font.Font]:
+def _load_bundled(kind: str, filename: str, size: int) -> pygame.font.Font | None:
     """Load a bundled font file, or return None if unavailable."""
     fonts_dir = _resolve_bundled_fonts_dir()
     if fonts_dir is None:

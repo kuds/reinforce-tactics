@@ -25,7 +25,6 @@ import json
 import random
 import time
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 import torch
@@ -42,7 +41,7 @@ def _seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _make_env(map_file: str, opponent: str, max_steps: int, max_turns: int, enabled_units: List[str], seed: int):
+def _make_env(map_file: str, opponent: str, max_steps: int, max_turns: int, enabled_units: list[str], seed: int):
     env = StrategyGameEnv(
         map_file=map_file,
         opponent=opponent,
@@ -55,7 +54,7 @@ def _make_env(map_file: str, opponent: str, max_steps: int, max_turns: int, enab
     return env
 
 
-def _train_one(args, *, autoregressive: bool, eval_steps: List[int]) -> List[Dict]:
+def _train_one(args, *, autoregressive: bool, eval_steps: list[int]) -> list[dict]:
     """Train one variant and return the eval-checkpoint history.
 
     Both variants run with identical seeds + hyperparameters so any
@@ -80,7 +79,7 @@ def _train_one(args, *, autoregressive: bool, eval_steps: List[int]) -> List[Dic
     agent.setup_training(learning_rate=args.learning_rate)
     agent.reset_goal()
 
-    history: List[Dict] = []
+    history: list[dict] = []
     total_timesteps = 0
     last_eval = 0
     n_updates = args.total_timesteps // args.n_steps
@@ -124,7 +123,7 @@ def _train_one(args, *, autoregressive: bool, eval_steps: List[int]) -> List[Dic
     return history
 
 
-def _print_comparison(legacy: List[Dict], ar: List[Dict]) -> None:
+def _print_comparison(legacy: list[dict], ar: list[dict]) -> None:
     print("\n" + "=" * 78)
     print("A/B comparison: legacy 6-head vs autoregressive worker")
     print("=" * 78)
@@ -175,8 +174,8 @@ def main():
     parser.add_argument("--output", type=str, default=None, help="Optional JSON dump of both histories")
     args = parser.parse_args()
 
-    eval_steps_legacy: List[int] = []
-    eval_steps_ar: List[int] = []
+    eval_steps_legacy: list[int] = []
+    eval_steps_ar: list[int] = []
     legacy_hist = _train_one(args, autoregressive=False, eval_steps=eval_steps_legacy)
     ar_hist = _train_one(args, autoregressive=True, eval_steps=eval_steps_ar)
 

@@ -6,7 +6,6 @@ bot performance across tournament games.
 """
 
 import json
-from typing import Dict, List
 
 
 class EloRatingSystem:
@@ -36,9 +35,9 @@ class EloRatingSystem:
         """
         self.starting_elo = starting_elo
         self.k_factor = k_factor
-        self.ratings: Dict[str, float] = {}
-        self.initial_ratings: Dict[str, float] = {}
-        self.rating_history: Dict[str, List[float]] = {}
+        self.ratings: dict[str, float] = {}
+        self.initial_ratings: dict[str, float] = {}
+        self.rating_history: dict[str, list[float]] = {}
 
     def initialize_bot(self, bot_name: str) -> None:
         """
@@ -150,7 +149,7 @@ class EloRatingSystem:
         current = self.ratings.get(bot_name, float(self.starting_elo))
         return current - initial
 
-    def get_rankings(self) -> List[tuple[str, float]]:
+    def get_rankings(self) -> list[tuple[str, float]]:
         """
         Get all bots ranked by Elo rating.
 
@@ -185,7 +184,7 @@ class EloRatingSystem:
         Args:
             filepath: Path to load ratings from
         """
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
 
         self.ratings = data["ratings"]
@@ -195,7 +194,7 @@ class EloRatingSystem:
         # Set initial ratings to current ratings when loading
         self.initial_ratings = self.ratings.copy()
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """
         Convert rating system state to dictionary.
 
@@ -211,7 +210,7 @@ class EloRatingSystem:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "EloRatingSystem":
+    def from_dict(cls, data: dict) -> "EloRatingSystem":
         """
         Create EloRatingSystem from dictionary.
 

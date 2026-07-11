@@ -1,6 +1,6 @@
 """In-game overlay menu for unit actions during gameplay."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pygame
 
@@ -37,8 +37,8 @@ class UnitActionMenu:
         self.option_font = get_font(24)
 
         # Interactive elements
-        self.interactive_elements: List[Dict[str, Any]] = []
-        self.hover_element: Optional[Dict[str, Any]] = None
+        self.interactive_elements: list[dict[str, Any]] = []
+        self.hover_element: dict[str, Any] | None = None
 
         # Cached overlay surface to avoid per-frame allocation
         self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
@@ -50,7 +50,7 @@ class UnitActionMenu:
         # Calculate menu position and size
         self._calculate_menu_rect()
 
-    def _calculate_available_actions(self) -> List[Dict[str, Any]]:
+    def _calculate_available_actions(self) -> list[dict[str, Any]]:
         """
         Calculate which actions are available for this unit.
 
@@ -150,7 +150,7 @@ class UnitActionMenu:
 
         self.menu_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)
 
-    def handle_click(self, mouse_pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
+    def handle_click(self, mouse_pos: tuple[int, int]) -> dict[str, Any] | None:
         """
         Handle mouse clicks.
 
@@ -175,7 +175,7 @@ class UnitActionMenu:
 
         return None
 
-    def handle_keydown(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
+    def handle_keydown(self, event: pygame.event.Event) -> dict[str, Any] | None:
         """
         Handle keyboard input.
 
@@ -196,7 +196,7 @@ class UnitActionMenu:
 
         return None
 
-    def handle_mouse_motion(self, mouse_pos: Tuple[int, int]) -> None:
+    def handle_mouse_motion(self, mouse_pos: tuple[int, int]) -> None:
         """
         Handle mouse motion for hover effects.
 

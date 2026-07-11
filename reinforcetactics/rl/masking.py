@@ -20,7 +20,8 @@ Usage:
     model.learn(total_timesteps=100000)
 """
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -98,7 +99,7 @@ class ActionMaskedEnv(gym.Wrapper):
         """Reset environment and optionally reset stats."""
         return super().reset(**kwargs)
 
-    def get_masking_stats(self) -> Dict[str, Any]:
+    def get_masking_stats(self) -> dict[str, Any]:
         """Get action masking statistics."""
         if not self.track_stats:
             return {}
@@ -112,25 +113,25 @@ class ActionMaskedEnv(gym.Wrapper):
 
 
 def make_maskable_env(
-    map_file: Optional[str] = None,
+    map_file: str | None = None,
     opponent: str = "bot",
-    render_mode: Optional[str] = None,
+    render_mode: str | None = None,
     max_steps: int = 200,
-    max_turns: Optional[int] = None,
-    reward_config: Optional[Dict[str, float]] = None,
+    max_turns: int | None = None,
+    reward_config: dict[str, float] | None = None,
     track_stats: bool = False,
-    enabled_units: Optional[List[str]] = None,
+    enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
-    max_actions_per_turn: Optional[int] = None,
-    seed: Optional[int] = None,
-    opponent_kwargs: Optional[Dict[str, Any]] = None,
+    max_actions_per_turn: int | None = None,
+    seed: int | None = None,
+    opponent_kwargs: dict[str, Any] | None = None,
     gamma: float = 0.99,
-    pad_to_size: Optional[Tuple[int, int]] = None,
-    gold_scale: Optional[float] = None,
-    turn_scale: Optional[float] = None,
-    unit_count_scale: Optional[float] = None,
-    engine_overrides: Optional[Dict[str, Any]] = None,
+    pad_to_size: tuple[int, int] | None = None,
+    gold_scale: float | None = None,
+    turn_scale: float | None = None,
+    unit_count_scale: float | None = None,
+    engine_overrides: dict[str, Any] | None = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -162,7 +163,7 @@ def make_maskable_env(
         # Reproducible eval against a random opponent:
         env = make_maskable_env(opponent="random", seed=42)
     """
-    scale_kwargs: Dict[str, Any] = {}
+    scale_kwargs: dict[str, Any] = {}
     if gold_scale is not None:
         scale_kwargs["gold_scale"] = gold_scale
     if turn_scale is not None:
@@ -195,22 +196,22 @@ def make_maskable_env(
 def _make_env_fn(
     rank: int,
     seed: int,
-    map_file: Optional[str],
+    map_file: str | None,
     opponent: str,
     max_steps: int,
-    reward_config: Optional[Dict[str, float]],
-    enabled_units: Optional[List[str]] = None,
+    reward_config: dict[str, float] | None,
+    enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
-    max_turns: Optional[int] = None,
-    opponent_kwargs: Optional[Dict[str, Any]] = None,
+    max_turns: int | None = None,
+    opponent_kwargs: dict[str, Any] | None = None,
     gamma: float = 0.99,
-    pad_to_size: Optional[Tuple[int, int]] = None,
-    gold_scale: Optional[float] = None,
-    turn_scale: Optional[float] = None,
-    unit_count_scale: Optional[float] = None,
-    max_actions_per_turn: Optional[int] = None,
-    engine_overrides: Optional[Dict[str, Any]] = None,
+    pad_to_size: tuple[int, int] | None = None,
+    gold_scale: float | None = None,
+    turn_scale: float | None = None,
+    unit_count_scale: float | None = None,
+    max_actions_per_turn: int | None = None,
+    engine_overrides: dict[str, Any] | None = None,
 ) -> Callable[[], ActionMaskedEnv]:
     """
     Create a function that creates an environment.
@@ -218,7 +219,7 @@ def _make_env_fn(
     Used for vectorized environment creation.
     """
 
-    scale_kwargs: Dict[str, Any] = {}
+    scale_kwargs: dict[str, Any] = {}
     if gold_scale is not None:
         scale_kwargs["gold_scale"] = gold_scale
     if turn_scale is not None:
@@ -253,24 +254,24 @@ def _make_env_fn(
 
 def make_maskable_vec_env(
     n_envs: int = 4,
-    map_file: Optional[str] = None,
+    map_file: str | None = None,
     opponent: str = "bot",
     max_steps: int = 200,
-    max_turns: Optional[int] = None,
-    reward_config: Optional[Dict[str, float]] = None,
+    max_turns: int | None = None,
+    reward_config: dict[str, float] | None = None,
     seed: int = 0,
     use_subprocess: bool = True,
-    enabled_units: Optional[List[str]] = None,
+    enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
-    max_actions_per_turn: Optional[int] = None,
-    opponent_kwargs: Optional[Dict[str, Any]] = None,
+    max_actions_per_turn: int | None = None,
+    opponent_kwargs: dict[str, Any] | None = None,
     gamma: float = 0.99,
-    pad_to_size: Optional[Tuple[int, int]] = None,
-    gold_scale: Optional[float] = None,
-    turn_scale: Optional[float] = None,
-    unit_count_scale: Optional[float] = None,
-    engine_overrides: Optional[Dict[str, Any]] = None,
+    pad_to_size: tuple[int, int] | None = None,
+    gold_scale: float | None = None,
+    turn_scale: float | None = None,
+    unit_count_scale: float | None = None,
+    engine_overrides: dict[str, Any] | None = None,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -339,7 +340,7 @@ def make_maskable_vec_env(
     return vec_env
 
 
-def validate_action_mask(env: StrategyGameEnv) -> Dict[str, Any]:
+def validate_action_mask(env: StrategyGameEnv) -> dict[str, Any]:
     """
     Validate that action masks are correctly computed.
 

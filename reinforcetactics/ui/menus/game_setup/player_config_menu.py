@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pygame
 
@@ -23,7 +23,7 @@ except ImportError:
 class PlayerConfigMenu:
     """Menu for configuring players (Human vs Computer) with difficulty settings."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, game_mode: str = "1v1") -> None:
+    def __init__(self, screen: pygame.Surface | None = None, game_mode: str = "1v1") -> None:
         """
         Initialize player configuration menu.
 
@@ -82,12 +82,12 @@ class PlayerConfigMenu:
         self.fog_of_war = False  # Fog of war toggle
 
         # Model validation state: {player_idx: {'valid': bool, 'error': str}}
-        self.model_validation: Dict[int, Dict[str, Any]] = {}
+        self.model_validation: dict[int, dict[str, Any]] = {}
 
         # UI interaction tracking
         self.hover_element = None
         self.selected_element = None
-        self.interactive_elements: List[Dict[str, Any]] = []
+        self.interactive_elements: list[dict[str, Any]] = []
 
         # Get language instance
         self.lang = get_language()
@@ -115,7 +115,7 @@ class PlayerConfigMenu:
         except ImportError:
             return False
 
-    def _validate_model(self, model_path: str) -> Dict[str, Any]:
+    def _validate_model(self, model_path: str) -> dict[str, Any]:
         """
         Validate that a model file is compatible.
 
@@ -158,7 +158,7 @@ class PlayerConfigMenu:
         except Exception as e:
             return {"valid": False, "error": f"Load error: {str(e)[:50]}"}
 
-    def _open_file_dialog(self) -> Optional[str]:
+    def _open_file_dialog(self) -> str | None:
         """
         Open a native OS file dialog to select a model file.
 
@@ -189,7 +189,7 @@ class PlayerConfigMenu:
             print(f"Error opening file dialog: {e}")
             return None
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
+    def handle_input(self, event: pygame.event.Event) -> dict[str, Any] | None:
         """
         Handle input events.
 
@@ -291,7 +291,7 @@ class PlayerConfigMenu:
 
         return None
 
-    def _get_result(self) -> Optional[Dict[str, Any]]:
+    def _get_result(self) -> dict[str, Any] | None:
         """
         Get the configured player settings as a result dict.
 
@@ -529,7 +529,7 @@ class PlayerConfigMenu:
 
         return button.rect
 
-    def run(self) -> Optional[Dict[str, Any]]:
+    def run(self) -> dict[str, Any] | None:
         """
         Run the player configuration menu loop.
 

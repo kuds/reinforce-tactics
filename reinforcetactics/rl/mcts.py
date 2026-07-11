@@ -17,7 +17,7 @@ Key design decisions:
 import copy
 import logging
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import torch
@@ -53,19 +53,19 @@ class MCTSNode:
         self,
         game_state,
         parent: Optional["MCTSNode"] = None,
-        action: Optional[int] = None,
+        action: int | None = None,
         prior: float = 0.0,
     ):
         self.parent = parent
         self.action = action  # flat action index that led to this node
-        self.children: Dict[int, "MCTSNode"] = {}  # flat_action -> child node
+        self.children: dict[int, MCTSNode] = {}  # flat_action -> child node
         self.visit_count: int = 0
         self.value_sum: float = 0.0
         self.prior: float = prior
         self.game_state = game_state
         self.player: int = game_state.current_player if game_state else 0
         self.is_terminal: bool = game_state.game_over if game_state else False
-        self._legal_actions_cache: Optional[Dict[int, dict]] = None
+        self._legal_actions_cache: dict[int, dict] | None = None
 
     @property
     def q_value(self) -> float:
@@ -78,7 +78,7 @@ class MCTSNode:
     def is_expanded(self) -> bool:
         return len(self.children) > 0
 
-    def get_legal_flat_actions(self, grid_width: int, grid_height: int) -> Dict[int, dict]:
+    def get_legal_flat_actions(self, grid_width: int, grid_height: int) -> dict[int, dict]:
         """
         Get legal actions mapped to flat action indices.
 
@@ -377,7 +377,7 @@ class MCTS:
         self.device = device
 
     @torch.no_grad()
-    def _evaluate(self, game_state) -> Tuple[np.ndarray, float]:
+    def _evaluate(self, game_state) -> tuple[np.ndarray, float]:
         """
         Evaluate a game state with the neural network.
 
@@ -397,7 +397,7 @@ class MCTS:
 
         return policy_probs.squeeze(0).cpu().numpy(), value.item()
 
-    def search(self, game_state, add_noise: bool = True) -> Tuple[np.ndarray, float]:
+    def search(self, game_state, add_noise: bool = True) -> tuple[np.ndarray, float]:
         """
         Run MCTS from the given game state.
 
@@ -465,7 +465,7 @@ class MCTS:
 
         return action_probs, root.q_value
 
-    def _expand_node(self, node: MCTSNode, policy_probs: np.ndarray, legal_flat: Dict[int, dict]) -> None:
+    def _expand_node(self, node: MCTSNode, policy_probs: np.ndarray, legal_flat: dict[int, dict]) -> None:
         """Expand a node by creating child nodes for all legal actions."""
         for flat_idx, action_info in legal_flat.items():
             prior = policy_probs[flat_idx] if flat_idx < len(policy_probs) else 0.0
@@ -481,7 +481,7 @@ class MCTS:
             child._action_info = action_info  # noqa: SLF001
             node.children[flat_idx] = child
 
-    def _select_child(self, node: MCTSNode) -> Tuple[int, MCTSNode]:
+    def _select_child(self, node: MCTSNode) -> tuple[int, MCTSNode]:
         """Select the child with highest PUCT score."""
         best_score = -float("inf")
         best_action = -1
@@ -532,7 +532,7 @@ class MCTS:
 
         return best_action, best_child
 
-    def _backup(self, search_path: List[MCTSNode], value: float, root_player: int) -> None:
+    def _backup(self, search_path: list[MCTSNode], value: float, root_player: int) -> None:
         """Propagate the value back up the search path."""
         for node in search_path:
             node.visit_count += 1
@@ -551,7 +551,7 @@ class MCTS:
             return 1.0
         return -1.0
 
-    def select_action(self, game_state, temperature: float = 1.0, add_noise: bool = True) -> Tuple[int, np.ndarray]:
+    def select_action(self, game_state, temperature: float = 1.0, add_noise: bool = True) -> tuple[int, np.ndarray]:
         """
         Run MCTS and select an action.
 
@@ -594,7 +594,7 @@ class MCTS:
 
         return action, action_probs
 
-    def get_action_info(self, game_state, flat_action: int) -> Optional[dict]:
+    def get_action_info(self, game_state, flat_action: int) -> dict | None:
         """
         Resolve a flat action index to a structured action using legal actions.
 

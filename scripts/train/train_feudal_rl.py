@@ -18,7 +18,6 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
 
 import torch
 from stable_baselines3 import PPO
@@ -338,7 +337,7 @@ def train_feudal_rl(args):
     # optimizer state via load_checkpoint, then pull timesteps and the best
     # eval metric out of the returned training_state blob so the run picks
     # up where it left off (eval cadence, best-model tracking, LR schedule).
-    resume_state: Dict = {}
+    resume_state: dict = {}
     if args.resume:
         print(f"Resuming from {args.resume}")
         resume_state = agent.load_checkpoint(args.resume) or {}

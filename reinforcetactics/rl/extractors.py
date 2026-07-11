@@ -19,8 +19,6 @@ before the convolution stack, then pooled (see ``pool``) and concatenated
 with the (already tanh-normalized) global features.
 """
 
-from typing import Dict
-
 import torch
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from torch import nn
@@ -171,7 +169,7 @@ class SpatialFeatureExtractor(BaseFeaturesExtractor):
         tile_sum = grid[..., :NUM_TILE_TYPES].sum(dim=-1)  # (B, H, W)
         return (tile_sum > 0).float().unsqueeze(1)  # (B, 1, H, W)
 
-    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
         """Run the CNN trunk and project to ``features_dim``."""
         grid = observations["grid"]  # (B, H, W, C_grid)
         units = observations["units"]  # (B, H, W, C_units)

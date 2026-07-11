@@ -3,7 +3,7 @@ AI bots for computer opponents with support for all unit types.
 """
 
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from reinforcetactics.constants import (
     CHARGE_BONUS,
@@ -104,7 +104,7 @@ class RandomBot(BotUnitMixin, BaseBot):
         if not self.game_state.game_over:
             self.game_state.end_turn()
 
-    def _execute(self, action_key: str, action: Dict[str, Any]) -> None:
+    def _execute(self, action_key: str, action: dict[str, Any]) -> None:
         """Dispatch a sampled action to the appropriate game-state method."""
         if action_key == "create_unit":
             self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=self.bot_player)
@@ -156,7 +156,7 @@ class BalancedRandomBot(RandomBot):
     # Map action_key -> attribute on the action dict that identifies the
     # actor unit. ``create_unit`` is handled out-of-band because it has no
     # actor unit.
-    _ACTOR_FIELDS: Dict[str, str] = {
+    _ACTOR_FIELDS: dict[str, str] = {
         "move": "unit",
         "attack": "attacker",
         "seize": "unit",
@@ -197,7 +197,7 @@ class BalancedRandomBot(RandomBot):
         # performs them, then pick one per unit. Iterating ``self.game_state.units``
         # in order keeps turn-to-turn behaviour deterministic given the RNG
         # seed (RandomBot relies on the same property).
-        actions_by_unit: Dict[int, List[Tuple[str, Dict[str, Any]]]] = {}
+        actions_by_unit: dict[int, list[tuple[str, dict[str, Any]]]] = {}
         for action_key, actor_field in self._ACTOR_FIELDS.items():
             for action in legal_actions.get(action_key, []):
                 actor = action.get(actor_field)
@@ -514,7 +514,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
         else:
             unit.end_unit_turn()
 
-    def _find_ranged_attack_position(self, unit, enemy, min_range: int, max_range: int) -> Optional[Tuple[int, int]]:
+    def _find_ranged_attack_position(self, unit, enemy, min_range: int, max_range: int) -> tuple[int, int] | None:
         """Find a position from which unit can attack enemy at valid range."""
         reachable = self.get_reachable(unit)
 
@@ -775,7 +775,7 @@ class MediumBot(BotUnitMixin, BaseBot):
     }
     COUNTER_TRIGGER_THRESHOLD = 3
 
-    def get_counter_unit(self) -> Optional[str]:
+    def get_counter_unit(self) -> str | None:
         """Return the unit type that should be prioritised based on the
         single most common enemy unit, or None when nothing crosses the
         trigger threshold."""
@@ -1071,7 +1071,7 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         return contested
 
-    def calculate_attack_value(self, attacker, target, move_distance: Optional[int] = None):
+    def calculate_attack_value(self, attacker, target, move_distance: int | None = None):
         """
         Evaluate attack efficiency considering damage dealt, received, and abilities.
 
@@ -1184,7 +1184,7 @@ class MediumBot(BotUnitMixin, BaseBot):
                     return True
         return False
 
-    def _find_flank_targets(self, rogue) -> List:
+    def _find_flank_targets(self, rogue) -> list:
         """Find enemies that can be flanked by the Rogue."""
         if rogue.type != "R" or not self.has_flank_units():
             return []
@@ -1384,8 +1384,8 @@ class MixedBot(BotUnitMixin, BaseBot):
         hard: str = "medium",
         p_hard: float = 0.5,
         rng=None,
-        easy_kwargs: Optional[Dict[str, Any]] = None,
-        hard_kwargs: Optional[Dict[str, Any]] = None,
+        easy_kwargs: dict[str, Any] | None = None,
+        hard_kwargs: dict[str, Any] | None = None,
     ):
         self.game_state = game_state
         self.bot_player = player
@@ -1553,8 +1553,8 @@ class AdvancedBot(MediumBot):
         # Game-phase state. ``phase`` is None until take_turn runs the first
         # time so direct callers (tests, REPL probing) see the unbiased
         # composition; the live bot updates it every turn.
-        self.phase: Optional[str] = None
-        self._pending_phase: Optional[str] = None
+        self.phase: str | None = None
+        self._pending_phase: str | None = None
         self._pending_phase_streak = 0
 
     def compute_target_phase(self) -> str:
@@ -1654,7 +1654,7 @@ class AdvancedBot(MediumBot):
                 elif tile.type == "f":  # Forests
                     self.forest_positions.append((tile.x, tile.y))
 
-    def get_dynamic_composition_targets(self) -> Dict[str, float]:
+    def get_dynamic_composition_targets(self) -> dict[str, float]:
         """Calculate target composition based on enabled units, then bias
         toward counters of the observed enemy composition."""
         # Filter to only enabled units
@@ -2487,7 +2487,7 @@ class MasterBot(AdvancedBot):
         super().__init__(game_state, player, rng=rng)
         # Per-turn cached threat map. Rebuilt in take_turn before any move
         # decisions. dict[(x, y)] -> float damage.
-        self._threat_map: Dict[Tuple[int, int], float] = {}
+        self._threat_map: dict[tuple[int, int], float] = {}
 
     # ------------------------------------------------------------------
     # Threat map
@@ -2501,7 +2501,7 @@ class MasterBot(AdvancedBot):
             return float(max(ad.get("adjacent", 0), ad.get("range", 0)))
         return float(ad)
 
-    def _enemy_reachable_positions(self, enemy) -> List[Tuple[int, int]]:
+    def _enemy_reachable_positions(self, enemy) -> list[tuple[int, int]]:
         """Reachable positions for an *enemy* unit. Mirrors get_reachable
         but uses the enemy as the moving unit so the move-validity check
         is correct (our units block, theirs pass through allies, etc.)."""
@@ -2513,7 +2513,7 @@ class MasterBot(AdvancedBot):
             ),
         )
 
-    def _compute_threat_map(self) -> Dict[Tuple[int, int], float]:
+    def _compute_threat_map(self) -> dict[tuple[int, int], float]:
         """Build a tile -> incoming damage map.
 
         For each living, non-paralyzed enemy unit, we union every tile it
@@ -2522,7 +2522,7 @@ class MasterBot(AdvancedBot):
         enemy's base damage added once -- summing across enemies so a tile
         in three Archers' range scores 3x.
         """
-        threat: Dict[Tuple[int, int], float] = {}
+        threat: dict[tuple[int, int], float] = {}
         width = self.game_state.grid.width
         height = self.game_state.grid.height
 
@@ -2532,7 +2532,7 @@ class MasterBot(AdvancedBot):
             base_damage = self._enemy_base_damage(enemy)
             if base_damage <= 0:
                 continue
-            positions: List[Tuple[int, int]] = [(enemy.x, enemy.y)]
+            positions: list[tuple[int, int]] = [(enemy.x, enemy.y)]
             positions.extend(self._enemy_reachable_positions(enemy))
             attackable_tiles: set = set()
             for ex, ey in positions:
@@ -2571,7 +2571,7 @@ class MasterBot(AdvancedBot):
         base_damage = self._enemy_base_damage(exclude_enemy)
         if base_damage <= 0:
             return base
-        positions: List[Tuple[int, int]] = [(exclude_enemy.x, exclude_enemy.y)]
+        positions: list[tuple[int, int]] = [(exclude_enemy.x, exclude_enemy.y)]
         positions.extend(self._enemy_reachable_positions(exclude_enemy))
         for ex, ey in positions:
             tile = self.game_state.grid.get_tile(ex, ey)
