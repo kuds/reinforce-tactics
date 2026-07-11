@@ -276,7 +276,7 @@ function HowItWorksSection(): ReactNode {
             <div className={styles.stepNumber}>1</div>
             <span className={styles.stepConnector} />
             <h3>Install</h3>
-            <p>Install via pip with optional GPU, GUI, and LLM extras. Works on Python 3.10+.</p>
+            <p>Install via pip with optional GPU, GUI, and LLM extras. Works on Python 3.11–3.13.</p>
             <code className={styles.stepCode}>pip install reinforcetactics[llm]</code>
           </div>
           <div className={styles.step}>

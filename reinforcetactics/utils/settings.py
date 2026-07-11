@@ -45,7 +45,7 @@ class Settings:
         """Load settings from file or create defaults."""
         if os.path.exists(self.settings_file):
             try:
-                with open(self.settings_file, "r", encoding="utf-8") as f:
+                with open(self.settings_file, encoding="utf-8") as f:
                     loaded_settings = json.load(f)
                     # Merge with defaults to ensure all keys exist
                     return self._merge_with_defaults(loaded_settings)

@@ -6,7 +6,6 @@ Uses PIL instead of Pygame to avoid display requirements.
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -68,7 +67,7 @@ def get_tile_color(tile: str) -> tuple:
     return TILE_COLORS.get(tile, (128, 128, 128))
 
 
-def generate_preview(map_path: str, width: int = 300, height: int = 300) -> Optional[Image.Image]:
+def generate_preview(map_path: str, width: int = 300, height: int = 300) -> Image.Image | None:
     """Generate a preview image for a map."""
     map_data = load_map(map_path)
     if map_data is None:

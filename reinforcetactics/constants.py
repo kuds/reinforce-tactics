@@ -3,6 +3,7 @@ Game constants for the 2D Strategy Game.
 """
 
 from enum import Enum
+from typing import Self
 
 
 class TileType(Enum):
@@ -19,7 +20,7 @@ class TileType(Enum):
     OCEAN = "o"
 
     @classmethod
-    def from_code(cls, code: str) -> "TileType":
+    def from_code(cls, code: str) -> Self:
         """Get TileType from single-letter code."""
         for tile_type in cls:
             if tile_type.value == code:

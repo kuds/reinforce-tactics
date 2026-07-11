@@ -1,7 +1,5 @@
 """Map editing canvas component."""
 
-from typing import Optional, Tuple
-
 import pandas as pd
 import pygame
 
@@ -36,7 +34,7 @@ class EditorCanvas:
         self.offset_y = 0
 
         # Mouse state
-        self.hover_tile: Optional[Tuple[int, int]] = None  # (x, y) of hovered tile
+        self.hover_tile: tuple[int, int] | None = None  # (x, y) of hovered tile
         self.is_painting = False
 
         # Colors
@@ -56,7 +54,7 @@ class EditorCanvas:
         self.visible_cols = self.width // self.tile_size
         self.visible_rows = self.height // self.tile_size
 
-    def handle_mouse_move(self, mouse_pos: Tuple[int, int]) -> bool:
+    def handle_mouse_move(self, mouse_pos: tuple[int, int]) -> bool:
         """
         Handle mouse movement over the canvas.
 
@@ -83,7 +81,7 @@ class EditorCanvas:
 
         return True
 
-    def handle_mouse_click(self, mouse_pos: Tuple[int, int], tile_code: str) -> bool:
+    def handle_mouse_click(self, mouse_pos: tuple[int, int], tile_code: str) -> bool:
         """
         Handle mouse click to paint a tile.
 
@@ -140,7 +138,7 @@ class EditorCanvas:
             self.tile_size -= 4
             self._update_visible_area()
 
-    def _is_over_canvas(self, mouse_pos: Tuple[int, int]) -> bool:
+    def _is_over_canvas(self, mouse_pos: tuple[int, int]) -> bool:
         """
         Check if mouse is over the canvas.
 

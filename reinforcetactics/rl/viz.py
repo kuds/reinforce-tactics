@@ -47,8 +47,9 @@ Kept deliberately minimal — three plot families that together cover the
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -107,7 +108,7 @@ _COMBAT_STAT_COLORS = {
 }
 
 
-def _draw_stage_boundaries(ax: Any, stage_boundaries: Optional[Sequence[int]]) -> None:
+def _draw_stage_boundaries(ax: Any, stage_boundaries: Sequence[int] | None) -> None:
     """Dashed vertical lines at each cumulative-timestep stage transition."""
     if not stage_boundaries:
         return
@@ -115,7 +116,7 @@ def _draw_stage_boundaries(ax: Any, stage_boundaries: Optional[Sequence[int]]) -
         ax.axvline(ts, color="gray", linestyle="--", alpha=0.3, linewidth=0.8)
 
 
-def _save_and_return(fig: plt.Figure, charts_dir: Optional[Any], name: str) -> plt.Figure:
+def _save_and_return(fig: plt.Figure, charts_dir: Any | None, name: str) -> plt.Figure:
     if charts_dir is not None:
         path = Path(charts_dir) / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,11 +127,11 @@ def _save_and_return(fig: plt.Figure, charts_dir: Optional[Any], name: str) -> p
 
 def plot_eval_curves(
     results: Sequence[dict],
-    train_records: Optional[Sequence[dict]] = None,
+    train_records: Sequence[dict] | None = None,
     *,
     opponent_label: str = "",
-    charts_dir: Optional[Any] = None,
-    stage_boundaries: Optional[Sequence[int]] = None,
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
 ) -> plt.Figure:
     """Win rate / avg reward / episode length / approx_kl / explained_variance / value_loss.
 
@@ -304,9 +305,9 @@ def _stack_inputs(results: Sequence[dict], key: str, names: Iterable[str]) -> tu
 def plot_reward_decomposition(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Stacked area of summed reward components per eval.
 
     Reads from ``r["reward_components"]`` produced when ``evaluate_model``
@@ -352,10 +353,10 @@ def plot_reward_decomposition(
 def plot_action_distribution(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     drop_unused: bool = True,
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Stacked area of action-type usage % per eval.
 
     Reads from ``r["action_counts"]`` produced when ``evaluate_model`` is
@@ -426,10 +427,10 @@ _OUTCOME_REASON_COLORS = {
 def plot_outcome_breakdown(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     drop_unused: bool = True,
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Stacked bar of outcome × end-reason per eval.
 
     Reads from ``r["outcome_reasons"]`` (always populated by
@@ -489,10 +490,10 @@ def plot_outcome_breakdown(
 def plot_unit_build_distribution(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     drop_unused: bool = True,
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Stacked area of unit-build mix per eval (% of units built per type).
 
     Reads ``r["units_built"]`` populated by ``evaluate_model`` from the
@@ -540,9 +541,9 @@ def plot_unit_build_distribution(
 def plot_combat_summary(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Per-eval combat counters normalized to a per-game average.
 
     Reads ``r["combat_stats"]`` (totals over the eval episodes) and
@@ -607,10 +608,10 @@ def plot_combat_summary(
 def plot_individual_game_stats(
     result: Mapping[str, Any],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     title_suffix: str = "",
-    filename: Optional[str] = None,
-) -> Optional[plt.Figure]:
+    filename: str | None = None,
+) -> plt.Figure | None:
     """Render a 2x3 panel summarising one recorded game.
 
     Reads the dict returned by
@@ -813,10 +814,10 @@ def plot_individual_game_stats(
 def plot_episode_length(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     title_suffix: str = "",
-    stage_boundaries: Optional[Sequence[int]] = None,
-) -> Optional[plt.Figure]:
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
     """Mean episode length per eval — small standalone chart.
 
     A single-panel plot of ``avg_length`` vs ``timesteps``. The value
@@ -854,8 +855,8 @@ def plot_curriculum_summary(
     history: Sequence[Mapping[str, Any]],
     stages: Sequence[Any],
     *,
-    charts_dir: Optional[Any] = None,
-) -> Optional[plt.Figure]:
+    charts_dir: Any | None = None,
+) -> plt.Figure | None:
     """Concatenated per-stage win-rate timeline with promotion thresholds.
 
     Each stage from ``history`` is drawn as its own line on a shared
@@ -909,8 +910,8 @@ def plot_curriculum_summary(
 def plot_curriculum_metrics(
     history: Sequence[Mapping[str, Any]],
     *,
-    charts_dir: Optional[Any] = None,
-) -> dict[str, Optional[plt.Figure]]:
+    charts_dir: Any | None = None,
+) -> dict[str, plt.Figure | None]:
     """Curriculum-wide diagnostic timelines on a single timestep axis.
 
     Flattens every stage's eval snapshots into one list and renders the
@@ -962,7 +963,7 @@ def plot_curriculum_metrics(
         sub_dir = Path(charts_dir) / "curriculum"
         sub_dir.mkdir(parents=True, exist_ok=True)
 
-    def _renamed(fig: Optional[plt.Figure], default: str, new: str) -> Optional[plt.Figure]:
+    def _renamed(fig: plt.Figure | None, default: str, new: str) -> plt.Figure | None:
         # ``_save_and_return`` writes the helpers' canonical filenames;
         # rename in place under the ``curriculum/`` subdir so the
         # curriculum-wide PNGs don't shadow the per-stage ones.
@@ -1035,9 +1036,9 @@ def plot_curriculum_metrics(
 def plot_curriculum_composition_summary(
     history: Sequence[Mapping[str, Any]],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     final_evals_to_average: int = 3,
-) -> Optional[plt.Figure]:
+) -> plt.Figure | None:
     """One-row-per-stage summary of *what the policy actually did*.
 
     Per-stage diagnostics (``plot_stage_diagnostics``) and curriculum-
@@ -1214,9 +1215,9 @@ def plot_curriculum_composition_summary(
 def plot_stage_diagnostics(
     results: Sequence[dict],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     title_suffix: str = "",
-) -> dict[str, Optional[plt.Figure]]:
+) -> dict[str, plt.Figure | None]:
     """Render the full per-stage diagnostic suite into ``charts_dir``.
 
     Calls, in order: ``plot_episode_length``, ``plot_outcome_breakdown``,
@@ -1253,7 +1254,7 @@ def plot_stage_diagnostics(
 def plot_bc_training_curves(
     bc_stats: Sequence[Any],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     name: str = "bc_training_curves.png",
 ) -> plt.Figure:
     """Per-epoch BC supervised metrics: loss + two accuracy curves.
@@ -1301,7 +1302,7 @@ def plot_bc_training_curves(
 def plot_bc_demo_outcomes(
     scenario_stats: Sequence[Any],
     *,
-    charts_dir: Optional[Any] = None,
+    charts_dir: Any | None = None,
     name: str = "bc_demo_outcomes.png",
 ) -> plt.Figure:
     """Per-scenario demonstrator outcomes: stacked W/L/D + avg turn count.

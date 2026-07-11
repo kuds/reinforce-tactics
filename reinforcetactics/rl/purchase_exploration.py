@@ -29,7 +29,8 @@ Pieces:
 from __future__ import annotations
 
 import math
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
@@ -104,7 +105,7 @@ def substitute_purchase_unit_types(
 def _slice_unit_type_mask(
     action_masks: Any,
     action_dims: Sequence[int],
-) -> Optional[np.ndarray]:
+) -> np.ndarray | None:
     """Extract the ``unit_type`` per-dim mask from MaskablePPO's input.
 
     sb3-contrib's :class:`MaskableMultiCategoricalDistribution.apply_masking`
@@ -139,7 +140,7 @@ def _slice_unit_type_mask(
     return masks_np[:, start:end]
 
 
-def install_purchase_explore_hook(model: Any, eps: float, seed: Optional[int] = None) -> None:
+def install_purchase_explore_hook(model: Any, eps: float, seed: int | None = None) -> None:
     """Install the ε-random unit-type substitution on ``model.policy.forward``.
 
     Idempotent: a model's policy is wrapped at most once, so calling
@@ -289,7 +290,7 @@ class PurchaseExploreScheduleCallback(BaseCallback):
         self.end = float(end)
         self.total_timesteps = int(total_timesteps)
         self.schedule = schedule
-        self._stage_start_step: Optional[int] = None
+        self._stage_start_step: int | None = None
 
     def _on_training_start(self) -> None:
         self._stage_start_step = int(self.num_timesteps)

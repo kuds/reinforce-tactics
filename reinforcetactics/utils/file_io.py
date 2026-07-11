@@ -397,7 +397,7 @@ class FileIO:
             Dictionary with game state data
         """
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 save_data = json.load(f)
 
             print(f"✅ Game loaded: {filepath}")
@@ -474,7 +474,7 @@ class FileIO:
             Dictionary with replay data
         """
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 replay_data = json.load(f)
 
             print(f"✅ Replay loaded: {filepath}")

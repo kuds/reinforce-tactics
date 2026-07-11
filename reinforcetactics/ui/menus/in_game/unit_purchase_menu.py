@@ -1,6 +1,6 @@
 """In-game overlay menu for purchasing units on buildings."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pygame
 
@@ -12,7 +12,7 @@ from reinforcetactics.utils.fonts import get_display_font, get_font
 class UnitPurchaseMenu:
     """In-game overlay menu for purchasing units on buildings."""
 
-    def __init__(self, screen: pygame.Surface, game_state: Any, building_pos: Tuple[int, int]) -> None:
+    def __init__(self, screen: pygame.Surface, game_state: Any, building_pos: tuple[int, int]) -> None:
         """
         Initialize unit purchase menu.
 
@@ -42,8 +42,8 @@ class UnitPurchaseMenu:
         self.unit_types = [ut for ut in all_unit_types if ut in game_state.enabled_units]
 
         # Interactive elements
-        self.interactive_elements: List[Dict[str, Any]] = []
-        self.hover_element: Optional[Dict[str, Any]] = None
+        self.interactive_elements: list[dict[str, Any]] = []
+        self.hover_element: dict[str, Any] | None = None
         self.selected_index = 0  # Keyboard navigation index
 
         # Cached overlay surface to avoid per-frame allocation
@@ -85,7 +85,7 @@ class UnitPurchaseMenu:
 
         self.menu_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)
 
-    def handle_click(self, mouse_pos: Tuple[int, int]) -> Optional[Dict[str, Any]]:
+    def handle_click(self, mouse_pos: tuple[int, int]) -> dict[str, Any] | None:
         """
         Handle mouse clicks.
 
@@ -120,7 +120,7 @@ class UnitPurchaseMenu:
 
         return None
 
-    def handle_mouse_motion(self, mouse_pos: Tuple[int, int]) -> None:
+    def handle_mouse_motion(self, mouse_pos: tuple[int, int]) -> None:
         """
         Handle mouse motion for hover effects.
 
@@ -133,7 +133,7 @@ class UnitPurchaseMenu:
                 self.hover_element = element
                 break
 
-    def handle_keydown(self, event: pygame.event.Event) -> Optional[Dict[str, Any]]:
+    def handle_keydown(self, event: pygame.event.Event) -> dict[str, Any] | None:
         """
         Handle keyboard input for unit selection.
 
@@ -170,7 +170,7 @@ class UnitPurchaseMenu:
 
         return None
 
-    def _try_purchase(self, index: int) -> Optional[Dict[str, Any]]:
+    def _try_purchase(self, index: int) -> dict[str, Any] | None:
         """
         Attempt to purchase a unit at the given index.
 

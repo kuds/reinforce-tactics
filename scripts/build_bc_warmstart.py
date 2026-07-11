@@ -33,7 +33,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _resolve_output_path(arg: Optional[str]) -> Path:
+def _resolve_output_path(arg: str | None) -> Path:
     if arg:
         return Path(arg)
     ts = time.strftime("%Y%m%d_%H%M%S")

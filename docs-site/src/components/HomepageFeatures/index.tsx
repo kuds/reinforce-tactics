@@ -15,7 +15,7 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
       <>
-        A complete tactical combat system with multiple unit types, structures to capture, 
+        A complete tactical combat system with multiple unit types, structures to capture,
         and an economic system. Rich gameplay designed for RL research.
       </>
     ),

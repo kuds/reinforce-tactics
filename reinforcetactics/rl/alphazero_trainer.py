@@ -20,7 +20,7 @@ import random
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Self
 
 import numpy as np
 import torch
@@ -51,11 +51,11 @@ class ReplayBuffer:
     def __init__(self, capacity: int = 100_000):
         self.buffer: deque[tuple] = deque(maxlen=capacity)
 
-    def push(self, examples: List[tuple]) -> None:
+    def push(self, examples: list[tuple]) -> None:
         """Add a list of training examples from a single game."""
         self.buffer.extend(examples)
 
-    def sample(self, batch_size: int) -> List[tuple]:
+    def sample(self, batch_size: int) -> list[tuple]:
         """Sample a random batch of examples."""
         return random.sample(list(self.buffer), min(batch_size, len(self.buffer)))
 
@@ -71,8 +71,8 @@ def self_play_game(
     map_data: list,
     max_steps: int = 400,
     temperature_threshold: int = 30,
-    enabled_units: Optional[list] = None,
-) -> Tuple[List[tuple], int]:
+    enabled_units: list | None = None,
+) -> tuple[list[tuple], int]:
     """
     Play a complete game using MCTS for both players.
 
@@ -166,7 +166,7 @@ class AlphaZeroTrainer:
 
     def __init__(
         self,
-        map_file: Optional[str] = None,
+        map_file: str | None = None,
         grid_height: int = 20,
         grid_width: int = 20,
         num_res_blocks: int = 6,
@@ -188,7 +188,7 @@ class AlphaZeroTrainer:
         eval_win_threshold: float = 0.55,
         checkpoint_dir: str = "checkpoints/alphazero",
         device: str = "cpu",
-        enabled_units: Optional[list] = None,
+        enabled_units: list | None = None,
     ):
         self.map_file = map_file
         self.grid_height = grid_height
@@ -261,7 +261,7 @@ class AlphaZeroTrainer:
         )
 
         # Training history
-        self.history: Dict[str, List[Any]] = {
+        self.history: dict[str, list[Any]] = {
             "iteration": [],
             "policy_loss": [],
             "value_loss": [],
@@ -274,7 +274,7 @@ class AlphaZeroTrainer:
         # Create checkpoint directory
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    def train(self) -> Dict:
+    def train(self) -> dict:
         """
         Run the full AlphaZero training loop.
 
@@ -355,7 +355,7 @@ class AlphaZeroTrainer:
 
         return self.history
 
-    def _self_play_phase(self) -> Tuple[List[tuple], Dict]:
+    def _self_play_phase(self) -> tuple[list[tuple], dict]:
         """Generate self-play training data."""
         mcts = MCTS(network=self.network, **self.mcts_kwargs)
         all_examples = []
@@ -394,7 +394,7 @@ class AlphaZeroTrainer:
 
         return all_examples, stats
 
-    def _training_phase(self) -> Dict[str, float]:
+    def _training_phase(self) -> dict[str, float]:
         """Train the network on replay buffer data."""
         if len(self.replay_buffer) < self.batch_size:
             logger.info("Buffer too small (%d < %d), skipping training", len(self.replay_buffer), self.batch_size)
@@ -524,7 +524,7 @@ class AlphaZeroTrainer:
             return 0.5
         return wins / total_decided
 
-    def _play_eval_game(self, p1_mcts: MCTS, p2_mcts: MCTS) -> Optional[int]:
+    def _play_eval_game(self, p1_mcts: MCTS, p2_mcts: MCTS) -> int | None:
         """Play a single evaluation game. Returns winner (1, 2, or None)."""
         game_state = GameState(
             self.map_data,
@@ -592,7 +592,7 @@ class AlphaZeroTrainer:
         logger.info("Saved training history: %s", path)
 
     @classmethod
-    def load_checkpoint(cls, path: str, device: str = "cpu", **kwargs) -> "AlphaZeroTrainer":
+    def load_checkpoint(cls, path: str, device: str = "cpu", **kwargs) -> Self:
         """
         Load a trainer from a checkpoint.
 

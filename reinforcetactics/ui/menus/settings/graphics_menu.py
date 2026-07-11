@@ -1,7 +1,5 @@
 """Graphics settings menu for configuring sprite paths."""
 
-from typing import Optional
-
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
@@ -14,7 +12,7 @@ from reinforcetactics.utils.settings import get_settings
 class GraphicsMenu(Menu):
     """Graphics settings menu for sprite configuration."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize graphics menu.
 
@@ -23,7 +21,7 @@ class GraphicsMenu(Menu):
         """
         super().__init__(screen, get_language().get("graphics.title", "Graphics Settings"))
         self.settings = get_settings()
-        self.editing_path: Optional[str] = None  # Which path is being edited ('unit', 'tile', or 'animation')
+        self.editing_path: str | None = None  # Which path is being edited ('unit', 'tile', or 'animation')
         self.path_input = TextInput()
         self._setup_options()
 
@@ -145,13 +143,13 @@ class GraphicsMenu(Menu):
         self.editing_path = None
         self.path_input.text = ""
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[str]:
+    def handle_input(self, event: pygame.event.Event) -> str | None:
         """Handle input events, including text input for path editing."""
         if self.editing_path:
             return self._handle_text_input(event)
         return super().handle_input(event)
 
-    def _handle_text_input(self, event: pygame.event.Event) -> Optional[str]:
+    def _handle_text_input(self, event: pygame.event.Event) -> str | None:
         """Handle text input for path editing."""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
@@ -223,7 +221,7 @@ class GraphicsMenu(Menu):
 
         pygame.display.flip()
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """Run the graphics menu loop."""
         result = None
         clock = pygame.time.Clock()

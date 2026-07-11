@@ -1,7 +1,6 @@
 """Menu for selecting a map when starting a new game."""
 
 import os
-from typing import List, Optional
 
 import pygame
 
@@ -14,9 +13,7 @@ from reinforcetactics.utils.language import get_language
 class MapSelectionMenu(Menu):
     """Menu for selecting a map when starting a new game with visual previews."""
 
-    def __init__(
-        self, screen: Optional[pygame.Surface] = None, maps_dir: str = "maps", game_mode: Optional[str] = None
-    ) -> None:
+    def __init__(self, screen: pygame.Surface | None = None, maps_dir: str = "maps", game_mode: str | None = None) -> None:
         """
         Initialize map selection menu.
 
@@ -28,7 +25,7 @@ class MapSelectionMenu(Menu):
         super().__init__(screen, get_language().get("new_game.title", "Select Map"))
         self.maps_dir = maps_dir
         self.game_mode = game_mode
-        self.available_maps: List[str] = []
+        self.available_maps: list[str] = []
         self.preview_generator = MapPreviewGenerator()
         self._load_maps()
         self._setup_options()
@@ -264,7 +261,7 @@ class MapSelectionMenu(Menu):
             self.screen.blit(diff_surface, (info_x, info_y))
             info_y += 30
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         """
         Run map selection menu.
 

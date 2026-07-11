@@ -70,7 +70,7 @@ and MaskablePPO already pulls them via ``env.action_masks()``. The
 included in the returned dict only when explicitly provided.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -141,13 +141,13 @@ UNIT_COUNT_SCALE = 20.0
 def build_observation(
     game_state: Any,
     perspective_player: int,
-    action_mask: Optional[np.ndarray] = None,
-    fog_of_war: Optional[bool] = None,
-    pad_to: Optional[Tuple[int, int]] = None,
+    action_mask: np.ndarray | None = None,
+    fog_of_war: bool | None = None,
+    pad_to: tuple[int, int] | None = None,
     gold_scale: float = GOLD_SCALE,
     turn_scale: float = TURN_SCALE,
     unit_count_scale: float = UNIT_COUNT_SCALE,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Build an RL observation from ``perspective_player``'s viewpoint.
 
     Args:
@@ -321,7 +321,7 @@ def build_observation(
             padded_units[:h, :w, :] = units
             units = padded_units
 
-    obs: Dict[str, np.ndarray] = {
+    obs: dict[str, np.ndarray] = {
         "grid": grid,
         "units": units,
         "global_features": global_features,

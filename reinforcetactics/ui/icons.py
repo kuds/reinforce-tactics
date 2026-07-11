@@ -5,12 +5,10 @@ Generates simple geometric icons programmatically using pygame drawing,
 ensuring consistent appearance across Windows, macOS, and Linux.
 """
 
-from typing import Dict, Tuple
-
 import pygame
 
 # Icon cache to avoid regenerating icons
-_icon_cache: Dict[str, pygame.Surface] = {}
+_icon_cache: dict[str, pygame.Surface] = {}
 
 
 def _ensure_pygame_init() -> None:
@@ -20,7 +18,7 @@ def _ensure_pygame_init() -> None:
 
 
 def get_arrow_up_icon(
-    size: int = 16, color: Tuple[int, int, int] = (200, 180, 100), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (200, 180, 100), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate an upward-pointing arrow icon.
@@ -57,7 +55,7 @@ def get_arrow_up_icon(
 
 
 def get_arrow_down_icon(
-    size: int = 16, color: Tuple[int, int, int] = (200, 180, 100), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (200, 180, 100), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a downward-pointing arrow icon.
@@ -95,8 +93,8 @@ def get_arrow_down_icon(
 
 def get_checkmark_icon(
     size: int = 16,
-    color: Tuple[int, int, int] = (50, 200, 50),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
+    color: tuple[int, int, int] = (50, 200, 50),
+    bg_color: tuple[int, int, int, int] = (0, 0, 0, 0),
     thickness: int = 0,
 ) -> pygame.Surface:
     """
@@ -143,8 +141,8 @@ def get_checkmark_icon(
 
 def get_x_icon(
     size: int = 16,
-    color: Tuple[int, int, int] = (200, 50, 50),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
+    color: tuple[int, int, int] = (200, 50, 50),
+    bg_color: tuple[int, int, int, int] = (0, 0, 0, 0),
     thickness: int = 0,
 ) -> pygame.Surface:
     """
@@ -188,7 +186,7 @@ def get_x_icon(
 
 
 def get_play_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a play icon (right-pointing triangle).
@@ -223,7 +221,7 @@ def get_play_icon(
 
 
 def get_pause_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a pause icon (two vertical bars).
@@ -266,7 +264,7 @@ def get_pause_icon(
 
 
 def get_arrow_left_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a left-pointing arrow icon.
@@ -301,7 +299,7 @@ def get_arrow_left_icon(
 
 
 def get_arrow_right_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a right-pointing arrow icon.
@@ -320,8 +318,8 @@ def get_arrow_right_icon(
 
 def get_restart_icon(
     size: int = 16,
-    color: Tuple[int, int, int] = (255, 255, 255),
-    bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0),
+    color: tuple[int, int, int] = (255, 255, 255),
+    bg_color: tuple[int, int, int, int] = (0, 0, 0, 0),
     thickness: int = 0,
 ) -> pygame.Surface:
     """
@@ -423,7 +421,7 @@ def get_restart_icon(
 
 
 def get_skip_back_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a skip back icon (vertical bar + two left triangles).
@@ -470,7 +468,7 @@ def get_skip_back_icon(
 
 
 def get_skip_forward_icon(
-    size: int = 16, color: Tuple[int, int, int] = (255, 255, 255), bg_color: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    size: int = 16, color: tuple[int, int, int] = (255, 255, 255), bg_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 ) -> pygame.Surface:
     """
     Generate a skip forward icon (two right triangles + vertical bar).

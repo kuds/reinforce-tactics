@@ -1,7 +1,5 @@
 """Menu for configuring LLM API keys."""
 
-from typing import Optional
-
 import pygame
 
 from reinforcetactics.ui import theme, widgets
@@ -15,7 +13,7 @@ from reinforcetactics.utils.language import get_language
 class APIKeysMenu:
     """Menu for configuring LLM API keys."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize API keys configuration menu.
 
@@ -69,14 +67,14 @@ class APIKeysMenu:
         self.hover_element = None
 
         # Test connection status
-        self.test_status: dict[str, Optional[str]] = {
+        self.test_status: dict[str, str | None] = {
             "openai": None,  # None, 'testing', 'success', 'failed'
             "anthropic": None,
             "google": None,
         }
         self.test_messages = {"openai": "", "anthropic": "", "google": ""}
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[bool]:
+    def handle_input(self, event: pygame.event.Event) -> bool | None:
         """
         Handle input events.
 

@@ -29,7 +29,6 @@ import subprocess
 import sys
 import threading
 from types import FrameType
-from typing import List, Optional
 
 # Make the package importable when the image is run from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -46,12 +45,12 @@ logger = logging.getLogger("vertex_train")
 DEFAULT_SYNC_INTERVAL = 300
 
 
-def _default_command() -> List[str]:
+def _default_command() -> list[str]:
     """Fallback training command when none is supplied (matches the image CMD)."""
     return ["python3", "main.py", "--mode", "train"]
 
 
-def _sync(base_uri: Optional[str], credentials_file: Optional[str], lock: threading.Lock, manifest: dict) -> None:
+def _sync(base_uri: str | None, credentials_file: str | None, lock: threading.Lock, manifest: dict) -> None:
     """Run one sync pass under ``lock`` so periodic and final syncs don't overlap.
 
     ``manifest`` is shared across passes so unchanged files are not re-uploaded.
@@ -65,7 +64,7 @@ def _sync(base_uri: Optional[str], credentials_file: Optional[str], lock: thread
 
 def _periodic_sync_loop(
     base_uri: str,
-    credentials_file: Optional[str],
+    credentials_file: str | None,
     interval: int,
     stop_event: threading.Event,
     lock: threading.Lock,
@@ -104,7 +103,7 @@ def main() -> int:
 
     # Forward termination signals (Vertex sends SIGTERM on cancel/preemption)
     # to the training process so it can checkpoint before we do a final sync.
-    def _forward(signum: int, _frame: Optional[FrameType]) -> None:
+    def _forward(signum: int, _frame: FrameType | None) -> None:
         logger.info("Received signal %s; forwarding to training process.", signum)
         proc.send_signal(signum)
 
@@ -114,7 +113,7 @@ def main() -> int:
     sync_lock = threading.Lock()
     stop_event = threading.Event()
     manifest: dict = {}  # shared across syncs so unchanged files aren't re-uploaded
-    sync_thread: Optional[threading.Thread] = None
+    sync_thread: threading.Thread | None = None
     if base_uri and interval > 0:
         sync_thread = threading.Thread(
             target=_periodic_sync_loop,

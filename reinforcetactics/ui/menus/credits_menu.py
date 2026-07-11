@@ -1,6 +1,6 @@
 """Credits menu."""
 
-from typing import Any, Optional
+from typing import Any
 
 import pygame
 
@@ -11,7 +11,7 @@ from reinforcetactics.utils.language import get_language
 class CreditsMenu(Menu):
     """Credits menu."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize credits menu.
 
@@ -62,7 +62,7 @@ class CreditsMenu(Menu):
         description_surface = self.option_font.render(description, True, self.text_color)
         self.screen.blit(description_surface, description_surface.get_rect(centerx=screen_cx, y=y))
 
-    def run(self) -> Optional[Any]:
+    def run(self) -> Any | None:
         """
         Run the credits menu loop.
 

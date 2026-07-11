@@ -1,7 +1,5 @@
 """Language selection menu."""
 
-from typing import Optional
-
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
@@ -13,7 +11,7 @@ class LanguageMenu(Menu):
 
     LANGUAGES = {"en": "English", "fr": "Français", "ko": "한국어", "es": "Español", "zh": "中文"}
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize language menu.
 

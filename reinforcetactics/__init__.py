@@ -1,6 +1,6 @@
 """Reinforce Tactics - Turn-Based Strategy Game"""
 
-import re
+import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -13,22 +13,17 @@ def _read_pyproject_version() -> str:
     training scripts, the tournament runner invoked from a fresh checkout
     -- otherwise fall through to ``0.0.0+unknown`` and lose version
     provenance in saved replays. Parsing the project file directly keeps
-    those runs honest without adding a hard ``tomllib``/``tomli`` dependency
-    (we just need one line out of the file).
+    those runs honest.
     """
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     if not pyproject.is_file():
         return "0.0.0+unknown"
     try:
         text = pyproject.read_text(encoding="utf-8")
-    except OSError:
+        project_version = tomllib.loads(text)["project"]["version"]
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
         return "0.0.0+unknown"
-    # Match the first ``version = "..."`` under [project]. Anchored so a
-    # tool's own ``version = "..."`` in a later table can't shadow it.
-    match = re.search(r'(?ms)^\[project\][^\[]*?^version\s*=\s*"([^"]+)"', text)
-    if match:
-        return match.group(1)
-    return "0.0.0+unknown"
+    return str(project_version)
 
 
 try:

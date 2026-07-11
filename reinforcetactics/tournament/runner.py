@@ -10,11 +10,12 @@ import logging
 import os
 import random
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
@@ -63,7 +64,7 @@ class TournamentRunner:
     def __init__(
         self,
         config: TournamentConfig,
-        elo_system: Optional[EloRatingSystem] = None,
+        elo_system: EloRatingSystem | None = None,
     ):
         """
         Initialize tournament runner.
@@ -81,10 +82,10 @@ class TournamentRunner:
         self._results_lock = Lock()
 
         # Progress callback
-        self._progress_callback: Optional[Callable[[int, int, GameResult], None]] = None
+        self._progress_callback: Callable[[int, int, GameResult], None] | None = None
 
         # Completed matches for resume support
-        self._completed_matches: Optional[Dict[str, List[CompletedMatchInfo]]] = None
+        self._completed_matches: dict[str, list[CompletedMatchInfo]] | None = None
 
         # Create output directories
         self._setup_directories()
@@ -108,7 +109,7 @@ class TournamentRunner:
         """
         self._progress_callback = callback
 
-    def set_completed_matches(self, completed: Dict[str, List[CompletedMatchInfo]]) -> None:
+    def set_completed_matches(self, completed: dict[str, list[CompletedMatchInfo]]) -> None:
         """
         Set completed matches for resume support.
 
@@ -117,7 +118,7 @@ class TournamentRunner:
         """
         self._completed_matches = completed
 
-    def run(self, bots: List[BotDescriptor]) -> TournamentResults:
+    def run(self, bots: list[BotDescriptor]) -> TournamentResults:
         """
         Run the tournament.
 
@@ -187,7 +188,7 @@ class TournamentRunner:
 
     def _run_round_sequential(
         self,
-        games: List[ScheduledGame],
+        games: list[ScheduledGame],
         completed_count: int,
         total_games: int,
     ) -> int:
@@ -208,7 +209,7 @@ class TournamentRunner:
 
     def _run_round_concurrent(
         self,
-        games: List[ScheduledGame],
+        games: list[ScheduledGame],
         completed_count: int,
         total_games: int,
     ) -> int:
@@ -245,7 +246,7 @@ class TournamentRunner:
         map_stem: str,
         bot1_name: str,
         bot2_name: str,
-    ) -> Tuple[Optional[random.Random], Optional[random.Random]]:
+    ) -> tuple[random.Random | None, random.Random | None]:
         """Derive deterministic per-side ``random.Random`` instances for a game.
 
         Returns ``(None, None)`` when ``self.config.rng_seed`` is None,
@@ -420,8 +421,8 @@ class TournamentRunner:
         winner_name: str,
         map_config: MapConfig,
         game_id: int,
-        bot1: Optional[Any] = None,
-        bot2: Optional[Any] = None,
+        bot1: Any | None = None,
+        bot2: Any | None = None,
     ) -> str:
         """Save game replay and return path."""
         # ``game_id`` is included in the filename to disambiguate multiple
@@ -481,7 +482,7 @@ class TournamentRunner:
         # balance notebook can correlate decision frequency with outcome.
         # Bots without the BaseBot hook (or LLM/RL bots that don't record)
         # contribute an empty dict.
-        def _capabilities_for(b: Optional[Any]) -> Dict[str, int]:
+        def _capabilities_for(b: Any | None) -> dict[str, int]:
             if b is None:
                 return {}
             getter = getattr(b, "get_capabilities_fired", None)
@@ -538,7 +539,7 @@ class TournamentRunner:
         FileIO.save_replay(game_state.action_history, game_info, replay_path)
         return replay_path
 
-    def _log_tournament_start(self, bots: List[BotDescriptor]) -> None:
+    def _log_tournament_start(self, bots: list[BotDescriptor]) -> None:
         """Log tournament start information."""
         logger.info("=" * 70)
         logger.info(f"TOURNAMENT: {self.config.name}")
@@ -570,7 +571,7 @@ class TournamentRunner:
 
         logger.info("=" * 70)
 
-    def export_results(self, timestamp: Optional[str] = None) -> Dict[str, str]:
+    def export_results(self, timestamp: str | None = None) -> dict[str, str]:
         """
         Export results to all formats.
 

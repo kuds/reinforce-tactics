@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pygame
 
@@ -19,7 +19,7 @@ from reinforcetactics.utils.language import get_language
 class LoadGameMenu(Menu):
     """Menu for loading saved games with visual previews and info."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, saves_dir: str = "saves") -> None:
+    def __init__(self, screen: pygame.Surface | None = None, saves_dir: str = "saves") -> None:
         """
         Initialize load game menu.
 
@@ -29,13 +29,13 @@ class LoadGameMenu(Menu):
         """
         super().__init__(screen, get_language().get("load_game.title", "Load Game"))
         self.saves_dir = saves_dir
-        self.save_files: List[str] = []
-        self.save_metadata: Dict[str, Dict[str, Any]] = {}
+        self.save_files: list[str] = []
+        self.save_metadata: dict[str, dict[str, Any]] = {}
         self._load_saves()
         self._setup_options()
 
         # Cache for map previews
-        self._preview_cache: Dict[str, pygame.Surface] = {}
+        self._preview_cache: dict[str, pygame.Surface] = {}
 
     def _load_saves(self) -> None:
         """Load available save files and their metadata."""
@@ -57,7 +57,7 @@ class LoadGameMenu(Menu):
     def _load_save_metadata(self, filepath: str) -> None:
         """Load metadata from a save file."""
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Parse timestamp
@@ -88,9 +88,9 @@ class LoadGameMenu(Menu):
 
             # Count units per player
             units = data.get("units", [])
-            unit_counts: Dict[int, int] = {}
-            unit_types_per_player: Dict[int, Dict[str, int]] = {}
-            total_health_per_player: Dict[int, int] = {}
+            unit_counts: dict[int, int] = {}
+            unit_types_per_player: dict[int, dict[str, int]] = {}
+            total_health_per_player: dict[int, int] = {}
 
             for unit in units:
                 player = unit.get("player", 0)
@@ -144,7 +144,7 @@ class LoadGameMenu(Menu):
                 "num_players": num_players,
             }
 
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             # Store minimal metadata for failed loads
             self.save_metadata[filepath] = {
                 "date": self._extract_date_from_filename(os.path.basename(filepath)),
@@ -172,7 +172,7 @@ class LoadGameMenu(Menu):
         """Extract date from save filename."""
         return extract_date_from_filename(filename)
 
-    def _get_player_display_name(self, player_configs: List[Dict], player_idx: int) -> str:
+    def _get_player_display_name(self, player_configs: list[dict], player_idx: int) -> str:
         """Get a display name for a player from config."""
         return get_player_display_name(player_configs, player_idx)
 
@@ -242,7 +242,7 @@ class LoadGameMenu(Menu):
             )
             self.option_rects.append(item_rect)
 
-    def _generate_save_map_preview(self, filepath: str, width: int, height: int) -> Optional[pygame.Surface]:
+    def _generate_save_map_preview(self, filepath: str, width: int, height: int) -> pygame.Surface | None:
         """Generate a map preview from save's tile data."""
         cache_key = f"{filepath}_{width}_{height}"
         if cache_key in self._preview_cache:
@@ -267,7 +267,7 @@ class LoadGameMenu(Menu):
             tile_height = height / map_height
 
             # Build a 2D grid from tiles list
-            tile_grid: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            tile_grid: dict[tuple[int, int], dict[str, Any]] = {}
             for tile in tiles:
                 x, y = tile.get("x", 0), tile.get("y", 0)
                 tile_grid[(x, y)] = tile
@@ -585,7 +585,7 @@ class LoadGameMenu(Menu):
         self.screen.blit(date_label, (info_x, info_y))
         self.screen.blit(date_value, (info_x + date_label.get_width(), info_y))
 
-    def run(self) -> Optional[Dict[str, Any]]:
+    def run(self) -> dict[str, Any] | None:
         """
         Run load game menu.
 
@@ -622,9 +622,9 @@ class LoadGameMenu(Menu):
 
             # Load the actual save data from the file
             try:
-                with open(selected_path, "r", encoding="utf-8") as f:
+                with open(selected_path, encoding="utf-8") as f:
                     save_data = json.load(f)
                 return save_data
-            except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
+            except (OSError, FileNotFoundError, json.JSONDecodeError) as e:
                 print(f"Error loading save file: {e}")
                 return None

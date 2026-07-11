@@ -2,8 +2,6 @@
 Language and translation system
 """
 
-from typing import Optional
-
 TRANSLATIONS = {
     "english": {
         # Main Menu
@@ -823,7 +821,7 @@ class Language:
         self.current_language = "english"
         return False
 
-    def get(self, key: str, default: Optional[str] = None) -> str:
+    def get(self, key: str, default: str | None = None) -> str:
         """
         Get translation for key.
 
@@ -847,7 +845,7 @@ class Language:
         """Get list of all available languages."""
         return list(TRANSLATIONS.keys())
 
-    def get_language_display_name(self, language: Optional[str] = None) -> str:
+    def get_language_display_name(self, language: str | None = None) -> str:
         """
         Get display name for language.
 
@@ -870,7 +868,7 @@ class Language:
 
 
 # Global language instance
-_language_instance: Optional[Language] = None  # pylint: disable=invalid-name
+_language_instance: Language | None = None  # pylint: disable=invalid-name
 
 
 def get_language() -> Language:
@@ -925,7 +923,7 @@ def reset_language(lang_code: str = "english") -> Language:
     return _language_instance
 
 
-def t(key: str, default: Optional[str] = None) -> str:
+def t(key: str, default: str | None = None) -> str:
     """
     Shorthand for translation.
 

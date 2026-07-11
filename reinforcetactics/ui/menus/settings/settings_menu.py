@@ -1,6 +1,6 @@
 """Settings menu."""
 
-from typing import Any, Optional
+from typing import Any
 
 import pygame
 
@@ -15,7 +15,7 @@ from reinforcetactics.utils.language import get_language
 class SettingsMenu(Menu):
     """Settings menu."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize settings menu.
 
@@ -71,7 +71,7 @@ class SettingsMenu(Menu):
         """Open API keys configuration menu."""
         return "api_keys_menu"
 
-    def run(self) -> Optional[Any]:
+    def run(self) -> Any | None:
         """
         Run the settings menu loop with submenu handling.
 

@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .elo import EloRatingSystem
 
@@ -42,10 +42,10 @@ class GameResult:
     winner_name: str
     turns: int
     map_name: str
-    replay_path: Optional[str] = None
-    error: Optional[str] = None
+    replay_path: str | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         result = {
             "game_id": self.game_id,
@@ -84,7 +84,7 @@ class BotStanding:
     draws: int = 0
     elo: float = 1500.0
     elo_change: float = 0.0
-    per_map_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    per_map_stats: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def total_games(self) -> int:
@@ -98,7 +98,7 @@ class BotStanding:
             return 0.0
         return self.wins / self.total_games
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "bot": self.bot_name,
@@ -132,7 +132,7 @@ class MatchupResult:
     bot2_wins: int = 0
     draws: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "bot1": self.bot1,
@@ -151,7 +151,7 @@ class TournamentResults:
     methods for generating standings and matchup data.
     """
 
-    def __init__(self, elo_system: Optional[EloRatingSystem] = None):
+    def __init__(self, elo_system: EloRatingSystem | None = None):
         """
         Initialize tournament results tracker.
 
@@ -159,15 +159,15 @@ class TournamentResults:
             elo_system: EloRatingSystem to use (creates new one if None)
         """
         self.elo_system = elo_system or EloRatingSystem()
-        self.game_results: List[GameResult] = []
-        self.bot_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
-        self.per_map_stats: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
+        self.game_results: list[GameResult] = []
+        self.bot_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
+        self.per_map_stats: dict[str, dict[str, dict[str, int]]] = defaultdict(
             lambda: defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
         )
-        self.matchup_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"bot1_wins": 0, "bot2_wins": 0, "draws": 0})
-        self.maps_used: List[str] = []
-        self.start_time: Optional[datetime] = None
-        self.end_time: Optional[datetime] = None
+        self.matchup_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"bot1_wins": 0, "bot2_wins": 0, "draws": 0})
+        self.maps_used: list[str] = []
+        self.start_time: datetime | None = None
+        self.end_time: datetime | None = None
 
     def start(self) -> None:
         """Mark tournament start time."""
@@ -233,7 +233,7 @@ class TournamentResults:
             self.matchup_stats[matchup_key]["draws"] += 1
             self.elo_system.update_ratings(bot1, bot2, 0)
 
-    def get_standings(self) -> List[BotStanding]:
+    def get_standings(self) -> list[BotStanding]:
         """
         Get tournament standings sorted by Elo rating.
 
@@ -258,7 +258,7 @@ class TournamentResults:
         standings.sort(key=lambda x: x.elo, reverse=True)
         return standings
 
-    def get_matchups(self) -> List[MatchupResult]:
+    def get_matchups(self) -> list[MatchupResult]:
         """
         Get head-to-head matchup results.
 
@@ -281,7 +281,7 @@ class TournamentResults:
 
         return matchups
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert all results to dictionary for serialization.
 
@@ -324,9 +324,9 @@ class ResultsExporter:
     def export_all(
         self,
         results: TournamentResults,
-        config: Optional[Dict[str, Any]] = None,
-        timestamp: Optional[str] = None,
-    ) -> Dict[str, str]:
+        config: dict[str, Any] | None = None,
+        timestamp: str | None = None,
+    ) -> dict[str, str]:
         """
         Export results to all formats.
 
@@ -360,8 +360,8 @@ class ResultsExporter:
     def export_json(
         self,
         results: TournamentResults,
-        config: Optional[Dict[str, Any]] = None,
-        timestamp: Optional[str] = None,
+        config: dict[str, Any] | None = None,
+        timestamp: str | None = None,
     ) -> str:
         """Export results to JSON."""
         if timestamp is None:
@@ -386,7 +386,7 @@ class ResultsExporter:
         logger.info(f"Results saved to: {filepath}")
         return str(filepath)
 
-    def export_standings_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
+    def export_standings_csv(self, results: TournamentResults, timestamp: str | None = None) -> str:
         """Export standings to CSV."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -406,7 +406,7 @@ class ResultsExporter:
         logger.info(f"Standings saved to: {filepath}")
         return str(filepath)
 
-    def export_matchups_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
+    def export_matchups_csv(self, results: TournamentResults, timestamp: str | None = None) -> str:
         """Export matchups to CSV."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -422,7 +422,7 @@ class ResultsExporter:
         logger.info(f"Matchups saved to: {filepath}")
         return str(filepath)
 
-    def export_matrix_csv(self, results: TournamentResults, timestamp: Optional[str] = None) -> str:
+    def export_matrix_csv(self, results: TournamentResults, timestamp: str | None = None) -> str:
         """Export results as a matrix table."""
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -477,7 +477,7 @@ class ResultsExporter:
         logger.info("=" * 84)
 
 
-def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+def _sanitize_config(config: dict[str, Any]) -> dict[str, Any]:
     """
     Remove sensitive data from configuration.
 

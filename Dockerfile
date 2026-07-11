@@ -1,11 +1,15 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 
-# Install Python
+# Install Python (Ubuntu 24.04 ships Python 3.12)
 RUN apt-get update && apt-get install -y \
-    python3.10 \
+    python3 \
     python3-pip \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 24.04 marks the system Python as externally managed (PEP 668);
+# inside a single-purpose container installing straight into it is fine.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Set working directory
 WORKDIR /app

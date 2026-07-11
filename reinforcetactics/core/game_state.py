@@ -8,7 +8,7 @@ from __future__ import annotations
 import copy
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -39,8 +39,8 @@ class GameState:
 
     @staticmethod
     def _resolve_engine_overrides(
-        overrides: Dict[str, Any],
-    ) -> Tuple[Dict[str, Any], Dict[str, int], int]:
+        overrides: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, int], int]:
         """Merge a sparse override overlay over the module engine constants.
 
         Returns ``(unit_data, income_rates, starting_gold)`` fully resolved.
@@ -84,7 +84,7 @@ class GameState:
         return unit_data, income_rates, starting_gold
 
     @staticmethod
-    def _resolve_max_units_per_player(overrides: Dict[str, Any]) -> int:
+    def _resolve_max_units_per_player(overrides: dict[str, Any]) -> int:
         """Resolve the per-player unit cap from the engine-override overlay.
 
         Defaults to :data:`MAX_UNITS_PER_PLAYER`. A positive int is required
@@ -106,7 +106,7 @@ class GameState:
         return val
 
     @staticmethod
-    def _resolve_damage_model(overrides: Dict[str, Any]) -> str:
+    def _resolve_damage_model(overrides: dict[str, Any]) -> str:
         """Resolve the combat damage model from the engine-override overlay.
 
         ``"flat"`` (default) reproduces legacy HP-independent damage.
@@ -129,7 +129,7 @@ class GameState:
     }
 
     @classmethod
-    def _resolve_structure_health(cls, overrides: Dict[str, Any]) -> Dict[str, int]:
+    def _resolve_structure_health(cls, overrides: dict[str, Any]) -> dict[str, int]:
         """Resolve per-structure max-HP overrides into ``{tile_code: hp}``.
 
         Only keys present in ``overrides`` appear in the result; absent
@@ -137,7 +137,7 @@ class GameState:
         fail loud (a structure with <=0 HP would be captured on the first
         seize / be nonsensical for regen).
         """
-        resolved: Dict[str, int] = {}
+        resolved: dict[str, int] = {}
         for ov_key, code in cls._STRUCTURE_HEALTH_KEYS.items():
             if ov_key in (overrides or {}):
                 val = int(overrides[ov_key])
@@ -167,11 +167,11 @@ class GameState:
         self,
         map_data,
         num_players: int = 2,
-        max_turns: Optional[int] = None,
-        enabled_units: Optional[List[str]] = None,
+        max_turns: int | None = None,
+        enabled_units: list[str] | None = None,
         fog_of_war: bool = False,
-        engine_overrides: Optional[Dict[str, Any]] = None,
-        rng: Optional[Any] = None,
+        engine_overrides: dict[str, Any] | None = None,
+        rng: Any | None = None,
     ) -> None:
         """
         Initialize the game state.
@@ -217,7 +217,7 @@ class GameState:
                 constant -- so an override can't leak or be half-applied.
         """
         self.grid = TileGrid(map_data)
-        self.units: List[Unit] = []
+        self.units: list[Unit] = []
         # Monotonic per-game unit-id counter. Stamped on every newly
         # created unit; written into the replay log alongside each
         # action so the v3 replay player can look up units by id
@@ -226,7 +226,7 @@ class GameState:
         self._next_unit_id: int = 0
         self.current_player: int = 1
         self.num_players: int = num_players
-        self.engine_overrides: Dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
+        self.engine_overrides: dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
         (
             self.unit_data,
             self.income_rates,
@@ -242,32 +242,32 @@ class GameState:
         # from engine_overrides and overlaid onto the grid built above; absent
         # keys keep constants.py defaults. Snapshotted into config.json via the
         # verbatim engine_overrides log, same as damage_model / economy.
-        self.structure_health: Dict[str, int] = self._resolve_structure_health(self.engine_overrides)
+        self.structure_health: dict[str, int] = self._resolve_structure_health(self.engine_overrides)
         self._apply_structure_health_overrides()
         # Hard ceiling on units-per-player (action-space + economy guardrail).
         # Enforced in both create_unit and get_legal_actions so the cap shows
         # up in the action mask, not just as a rejected action.
         self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
-        self.player_gold: Dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
+        self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         self.game_over: bool = False
-        self.winner: Optional[int] = None
+        self.winner: int | None = None
         # Why the game ended. Populated alongside ``game_over`` by
         # ``_set_game_over``. Values: ``hq_capture``, ``elimination``,
         # ``max_turns_draw``, ``resign``. Replays surface this so videos
         # and the load-game UI can explain *how* a game finished without
         # re-deriving it from actions[].
-        self.end_reason: Optional[str] = None
+        self.end_reason: str | None = None
         # Index into ``action_history`` of the action that flipped
         # ``game_over``. None until the game ends. Lets replay viewers
         # jump to the decisive moment and lets analysis count any
         # post-victory actions a bot may have queued.
-        self.game_over_action_index: Optional[int] = None
+        self.game_over_action_index: int | None = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
         # Engine-side RNG for stochastic combat outcomes (Rogue evade).
         # ``None`` = module-global ``random`` (legacy / GUI play); seeded
         # callers (the RL env) inject a ``random.Random`` for reproducibility.
-        self.rng: Optional[Any] = rng
+        self.rng: Any | None = rng
 
         # Fog of war settings
         self.fog_of_war: bool = fog_of_war
@@ -275,16 +275,16 @@ class GameState:
         # Current options: 'simple_radius' (Option A from proposal)
         # Future options: 'line_of_sight', 'hybrid'
         self.fog_of_war_method: str = "simple_radius" if fog_of_war else "none"
-        self.visibility_maps: Dict[int, VisibilityMap] = {}
+        self.visibility_maps: dict[int, VisibilityMap] = {}
         if fog_of_war:
             for player in range(1, num_players + 1):
                 self.visibility_maps[player] = VisibilityMap(self.grid.width, self.grid.height, player)
 
         # Enabled unit types (defaults to all if not specified)
-        self.enabled_units: List[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
+        self.enabled_units: list[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
 
         # Optional map file reference for saving
-        self.map_file_used: Optional[str] = None
+        self.map_file_used: str | None = None
 
         # Original map dimensions (before padding)
         # These default to the current grid dimensions if not set
@@ -296,30 +296,30 @@ class GameState:
         # Store initial map data for replays (as 2D list of tile codes)
         # This stores the PADDED map by default
         if isinstance(map_data, pd.DataFrame):
-            self.initial_map_data: List[List[str]] = map_data.values.tolist()
+            self.initial_map_data: list[list[str]] = map_data.values.tolist()
         elif isinstance(map_data, np.ndarray):
-            self.initial_map_data: List[List[str]] = map_data.tolist()
+            self.initial_map_data: list[list[str]] = map_data.tolist()
         else:
-            self.initial_map_data: List[List[str]] = [list(row) for row in map_data]
+            self.initial_map_data: list[list[str]] = [list(row) for row in map_data]
 
         # Store original unpadded map data (will be set via set_map_metadata if map was padded)
         # If not set, defaults to the same as initial_map_data (no padding)
-        self.original_map_data: Optional[List[List[str]]] = None
+        self.original_map_data: list[list[str]] | None = None
 
         # Player configurations (human vs bot)
-        self.player_configs: List[Dict[str, Any]] = []
+        self.player_configs: list[dict[str, Any]] = []
 
         # Maximum turns for the game (None = unlimited)
-        self.max_turns: Optional[int] = max_turns
+        self.max_turns: int | None = max_turns
 
         # Action history for replay
-        self.action_history: List[Dict[str, Any]] = []
+        self.action_history: list[dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
 
         # Cached values for performance (separate validity flags to prevent stale cross-reads)
-        self._unit_count_cache: Dict[int, int] = {}
+        self._unit_count_cache: dict[int, int] = {}
         self._unit_count_cache_valid: bool = False
-        self._legal_actions_cache: Dict[int, Dict[str, List[Any]]] = {}
+        self._legal_actions_cache: dict[int, dict[str, list[Any]]] = {}
         self._legal_actions_cache_valid: bool = False
 
     def reset(self, map_data) -> None:
@@ -340,8 +340,8 @@ class GameState:
         original_height: int,
         padding_offset_x: int,
         padding_offset_y: int,
-        map_file: Optional[str] = None,
-        original_map_data: Optional[List[List[str]]] = None,
+        map_file: str | None = None,
+        original_map_data: list[list[str]] | None = None,
     ) -> None:
         """
         Set metadata about the original map before padding.
@@ -363,7 +363,7 @@ class GameState:
         if original_map_data:
             self.original_map_data = original_map_data
 
-    def padded_to_original_coords(self, x: int, y: int) -> Tuple[int, int]:
+    def padded_to_original_coords(self, x: int, y: int) -> tuple[int, int]:
         """
         Convert padded map coordinates to original map coordinates.
 
@@ -376,7 +376,7 @@ class GameState:
         """
         return (x - self.map_padding_offset_x, y - self.map_padding_offset_y)
 
-    def original_to_padded_coords(self, x: int, y: int) -> Tuple[int, int]:
+    def original_to_padded_coords(self, x: int, y: int) -> tuple[int, int]:
         """
         Convert original map coordinates to padded map coordinates.
 
@@ -396,7 +396,7 @@ class GameState:
         self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
-    def _set_game_over(self, winner: Optional[int], end_reason: str) -> None:
+    def _set_game_over(self, winner: int | None, end_reason: str) -> None:
         """Single chokepoint for flipping ``game_over``.
 
         Records the winner, end reason, and the index of the action that
@@ -428,7 +428,7 @@ class GameState:
                 if len(active_players) == 1:
                     self._set_game_over(winner=active_players.pop(), end_reason="elimination")
 
-    def update_visibility(self, player: Optional[int] = None) -> None:
+    def update_visibility(self, player: int | None = None) -> None:
         """
         Update visibility maps for fog of war.
 
@@ -447,7 +447,7 @@ class GameState:
                 vis_map.update(self)
                 vis_map.clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
 
-    def get_visible_units_for_player(self, player: int, include_own: bool = True) -> List[Unit]:
+    def get_visible_units_for_player(self, player: int, include_own: bool = True) -> list[Unit]:
         """
         Get units visible to a specific player.
 
@@ -552,7 +552,7 @@ class GameState:
         """Check if a unit type is enabled for this game."""
         return unit_type in self.enabled_units
 
-    def set_enabled_units(self, enabled_units: List[str]) -> None:
+    def set_enabled_units(self, enabled_units: list[str]) -> None:
         """Set the list of enabled unit types."""
         self.enabled_units = enabled_units
         self._invalidate_cache()
@@ -566,7 +566,7 @@ class GameState:
             self._unit_count_cache_valid = True
         return self._unit_count_cache.get(player, 0)
 
-    def get_unit_at_position(self, x: int, y: int) -> Optional[Unit]:
+    def get_unit_at_position(self, x: int, y: int) -> Unit | None:
         """Get the unit at a grid position."""
         for unit in self.units:
             if unit.x == x and unit.y == y:
@@ -640,7 +640,7 @@ class GameState:
         }
         self.action_history.append(action_record)
 
-    def create_unit(self, unit_type: str, x: int, y: int, player: Optional[int] = None) -> Optional[Unit]:
+    def create_unit(self, unit_type: str, x: int, y: int, player: int | None = None) -> Unit | None:
         """
         Create a unit at the specified position.
 
@@ -776,7 +776,7 @@ class GameState:
 
         return True
 
-    def attack(self, attacker: Unit, target: Unit) -> Dict[str, Any]:
+    def attack(self, attacker: Unit, target: Unit) -> dict[str, Any]:
         """
         Execute an attack.
 
@@ -1014,7 +1014,7 @@ class GameState:
             self._invalidate_cache()
         return result
 
-    def seize(self, unit: Unit) -> Dict[str, Any]:
+    def seize(self, unit: Unit) -> dict[str, Any]:
         """Seize the structure the unit is on."""
         if unit not in self.units:
             tile = self.grid.get_tile(unit.x, unit.y)
@@ -1052,7 +1052,7 @@ class GameState:
 
         return result
 
-    def heal_units_on_structures(self, player: int) -> Dict[str, Any]:
+    def heal_units_on_structures(self, player: int) -> dict[str, Any]:
         """
         Heal units on owned structures at the start of their turn.
 
@@ -1174,7 +1174,7 @@ class GameState:
 
         return stats
 
-    def end_turn(self) -> Dict[str, Any]:
+    def end_turn(self) -> dict[str, Any]:
         """End the current player's turn and pass to the next player."""
         # No-op once the game has ended. Prevents turn_number from being
         # bumped past the winning turn (which would otherwise make
@@ -1255,7 +1255,7 @@ class GameState:
 
         return income_data
 
-    def resign(self, player: Optional[int] = None) -> None:
+    def resign(self, player: int | None = None) -> None:
         """Player resigns."""
         if player is None:
             player = self.current_player
@@ -1276,7 +1276,7 @@ class GameState:
                     end_reason="resign",
                 )
 
-    def get_legal_actions(self, player: Optional[int] = None) -> Dict[str, List[Any]]:
+    def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
         """
         Get all legal actions for the current player.
 
@@ -1418,7 +1418,7 @@ class GameState:
 
         return legal_actions
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert game state to dictionary for serialization."""
         return {
             "timestamp": self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
@@ -1449,7 +1449,7 @@ class GameState:
             "next_unit_id": self._next_unit_id,
         }
 
-    def to_numpy(self, for_player: Optional[int] = None) -> Dict[str, np.ndarray]:
+    def to_numpy(self, for_player: int | None = None) -> dict[str, np.ndarray]:
         """
         Convert game state to numpy arrays for RL.
 
@@ -1546,7 +1546,7 @@ class GameState:
 
         return result
 
-    def save_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
+    def save_to_file(self, filepath: str | None = None) -> str | None:
         """
         Save game state to file.
 
@@ -1560,7 +1560,7 @@ class GameState:
 
         return FileIO.save_game(self, filepath)
 
-    def _get_player_type(self, config: Dict[str, Any]) -> str:
+    def _get_player_type(self, config: dict[str, Any]) -> str:
         """
         Get the standardized player type for replay logs.
 
@@ -1588,8 +1588,8 @@ class GameState:
 
     @staticmethod
     def build_player_config(
-        player_no: int, name: str, player_type: str, temperature: Optional[float] = None, max_tokens: Optional[int] = None
-    ) -> Dict[str, Any]:
+        player_no: int, name: str, player_type: str, temperature: float | None = None, max_tokens: int | None = None
+    ) -> dict[str, Any]:
         """
         Build a standardized player config for replay logs.
 
@@ -1603,7 +1603,7 @@ class GameState:
         Returns:
             Standardized player config dictionary
         """
-        config: Dict[str, Any] = {"player_no": player_no, "type": player_type, "name": name}
+        config: dict[str, Any] = {"player_no": player_no, "type": player_type, "name": name}
 
         # Add LLM-specific fields
         if player_type == "llm":
@@ -1612,7 +1612,7 @@ class GameState:
 
         return config
 
-    def save_replay_to_file(self, filepath: Optional[str] = None) -> Optional[str]:
+    def save_replay_to_file(self, filepath: str | None = None) -> str | None:
         """
         Save replay to file.
 
@@ -1658,7 +1658,7 @@ class GameState:
 
         # Final-state snapshot doubles as a replay-integrity checksum;
         # see runner._save_replay for the same fields.
-        final_units_by_player: Dict[int, list] = {}
+        final_units_by_player: dict[int, list] = {}
         for u in self.units:
             final_units_by_player.setdefault(u.player, []).append(u)
         final_counts = {p: len(us) for p, us in final_units_by_player.items()}
@@ -1689,7 +1689,7 @@ class GameState:
         return FileIO.save_replay(self.action_history, game_info, filepath)
 
     @classmethod
-    def from_dict(cls, save_data: Dict[str, Any], map_data) -> "GameState":
+    def from_dict(cls, save_data: dict[str, Any], map_data) -> GameState:
         """
         Restore game state from dictionary.
 

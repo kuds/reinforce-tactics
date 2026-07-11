@@ -16,14 +16,15 @@ import json
 import os
 import platform
 import subprocess
-from datetime import datetime, timezone
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 
-def _git_meta() -> Dict[str, Any]:
+def _git_meta() -> dict[str, Any]:
     try:
         sha = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -37,14 +38,14 @@ def _git_meta() -> Dict[str, Any]:
             ["git", "diff", "--quiet", "HEAD"],
             stderr=subprocess.DEVNULL,
         )
-        dirty: Optional[bool] = bool(rc)
+        dirty: bool | None = bool(rc)
     except (FileNotFoundError, OSError):
         dirty = None
     return {"commit": sha, "short": sha[:7] if sha else None, "dirty": dirty}
 
 
-def _lib_versions() -> Dict[str, Optional[str]]:
-    versions: Dict[str, Optional[str]] = {}
+def _lib_versions() -> dict[str, str | None]:
+    versions: dict[str, str | None] = {}
     for name in (
         "reinforcetactics",
         "torch",
@@ -61,7 +62,7 @@ def _lib_versions() -> Dict[str, Optional[str]]:
     return versions
 
 
-def _engine_economy() -> Dict[str, Any]:
+def _engine_economy() -> dict[str, Any]:
     """Snapshot the engine economy constants that are NOT YAML-settable.
 
     STARTING_GOLD / *_INCOME and the per-unit stat block live in
@@ -95,7 +96,7 @@ def _engine_economy() -> Dict[str, Any]:
         return {}
 
 
-def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
+def _map_meta(map_file: str | None) -> dict[str, Any]:
     """Fingerprint the map CSV by content, not just path.
 
     Maps are referenced by path; a silent terrain edit to e.g.
@@ -107,7 +108,7 @@ def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
     """
     if not map_file:
         return {"map_file": None, "map_sha256": None, "map_dims": None}
-    out: Dict[str, Any] = {"map_file": map_file, "map_sha256": None, "map_dims": None}
+    out: dict[str, Any] = {"map_file": map_file, "map_sha256": None, "map_dims": None}
     try:
         raw = Path(map_file).read_bytes()
         out["map_sha256"] = hashlib.sha256(raw).hexdigest()
@@ -119,7 +120,7 @@ def _map_meta(map_file: Optional[str]) -> Dict[str, Any]:
     return out
 
 
-def _full_engine_constants_hash() -> Optional[str]:
+def _full_engine_constants_hash() -> str | None:
     """Verbatim hash of the *entire* engine constant surface.
 
     ``_engine_economy`` only enumerates 5 unit fields + 4 economy
@@ -145,7 +146,7 @@ def _full_engine_constants_hash() -> Optional[str]:
         return None
 
 
-def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return the *effective* economy = captured defaults + overlay.
 
     Mirrors ``GameState._resolve_engine_overrides`` so config.json
@@ -153,7 +154,7 @@ def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Optional[Mapp
     defaults. Pure dict math (no engine import); unknown keys are
     ignored here since GameState already validated them.
     """
-    eff: Dict[str, Any] = json.loads(json.dumps(economy, default=str)) if economy else {}
+    eff: dict[str, Any] = json.loads(json.dumps(economy, default=str)) if economy else {}
     if not overrides:
         return eff
     for k_ov, k_econ in (
@@ -172,7 +173,7 @@ def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Optional[Mapp
     return eff
 
 
-def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> Optional[str]:
+def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> str | None:
     """Short stable hash of the engine economy, so runs can be grouped
     by balance era in one column instead of diffing constants. Derived
     from the already-captured engine_economy block (canonical JSON ->
@@ -187,8 +188,8 @@ def _balance_profile_hash(engine_economy: Mapping[str, Any]) -> Optional[str]:
         return None
 
 
-def _hardware_meta() -> Dict[str, Any]:
-    info: Dict[str, Any] = {
+def _hardware_meta() -> dict[str, Any]:
+    info: dict[str, Any] = {
         "platform": platform.platform(),
         "python": platform.python_version(),
         "cpu_count": os.cpu_count(),
@@ -221,13 +222,13 @@ def _hardware_meta() -> Dict[str, Any]:
 def build_run_config(
     *,
     run_type: str,
-    map_file: Optional[str],
-    opponent: Optional[str],
+    map_file: str | None,
+    opponent: str | None,
     hyperparams: Mapping[str, Any],
     env_config: Mapping[str, Any],
-    seed: Optional[int] = None,
-    extra: Optional[Mapping[str, Any]] = None,
-) -> Dict[str, Any]:
+    seed: int | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Assemble a self-describing config dict.
 
     ``hyperparams`` and ``env_config`` should be the *resolved* values
@@ -247,7 +248,7 @@ def build_run_config(
         "env_config": dict(env_config),
         "extra": dict(extra) if extra else {},
         "meta": {
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
             # Engine *defaults* (constants.py as imported).

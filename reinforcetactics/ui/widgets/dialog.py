@@ -9,7 +9,7 @@ Each button resolves the dialog to a caller-supplied value; ``None`` is
 reserved for "still running" and cannot be used as a button value.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pygame
 
@@ -19,7 +19,7 @@ from reinforcetactics.ui.widgets.text import wrap_text
 from reinforcetactics.utils.fonts import get_display_font, get_font
 
 # (label, resolve value, style) for each action button, left to right.
-DialogButtonSpec = Tuple[str, Any, ButtonStyle]
+DialogButtonSpec = tuple[str, Any, ButtonStyle]
 
 _PADDING = 20
 _BUTTON_HEIGHT = 40
@@ -35,10 +35,10 @@ class Dialog:
         screen: pygame.Surface,
         title: str,
         message: str,
-        buttons: List[DialogButtonSpec],
+        buttons: list[DialogButtonSpec],
         *,
-        hint: Optional[str] = None,
-        keymap: Optional[Dict[int, Any]] = None,
+        hint: str | None = None,
+        keymap: dict[int, Any] | None = None,
         cancel_value: Any = None,
         quit_value: Any = None,
         min_width: int = 400,
@@ -76,7 +76,7 @@ class Dialog:
 
         self._build_layout(buttons, min_width)
 
-    def _build_layout(self, button_specs: List[DialogButtonSpec], min_width: int) -> None:
+    def _build_layout(self, button_specs: list[DialogButtonSpec], min_width: int) -> None:
         """Size the dialog to its content and lay out the buttons."""
         screen_width = self.screen.get_width()
         screen_height = self.screen.get_height()
@@ -119,7 +119,7 @@ class Dialog:
 
         buttons_start_x = self.dialog_rect.centerx - buttons_total // 2
         button_y = self.dialog_rect.bottom - _BUTTON_HEIGHT - _PADDING
-        self.buttons: List[Button] = []
+        self.buttons: list[Button] = []
         for i, (label, value, style) in enumerate(button_specs):
             rect = pygame.Rect(buttons_start_x + i * (button_width + _BUTTON_SPACING), button_y, button_width, _BUTTON_HEIGHT)
             self.buttons.append(Button(rect, label, self.button_font, style=style, payload=value))
@@ -130,7 +130,7 @@ class Dialog:
         self.running = False
         return value
 
-    def handle_event(self, event: pygame.event.Event) -> Optional[Any]:
+    def handle_event(self, event: pygame.event.Event) -> Any | None:
         """Handle a pygame event.
 
         Returns:

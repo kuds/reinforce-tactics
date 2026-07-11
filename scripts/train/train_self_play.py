@@ -30,7 +30,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -71,8 +71,8 @@ class SelfPlayTrainingCallback(BaseCallback):
 
     def __init__(
         self,
-        envs: List[SelfPlayEnv],
-        opponent_pool: Optional[OpponentPool] = None,
+        envs: list[SelfPlayEnv],
+        opponent_pool: OpponentPool | None = None,
         update_freq: int = 10000,
         add_to_pool_freq: int = 50000,
         min_win_rate_for_pool: float = 0.55,
@@ -85,7 +85,7 @@ class SelfPlayTrainingCallback(BaseCallback):
         self.add_to_pool_freq = add_to_pool_freq
         self.min_win_rate_for_pool = min_win_rate_for_pool
 
-        self.win_rate_history: List[float] = []
+        self.win_rate_history: list[float] = []
         self.pool_additions = 0
 
     def _on_training_start(self) -> None:
@@ -178,7 +178,7 @@ class MixedTrainingCallback(BaseCallback):
 
     def __init__(
         self,
-        self_play_envs: List[SelfPlayEnv],
+        self_play_envs: list[SelfPlayEnv],
         bot_vec_env: Any,
         bot_ratio: float = 0.5,
         switch_freq: int = 5000,
@@ -202,7 +202,7 @@ class MixedTrainingCallback(BaseCallback):
         return True
 
 
-def get_self_play_envs_from_vec(vec_env: Any) -> List[SelfPlayEnv]:
+def get_self_play_envs_from_vec(vec_env: Any) -> list[SelfPlayEnv]:
     """Extract SelfPlayEnv instances from a vectorized environment."""
     envs = []
 

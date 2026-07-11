@@ -8,7 +8,7 @@ without requiring a display server. Works on Google Colab and headless Linux.
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -39,10 +39,10 @@ def _ensure_headless_pygame():
 
 
 def record_game_to_video(
-    game_states: List[Any],
+    game_states: list[Any],
     output_path: str = "game_replay.mp4",
     fps: int = 4,
-    map_file: Optional[str] = None,
+    map_file: str | None = None,
     scale: int = 1,
     use_pixel_art: bool = False,
 ) -> str:
@@ -84,7 +84,7 @@ def record_evaluation_to_video(
     deterministic: bool = True,
     scale: int = 1,
     use_pixel_art: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run one episode of a trained model and record it to video.
 
@@ -165,7 +165,7 @@ def record_evaluation_to_video(
     # Create headless renderer after reset so game_state is fresh
     renderer = Renderer(_get_gs(), replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
-    step_stats: List[Dict[str, Any]] = [_snapshot()]
+    step_stats: list[dict[str, Any]] = [_snapshot()]
 
     total_reward = 0.0
     steps = 0
@@ -235,13 +235,13 @@ def record_evaluation_to_video(
     # not the env's end_reason classification (hq_capture / elimination /
     # max_turns_draw / max_steps_truncate). Patch it in here so a reader
     # can see *how* the game ended without re-deriving it from actions[].
-    replay_path: Optional[str] = None
+    replay_path: str | None = None
     try:
         replay_path = gs.save_replay_to_file(str(Path(output_path).with_suffix(".json")))
         if replay_path:
             import json as _json
 
-            with open(replay_path, "r", encoding="utf-8") as _f:
+            with open(replay_path, encoding="utf-8") as _f:
                 _replay_data = _json.load(_f)
             _replay_data.setdefault("game_info", {})["end_reason"] = info.get("end_reason")
             with open(replay_path, "w", encoding="utf-8") as _f:
@@ -262,7 +262,7 @@ def record_evaluation_to_video(
 
 
 def record_replay_to_video(
-    replay_data: Dict[str, Any],
+    replay_data: dict[str, Any],
     output_path: str = "replay.mp4",
     fps: int = 4,
     scale: int = 1,
@@ -366,7 +366,7 @@ def record_replay_to_video(
     return output_path
 
 
-def _overlay_game_over(frame, game_info: Dict[str, Any], game_state) -> np.ndarray:
+def _overlay_game_over(frame, game_info: dict[str, Any], game_state) -> np.ndarray:
     """Stamp a "Game Over -- Winner: X" caption onto the final frame.
 
     Used to give the held closing frame a visible end-state caption -- the
@@ -585,7 +585,7 @@ class _VideoWriter:
         self.scale = max(1, int(scale))
         self._writer: Any = None
         self._cv2_writer: Any = None
-        self._target_wh: Optional[tuple] = None
+        self._target_wh: tuple | None = None
         self._need_resize = False
         self._n_frames = 0
         self._backend = "unknown"

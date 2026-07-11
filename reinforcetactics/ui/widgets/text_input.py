@@ -6,15 +6,13 @@ printable-character filtering with modifier guards) and the box rendering
 menus previously each implemented by hand.
 """
 
-from typing import Optional, Tuple
-
 import pygame
 
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.clipboard import get_clipboard_text
 
-Color = Tuple[int, int, int]
+Color = tuple[int, int, int]
 
 CURSOR_BLINK_MS = 500
 
@@ -27,7 +25,7 @@ class TextInput:
     the owning menu so each screen keeps its own flow.
     """
 
-    def __init__(self, text: str = "", max_length: Optional[int] = None) -> None:
+    def __init__(self, text: str = "", max_length: int | None = None) -> None:
         """
         Args:
             text: Initial contents.
@@ -84,7 +82,7 @@ class TextInput:
         font: pygame.font.Font,
         *,
         active: bool = True,
-        display_text: Optional[str] = None,
+        display_text: str | None = None,
         text_color: Color = theme.TEXT,
         bg_color: Color = theme.OPTION_BG,
         bg_active_color: Color = theme.OPTION_BG_HOVER,

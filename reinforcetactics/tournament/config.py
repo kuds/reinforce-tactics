@@ -7,7 +7,7 @@ This module provides a unified configuration class for tournament settings.
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Self
 
 from .bots import BotDescriptor, BotType
 from .schedule import MapConfig
@@ -41,7 +41,7 @@ class TournamentConfig:
     name: str = "Tournament"
 
     # Map settings
-    maps: List[MapConfig] = field(default_factory=list)
+    maps: list[MapConfig] = field(default_factory=list)
     map_pool_mode: str = "all"
 
     # Game settings
@@ -51,16 +51,16 @@ class TournamentConfig:
     # Output settings
     output_dir: str = "tournament_results"
     save_replays: bool = True
-    replay_dir: Optional[str] = None
+    replay_dir: str | None = None
 
     # LLM settings
     log_conversations: bool = False
-    conversation_log_dir: Optional[str] = None
+    conversation_log_dir: str | None = None
     should_reason: bool = False
     llm_api_delay: float = 1.0
 
     # Unit restriction settings
-    enabled_units: Optional[List[str]] = None
+    enabled_units: list[str] | None = None
 
     # Stochastic tiebreak settings. ``rng_seed=None`` keeps every scripted
     # bot fully deterministic (every replay of the same matchup is byte-
@@ -75,7 +75,7 @@ class TournamentConfig:
     # is the recommended setting for balance-analysis runs -- without
     # it, ``games_per_side > 1`` writes duplicate replays instead of
     # producing independent samples.
-    rng_seed: Optional[int] = None
+    rng_seed: int | None = None
 
     # Execution settings
     concurrent_games: int = 1
@@ -103,7 +103,7 @@ class TournamentConfig:
             self.conversation_log_dir = str(Path(self.output_dir) / "llm_conversations")
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TournamentConfig":
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """
         Create TournamentConfig from dictionary.
 
@@ -163,7 +163,7 @@ class TournamentConfig:
         )
 
     @classmethod
-    def from_json(cls, filepath: str) -> "TournamentConfig":
+    def from_json(cls, filepath: str) -> Self:
         """
         Load configuration from JSON file.
 
@@ -173,11 +173,11 @@ class TournamentConfig:
         Returns:
             TournamentConfig instance
         """
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
         return cls.from_dict(data)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "name": self.name,
@@ -202,7 +202,7 @@ class TournamentConfig:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """
         Validate configuration.
 
@@ -240,7 +240,7 @@ class TournamentConfig:
 
         return errors
 
-    def add_map(self, path: str, max_turns: Optional[int] = None) -> "TournamentConfig":
+    def add_map(self, path: str, max_turns: int | None = None) -> Self:
         """
         Add a map to the configuration.
 
@@ -254,7 +254,7 @@ class TournamentConfig:
         self.maps.append(MapConfig(path=path, max_turns=max_turns or self.max_turns))
         return self
 
-    def add_maps_from_directory(self, directory: str, max_turns: Optional[int] = None) -> "TournamentConfig":
+    def add_maps_from_directory(self, directory: str, max_turns: int | None = None) -> Self:
         """
         Add all CSV maps from a directory.
 
@@ -275,7 +275,7 @@ class TournamentConfig:
         return self
 
 
-def parse_bots_from_config(data: Dict[str, Any]) -> List[BotDescriptor]:
+def parse_bots_from_config(data: dict[str, Any]) -> list[BotDescriptor]:
     """
     Parse bot configurations from config dictionary.
 

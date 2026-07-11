@@ -8,7 +8,7 @@ and managing map configurations.
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .bots import BotDescriptor
@@ -25,7 +25,7 @@ class MapConfig:
     """
 
     path: str
-    max_turns: Optional[int] = None
+    max_turns: int | None = None
 
     @classmethod
     def from_config(cls, config_entry: Any, default_max_turns: int = 500) -> "MapConfig":
@@ -61,7 +61,7 @@ class MapConfig:
         """Get the map filename without path or extension."""
         return Path(self.path).stem
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {"path": self.path, "max_turns": self.max_turns}
 
@@ -96,7 +96,7 @@ class ScheduledGame:
         return self.map_config.name
 
     @property
-    def max_turns(self) -> Optional[int]:
+    def max_turns(self) -> int | None:
         """Get max turns for this game."""
         return self.map_config.max_turns
 
@@ -130,12 +130,12 @@ class CompletedMatchInfo:
 
 
 def generate_round_robin_schedule(
-    bots: List["BotDescriptor"],
-    map_configs: List[MapConfig],
+    bots: list["BotDescriptor"],
+    map_configs: list[MapConfig],
     games_per_side: int = 1,
     map_pool_mode: str = "all",
-    completed_matches: Optional[Dict[str, List[CompletedMatchInfo]]] = None,
-) -> Tuple[List[List[ScheduledGame]], int]:
+    completed_matches: dict[str, list[CompletedMatchInfo]] | None = None,
+) -> tuple[list[list[ScheduledGame]], int]:
     """
     Generate a complete round-robin tournament schedule.
 
@@ -165,7 +165,7 @@ def generate_round_robin_schedule(
         for j in range(i + 1, len(bots)):
             matchups.append((bots[i], bots[j]))
 
-    schedule_by_round: List[List[ScheduledGame]] = []
+    schedule_by_round: list[list[ScheduledGame]] = []
     game_id = 0
     skipped_games = 0
 
@@ -289,7 +289,7 @@ def generate_round_robin_schedule(
     return schedule_by_round, skipped_games
 
 
-def _select_map(map_configs: List[MapConfig], mode: str, index: int) -> MapConfig:
+def _select_map(map_configs: list[MapConfig], mode: str, index: int) -> MapConfig:
     """Select a map based on mode and index."""
     if len(map_configs) == 1:
         return map_configs[0]
@@ -307,8 +307,8 @@ def _get_pending_games(
     bot2_name: str,
     map_name: str,
     games_per_side: int,
-    completed_matches: Dict[str, List[CompletedMatchInfo]],
-) -> Tuple[int, int]:
+    completed_matches: dict[str, list[CompletedMatchInfo]],
+) -> tuple[int, int]:
     """
     Determine how many games still need to be played for a matchup.
 

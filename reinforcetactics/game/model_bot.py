@@ -4,7 +4,7 @@ Model-based bot that uses trained Stable-Baselines3 models.
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -23,7 +23,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
     # Number of action types in the environment (0-9)
     NUM_ACTION_TYPES = 10
 
-    def __init__(self, game_state, player: int = 2, model_path: Optional[str] = None):
+    def __init__(self, game_state, player: int = 2, model_path: str | None = None):
         """
         Initialize the model bot.
 
@@ -36,11 +36,11 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         self.game_state = game_state
         self.bot_player = player
         self.model_path = model_path
-        self.model: Optional[Any] = None
+        self.model: Any | None = None
         # Set when loading a .pt feudal checkpoint. Take-turn flow branches on this.
         # Typed as Any rather than ``Optional["FeudalRLAgent"]`` to avoid pulling
         # the heavy reinforcetactics.rl.feudal_rl import at module load time.
-        self.feudal_agent: Optional[Any] = None
+        self.feudal_agent: Any | None = None
 
         # SB3-checkpoint runtime config, derived from the loaded model's
         # saved observation/action spaces by ``_configure_from_sb3_model``:
@@ -57,7 +57,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         #                          recent flat-mode predict call.
         self._action_mode: str = "multi_discrete"
         self._max_flat_actions: int = 0
-        self._pad_to: Optional[tuple] = None
+        self._pad_to: tuple | None = None
         self._accepts_action_masks: bool = False
         self._flat_actions: list = []
 

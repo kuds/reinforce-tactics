@@ -1,6 +1,6 @@
 """Main menu for the game."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pygame
 
@@ -43,7 +43,7 @@ class MainMenu(Menu):
         self.title = self._get_title()
         self._setup_options()
 
-    def _new_game(self) -> Optional[Dict[str, Any]]:
+    def _new_game(self) -> dict[str, Any] | None:
         """Handle new game - show game mode selection, map selection, and player configuration.
 
         Supports back-navigation: cancelling a step returns to the previous step
@@ -91,7 +91,7 @@ class MainMenu(Menu):
 
         return None
 
-    def _load_game(self) -> Optional[Dict[str, Any]]:
+    def _load_game(self) -> dict[str, Any] | None:
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
         save_path = load_menu.run()
@@ -101,7 +101,7 @@ class MainMenu(Menu):
             return {"type": "load_game", "save_path": save_path}
         return None  # Cancelled
 
-    def _watch_replay(self) -> Optional[Dict[str, Any]]:
+    def _watch_replay(self) -> dict[str, Any] | None:
         """Handle watch replay - show replay menu and return result."""
         replay_menu = ReplaySelectionMenu(self.screen)
         replay_path = replay_menu.run()
@@ -134,11 +134,11 @@ class MainMenu(Menu):
         pygame.event.clear()
         # Return to main menu after credits
 
-    def _quit(self) -> Dict[str, Any]:
+    def _quit(self) -> dict[str, Any]:
         """Handle quit."""
         return {"type": "exit"}
 
-    def run(self) -> Optional[Dict[str, Any]]:
+    def run(self) -> dict[str, Any] | None:
         """
         Run the main menu loop with internal navigation.
 

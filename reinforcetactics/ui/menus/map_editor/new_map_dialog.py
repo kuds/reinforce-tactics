@@ -1,6 +1,6 @@
 """Dialog for creating a new map with custom dimensions."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pygame
 
@@ -13,7 +13,7 @@ from reinforcetactics.utils.language import get_language
 class NewMapDialog(Menu):
     """Dialog for creating a new map with custom dimensions."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None) -> None:
+    def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
         Initialize the new map dialog.
 
@@ -47,7 +47,7 @@ class NewMapDialog(Menu):
         self.add_option(lang.get("map_editor.new_map_dialog.create", "Create"), self._create)
         self.add_option(lang.get("common.cancel", "Cancel"), lambda: None)
 
-    def _create(self) -> Dict[str, Any]:
+    def _create(self) -> dict[str, Any]:
         """Create a new map with specified dimensions."""
         return {
             "width": max(self.width_value, MIN_MAP_SIZE),
@@ -55,7 +55,7 @@ class NewMapDialog(Menu):
             "num_players": self.num_players,
         }
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
+    def handle_input(self, event: pygame.event.Event) -> Any | None:
         """
         Handle input events.
 

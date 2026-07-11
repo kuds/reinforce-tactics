@@ -10,7 +10,7 @@ discovers the failure at hour 6.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import matplotlib
 
@@ -28,7 +28,7 @@ from reinforcetactics.rl.viz import (  # noqa: E402
 )
 
 
-def _synthetic_step_stats(n: int = 30) -> List[Dict[str, Any]]:
+def _synthetic_step_stats(n: int = 30) -> list[dict[str, Any]]:
     """Build a step_stats list shaped like ``record_evaluation_to_video``.
 
     First entry is the pre-action initial snapshot (``action_type=None``);
@@ -38,7 +38,7 @@ def _synthetic_step_stats(n: int = 30) -> List[Dict[str, Any]]:
     # The dict literals mix int/str/float/None/dict values, so type the
     # list explicitly to keep mypy from inferring a too-narrow value type
     # from the first entry.
-    steps: List[Dict[str, Any]] = [
+    steps: list[dict[str, Any]] = [
         {
             "turn": 0,
             "current_player": 1,
@@ -172,7 +172,7 @@ class TestPlotIndividualGameStats:
         plt.close(fig)
 
 
-def _synthetic_eval_results(n: int = 6, base_ts: int = 50_000) -> List[Dict[str, Any]]:
+def _synthetic_eval_results(n: int = 6, base_ts: int = 50_000) -> list[dict[str, Any]]:
     """Build per-eval result dicts shaped like ``PeriodicEvalCallback.results``."""
     out = []
     for i in range(n):
@@ -192,7 +192,7 @@ def _synthetic_eval_results(n: int = 6, base_ts: int = 50_000) -> List[Dict[str,
     return out
 
 
-def _synthetic_train_records(n: int = 30, base_ts: int = 10_000) -> List[Dict[str, Any]]:
+def _synthetic_train_records(n: int = 30, base_ts: int = 10_000) -> list[dict[str, Any]]:
     """Build per-rollout train_records shaped like ``TrainingMetricsCallback.records``."""
     out = []
     for i in range(n):

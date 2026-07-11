@@ -6,7 +6,7 @@ implementing a simple radius-based visibility model (Option A).
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -22,7 +22,7 @@ VISIBLE = 2  # Currently visible - full information
 
 
 # Default vision ranges for units (Chebyshev distance)
-UNIT_VISION_RANGES: Dict[str, int] = {
+UNIT_VISION_RANGES: dict[str, int] = {
     "W": 3,  # Warrior - standard vision
     "M": 3,  # Mage - standard vision
     "C": 3,  # Cleric - standard vision
@@ -34,7 +34,7 @@ UNIT_VISION_RANGES: Dict[str, int] = {
 }
 
 # Vision ranges for structures
-STRUCTURE_VISION_RANGES: Dict[str, int] = {
+STRUCTURE_VISION_RANGES: dict[str, int] = {
     "h": 4,  # Headquarters - large vision radius
     "b": 3,  # Building - standard vision
     "t": 5,  # Tower - best vision (elevated position)
@@ -52,7 +52,7 @@ class UnitSnapshot:
     owner: int
     health: int
     max_health: int
-    position: Tuple[int, int]
+    position: tuple[int, int]
     turn_seen: int
 
 
@@ -61,9 +61,9 @@ class StructureSnapshot:
     """Snapshot of structure information when last visible."""
 
     tile_type: str
-    owner: Optional[int]
+    owner: int | None
     health: int
-    position: Tuple[int, int]
+    position: tuple[int, int]
     turn_seen: int
 
 
@@ -90,10 +90,10 @@ class VisibilityMap:
         self.state = np.zeros((height, width), dtype=np.uint8)
 
         # Memory of last-seen enemy units (position -> UnitSnapshot)
-        self.last_seen_units: Dict[Tuple[int, int], UnitSnapshot] = {}
+        self.last_seen_units: dict[tuple[int, int], UnitSnapshot] = {}
 
         # Memory of last-seen structures (position -> StructureSnapshot)
-        self.last_seen_structures: Dict[Tuple[int, int], StructureSnapshot] = {}
+        self.last_seen_structures: dict[tuple[int, int], StructureSnapshot] = {}
 
         # Current visibility mask (recomputed each update)
         self._current_visible = np.zeros((height, width), dtype=bool)
@@ -249,7 +249,7 @@ class VisibilityMap:
         """
         return self.state >= SHROUDED
 
-    def get_last_seen_unit(self, x: int, y: int) -> Optional[UnitSnapshot]:
+    def get_last_seen_unit(self, x: int, y: int) -> UnitSnapshot | None:
         """Get the last-seen unit at a position.
 
         Args:
@@ -261,7 +261,7 @@ class VisibilityMap:
         """
         return self.last_seen_units.get((x, y))
 
-    def get_last_seen_structure(self, x: int, y: int) -> Optional[StructureSnapshot]:
+    def get_last_seen_structure(self, x: int, y: int) -> StructureSnapshot | None:
         """Get the last-seen structure info at a position.
 
         Args:
@@ -295,7 +295,7 @@ class VisibilityMap:
         return self.state.copy()
 
 
-def calculate_vision_radius(unit_or_structure_type: str, tile_type: Optional[str] = None, is_structure: bool = False) -> int:
+def calculate_vision_radius(unit_or_structure_type: str, tile_type: str | None = None, is_structure: bool = False) -> int:
     """Calculate vision radius for a unit or structure.
 
     Args:
@@ -318,7 +318,7 @@ def calculate_vision_radius(unit_or_structure_type: str, tile_type: Optional[str
     return base_range
 
 
-def get_visible_units(game_state: "GameState", player: int, include_own: bool = True) -> List["Unit"]:
+def get_visible_units(game_state: "GameState", player: int, include_own: bool = True) -> list["Unit"]:
     """Get list of units visible to a player.
 
     Args:
@@ -350,7 +350,7 @@ def get_visible_units(game_state: "GameState", player: int, include_own: bool = 
     return visible
 
 
-def get_visible_tiles_info(game_state: "GameState", player: int) -> List[Tuple[int, int, Any, int]]:
+def get_visible_tiles_info(game_state: "GameState", player: int) -> list[tuple[int, int, Any, int]]:
     """Get list of tiles with visibility information.
 
     Args:

@@ -1,7 +1,7 @@
 """Main map editor class that coordinates all components."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pandas as pd
 import pygame
@@ -19,9 +19,9 @@ class MapEditor:
 
     def __init__(
         self,
-        screen: Optional[pygame.Surface] = None,
-        map_data: Optional[pd.DataFrame] = None,
-        map_filename: Optional[str] = None,
+        screen: pygame.Surface | None = None,
+        map_data: pd.DataFrame | None = None,
+        map_filename: str | None = None,
         num_players: int = 2,
     ) -> None:
         """
@@ -79,7 +79,7 @@ class MapEditor:
         # Keyboard state
         self.ctrl_pressed = False
 
-    def run(self) -> Optional[Dict[str, Any]]:
+    def run(self) -> dict[str, Any] | None:
         """
         Run the map editor loop.
 

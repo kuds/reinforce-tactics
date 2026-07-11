@@ -5,7 +5,8 @@ Self-contained menus that manage their own pygame screen and navigation.
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import pygame
 
@@ -41,7 +42,7 @@ def _get_back_translations() -> set:
 class Menu:
     """Base class for game menus. Manages its own screen if not provided."""
 
-    def __init__(self, screen: Optional[pygame.Surface] = None, title: str = "") -> None:
+    def __init__(self, screen: pygame.Surface | None = None, title: str = "") -> None:
         """
         Initialize the menu.
 
@@ -66,11 +67,11 @@ class Menu:
         self.title = title
         self.running = True
         self.selected_index = 0
-        self.options: List[Tuple[str, Callable[[], Any]]] = []
+        self.options: list[tuple[str, Callable[[], Any]]] = []
         # Parallel list: self.option_enabled[i] gates whether options[i] can
         # receive focus or clicks. Kept separate from `options` to preserve
         # the public 2-tuple shape subclasses may rely on.
-        self.option_enabled: List[bool] = []
+        self.option_enabled: list[bool] = []
 
         # Colors (from shared theme)
         self.bg_color = theme.BG
@@ -91,7 +92,7 @@ class Menu:
 
         # Mouse tracking
         self.hover_index = -1
-        self.option_rects: List[pygame.Rect] = []
+        self.option_rects: list[pygame.Rect] = []
 
         # Scrolling support
         self.scroll_offset = 0
@@ -127,7 +128,7 @@ class Menu:
         """
         return index < len(self.option_enabled) and self.option_enabled[index]
 
-    def handle_input(self, event: pygame.event.Event) -> Optional[Any]:
+    def handle_input(self, event: pygame.event.Event) -> Any | None:
         """
         Handle input events.
 
@@ -234,7 +235,7 @@ class Menu:
         """
         return self.screen.get_height() // 3
 
-    def _layout_visible_options(self) -> List[Tuple[int, str, pygame.Rect]]:
+    def _layout_visible_options(self) -> list[tuple[int, str, pygame.Rect]]:
         """Compute the on-screen layout for the currently visible options.
 
         Single source of truth for geometry — used by both click-hit testing
@@ -272,7 +273,7 @@ class Menu:
         sample = self.option_font.render("Ag", True, self.text_color)
         row_height = sample.get_height()
 
-        layout: List[Tuple[int, str, pygame.Rect]] = []
+        layout: list[tuple[int, str, pygame.Rect]] = []
         for display_i, option_i in enumerate(range(start_index, end_index)):
             text, _ = self.options[option_i]
             text = safe(text)
@@ -391,7 +392,7 @@ class Menu:
         self._draw_content()
         pygame.display.flip()
 
-    def run(self) -> Optional[Any]:
+    def run(self) -> Any | None:
         """
         Run the menu loop.
 

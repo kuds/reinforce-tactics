@@ -8,13 +8,13 @@ the state into :meth:`Button.draw`.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any, Self
 
 import pygame
 
 from reinforcetactics.ui import theme
 
-Color = Tuple[int, int, int]
+Color = tuple[int, int, int]
 
 
 @dataclass(frozen=True)
@@ -27,8 +27,8 @@ class ButtonStyle:
     text_color: Color = theme.TEXT
     text_hover_color: Color = theme.TEXT
     text_disabled_color: Color = theme.TEXT_DISABLED
-    border_color: Optional[Color] = None
-    border_hover_color: Optional[Color] = theme.HOVER
+    border_color: Color | None = None
+    border_hover_color: Color | None = theme.HOVER
     border_radius: int = theme.BORDER_RADIUS
     border_width: int = 1
     border_hover_width: int = theme.BORDER_WIDTH_HOVER
@@ -111,13 +111,13 @@ class Button:
         padding_x: int = 20,
         padding_y: int = 10,
         **kwargs: Any,
-    ) -> "Button":
+    ) -> Self:
         """Create a button sized to fit its label plus padding at (x, y)."""
         width, height = font.size(text)
         rect = pygame.Rect(x, y, width + 2 * padding_x, height + 2 * padding_y)
         return cls(rect, text, font, **kwargs)
 
-    def collidepoint(self, pos: Tuple[int, int]) -> bool:
+    def collidepoint(self, pos: tuple[int, int]) -> bool:
         """Whether ``pos`` is inside the button (regardless of enabled state)."""
         return self.rect.collidepoint(pos)
 
@@ -184,7 +184,7 @@ class CloseButton:
         """
         self.rect = pygame.Rect(x, y, size, size)
 
-    def collidepoint(self, pos: Tuple[int, int]) -> bool:
+    def collidepoint(self, pos: tuple[int, int]) -> bool:
         """Whether ``pos`` is inside the button."""
         return self.rect.collidepoint(pos)
 

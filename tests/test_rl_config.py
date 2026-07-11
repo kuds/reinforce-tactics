@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from reinforcetactics.rl.config import (
     AlphaZeroConfig,
