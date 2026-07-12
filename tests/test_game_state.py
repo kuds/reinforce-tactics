@@ -329,3 +329,40 @@ class TestEngineRngInjection:
         map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
         gs = GameState(map_data, num_players=2)
         assert gs.rng is None
+
+
+class TestStructureAutoHealAccumulator:
+    """``heal_units_on_structures`` accumulates game-lifetime totals into
+    ``healing_totals`` -- the only surviving record of the auto-heal
+    economy, since callers routinely discard ``end_turn()``'s return
+    (bots call ``end_turn`` internally; the gym env drops the value)."""
+
+    def test_healing_totals_accumulate_across_turns(self, game_with_building):
+        gs = game_with_building
+        gs.player_gold[1] = 500
+        wounded = Unit("W", 1, 1, 1)  # parked on player 1's building
+        wounded.health = 10  # 5 below the Warrior's 15 max
+        gs.units.append(wounded)
+
+        stats = gs.heal_units_on_structures(1)
+        # Building heals 2 HP at (heal/max_hp) * unit_cost gold.
+        expected_cost = round(2 * 200 / 15)
+        assert stats["total_healed"] == 2
+        assert stats["total_cost"] == expected_cost
+        assert gs.healing_totals[1] == {"hp": 2, "gold": expected_cost}
+        assert gs.healing_totals[2] == {"hp": 0, "gold": 0}
+
+        gs.heal_units_on_structures(1)
+        assert gs.healing_totals[1]["hp"] == 4
+        assert gs.healing_totals[1]["gold"] == 2 * expected_cost
+
+    def test_no_gold_means_no_heal_and_no_accumulation(self, game_with_building):
+        gs = game_with_building
+        gs.player_gold[1] = 0  # cannot afford even a 1 HP partial heal
+        wounded = Unit("W", 1, 1, 1)
+        wounded.health = 10
+        gs.units.append(wounded)
+
+        stats = gs.heal_units_on_structures(1)
+        assert stats["total_healed"] == 0
+        assert gs.healing_totals[1] == {"hp": 0, "gold": 0}

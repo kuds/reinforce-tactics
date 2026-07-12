@@ -1953,3 +1953,46 @@ class TestEngineRngSeeding:
         stream_b = [env.game_state.rng.random() for _ in range(5)]
         assert stream_a != stream_b
         env.close()
+
+
+# ==============================================================================
+# STRUCTURE AUTO-HEAL EPISODE STATS
+# ==============================================================================
+
+
+class TestAutoHealEpisodeStats:
+    """``episode_stats`` mirrors ``GameState.healing_totals`` agent-relatively,
+    so eval diagnostics can quantify the silent auto-heal gold drain (own)
+    and the opponent meat-wall's free durability (opp)."""
+
+    def test_new_episode_stats_include_heal_keys(self, env_default):
+        stats = env_default._new_episode_stats()
+        for key in ("own_heal_hp", "own_heal_gold", "opp_heal_hp", "opp_heal_gold"):
+            assert stats[key] == 0
+
+    def test_opponent_auto_heal_flows_into_episode_stats(self):
+        env = StrategyGameEnv(map_file=None, opponent="random", render_mode=None)
+        env.reset(seed=0)
+        gs = env.game_state
+        opp = 3 - env.agent_player
+
+        from reinforcetactics.core.unit import Unit
+
+        # Park a wounded opponent unit on one of the opponent's structures
+        # and fund the heal. Healing fires at the start of the opponent's
+        # turn (inside the agent's end_turn processing), before the bot acts.
+        opp_tile = next(t for row in gs.grid.tiles for t in row if t.player == opp and t.type in ("h", "b", "t"))
+        wounded = Unit("W", opp_tile.x, opp_tile.y, opp)
+        wounded.health = 5
+        gs.units.append(wounded)
+        gs.player_gold[opp] = 500
+
+        action = np.array([5, 0, 0, 0, 0, 0])  # end_turn -> opponent turn runs
+        env.step(action)
+
+        assert env.episode_stats["opp_heal_hp"] > 0
+        assert env.episode_stats["opp_heal_gold"] > 0
+        # Mirrors are cumulative snapshots, not deltas.
+        assert env.episode_stats["opp_heal_hp"] == gs.healing_totals[opp]["hp"]
+        assert env.episode_stats["opp_heal_gold"] == gs.healing_totals[opp]["gold"]
+        env.close()
