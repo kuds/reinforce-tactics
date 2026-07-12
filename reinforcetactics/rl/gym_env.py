@@ -724,6 +724,19 @@ class StrategyGameEnv(gym.Env):
             "own_units_sum": 0,
             "peak_gold_banked": 0.0,
             "gold_banked_sum": 0.0,
+            # Structure auto-heal economics (see step()): mirrors of
+            # ``GameState.healing_totals``, agent-relative. Wounded units
+            # parked on owned structures heal 1-2 HP at turn start for
+            # (heal/max_hp) * unit_cost gold -- mandatory, no opt-out, and
+            # otherwise invisible in every log (the engine's per-turn stats
+            # are discarded by callers). ``own_heal_gold`` quantifies the
+            # silent drain on the agent's economy; ``opp_heal_hp`` measures
+            # how much free durability the opponent's rebuild economy gets
+            # -- a direct probe of the random-bot meat-wall / draw machine.
+            "own_heal_hp": 0,
+            "own_heal_gold": 0,
+            "opp_heal_hp": 0,
+            "opp_heal_gold": 0,
         }
 
     def _get_action_space_size(self) -> int:
@@ -1602,6 +1615,20 @@ class StrategyGameEnv(gym.Env):
         self.episode_stats["own_units_sum"] += int(own_units)
         self.episode_stats["peak_gold_banked"] = max(self.episode_stats["peak_gold_banked"], own_gold)
         self.episode_stats["gold_banked_sum"] += own_gold
+
+        # Structure auto-heal economics. ``GameState.healing_totals`` is
+        # game-cumulative, so overwriting each step is idempotent and the
+        # terminal snapshot carries the whole episode. Read via getattr so
+        # a stale pickled GameState (pre-accumulator schema) degrades to
+        # zeros instead of crashing the step loop.
+        healing_totals = getattr(self.game_state, "healing_totals", None)
+        if healing_totals:
+            own_heal = healing_totals.get(self.agent_player) or {}
+            opp_heal = healing_totals.get(3 - self.agent_player) or {}
+            self.episode_stats["own_heal_hp"] = int(own_heal.get("hp", 0))
+            self.episode_stats["own_heal_gold"] = int(own_heal.get("gold", 0))
+            self.episode_stats["opp_heal_hp"] = int(opp_heal.get("hp", 0))
+            self.episode_stats["opp_heal_gold"] = int(opp_heal.get("gold", 0))
 
         # Get observation
         obs = self._get_obs()

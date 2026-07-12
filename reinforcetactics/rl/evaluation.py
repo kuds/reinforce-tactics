@@ -74,6 +74,15 @@ UNIT_TYPE_LETTERS = ("W", "M", "C", "A", "K", "R", "S", "B")
 # can plot e.g. "captures per game" or "damage delta" curves.
 COMBAT_STAT_KEYS = ("captures", "kills", "attacks", "seize_attempts", "damage_dealt", "damage_taken")
 
+# Structure auto-heal economics surfaced via ``info["episode_stats"]``.
+# Summed across eval episodes into the same ``combat_stats`` dict, but
+# kept out of COMBAT_STAT_KEYS so viz.py's combat plot (which iterates
+# that tuple) is unchanged. ``own_heal_gold`` = gold the agent silently
+# spent auto-healing wounded units parked on its structures;
+# ``opp_heal_hp`` = free durability the opponent's rebuild economy
+# received -- the meat-wall / draw-machine probe.
+HEALING_STAT_KEYS = ("own_heal_hp", "own_heal_gold", "opp_heal_hp", "opp_heal_gold")
+
 # Structure types tracked under ``info["episode_stats"]["captures_by_type"]``.
 # Populated by ``StrategyGameEnv._execute_action`` whenever a seize action
 # captures a tile; aggregated here so eval_results.json shows per-structure
@@ -160,7 +169,7 @@ def evaluate_model(
     # per episode (cheap) and the per-stage diagnostics in viz.py rely
     # on them.
     units_built = {ut: 0 for ut in UNIT_TYPE_LETTERS}
-    combat_stats = {k: 0.0 for k in COMBAT_STAT_KEYS}
+    combat_stats = {k: 0.0 for k in (*COMBAT_STAT_KEYS, *HEALING_STAT_KEYS)}
     captures_by_type = {k: 0 for k in CAPTURE_STRUCTURE_TYPES}
 
     # Action-space diagnostics aggregated from ``info["episode_stats"]``.
@@ -324,7 +333,7 @@ def evaluate_model(
         for ut, count in ep_units_built.items():
             if ut in units_built:
                 units_built[ut] += int(count)
-        for key in COMBAT_STAT_KEYS:
+        for key in (*COMBAT_STAT_KEYS, *HEALING_STAT_KEYS):
             val = episode_stats.get(key)
             if val is not None:
                 combat_stats[key] += float(val)

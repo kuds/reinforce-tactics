@@ -249,6 +249,14 @@ class GameState:
         # up in the action mask, not just as a rejected action.
         self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
         self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
+        # Cumulative structure auto-heal totals per player (HP restored and
+        # gold spent by ``heal_units_on_structures`` over the whole game).
+        # The per-turn stats returned via ``end_turn()`` are routinely
+        # discarded by callers (bots call ``end_turn`` internally, the gym
+        # env drops the return value), so this game-lifetime accumulator is
+        # the only reliable way for diagnostics to answer "how much gold did
+        # each side silently spend on auto-heal" after the fact.
+        self.healing_totals: dict[int, dict[str, int]] = {i: {"hp": 0, "gold": 0} for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: int | None = None
         # Why the game ended. Populated alongside ``game_over`` by
@@ -1172,6 +1180,13 @@ class GameState:
                     f"{actual_heal} HP ({old_health} → {unit.health}) for ${actual_cost}"
                 )
 
+        # Game-lifetime accumulator (see __init__): the per-call stats
+        # returned below are usually discarded by callers, so this is
+        # what diagnostics read after the game.
+        totals = self.healing_totals.setdefault(player, {"hp": 0, "gold": 0})
+        totals["hp"] += stats["total_healed"]
+        totals["gold"] += stats["total_cost"]
+
         return stats
 
     def end_turn(self) -> dict[str, Any]:
@@ -1684,6 +1699,12 @@ class GameState:
             "replay_schema_version": 3,
             "final_unit_counts": final_counts,
             "final_hp_totals": final_hp,
+            # Structure auto-heal economics (HP restored / gold spent per
+            # player over the whole game). Queryable without re-simulating
+            # the action log, and doubles as a replay-integrity checksum:
+            # playback re-executes end_turn, so a faithful replay's
+            # re-accumulated healing_totals must match these values.
+            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)

@@ -291,6 +291,18 @@ class PeriodicEvalCallback(BaseCallback):
             self.logger.record("eval/mean_own_units", m["mean_own_units"])
             self.logger.record("eval/peak_gold_banked", m["peak_gold_banked"])
             self.logger.record("eval/mean_gold_banked", m["mean_gold_banked"])
+        # Structure auto-heal economics (sums over the eval in
+        # ``combat_stats``; normalised per episode here). own_heal_gold is
+        # the agent's silent gold drain from parking wounded units on its
+        # structures; opp_heal_hp is the free durability the opponent's
+        # rebuild economy received -- the meat-wall / draw-machine probe.
+        combat = m.get("combat_stats") or {}
+        heal_eps = max(1, int(m.get("episodes", 0) or self.n_eval_episodes or 1))
+        if "own_heal_gold" in combat:
+            self.logger.record("eval/own_heal_gold_per_ep", combat["own_heal_gold"] / heal_eps)
+            self.logger.record("eval/own_heal_hp_per_ep", combat.get("own_heal_hp", 0.0) / heal_eps)
+            self.logger.record("eval/opp_heal_gold_per_ep", combat.get("opp_heal_gold", 0.0) / heal_eps)
+            self.logger.record("eval/opp_heal_hp_per_ep", combat.get("opp_heal_hp", 0.0) / heal_eps)
 
         if self.verbose:
             print(
@@ -303,7 +315,8 @@ class PeriodicEvalCallback(BaseCallback):
                 f"seize_avail={m.get('seize_available_rate', 0.0) * 100:4.1f}%  "
                 f"max_legal={m.get('max_legal_actions', 0)}  "
                 f"army(pk/mn)={m.get('peak_own_units', 0)}/{m.get('mean_own_units', 0.0):.1f}  "
-                f"gold(pk/mn)={m.get('peak_gold_banked', 0.0):.0f}/{m.get('mean_gold_banked', 0.0):.0f}"
+                f"gold(pk/mn)={m.get('peak_gold_banked', 0.0):.0f}/{m.get('mean_gold_banked', 0.0):.0f}  "
+                f"heal$(own/opp)={combat.get('own_heal_gold', 0.0) / heal_eps:.0f}/{combat.get('opp_heal_gold', 0.0) / heal_eps:.0f}"
             )
 
         # Save best by win rate, with avg_reward as a tiebreaker so we don't
