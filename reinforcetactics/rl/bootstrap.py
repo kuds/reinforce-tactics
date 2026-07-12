@@ -63,6 +63,13 @@ class CurriculumStalled(RuntimeError):
             point of stall (the in-progress policy at the moment the
             stalled stage gave up). ``None`` for older callers that
             didn't pass it.
+        best_model_path: Path to the stalled stage's ``best_model.zip``
+            when one was saved -- the peak-WR snapshot from before the
+            collapse. Most stalls peak at or above the promotion
+            threshold before crashing, so this checkpoint (not the
+            collapsed ``final_model_path``) is usually the one worth
+            warm-starting or replaying. ``None`` if the stage never
+            saved a best.
         metrics_callback: ``TrainingMetricsCallback`` accumulated over
             the partial run, exposed for the same reason as
             ``history``.
@@ -77,6 +84,7 @@ class CurriculumStalled(RuntimeError):
         history: list[dict[str, Any]] | None = None,
         final_model_path: str | None = None,
         metrics_callback: Any = None,
+        best_model_path: str | None = None,
     ) -> None:
         self.stage_name = stage_name
         self.achieved_win_rate = achieved_win_rate
@@ -84,6 +92,7 @@ class CurriculumStalled(RuntimeError):
         self.timesteps = timesteps
         self.history = history or []
         self.final_model_path = final_model_path
+        self.best_model_path = best_model_path
         self.metrics_callback = metrics_callback
         super().__init__(
             f"Stage '{stage_name}' stalled at {timesteps:,} timesteps: "
@@ -105,6 +114,7 @@ class CurriculumStalled(RuntimeError):
             "model": None,
             "history": list(self.history),
             "final_model_path": self.final_model_path,
+            "best_model_path": self.best_model_path,
             "metrics_callback": self.metrics_callback,
             "stalled": True,
             "stalled_stage": self.stage_name,
@@ -622,7 +632,13 @@ def run_curriculum(
     eval_env_factory = eval_env_factory or _default_eval_env_factory
     model_factory = model_factory or _default_model_factory
 
-    metrics_callback = TrainingMetricsCallback()
+    # ``csv_path`` makes the optimizer diagnostics (approx_kl, clip_fraction,
+    # explained_variance, value_loss, ent_coef, ...) survive the process:
+    # each committed record is appended to ``train_metrics.csv`` immediately,
+    # so a Colab disconnect no longer erases the only evidence of *how* a
+    # stage's policy collapsed. One continuous file across all stages; rows
+    # carry the stage name via ``metrics_callback.context`` (set below).
+    metrics_callback = TrainingMetricsCallback(csv_path=output_dir / "train_metrics.csv")
     history: list[dict[str, Any]] = []
     model = None
     # Provenance of the warm-start checkpoint, filled in the first time
@@ -746,6 +762,10 @@ def run_curriculum(
             # land under ``<stage_dir>/traces/eval_<timesteps>/`` so it's
             # easy to grep for which actions the policy spammed.
             trace_dir=stage_dir / "traces",
+            # Append each eval result as it happens so a mid-stage kill
+            # (Colab disconnect) leaves the stage's eval timeline on disk.
+            # ``eval_results.json`` below is still written at stage end.
+            results_jsonl_path=stage_dir / "eval_results.jsonl",
         )
         promote_cb = PromotionCallback(
             eval_callback=eval_cb,
@@ -808,6 +828,12 @@ def run_curriculum(
         # checkpoint's timestep gives stage-relative "how much did this stage
         # actually train before its peak" -- the skip-ahead diagnostic.
         stage_start_timesteps = int(model.num_timesteps)
+
+        # Stamp the stage name onto every train-metrics record committed
+        # during this learn() so train_metrics.csv rows are joinable
+        # against bootstrap_results.csv without reconstructing stage
+        # boundaries from timestep ranges.
+        metrics_callback.context = stage.name
 
         model.learn(
             total_timesteps=stage.max_timesteps,
@@ -919,6 +945,16 @@ def run_curriculum(
                 stalled_final_path = str(final_path)
             except Exception:  # noqa: BLE001
                 stalled_final_path = None
+            # Surface the stage's peak-WR checkpoint alongside the
+            # collapsed end-of-stage policy. Most stalls peak at or
+            # above the promotion threshold before crashing (28/41 in
+            # the May-June run history), so best_model.zip -- not the
+            # collapsed final_model.zip -- is usually the checkpoint
+            # worth warm-starting a retry from or replaying. It was
+            # already on disk but nothing pointed at it, so post-stall
+            # tooling only ever saw the collapsed policy.
+            stalled_best_ckpt = stage_dir / "best_model.zip"
+            stalled_best_path = str(stalled_best_ckpt) if stalled_best_ckpt.exists() else None
             _write_run_status(
                 output_dir,
                 "curriculum_stalled",
@@ -926,6 +962,9 @@ def run_curriculum(
                 stages_completed=len(history),
                 achieved_win_rate=eval_cb.best_win_rate,
                 threshold=stage.promotion_win_rate,
+                best_model_path=stalled_best_path,
+                best_checkpoint_timestep=best_timestep,
+                best_checkpoint_stage_steps=best_stage_steps,
                 curriculum_hash=_curriculum_hash(cfg),
                 stage_count=len(cfg.curriculum.stages),
                 warm_start=warm_start_info,
@@ -937,6 +976,7 @@ def run_curriculum(
                 timesteps=stage.max_timesteps,
                 history=list(history),
                 final_model_path=stalled_final_path,
+                best_model_path=stalled_best_path,
                 metrics_callback=metrics_callback,
             )
 
@@ -1069,6 +1109,12 @@ def make_stage_env(
         reward_config=stage.resolve_reward_config(env_cfg),
         enabled_units=env_cfg.enabled_units,
         action_space_type=env_cfg.action_space_type,
+        # Must match training: a config with a non-default cap (e.g.
+        # max_flat_actions: 1024) trains a Discrete(1024) policy, and a
+        # replay/sanity env silently built at the 512 default would
+        # reject the checkpoint (or worse, evaluate a truncated action
+        # space). This was the drift bug this helper exists to prevent.
+        max_flat_actions=env_cfg.max_flat_actions,
         max_actions_per_turn=env_cfg.max_actions_per_turn,
         pad_to_size=env_cfg.pad_to_size,
         opponent_kwargs=opponent_kwargs,

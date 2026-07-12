@@ -18,10 +18,17 @@ env:
   # for real CPU parallelism with n_envs > 1.
   n_envs: 8
   use_subprocess: true
-  # max_steps is uniform across stages: 3000 is well above any
-  # realistic game length (max_turns=120 * ~20 env-steps/turn ~ 2400)
-  # so truncation never fires under normal play. Per-stage max_turns
-  # still varies (20 / 60 / 120) to bound the natural game-clock.
+  # max_steps is uniform across stages. Per-stage max_turns bounds the
+  # natural game-clock and varies 20 (starter) / 60 (intermediate) /
+  # 75 (beginner) / 120 (skirmish) / 200 (corner_points). At ~20
+  # env-steps/turn, 3000 covers skirmish (120 * ~20 ~ 2400) but NOT
+  # corner_points: a 200-turn game with sustained 20+ unit armies
+  # accumulates 3000 agent steps around turn ~90-135 and ends as a
+  # max_steps_truncate draw (paying reward_config.draw) regardless of
+  # board state. Raise max_steps (>= ~4500) or scale it with max_turns
+  # before training the corner_points block. (Flagged in the 2026-07
+  # training review, docs/REVIEW_ppo_training.md; no run has reached
+  # corner_points yet.)
   max_steps: 3000
   max_turns: 20
   # Per-game-turn hard cap on agent actions. When the policy has taken
@@ -304,11 +311,11 @@ curriculum:
       opponent: random
       opponent_kwargs:
         max_actions: 20
-      # Hardest random stage. Lower bar than random_15 (0.65 vs 0.70)
-      # because run 4 plateaued at ~62% WR against this opponent on the
-      # prior reward shape and was still budget-limited; 0.65 leaves room
-      # for the policy to clear without requiring runs to outperform that
-      # baseline by more than a few points.
+      # Hardest random stage; the bar matches random_15's 0.70. (An
+      # earlier revision set 0.65 because run 4 plateaued at ~62% WR
+      # against this opponent on the prior reward shape while still
+      # budget-limited; the threshold has since been raised to 0.70 —
+      # keep this comment in sync with the value below when tuning.)
       promotion_win_rate: 0.70
       patience: 2
       max_timesteps: 3_000_000
@@ -371,9 +378,9 @@ curriculum:
       # Bridge stage between medium and advanced. MixedBot samples
       # MediumBot or AdvancedBot per episode with p_hard=0.5: half the
       # episodes mirror beginner_medium (just cleared at 0.70 WR) and
-      # half preview beginner_advanced. Threshold (0.65) and budget
-      # (4.5M) sit halfway between the flanking stages, mirroring the
-      # simple -> mixed_50 -> medium spacing.
+      # half preview beginner_advanced. Threshold (0.70) matches the
+      # flanking stages; budget (4.5M) sits halfway between them,
+      # mirroring the simple -> mixed_50 -> medium spacing.
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs:
@@ -389,11 +396,12 @@ curriculum:
 
     - name: beginner_advanced
       # AdvancedBot extends MediumBot with map analysis and enhanced
-      # tactics (bot.py). Caps the descending-threshold / rising-budget
-      # ladder: simple 0.70/3M -> mixed_50 0.70/3.5M -> medium 0.70/4M ->
-      # mixed_med_adv_50 0.65/4.5M -> advanced 0.60/5M. The extra ~1M
-      # budget accounts for AdvancedBot's tighter play forcing the
-      # policy to convert draws into wins on the same map geometry.
+      # tactics (bot.py). Caps the rising-budget ladder (threshold flat
+      # at 0.70 throughout): simple 0.70/3M -> mixed_50 0.70/3.5M ->
+      # medium 0.70/4M -> mixed_med_adv_50 0.70/4.5M -> advanced
+      # 0.70/5M. The extra ~1M budget accounts for AdvancedBot's
+      # tighter play forcing the policy to convert draws into wins on
+      # the same map geometry.
       map_file: maps/1v1/beginner.csv
       opponent: advanced
       promotion_win_rate: 0.70

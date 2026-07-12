@@ -212,11 +212,13 @@ def _make_env_fn(
     unit_count_scale: float | None = None,
     max_actions_per_turn: int | None = None,
     engine_overrides: dict[str, Any] | None = None,
-) -> Callable[[], ActionMaskedEnv]:
+) -> Callable[[], gym.Env]:
     """
     Create a function that creates an environment.
 
-    Used for vectorized environment creation.
+    Used for vectorized environment creation. Each sub-env is
+    ``Monitor(ActionMaskedEnv(StrategyGameEnv))`` — the Monitor layer
+    feeds SB3's ``ep_info_buffer`` (rollout/ep_rew_mean, ep_len_mean).
     """
 
     scale_kwargs: dict[str, Any] = {}
@@ -227,7 +229,9 @@ def _make_env_fn(
     if unit_count_scale is not None:
         scale_kwargs["unit_count_scale"] = unit_count_scale
 
-    def _init() -> ActionMaskedEnv:
+    def _init() -> gym.Env:
+        from stable_baselines3.common.monitor import Monitor
+
         env = StrategyGameEnv(
             map_file=map_file,
             opponent=opponent,
@@ -246,8 +250,16 @@ def _make_env_fn(
             **scale_kwargs,
         )
         env.reset(seed=seed + rank)
-        wrapped = ActionMaskedEnv(env)
-        return wrapped
+        # Monitor must be the outer wrapper: it injects the ``episode``
+        # key into ``info`` at episode end, which is the only source SB3
+        # reads to fill ``model.ep_info_buffer``. Without it,
+        # rollout/ep_rew_mean and ep_len_mean are silently absent from
+        # every training log and chart (SB3 auto-wraps single envs in
+        # Monitor, but hand-built VecEnvs like this one skip that path).
+        # Mask lookups still work: ``env_method("action_masks")`` reaches
+        # ActionMaskedEnv through Monitor's attribute forwarding — the
+        # same chain sb3-contrib relies on for its own auto-wrapped envs.
+        return Monitor(ActionMaskedEnv(env))
 
     return _init
 

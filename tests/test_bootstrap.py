@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ from reinforcetactics.rl.callbacks import (
     EntropyScheduleCallback,
     PeriodicEvalCallback,
     PromotionCallback,
+    TrainingMetricsCallback,
 )
 from reinforcetactics.rl.config import (
     CurriculumConfig,
@@ -132,6 +135,113 @@ class TestBestCheckpointTimestep:
         assert cb.best_win_rate == pytest.approx(0.90)
         assert cb.best_timestep == 200  # the peak eval's cumulative timestep
         assert (tmp_path / "best_model.zip").exists()
+
+
+class TestPeriodicEvalJsonlPersistence:
+    """``results_jsonl_path`` gets one JSON line per eval, appended the
+    moment the eval finishes — so a run killed mid-stage (the routine
+    Colab death) keeps the in-progress stage's eval timeline on disk
+    instead of losing it with ``self.results``."""
+
+    def test_do_eval_appends_one_json_line_per_eval(self, tmp_path, monkeypatch):
+        def fake_eval(model, env, **kwargs):
+            return {
+                "win_rate": 0.5,
+                "avg_reward": 1.0,
+                "avg_length": 1.0,
+                "avg_turns": 1.0,
+                "std_reward": 0.0,
+                "wins": 1,
+                "losses": 1,
+                "draws": 0,
+            }
+
+        monkeypatch.setattr("reinforcetactics.rl.callbacks.evaluate_model", fake_eval)
+
+        jsonl_path = tmp_path / "eval_results.jsonl"
+        cb = PeriodicEvalCallback(
+            eval_env=object(),
+            eval_freq=100,
+            n_eval_episodes=1,
+            results_jsonl_path=jsonl_path,
+            verbose=0,
+        )
+        cb.model = _BestStubModel()
+
+        for ts in (100, 200):
+            cb.num_timesteps = ts
+            cb.model.num_timesteps = ts
+            cb._last_eval_block = ts // 100
+            cb._do_eval()
+            # Appended immediately, not at stage end: after the first eval
+            # the file already holds that eval's row.
+            lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
+            assert len(lines) == ts // 100
+
+        rows = [json.loads(line) for line in lines]
+        assert [r["timesteps"] for r in rows] == [100, 200]
+        assert len(cb.results) == 2  # in-memory contract unchanged
+
+
+class _MetricsStubModel:
+    """Minimal model stub for exercising TrainingMetricsCallback commits."""
+
+    def __init__(self) -> None:
+        self.num_timesteps = 0
+        self.logger = _StubLogger()
+        self.ep_info_buffer = [{"r": 2.0, "l": 10}, {"r": 4.0, "l": 20}]
+        self.ent_coef = 0.05
+
+
+class TestTrainingMetricsCsvPersistence:
+    """``csv_path`` mirrors every committed record to disk immediately so
+    optimizer diagnostics (approx_kl, value_loss, ...) survive a Colab
+    disconnect instead of dying with the in-memory ``records`` list."""
+
+    def test_records_appended_to_csv_incrementally(self, tmp_path):
+        csv_path = tmp_path / "train_metrics.csv"
+        cb = TrainingMetricsCallback(csv_path=csv_path)
+        cb.model = _MetricsStubModel()
+        cb.model.logger.name_to_value = {
+            "train/approx_kl": 0.01,
+            "train/value_loss": 3.5,
+        }
+
+        cb.context = "stage_a"
+        cb.num_timesteps = 100
+        cb._on_rollout_end()
+        cb._on_rollout_start()  # commits the pending record
+
+        # First record is on disk already (survives a mid-run kill).
+        lines = csv_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 2  # header + 1 row
+
+        cb.context = "stage_b"
+        cb.num_timesteps = 200
+        cb._on_rollout_end()
+        cb._on_training_end()
+
+        assert len(cb.records) == 2
+        assert cb.records[0]["stage"] == "stage_a"
+        assert cb.records[0]["rollout/ep_rew_mean"] == pytest.approx(3.0)
+        assert cb.records[0]["train/approx_kl"] == pytest.approx(0.01)
+        assert cb.records[0]["train/ent_coef"] == pytest.approx(0.05)
+
+        with csv_path.open(encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert [r["stage"] for r in rows] == ["stage_a", "stage_b"]
+        assert rows[1]["timesteps"] == "200"
+        assert rows[0]["train/value_loss"] == "3.5"
+
+    def test_no_csv_written_when_path_unset(self, tmp_path):
+        cb = TrainingMetricsCallback()
+        cb.model = _MetricsStubModel()
+        cb.model.logger.name_to_value = {"train/approx_kl": 0.01}
+        cb.num_timesteps = 100
+        cb._on_rollout_end()
+        cb._on_training_end()
+        assert len(cb.records) == 1
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestPromotionCallback:
@@ -1177,6 +1287,46 @@ class TestRunCurriculum:
         assert partial["history"][0]["promoted"] is False
         assert partial["final_model_path"] is not None
         assert (tmp_path / "final_model.zip").exists()
+        # The base fake never saves a best_model.zip, so the surfaced
+        # best-checkpoint path is None (see the SavesBest variant below
+        # for the populated case).
+        assert partial["best_model_path"] is None
+
+    def test_stall_surfaces_best_checkpoint(self, tmp_path):
+        """On stall, the stage's peak-WR ``best_model.zip`` is surfaced on
+        the exception / partial_result / run_status.json alongside the
+        collapsed end-of-stage policy: most stalls peak >= threshold
+        before crashing, so that checkpoint (not final_model.zip) is the
+        one worth retrying from -- it was already on disk but nothing
+        pointed at it."""
+        stages = [_stage("a", patience=2)]
+        program = {"a": [0.95, 0.40, 0.80]}
+        cfg = _make_cfg(stages)
+
+        def model_factory(vec_env, cfg_arg, output_dir):
+            return _FakeModelSavesBest(
+                win_rate_program=program,
+                _stage_names=[s.name for s in cfg_arg.curriculum.stages],
+            )
+
+        with pytest.raises(CurriculumStalled) as excinfo:
+            run_curriculum(
+                cfg,
+                output_dir=tmp_path,
+                train_env_factory=lambda stage, c: _FakeEnv(),
+                eval_env_factory=lambda stage, c: _FakeEnv(),
+                model_factory=model_factory,
+            )
+
+        best_path = excinfo.value.best_model_path
+        assert best_path is not None
+        assert best_path.endswith("best_model.zip")
+        assert Path(best_path).exists()
+        assert excinfo.value.partial_result()["best_model_path"] == best_path
+
+        status = json.loads((tmp_path / "run_status.json").read_text(encoding="utf-8"))
+        assert status["status"] == "curriculum_stalled"
+        assert status["best_model_path"] == best_path
 
     def test_installs_entropy_schedule_callback_for_dict_ent_coef(self, tmp_path):
         """When ``stage.ent_coef`` is a ``{start, end, schedule}`` mapping,
