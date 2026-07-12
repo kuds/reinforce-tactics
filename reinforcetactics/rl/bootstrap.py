@@ -622,7 +622,13 @@ def run_curriculum(
     eval_env_factory = eval_env_factory or _default_eval_env_factory
     model_factory = model_factory or _default_model_factory
 
-    metrics_callback = TrainingMetricsCallback()
+    # ``csv_path`` makes the optimizer diagnostics (approx_kl, clip_fraction,
+    # explained_variance, value_loss, ent_coef, ...) survive the process:
+    # each committed record is appended to ``train_metrics.csv`` immediately,
+    # so a Colab disconnect no longer erases the only evidence of *how* a
+    # stage's policy collapsed. One continuous file across all stages; rows
+    # carry the stage name via ``metrics_callback.context`` (set below).
+    metrics_callback = TrainingMetricsCallback(csv_path=output_dir / "train_metrics.csv")
     history: list[dict[str, Any]] = []
     model = None
     # Provenance of the warm-start checkpoint, filled in the first time
@@ -746,6 +752,10 @@ def run_curriculum(
             # land under ``<stage_dir>/traces/eval_<timesteps>/`` so it's
             # easy to grep for which actions the policy spammed.
             trace_dir=stage_dir / "traces",
+            # Append each eval result as it happens so a mid-stage kill
+            # (Colab disconnect) leaves the stage's eval timeline on disk.
+            # ``eval_results.json`` below is still written at stage end.
+            results_jsonl_path=stage_dir / "eval_results.jsonl",
         )
         promote_cb = PromotionCallback(
             eval_callback=eval_cb,
@@ -808,6 +818,12 @@ def run_curriculum(
         # checkpoint's timestep gives stage-relative "how much did this stage
         # actually train before its peak" -- the skip-ahead diagnostic.
         stage_start_timesteps = int(model.num_timesteps)
+
+        # Stamp the stage name onto every train-metrics record committed
+        # during this learn() so train_metrics.csv rows are joinable
+        # against bootstrap_results.csv without reconstructing stage
+        # boundaries from timestep ranges.
+        metrics_callback.context = stage.name
 
         model.learn(
             total_timesteps=stage.max_timesteps,

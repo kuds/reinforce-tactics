@@ -101,12 +101,13 @@ class TestMakeMaskableVecEnv:
             use_subprocess=False,
             max_turns=9,
         )
-        # DummyVecEnv exposes attrs across sub-envs via env_method / get_attr.
-        # Use a direct attribute fetch via the .envs list (DummyVecEnv only).
+        # Sub-envs are Monitor(ActionMaskedEnv(StrategyGameEnv)); gymnasium
+        # 1.x wrappers don't implicitly forward attributes, so go through
+        # the VecEnv API (get_attr uses get_wrapper_attr, which walks the
+        # wrapper stack) and .unwrapped for the base env.
+        assert vec.get_attr("max_turns") == [9, 9]
         for sub in vec.envs:
-            # sub is the ActionMaskedEnv wrapper around StrategyGameEnv
-            assert sub.max_turns == 9
-            assert sub.game_state.max_turns == 9
+            assert sub.unwrapped.game_state.max_turns == 9
         vec.close()
 
 

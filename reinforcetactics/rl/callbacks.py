@@ -24,6 +24,8 @@ sb3-contrib, so the module remains usable in non-masked training too.
 
 from __future__ import annotations
 
+import csv
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,16 @@ class TrainingMetricsCallback(BaseCallback):
 
     The accumulated records persist across multiple ``model.learn()``
     invocations, so multi-stage training produces one continuous timeline.
+
+    When ``csv_path`` is provided, every committed record is also appended
+    to that CSV immediately (header written on first row). In-memory
+    ``records`` vanish with the process — on Colab exactly the deep runs
+    that die to disconnects lose their optimization diagnostics, leaving
+    stall collapses unattributable (KL blowup vs value divergence vs
+    entropy collapse). Append-mode writes survive the kill and keep one
+    continuous file across stages. ``context`` (when set by the caller,
+    e.g. the curriculum runner setting the stage name before each
+    ``learn()``) is stamped onto each record as ``stage``.
     """
 
     TRAIN_KEYS = (
@@ -61,16 +73,35 @@ class TrainingMetricsCallback(BaseCallback):
         "train/value_loss",
     )
 
-    def __init__(self) -> None:
+    # Fixed CSV schema: identity/context first, then rollout/* and train/*.
+    # ``train/ent_coef`` is read live off the model (schedules mutate the
+    # attribute) because the logger copy is cleared by dump() before the
+    # commit hook runs.
+    _CSV_COLUMNS = (
+        "timesteps",
+        "stage",
+        "rollout/ep_rew_mean",
+        "rollout/ep_len_mean",
+        *TRAIN_KEYS,
+        "train/ent_coef",
+    )
+
+    def __init__(self, csv_path: str | Path | None = None) -> None:
         super().__init__()
         self.records: list[dict] = []
         self._pending: dict | None = None
+        self.csv_path = Path(csv_path) if csv_path is not None else None
+        # Free-form context label (typically the curriculum stage name);
+        # stamped onto records committed while it is set.
+        self.context: str | None = None
 
     def _on_step(self) -> bool:
         return True
 
     def _on_rollout_end(self) -> None:
         snapshot: dict = {"timesteps": self.num_timesteps}
+        if self.context is not None:
+            snapshot["stage"] = self.context
         ep_buffer = getattr(self.model, "ep_info_buffer", None)
         if ep_buffer:
             rewards = [ep["r"] for ep in ep_buffer if "r" in ep]
@@ -88,10 +119,31 @@ class TrainingMetricsCallback(BaseCallback):
             val = self.model.logger.name_to_value.get(key)
             if val is not None:
                 self._pending[key] = float(val)
-        # Only emit records that contain at least one metric beyond timesteps.
-        if len(self._pending) > 1:
+        ent_coef = getattr(self.model, "ent_coef", None)
+        if isinstance(ent_coef, (int, float)):
+            self._pending["train/ent_coef"] = float(ent_coef)
+        # Only emit records that contain at least one metric beyond
+        # timesteps and the context label.
+        min_len = 1 + ("stage" in self._pending) + ("train/ent_coef" in self._pending)
+        if len(self._pending) > min_len:
             self.records.append(self._pending)
+            self._append_csv_row(self._pending)
         self._pending = None
+
+    def _append_csv_row(self, record: dict) -> None:
+        """Best-effort incremental persistence; must never break training."""
+        if self.csv_path is None:
+            return
+        try:
+            self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+            write_header = not self.csv_path.exists()
+            with self.csv_path.open("a", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(self._CSV_COLUMNS))
+                if write_header:
+                    writer.writeheader()
+                writer.writerow({col: record.get(col, "") for col in self._CSV_COLUMNS})
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_rollout_start(self) -> None:
         # train() of the previous iteration has run by this hook, so
@@ -120,6 +172,15 @@ class PeriodicEvalCallback(BaseCallback):
     parallel envs are rolling. Best model (by win rate, with avg reward
     as tiebreaker) is saved to ``save_dir/best_model.zip`` when
     ``save_dir`` is provided.
+
+    When ``results_jsonl_path`` is provided, each eval result is also
+    appended to that file as one JSON line the moment it is produced.
+    ``self.results`` lives only in memory until the *stage* finishes
+    (the curriculum runner writes ``eval_results.json`` at stage end),
+    so a run killed mid-stage — the normal Colab death — used to leave
+    zero on-disk evidence of everything the in-progress stage measured.
+    The JSONL sibling closes that gap without changing the end-of-stage
+    JSON contract.
     """
 
     def __init__(
@@ -131,6 +192,7 @@ class PeriodicEvalCallback(BaseCallback):
         save_dir: Any = None,
         track_breakdown: bool = True,
         trace_dir: Any = None,
+        results_jsonl_path: Any = None,
         verbose: int = 1,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -146,6 +208,7 @@ class PeriodicEvalCallback(BaseCallback):
         # ``evaluate_model``; only ``max_steps_truncate`` episodes are
         # dumped, so healthy evals leave no artefacts on disk.
         self.trace_dir = Path(trace_dir) if trace_dir is not None else None
+        self.results_jsonl_path = Path(results_jsonl_path) if results_jsonl_path is not None else None
 
         self.results: list[dict] = []
         self.best_win_rate: float = -1.0
@@ -189,6 +252,17 @@ class PeriodicEvalCallback(BaseCallback):
         m["timesteps"] = int(self.num_timesteps)
         m["eval_seed"] = eval_seed
         self.results.append(m)
+
+        # Incremental persistence: append the row now so a mid-stage kill
+        # (Colab disconnect / OOM) doesn't erase every eval this stage ran.
+        # Best-effort — a disk hiccup must not abort training.
+        if self.results_jsonl_path is not None:
+            try:
+                self.results_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.results_jsonl_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(m, default=float) + "\n")
+            except Exception:  # noqa: BLE001
+                pass
 
         # Tensorboard: log the most useful scalars so they show up alongside
         # the SB3-internal train/* and rollout/* curves.
