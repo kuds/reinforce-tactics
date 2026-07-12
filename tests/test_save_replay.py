@@ -581,15 +581,14 @@ class TestReplayVideoExport:
 
             player = ReplayPlayer(replay_data, map_df)
 
-            assert player.recording is False
-            assert len(player.recorded_frames) == 0
+            assert player.exporting is False
             assert hasattr(player, "save_video_button")
             # Check padding is applied
             assert hasattr(player, "padding_offset_x")
             assert hasattr(player, "padding_offset_y")
 
-    def test_start_stop_recording(self, game_with_actions):
-        """Test starting and stopping video recording."""
+    def test_export_video(self, game_with_actions):
+        """Test exporting the full replay to an MP4 file."""
         import pandas as pd
 
         from reinforcetactics.utils.replay_player import ReplayPlayer
@@ -602,87 +601,23 @@ class TestReplayVideoExport:
 
             player = ReplayPlayer(replay_data, map_df)
 
-            # Test start recording
-            player.start_recording()
-            assert player.recording is True
-            assert len(player.recorded_frames) == 0
-
-            # Test stop recording
-            player.stop_recording()
-            assert player.recording is False
-
-    def test_frame_capture(self, game_with_actions):
-        """Test that frames are captured during recording."""
-        import pandas as pd
-
-        from reinforcetactics.utils.replay_player import ReplayPlayer
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
-
-            replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
-
-            player = ReplayPlayer(replay_data, map_df)
-            player.start_recording()
-
-            # Simulate rendering frames
-            mouse_pos = (0, 0)
-            player.draw(mouse_pos)
-            pygame.display.flip()
-
-            assert len(player.recorded_frames) == 1
-
-            player.draw(mouse_pos)
-            pygame.display.flip()
-
-            assert len(player.recorded_frames) == 2
-
-            player.stop_recording()
-
-    def test_save_video(self, game_with_actions):
-        """Test saving recorded frames to video file."""
-        import pandas as pd
-
-        from reinforcetactics.utils.replay_player import ReplayPlayer
-
-        try:
-            import cv2  # pylint: disable=import-outside-toplevel
-
-            _ = cv2  # Mark as used
-        except ImportError:
-            pytest.skip("opencv-python not installed")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            replay_path = game_with_actions.save_replay_to_file(filepath=str(Path(tmpdir) / "test_replay.json"))
-
-            replay_data = FileIO.load_replay(replay_path)
-            map_df = pd.DataFrame(replay_data["game_info"]["initial_map"])
-
-            player = ReplayPlayer(replay_data, map_df)
-            player.start_recording()
-
-            # Capture some frames
-            mouse_pos = (0, 0)
-            for _ in range(5):
-                player.draw(mouse_pos)
-                pygame.display.flip()
-
-            player.stop_recording()
-
-            # Save video
-            video_path = player.save_video()
+            old_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                video_path = player.export_video()
+            finally:
+                os.chdir(old_cwd)
 
             assert video_path is not None
-            assert os.path.exists(video_path)
             assert video_path.endswith(".mp4")
+            full_path = Path(tmpdir) / video_path if not Path(video_path).is_absolute() else Path(video_path)
+            assert full_path.exists()
+            assert full_path.stat().st_size > 0
+            # Export leaves the player in a resumable state
+            assert player.exporting is False
 
-            # Cleanup
-            if os.path.exists(video_path):
-                os.remove(video_path)
-
-    def test_save_video_without_frames(self, game_with_actions):
-        """Test that saving video without frames returns None."""
+    def test_export_video_reports_progress(self, game_with_actions):
+        """Test that export invokes the progress overlay without crashing."""
         import pandas as pd
 
         from reinforcetactics.utils.replay_player import ReplayPlayer
@@ -695,10 +630,9 @@ class TestReplayVideoExport:
 
             player = ReplayPlayer(replay_data, map_df)
 
-            # Try to save without recording
-            video_path = player.save_video()
-
-            assert video_path is None
+            # Drawing the progress overlay directly must not raise
+            player._draw_export_progress(1, 10)
+            player._draw_export_progress(10, 10)
 
     def test_video_button_layout(self, game_with_actions):
         """Test that video button is properly positioned."""

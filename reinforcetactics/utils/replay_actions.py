@@ -277,3 +277,137 @@ def apply_recorded_move_v3(game_state, action: dict[str, Any], translate_fn: Cal
     to_x, to_y = translate_fn(action["to_x"], action["to_y"])
     unit = _resolve_or_warn(game_state, action.get("actor_unit_id"), (from_x, from_y), "move actor")
     _apply_move_outcome(game_state, action, unit, to_x, to_y)
+
+
+def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Callable, schema_version: int = 1) -> None:
+    """Execute a single replay action on ``game_state``.
+
+    The one shared dispatcher for both playback paths (the interactive
+    :class:`~reinforcetactics.utils.replay_player.ReplayPlayer` and the
+    headless :mod:`~reinforcetactics.utils.video` recorder), so replay
+    semantics can't drift between them.
+
+    Coordinates in ``action`` are in original (unpadded) map space;
+    ``translate_fn`` maps them into the padded space of ``game_state``.
+    ``schema_version`` selects between v3 (id-based lookup), v2 (apply
+    recorded outcome), and v1 (re-run engine). v2+ are the only paths
+    safe against the Rogue-evade RNG and missing counter-kill info in
+    v1 attack records.
+    """
+    action_type = action.get("type")
+
+    # Defensive guard: v1 replays may carry trailing post-victory actions
+    # (bots that didn't break out of their per-unit loop on game_over --
+    # since fixed, but old saved replays still contain them). Skipping
+    # them keeps playback from advancing past the actual end of the game.
+    if game_state.game_over:
+        return
+
+    try:
+        if action_type == "create_unit":
+            px, py = translate_fn(action["x"], action["y"])
+            unit = game_state.create_unit(action["unit_type"], px, py, action["player"])
+            if unit is not None and schema_version >= 3 and "unit_id" in action:
+                # Pin the unit's id to the recorded value so later actions
+                # can look it up. The engine's natural id assignment is
+                # monotonic, so values normally already match, but pinning
+                # hardens against any transient create-unit failure in the
+                # replay (e.g. a gold-cost mismatch) skewing the counter.
+                unit.unit_id = action["unit_id"]
+                game_state._next_unit_id = max(game_state._next_unit_id, unit.unit_id + 1)
+        elif action_type == "move":
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_move_v3(game_state, action, translate_fn)
+            else:
+                fx, fy = translate_fn(action["from_x"], action["from_y"])
+                tx, ty = translate_fn(action["to_x"], action["to_y"])
+                unit = game_state.get_unit_at_position(fx, fy)
+                if unit and unit.player == action["player"]:
+                    # Trust the recorded action: a unit that legitimately
+                    # moved a second time in the original turn (Sorcerer
+                    # Haste resets can_move/can_attack) was rejected here
+                    # without this override -- silent failure that diverged
+                    # downstream state and produced ghost-action symptoms.
+                    unit.can_move = True
+                    game_state.move_unit(unit, tx, ty)
+        elif action_type == "attack":
+            if schema_version >= 3 and "attacker_unit_id" in action:
+                apply_recorded_attack_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
+                apply_recorded_attack(game_state, action, translate_fn)
+            else:
+                ap = translate_fn(*action["attacker_pos"])
+                tp = translate_fn(*action["target_pos"])
+                attacker = game_state.get_unit_at_position(*ap)
+                target = game_state.get_unit_at_position(*tp)
+                if attacker and target:
+                    game_state.attack(attacker, target)
+        elif action_type == "seize":
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_seize_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
+                apply_recorded_seize(game_state, action, translate_fn)
+            else:
+                pos = translate_fn(*action["position"])
+                unit = game_state.get_unit_at_position(*pos)
+                if unit:
+                    game_state.seize(unit)
+        elif action_type == "paralyze":
+            pp = translate_fn(*action["paralyzer_pos"])
+            tp = translate_fn(*action["target_pos"])
+            paralyzer = game_state.get_unit_at_position(*pp)
+            target = game_state.get_unit_at_position(*tp)
+            if paralyzer and target:
+                game_state.paralyze(paralyzer, target)
+        elif action_type == "heal":
+            if schema_version >= 3 and "actor_unit_id" in action:
+                apply_recorded_heal_v3(game_state, action, translate_fn)
+            elif schema_version >= 2:
+                apply_recorded_heal(game_state, action, translate_fn)
+            else:
+                hp = translate_fn(*action["healer_pos"])
+                tp = translate_fn(*action["target_pos"])
+                healer = game_state.get_unit_at_position(*hp)
+                target = game_state.get_unit_at_position(*tp)
+                if healer and target:
+                    game_state.heal(healer, target)
+        elif action_type == "cure":
+            cp = translate_fn(*action["curer_pos"])
+            tp = translate_fn(*action["target_pos"])
+            curer = game_state.get_unit_at_position(*cp)
+            target = game_state.get_unit_at_position(*tp)
+            if curer and target:
+                game_state.cure(curer, target)
+        elif action_type == "haste":
+            sp = translate_fn(*action["sorcerer_pos"])
+            tp = translate_fn(*action["target_pos"])
+            sorcerer = game_state.get_unit_at_position(*sp)
+            target = game_state.get_unit_at_position(*tp)
+            if sorcerer and target:
+                game_state.haste(sorcerer, target)
+        elif action_type == "defence_buff":
+            sp = translate_fn(*action["sorcerer_pos"])
+            tp = translate_fn(*action["target_pos"])
+            sorcerer = game_state.get_unit_at_position(*sp)
+            target = game_state.get_unit_at_position(*tp)
+            if sorcerer and target:
+                game_state.defence_buff(sorcerer, target)
+        elif action_type == "attack_buff":
+            sp = translate_fn(*action["sorcerer_pos"])
+            tp = translate_fn(*action["target_pos"])
+            sorcerer = game_state.get_unit_at_position(*sp)
+            target = game_state.get_unit_at_position(*tp)
+            if sorcerer and target:
+                game_state.attack_buff(sorcerer, target)
+        elif action_type == "resign":
+            game_state.resign(action["player"])
+        elif action_type == "end_turn":
+            # Don't re-record this action while replaying it
+            old_history = game_state.action_history
+            game_state.action_history = []
+            game_state.end_turn()
+            game_state.action_history = old_history
+        else:
+            logger.warning("Unknown replay action type %r (schema v%d); skipping", action_type, schema_version)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Error executing replay action %s: %s", action_type, e)

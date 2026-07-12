@@ -11,6 +11,7 @@ import pandas as pd
 import pygame
 
 from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.icons import (
     get_arrow_left_icon,
     get_arrow_right_icon,
@@ -22,24 +23,7 @@ from reinforcetactics.ui.icons import (
     get_x_icon,
 )
 from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.utils.replay_actions import (
-    apply_recorded_attack,
-    apply_recorded_attack_v3,
-    apply_recorded_heal,
-    apply_recorded_heal_v3,
-    apply_recorded_move_v3,
-    apply_recorded_seize,
-    apply_recorded_seize_v3,
-    get_schema_version,
-)
-
-# Optional OpenCV import for video export
-try:
-    import cv2
-
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
+from reinforcetactics.utils.replay_actions import execute_replay_action, get_schema_version
 
 # Default border size for replay padding (same as UI)
 REPLAY_BORDER_SIZE = 2
@@ -67,19 +51,28 @@ class ReplayPlayer:
         self.padding_offset_y = offset_y
 
         self.current_action_index = 0
-        self.playing = False
         self.paused = True
+        # True while the progress bar is being dragged (scrubbing)
+        self.scrubbing = False
 
         # v2 replays carry per-action outcome data so we can apply
         # recorded effects directly instead of re-calling the engine.
         # v1 (legacy) replays fall through to the recompute path.
         self.schema_version = get_schema_version(self.game_info)
+
+        # Actions record 0-based turn numbers; the in-game HUD shows 1-based
+        # ("Turn 1" on the opening move), so the info panel displays 1-based
+        # too. The total is derived from the recorded actions so both
+        # numbers share the same convention.
+        if self.actions:
+            self._total_turns = max(a.get("turn", 0) for a in self.actions) + 1
+        else:
+            self._total_turns = self.game_info.get("total_turns", "?")
         self.playback_speed = 1.0  # 1x speed
         self.last_action_time = time.time()
 
-        # Video recording state
-        self.recording = False
-        self.recorded_frames = []
+        # Video export state (True while an export is in progress)
+        self.exporting = False
 
         # On-screen notification state
         self.notification_text = ""
@@ -225,176 +218,34 @@ class ReplayPlayer:
         progress_width = max(progress_end - progress_start, 100)
         self.progress_bar_rect = pygame.Rect(progress_start, self.control_y + 20, progress_width, 20)
 
+        # Hover tooltips for the icon-only controls (label + shortcut)
+        self._control_tooltips = [
+            (self.step_back_button, "Step back (Left)"),
+            (self.play_pause_button, "Play / Pause (Space)"),
+            (self.step_forward_button, "Step forward (Right)"),
+            (self.restart_button, "Restart (R)"),
+            (self.prev_turn_button, "Previous turn (PgUp)"),
+            (self.next_turn_button, "Next turn (PgDn)"),
+            (self.speed_down_button, "Slower (-)"),
+            (self.speed_up_button, "Faster (+)"),
+            (self.save_video_button, "Export MP4 (V)"),
+            (self.exit_button, "Exit (Esc)"),
+        ]
+
     def execute_action(self, action):
         """
         Execute a single replay action.
 
         Coordinates in the action are in original (unpadded) space and are
-        translated to padded coordinates before execution.
+        translated to padded coordinates before execution. Dispatch lives
+        in :func:`reinforcetactics.utils.replay_actions.execute_replay_action`,
+        shared with the headless video recorder so the two playback paths
+        can't drift apart.
 
         Args:
             action: Action dictionary to execute
         """
-        action_type = action.get("type")
-
-        # Defensive: don't apply post-victory actions if any survive in
-        # an older replay. Newly-saved (v2) replays can't contain them
-        # because record_action early-returns on game_over, but we still
-        # get v1 files in saves/ and tournament_results/.
-        if self.game_state.game_over:
-            return
-
-        try:
-            if action_type == "create_unit":
-                # Translate coordinates from original to padded
-                padded_x, padded_y = self._translate_coords(action["x"], action["y"])
-                unit = self.game_state.create_unit(action["unit_type"], padded_x, padded_y, action["player"])
-                # v3: pin the unit's id to the recorded value so subsequent
-                # actions can find this unit by id. The engine's natural
-                # id assignment is monotonic, so values normally already
-                # match, but enforcing it explicitly hardens against any
-                # transient create-unit failure in the replay (e.g. a
-                # gold-cost mismatch) skewing the counter.
-                if unit is not None and self.schema_version >= 3 and "unit_id" in action:
-                    unit.unit_id = action["unit_id"]
-                    self.game_state._next_unit_id = max(self.game_state._next_unit_id, unit.unit_id + 1)
-
-            elif action_type == "move":
-                if self.schema_version >= 3 and "actor_unit_id" in action:
-                    # v3: id-based lookup + direct position write. No
-                    # engine can_move/reachable/occupancy gates can
-                    # silently reject a legitimately-recorded second
-                    # move (e.g. Sorcerer Haste reset).
-                    apply_recorded_move_v3(self.game_state, action, self._translate_coords)
-                else:
-                    # v1/v2 path: engine-driven move with can_move override.
-                    from_x, from_y = self._translate_coords(action["from_x"], action["from_y"])
-                    to_x, to_y = self._translate_coords(action["to_x"], action["to_y"])
-                    unit = self.game_state.get_unit_at_position(from_x, from_y)
-                    if unit and unit.player == action["player"]:
-                        # Trust the recorded action: enable the move so the engine's
-                        # ``can_move`` guard doesn't block replay of legal actions
-                        # (e.g. a unit created earlier in this same turn whose
-                        # ``can_move`` flips to True only at next turn start).
-                        unit.can_move = True
-                        self.game_state.move_unit(unit, to_x, to_y)
-
-            elif action_type == "attack":
-                if self.schema_version >= 3 and "attacker_unit_id" in action:
-                    apply_recorded_attack_v3(self.game_state, action, self._translate_coords)
-                elif self.schema_version >= 2:
-                    # v2: apply recorded outcome directly. No RNG re-roll,
-                    # no damage recomputation -- the only path that's
-                    # immune to mechanics drift and Rogue evade variance.
-                    apply_recorded_attack(self.game_state, action, self._translate_coords)
-                else:
-                    # v1 legacy: re-run the engine. Vulnerable to RNG
-                    # divergence and missing counter-kill information.
-                    orig_attacker_pos = action["attacker_pos"]
-                    orig_target_pos = action["target_pos"]
-                    attacker_pos = self._translate_coords(*orig_attacker_pos)
-                    target_pos = self._translate_coords(*orig_target_pos)
-                    attacker = self.game_state.get_unit_at_position(*attacker_pos)
-                    target = self.game_state.get_unit_at_position(*target_pos)
-
-                    if attacker and target:
-                        self.game_state.attack(attacker, target)
-
-            elif action_type == "seize":
-                if self.schema_version >= 3 and "actor_unit_id" in action:
-                    apply_recorded_seize_v3(self.game_state, action, self._translate_coords)
-                elif self.schema_version >= 2:
-                    apply_recorded_seize(self.game_state, action, self._translate_coords)
-                else:
-                    orig_position = action["position"]
-                    position = self._translate_coords(*orig_position)
-                    unit = self.game_state.get_unit_at_position(*position)
-                    if unit:
-                        self.game_state.seize(unit)
-
-            elif action_type == "paralyze":
-                # Translate coordinates from original to padded
-                orig_paralyzer_pos = action["paralyzer_pos"]
-                orig_target_pos = action["target_pos"]
-                paralyzer_pos = self._translate_coords(*orig_paralyzer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                paralyzer = self.game_state.get_unit_at_position(*paralyzer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if paralyzer and target:
-                    self.game_state.paralyze(paralyzer, target)
-
-            elif action_type == "heal":
-                if self.schema_version >= 3 and "actor_unit_id" in action:
-                    apply_recorded_heal_v3(self.game_state, action, self._translate_coords)
-                elif self.schema_version >= 2:
-                    apply_recorded_heal(self.game_state, action, self._translate_coords)
-                else:
-                    orig_healer_pos = action["healer_pos"]
-                    orig_target_pos = action["target_pos"]
-                    healer_pos = self._translate_coords(*orig_healer_pos)
-                    target_pos = self._translate_coords(*orig_target_pos)
-                    healer = self.game_state.get_unit_at_position(*healer_pos)
-                    target = self.game_state.get_unit_at_position(*target_pos)
-                    if healer and target:
-                        self.game_state.heal(healer, target)
-
-            elif action_type == "cure":
-                # Translate coordinates from original to padded
-                orig_curer_pos = action["curer_pos"]
-                orig_target_pos = action["target_pos"]
-                curer_pos = self._translate_coords(*orig_curer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                curer = self.game_state.get_unit_at_position(*curer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if curer and target:
-                    self.game_state.cure(curer, target)
-
-            elif action_type == "haste":
-                # Translate coordinates from original to padded
-                orig_sorcerer_pos = action["sorcerer_pos"]
-                orig_target_pos = action["target_pos"]
-                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if sorcerer and target:
-                    self.game_state.haste(sorcerer, target)
-
-            elif action_type == "defence_buff":
-                # Translate coordinates from original to padded
-                orig_sorcerer_pos = action["sorcerer_pos"]
-                orig_target_pos = action["target_pos"]
-                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if sorcerer and target:
-                    self.game_state.defence_buff(sorcerer, target)
-
-            elif action_type == "attack_buff":
-                # Translate coordinates from original to padded
-                orig_sorcerer_pos = action["sorcerer_pos"]
-                orig_target_pos = action["target_pos"]
-                sorcerer_pos = self._translate_coords(*orig_sorcerer_pos)
-                target_pos = self._translate_coords(*orig_target_pos)
-                sorcerer = self.game_state.get_unit_at_position(*sorcerer_pos)
-                target = self.game_state.get_unit_at_position(*target_pos)
-                if sorcerer and target:
-                    self.game_state.attack_buff(sorcerer, target)
-
-            elif action_type == "resign":
-                self.game_state.resign(action["player"])
-
-            elif action_type == "end_turn":
-                # Don't record this action again
-                old_history = self.game_state.action_history
-                self.game_state.action_history = []
-                self.game_state.end_turn()
-                self.game_state.action_history = old_history
-
-        except Exception as e:
-            print(f"⚠️  Error executing action: {e}")
-            print(f"   Action: {action}")
+        execute_replay_action(self.game_state, action, self._translate_coords, self.schema_version)
 
     def update(self):
         """Update replay playback."""
@@ -415,22 +266,26 @@ class ReplayPlayer:
 
     def restart(self):
         """Restart the replay from the beginning."""
+        self._reset_game_state()
         self.current_action_index = 0
         self.paused = True
         self.current_action_description = ""
 
-        # Recreate game state
+        self.show_notification("Replay restarted")
+
+    def _reset_game_state(self):
+        """Rebuild the game state at action 0, reusing the live renderer.
+
+        The map (and therefore the window size) never changes for a given
+        replay, so the existing renderer is retargeted rather than
+        recreated -- constructing a Renderer re-runs display set_mode and
+        reloads every sprite from disk, which made each backward step,
+        turn skip, and seek visibly hitch.
+        """
         from reinforcetactics.core.game_state import GameState
 
         self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
-
-        # Recreate renderer (replay mode hides End Turn and Resign buttons)
-        from reinforcetactics.ui.renderer import Renderer
-
-        self.renderer = Renderer(self.game_state, replay_mode=True)
-        self.setup_ui()
-
-        self.show_notification("Replay restarted")
+        self.renderer.game_state = self.game_state
 
     def toggle_pause(self):
         """Toggle pause/play."""
@@ -473,22 +328,21 @@ class ReplayPlayer:
 
     def _replay_to_action(self, target_index):
         """Replay from beginning to target action index."""
-        # Reset game state
-        from reinforcetactics.core.game_state import GameState
-
-        self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
-
-        # Recreate renderer (replay mode hides End Turn and Resign buttons)
-        from reinforcetactics.ui.renderer import Renderer
-
-        self.renderer = Renderer(self.game_state, replay_mode=True)
-        self.setup_ui()
+        self._reset_game_state()
 
         # Replay to target
+        target_index = max(0, min(target_index, len(self.actions)))
         for i in range(target_index):
-            if i < len(self.actions):
-                self.execute_action(self.actions[i])
+            self.execute_action(self.actions[i])
         self.current_action_index = target_index
+
+        # Refresh playback state so the seek doesn't leave a stale action
+        # description on screen or an old timer that fires immediately.
+        if target_index > 0:
+            self.current_action_description = self._get_action_description(self.actions[target_index - 1])
+        else:
+            self.current_action_description = ""
+        self.last_action_time = time.time()
 
     def skip_to_next_turn(self):
         """Skip to the next turn's first action."""
@@ -501,7 +355,7 @@ class ReplayPlayer:
         for i in range(self.current_action_index + 1, len(self.actions)):
             if self._get_action_turn(i) > current_turn:
                 self._replay_to_action(i)
-                self.show_notification(f"Turn {self._get_action_turn(i)}")
+                self.show_notification(f"Turn {self._get_action_turn(i) + 1}")
                 return
 
         # No next turn found, go to end
@@ -509,25 +363,51 @@ class ReplayPlayer:
         self.show_notification("Replay finished!")
 
     def skip_to_prev_turn(self):
-        """Skip to the previous turn's first action."""
+        """Skip to the start of the current turn, or the previous turn.
+
+        Media-player semantics: when playback is mid-turn, the first press
+        rewinds to the start of the current turn; pressing again at a turn
+        boundary goes back one full turn. Turn numbers are 0-based, so the
+        first turn is reachable (the old ``max(1, ...)`` floor made it
+        impossible to rewind into turn 0 and could even jump forward).
+        """
         if self.current_action_index <= 0:
             return
 
         current_turn = self._get_action_turn(max(0, self.current_action_index - 1))
 
-        # Find the start of the previous turn
-        target_turn = max(1, current_turn - 1)
+        # Index of the current turn's first action
+        first_of_current = 0
+        for i in range(len(self.actions)):
+            if self._get_action_turn(i) >= current_turn:
+                first_of_current = i
+                break
+
+        if self.current_action_index > first_of_current:
+            target_turn = current_turn
+        else:
+            target_turn = max(0, current_turn - 1)
 
         # Find the first action of the target turn
         for i in range(len(self.actions)):
             if self._get_action_turn(i) >= target_turn:
                 self._replay_to_action(i)
-                self.show_notification(f"Turn {self._get_action_turn(i)}")
+                self.show_notification(f"Turn {self._get_action_turn(i) + 1}")
                 return
 
         # Fallback to beginning
         self._replay_to_action(0)
         self.show_notification("Turn 1")
+
+    def _seek_to_mouse(self, mouse_pos):
+        """Seek playback to the progress-bar position under the mouse."""
+        if not self.actions or self.progress_bar_rect.width <= 0:
+            return
+        relative_x = mouse_pos[0] - self.progress_bar_rect.x
+        progress = max(0.0, min(1.0, relative_x / self.progress_bar_rect.width))
+        target_action = int(progress * len(self.actions))
+        if target_action != self.current_action_index:
+            self._replay_to_action(target_action)
 
     def _get_action_turn(self, action_index):
         """Get the turn number for an action index."""
@@ -568,74 +448,103 @@ class ReplayPlayer:
         else:
             return f"P{player}: {action_type}"
 
-    def start_recording(self):
-        """Start recording video frames."""
-        self.recording = True
-        self.recorded_frames = []
-        self.show_notification("Recording started...")
+    def export_video(self):
+        """Export the full replay to an MP4 file via headless rendering.
 
-    def stop_recording(self):
-        """Stop recording and prompt to save."""
-        if self.recording:
-            self.recording = False
-            self.show_notification(f"Recording stopped ({len(self.recorded_frames)} frames)")
+        Renders the entire action history (not just what has been watched)
+        through :func:`reinforcetactics.utils.video.record_replay_to_video`,
+        streaming frames straight to the encoder so memory stays bounded.
+        An on-screen progress bar tracks the export; playback resumes when
+        it finishes.
 
-    def save_video(self):
-        """Save recorded frames to video file."""
-        if not self.recorded_frames:
-            self.show_notification("No frames recorded!")
+        Returns:
+            Path to the saved video file, or None on failure.
+        """
+        if self.exporting:
             return None
 
-        if not CV2_AVAILABLE:
-            self.show_notification("OpenCV not installed!")
-            return None
+        from reinforcetactics.utils.video import record_replay_to_video
+
+        self.exporting = True
+        was_paused = self.paused
+        self.paused = True
 
         try:
-            # Create videos directory
             videos_dir = Path("videos")
             videos_dir.mkdir(exist_ok=True)
-
-            # Generate filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = videos_dir / f"replay_{timestamp}.mp4"
 
-            # Get frame dimensions from first frame
-            height, width, _ = self.recorded_frames[0].shape
+            last_drawn = 0.0
 
-            # Create video writer
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            fps = 30  # 30 FPS for smooth playback
-            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+            def _on_progress(done, total):
+                # Keep the window responsive and show progress, but don't
+                # redraw more than ~10x per second.
+                nonlocal last_drawn
+                now = time.time()
+                if now - last_drawn < 0.1 and done < total:
+                    return
+                last_drawn = now
+                pygame.event.pump()
+                self._draw_export_progress(done, total)
+                pygame.display.flip()
 
-            # Write frames
-            for frame in self.recorded_frames:
-                # Convert RGB to BGR for OpenCV
-                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                writer.write(bgr_frame)
-
-            writer.release()
-            duration = len(self.recorded_frames) / fps
-            self.show_notification(f"Video saved! ({duration:.1f}s)")
-
-            # Clear recorded frames to free memory
-            self.recorded_frames = []
-            return str(output_path)
+            path = record_replay_to_video(
+                self.replay_data,
+                str(output_path),
+                fps=4,
+                # None = follow settings.json, so the export matches the
+                # sprite style the viewer is currently looking at.
+                use_pixel_art=None,
+                progress_callback=_on_progress,
+            )
+            self.show_notification(f"Video saved: {path}")
+            return path
 
         except Exception as e:
-            self.show_notification(f"Error: {e}")
+            self.show_notification(f"Export failed: {e}")
             return None
+
+        finally:
+            self.exporting = False
+            self.paused = was_paused
+            self.last_action_time = time.time()
+
+    def _draw_export_progress(self, done, total):
+        """Draw a modal progress bar while a video export runs."""
+        screen = self.renderer.screen
+        width, height = screen.get_width(), screen.get_height()
+
+        bar_width = max(200, width // 2)
+        bar_height = 22
+        bar_x = (width - bar_width) // 2
+        bar_y = height // 2
+
+        panel = pygame.Rect(bar_x - 20, bar_y - 50, bar_width + 40, 100)
+        pygame.draw.rect(screen, theme.PANEL_BG, panel, border_radius=theme.BORDER_RADIUS)
+        pygame.draw.rect(screen, theme.PANEL_BORDER, panel, 2, border_radius=theme.BORDER_RADIUS)
+
+        label = get_font(20).render("Exporting video...", True, theme.TEXT)
+        screen.blit(label, label.get_rect(centerx=width // 2, y=bar_y - 36))
+
+        bar_rect = pygame.Rect(bar_x, bar_y, bar_width, bar_height)
+        pygame.draw.rect(screen, theme.REPLAY_PROGRESS_BG, bar_rect, border_radius=4)
+        if total > 0 and done > 0:
+            fill = pygame.Rect(bar_x, bar_y, int(bar_width * done / total), bar_height)
+            pygame.draw.rect(screen, theme.REPLAY_PROGRESS_FILL, fill, border_radius=4)
+        pygame.draw.rect(screen, theme.REPLAY_BTN_BORDER, bar_rect, 2, border_radius=4)
 
     def run(self):
         """Run the replay player."""
         clock = pygame.time.Clock()
         running = True
 
-        # Show initial notification with game info
+        # Show initial notification with the full matchup (2-4 players)
         player_configs = self.game_info.get("player_configs", [])
         if player_configs:
-            p1_name = player_configs[0].get("name", "P1") if len(player_configs) > 0 else "P1"
-            p2_name = player_configs[1].get("name", "P2") if len(player_configs) > 1 else "P2"
-            self.show_notification(f"{p1_name} vs {p2_name}")
+            num_players = self.game_info.get("num_players", 2)
+            names = [player_configs[i].get("name", f"P{i + 1}") for i in range(min(num_players, len(player_configs)))]
+            self.show_notification(" vs ".join(names))
 
         while running:
             mouse_pos = pygame.mouse.get_pos()
@@ -652,11 +561,7 @@ class ReplayPlayer:
                     elif event.key == pygame.K_r:
                         self.restart()
                     elif event.key == pygame.K_v:
-                        if not self.recording:
-                            self.start_recording()
-                        else:
-                            self.stop_recording()
-                            self.save_video()
+                        self.export_video()
                     elif event.key in [pygame.K_PLUS, pygame.K_EQUALS]:
                         self.change_speed(1)
                     elif event.key == pygame.K_MINUS:
@@ -690,19 +595,19 @@ class ReplayPlayer:
                         elif self.speed_down_button.collidepoint(mouse_pos):
                             self.change_speed(-1)
                         elif self.save_video_button.collidepoint(mouse_pos):
-                            if not self.recording:
-                                self.start_recording()
-                            else:
-                                self.stop_recording()
-                                self.save_video()
+                            self.export_video()
                         elif self.exit_button.collidepoint(mouse_pos):
                             running = False
                         elif self.progress_bar_rect.collidepoint(mouse_pos):
-                            # Seek to position
-                            relative_x = mouse_pos[0] - self.progress_bar_rect.x
-                            progress = relative_x / self.progress_bar_rect.width
-                            target_action = int(progress * len(self.actions))
-                            self._replay_to_action(target_action)
+                            # Seek, then keep scrubbing while the button is held
+                            self.scrubbing = True
+                            self._seek_to_mouse(mouse_pos)
+
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    self.scrubbing = False
+
+                elif event.type == pygame.MOUSEMOTION and self.scrubbing:
+                    self._seek_to_mouse(event.pos)
 
             # Update replay
             self.update()
@@ -726,62 +631,62 @@ class ReplayPlayer:
 
         # Draw control panel background
         panel_rect = pygame.Rect(0, self.control_y, screen_width, 60)
-        pygame.draw.rect(screen, (40, 40, 50), panel_rect)
-        pygame.draw.line(screen, (200, 200, 220), (0, self.control_y), (screen_width, self.control_y), 2)
+        pygame.draw.rect(screen, theme.PANEL_BG, panel_rect)
+        pygame.draw.line(screen, theme.REPLAY_PANEL_DIVIDER, (0, self.control_y), (screen_width, self.control_y), 2)
 
         # Draw buttons
         font = get_font(24)
         small_font = get_font(20)
         icon_size = 24
-        icon_color = (255, 255, 255)
+        icon_color = theme.TEXT
 
         # Step back button
         step_back_icon = get_arrow_left_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.step_back_button, step_back_icon, mouse_pos, (80, 80, 120))
+        self._draw_icon_button(self.step_back_button, step_back_icon, mouse_pos, theme.REPLAY_BTN_STEP)
 
         # Play/Pause button
         if self.paused:
             play_pause_icon = get_play_icon(size=icon_size, color=icon_color)
         else:
             play_pause_icon = get_pause_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.play_pause_button, play_pause_icon, mouse_pos, (100, 150, 100))
+        self._draw_icon_button(self.play_pause_button, play_pause_icon, mouse_pos, theme.REPLAY_BTN_PLAY)
 
         # Step forward button
         step_forward_icon = get_arrow_right_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.step_forward_button, step_forward_icon, mouse_pos, (80, 80, 120))
+        self._draw_icon_button(self.step_forward_button, step_forward_icon, mouse_pos, theme.REPLAY_BTN_STEP)
 
         # Restart button
         restart_icon = get_restart_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.restart_button, restart_icon, mouse_pos, (150, 100, 100))
+        self._draw_icon_button(self.restart_button, restart_icon, mouse_pos, theme.REPLAY_BTN_RESTART)
 
         # Skip to previous turn button
         skip_back_icon = get_skip_back_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.prev_turn_button, skip_back_icon, mouse_pos, (100, 100, 130))
+        self._draw_icon_button(self.prev_turn_button, skip_back_icon, mouse_pos, theme.REPLAY_BTN_TURN_SKIP)
 
         # Skip to next turn button
         skip_forward_icon = get_skip_forward_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.next_turn_button, skip_forward_icon, mouse_pos, (100, 100, 130))
+        self._draw_icon_button(self.next_turn_button, skip_forward_icon, mouse_pos, theme.REPLAY_BTN_TURN_SKIP)
 
         # Speed down button
-        self._draw_button(self.speed_down_button, "-", mouse_pos, (100, 100, 150), font)
+        self._draw_button(self.speed_down_button, "-", mouse_pos, theme.REPLAY_BTN_SPEED, font)
 
         # Speed display (between speed buttons)
-        speed_text = f"{self.playback_speed}x"
-        speed_surface = small_font.render(speed_text, True, (200, 200, 255))
+        speed_text = f"{self.playback_speed:g}x"
+        speed_surface = small_font.render(speed_text, True, theme.REPLAY_SPEED_TEXT)
         speed_rect = speed_surface.get_rect(center=(self.speed_display_x, self.control_y + 30))
         screen.blit(speed_surface, speed_rect)
 
         # Speed up button
-        self._draw_button(self.speed_up_button, "+", mouse_pos, (100, 100, 150), font)
+        self._draw_button(self.speed_up_button, "+", mouse_pos, theme.REPLAY_BTN_SPEED, font)
 
-        # Save Video button
-        save_video_text = "Rec" if not self.recording else "Save"
-        save_video_color = (200, 50, 50) if self.recording else (70, 70, 150)
-        self._draw_button(self.save_video_button, save_video_text, mouse_pos, save_video_color, small_font)
+        # Export video button
+        export_text = "..." if self.exporting else "Export"
+        export_color = theme.REPLAY_BTN_EXPORT_ACTIVE if self.exporting else theme.REPLAY_BTN_EXPORT
+        self._draw_button(self.save_video_button, export_text, mouse_pos, export_color, small_font)
 
         # Progress bar (only if there's space)
         if self.progress_bar_rect.width > 50:
-            pygame.draw.rect(screen, (60, 60, 70), self.progress_bar_rect, border_radius=4)
+            pygame.draw.rect(screen, theme.REPLAY_PROGRESS_BG, self.progress_bar_rect, border_radius=4)
             if len(self.actions) > 0:
                 progress = self.current_action_index / len(self.actions)
                 progress_width = int(self.progress_bar_rect.width * progress)
@@ -789,30 +694,40 @@ class ReplayPlayer:
                     progress_rect = pygame.Rect(
                         self.progress_bar_rect.x, self.progress_bar_rect.y, progress_width, self.progress_bar_rect.height
                     )
-                    pygame.draw.rect(screen, (100, 200, 100), progress_rect, border_radius=4)
-            pygame.draw.rect(screen, (160, 160, 180), self.progress_bar_rect, 2, border_radius=4)
+                    pygame.draw.rect(screen, theme.REPLAY_PROGRESS_FILL, progress_rect, border_radius=4)
+            pygame.draw.rect(screen, theme.REPLAY_BTN_BORDER, self.progress_bar_rect, 2, border_radius=4)
 
         # Exit button
         exit_icon = get_x_icon(size=icon_size, color=icon_color)
-        self._draw_icon_button(self.exit_button, exit_icon, mouse_pos, (150, 70, 70))
+        self._draw_icon_button(self.exit_button, exit_icon, mouse_pos, theme.REPLAY_BTN_EXIT)
 
-        # Recording indicator
-        if self.recording:
-            rec_text = f"REC ({len(self.recorded_frames)})"
-            rec_surface = get_font(18).render(rec_text, True, (255, 50, 50))
-            rec_x = screen_width - rec_surface.get_width() - 10
-            screen.blit(rec_surface, (rec_x, 10))
+        # Unit stats on hover, same as in-game (only while the cursor is
+        # over the board, not the info/control panels)
+        info_panel_top = self.control_y - 40
+        if mouse_pos[1] < info_panel_top:
+            self.renderer.draw_unit_tooltip(mouse_pos)
+
+        # Label + shortcut tooltip for the hovered control
+        self._draw_control_tooltip(mouse_pos)
 
         # Draw on-screen notification
         self._draw_notification(screen, screen_width)
 
-        # Capture frame if recording
-        if self.recording:
-            # Get the pygame surface as a numpy array
-            frame_data = pygame.surfarray.array3d(screen)
-            # Transpose from (width, height, channels) to (height, width, channels)
-            frame_data = np.transpose(frame_data, (1, 0, 2))
-            self.recorded_frames.append(frame_data.copy())
+    def _draw_control_tooltip(self, mouse_pos):
+        """Draw a small label/shortcut tooltip above the hovered control."""
+        for rect, label in self._control_tooltips:
+            if not rect.collidepoint(mouse_pos):
+                continue
+            screen = self.renderer.screen
+            text_surface = get_font(16).render(label, True, theme.TEXT)
+            padding = 6
+            bg_rect = pygame.Rect(0, 0, text_surface.get_width() + 2 * padding, text_surface.get_height() + 2 * padding)
+            bg_rect.midbottom = (rect.centerx, rect.top - 6)
+            bg_rect.x = max(4, min(bg_rect.x, screen.get_width() - bg_rect.width - 4))
+            pygame.draw.rect(screen, theme.TOOLTIP_BG, bg_rect, border_radius=theme.BORDER_RADIUS_SMALL)
+            pygame.draw.rect(screen, theme.PANEL_BORDER, bg_rect, 1, border_radius=theme.BORDER_RADIUS_SMALL)
+            screen.blit(text_surface, (bg_rect.x + padding, bg_rect.y + padding))
+            return
 
     def _draw_info_panel(self, screen, screen_width):
         """Draw the info panel above the control panel at the bottom."""
@@ -835,21 +750,21 @@ class ReplayPlayer:
         elif self.current_action_index == 0 and len(self.actions) > 0:
             current_turn = self._get_action_turn(0)
 
-        total_turns = self.game_info.get("total_turns", "?")
+        total_turns = self._total_turns
 
         # Layout: Turn/Action on left, Action description in center, Player info on right
         # All on a single row for compact display
 
         # Turn and action info on left
-        turn_text = f"Turn {current_turn}/{total_turns}"
+        turn_text = f"Turn {current_turn + 1}/{total_turns}"
         action_text = f"Action {self.current_action_index}/{len(self.actions)}"
         combined_left = f"{turn_text}  |  {action_text}"
-        left_surface = small_font.render(combined_left, True, (200, 200, 220))
+        left_surface = small_font.render(combined_left, True, theme.TEXT_SECONDARY)
         screen.blit(left_surface, (10, panel_y + (panel_height - left_surface.get_height()) // 2))
 
         # Current action description in center
         if self.current_action_description:
-            desc_surface = font.render(self.current_action_description, True, (255, 220, 100))
+            desc_surface = font.render(self.current_action_description, True, theme.SELECTED)
             desc_rect = desc_surface.get_rect(center=(screen_width // 2, panel_y + panel_height // 2))
             screen.blit(desc_surface, desc_rect)
 
@@ -865,7 +780,7 @@ class ReplayPlayer:
                 p_num = p_idx + 1
                 p_name = player_configs[p_idx].get("name", f"P{p_num}")[:12]
                 if winner == p_num:
-                    p_color = (100, 255, 100)
+                    p_color = theme.STATUS_VALID
                 else:
                     p_color = PLAYER_COLORS.get(p_num, (200, 200, 200))
                 segments.append((f"{p_name} (P{p_num})", p_color))
@@ -879,7 +794,7 @@ class ReplayPlayer:
                 right_x -= text_surface.get_width()
                 screen.blit(text_surface, (right_x, text_y))
                 if i > 0:
-                    vs_surface = small_font.render(" vs ", True, (200, 200, 200))
+                    vs_surface = small_font.render(" vs ", True, theme.TEXT_SECONDARY)
                     right_x -= vs_surface.get_width()
                     screen.blit(vs_surface, (right_x, text_y))
 
@@ -894,7 +809,7 @@ class ReplayPlayer:
                     alpha = int(255 * (self.notification_duration - elapsed) / 0.5)
 
                 font = get_font(24)
-                text_surface = font.render(self.notification_text, True, (255, 255, 255))
+                text_surface = font.render(self.notification_text, True, theme.TEXT)
 
                 # Create background
                 padding = 15
@@ -920,12 +835,12 @@ class ReplayPlayer:
         """Draw a button with text and rounded corners."""
         is_hover = rect.collidepoint(mouse_pos)
         button_color = tuple(min(c + 40, 255) for c in color) if is_hover else color
-        border_color = (220, 220, 240) if is_hover else (160, 160, 180)
+        border_color = theme.REPLAY_BTN_BORDER_HOVER if is_hover else theme.REPLAY_BTN_BORDER
 
-        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=6)
-        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=6)
+        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=theme.BORDER_RADIUS_SMALL)
+        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=theme.BORDER_RADIUS_SMALL)
 
-        text_surface = font.render(text, True, (255, 255, 255))
+        text_surface = font.render(text, True, theme.TEXT)
         text_rect = text_surface.get_rect(center=rect.center)
         self.renderer.screen.blit(text_surface, text_rect)
 
@@ -933,10 +848,10 @@ class ReplayPlayer:
         """Draw a button with an icon surface and rounded corners."""
         is_hover = rect.collidepoint(mouse_pos)
         button_color = tuple(min(c + 40, 255) for c in color) if is_hover else color
-        border_color = (220, 220, 240) if is_hover else (160, 160, 180)
+        border_color = theme.REPLAY_BTN_BORDER_HOVER if is_hover else theme.REPLAY_BTN_BORDER
 
-        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=6)
-        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=6)
+        pygame.draw.rect(self.renderer.screen, button_color, rect, border_radius=theme.BORDER_RADIUS_SMALL)
+        pygame.draw.rect(self.renderer.screen, border_color, rect, width=2, border_radius=theme.BORDER_RADIUS_SMALL)
 
         icon_rect = icon.get_rect(center=rect.center)
         self.renderer.screen.blit(icon, icon_rect)

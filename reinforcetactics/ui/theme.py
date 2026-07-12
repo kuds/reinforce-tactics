@@ -21,6 +21,7 @@ OPTION_BG_SELECTED = (80, 80, 100)
 
 PANEL_BG = (40, 40, 50)
 PANEL_BORDER = (80, 80, 100)
+PANEL_BUTTON_BORDER = (60, 60, 80)
 BORDER = (100, 150, 200)
 
 # ── Buttons ──────────────────────────────────────────────────────────
@@ -88,6 +89,11 @@ OVERLAY_ATTACK_RANGE_BORDER = (255, 100, 0)
 OVERLAY_FOG_UNEXPLORED = (0, 0, 0, 175)
 OVERLAY_FOG_SHROUDED = (0, 0, 0, 110)
 
+# Fully-faded-in alpha for each gameplay overlay
+OVERLAY_MOVEMENT_ALPHA = 100
+OVERLAY_TARGET_ALPHA = 120
+OVERLAY_ATTACK_RANGE_ALPHA = 100
+
 # ── Animation timing (ms) ────────────────────────────────────────────
 OVERLAY_FADE_MS = 150
 SELECTION_PULSE_MS = 360
@@ -113,6 +119,22 @@ FONT_SIZE_OPTION = 32
 FONT_SIZE_BODY = 24
 FONT_SIZE_HINT = 18
 FONT_SIZE_INDICATOR = 24
+
+# ── Replay player controls ───────────────────────────────────────────
+REPLAY_BTN_STEP = (80, 80, 120)
+REPLAY_BTN_PLAY = (100, 150, 100)
+REPLAY_BTN_RESTART = (150, 100, 100)
+REPLAY_BTN_TURN_SKIP = (100, 100, 130)
+REPLAY_BTN_SPEED = (100, 100, 150)
+REPLAY_BTN_EXPORT = (70, 70, 150)
+REPLAY_BTN_EXPORT_ACTIVE = (200, 50, 50)
+REPLAY_BTN_EXIT = (150, 70, 70)
+REPLAY_BTN_BORDER = (160, 160, 180)
+REPLAY_BTN_BORDER_HOVER = (220, 220, 240)
+REPLAY_PANEL_DIVIDER = (200, 200, 220)
+REPLAY_PROGRESS_BG = (60, 60, 70)
+REPLAY_PROGRESS_FILL = (100, 200, 100)
+REPLAY_SPEED_TEXT = (200, 200, 255)
 
 # ── Dialog overlay (modal dim) ───────────────────────────────────────
 DIALOG_OVERLAY_COLOR = (0, 0, 0, 150)
