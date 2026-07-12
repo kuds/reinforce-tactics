@@ -31,13 +31,14 @@ def test_language_menu_has_all_languages(pygame_init):
     # Should have 5 language options + 1 back button
     assert len(menu.options) == 6
 
-    # Check that all language names are present
+    # Check that all language names are present. Labels carry an
+    # active-language marker prefix ("● " or spaces), so match by suffix.
     option_texts = [text for text, _ in menu.options]
-    assert "English" in option_texts
-    assert "Français" in option_texts
-    assert "한국어" in option_texts
-    assert "Español" in option_texts
-    assert "中文" in option_texts
+    for name in ["English", "Français", "한국어", "Español", "中文"]:
+        assert any(text.endswith(name) for text in option_texts), name
+
+    # Exactly one option is marked as the active language
+    assert sum(1 for text in option_texts if text.startswith("●")) == 1
 
 
 def test_language_change_updates_menu_title(pygame_init):

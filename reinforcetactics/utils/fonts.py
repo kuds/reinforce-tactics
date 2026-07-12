@@ -179,15 +179,21 @@ def _get_system_font(size: int) -> pygame.font.Font:
 
     try:
         available_fonts_lower = _get_available_fonts()
-        for candidate in CJK_FONT_CANDIDATES:
-            candidate_normalized = candidate.lower().replace(" ", "")
-            if candidate_normalized in available_fonts_lower:
-                font = pygame.font.SysFont(candidate, size)
-                _font_cache[("system", size)] = font
-                return font
     except (pygame.error, OSError):
-        # Font loading failed, will fallback to default
-        pass
+        available_fonts_lower = set()
+
+    for candidate in CJK_FONT_CANDIDATES:
+        candidate_normalized = candidate.lower().replace(" ", "")
+        if candidate_normalized not in available_fonts_lower:
+            continue
+        # One broken candidate must not abort the whole chain -- try the
+        # next one instead of dropping straight to the default font.
+        try:
+            font = pygame.font.SysFont(candidate, size)
+        except (pygame.error, OSError):
+            continue
+        _font_cache[("system", size)] = font
+        return font
 
     font = pygame.font.Font(None, size)
     _font_cache[("system", size)] = font

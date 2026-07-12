@@ -3,7 +3,7 @@
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
-from reinforcetactics.utils.language import get_language, reset_language
+from reinforcetactics.utils.language import LANGUAGE_CODES, get_language, reset_language
 
 
 class LanguageMenu(Menu):
@@ -22,12 +22,15 @@ class LanguageMenu(Menu):
         self._setup_options()
 
     def _setup_options(self) -> None:
+        current = get_language().current_language
         for code, name in self.LANGUAGES.items():
 
             def make_callback(c: str = code) -> str:
                 return self._set_language(c)
 
-            self.add_option(name, make_callback)
+            # Mark the active language so users can see the current setting
+            label = f"● {name}" if LANGUAGE_CODES.get(code, code) == current else f"   {name}"
+            self.add_option(label, make_callback)
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
@@ -37,7 +40,7 @@ class LanguageMenu(Menu):
         self.lang = get_language()  # Refresh our reference
 
         # Clear existing options
-        self.options.clear()
+        self.clear_options()
 
         # Update menu title to use the new language
         self.title = self.lang.get("language.title", "Select Language")

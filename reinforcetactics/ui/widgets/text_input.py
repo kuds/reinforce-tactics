@@ -33,6 +33,12 @@ class TextInput:
         """
         self.text = text
         self.max_length = max_length
+        # Enable OS-style key repeat so holding Backspace (or a character
+        # key) keeps editing instead of requiring one press per character.
+        # pygame's default is repeat-off; this is global but matches
+        # expected behavior in menus too (held arrows keep scrolling).
+        if pygame.get_init():
+            pygame.key.set_repeat(400, 50)
 
     def _append(self, addition: str) -> None:
         if self.max_length is not None:

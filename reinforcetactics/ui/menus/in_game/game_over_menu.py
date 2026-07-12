@@ -44,6 +44,11 @@ class GameOverMenu(Menu):
         """Save game replay."""
         return self.game_state.save_replay_to_file()
 
+    def _options_start_y(self) -> int:
+        # Keep the options clear of the winner banner + underline + turn
+        # count stack drawn above them, whatever the window height.
+        return max(self.screen.get_height() // 3, 50 + self.title_font.get_height() * 2 + 80)
+
     def _draw_content(self) -> None:
         super()._draw_content()
 
@@ -54,29 +59,32 @@ class GameOverMenu(Menu):
         winner_template = lang.get("game_over.winner", "Player {player} Wins!")
         winner_text = winner_template.format(player=self.winner)
 
+        # Position below the base-class title (drawn at y=50) instead of a
+        # hardcoded y that collides with tall display-font titles.
         winner_surface = self.title_font.render(winner_text, True, self.winner_color)
-        winner_rect = winner_surface.get_rect(centerx=screen_cx, y=100)
+        winner_rect = winner_surface.get_rect(centerx=screen_cx, y=50 + self.title_font.get_height() + 16)
         self.screen.blit(winner_surface, winner_rect)
 
-        # Draw decorative underline in player color
+        # Draw decorative underline in a dimmed player color. (draw.line
+        # ignores alpha on the opaque display surface, so dim by blending
+        # toward the background instead.)
         line_y = winner_rect.bottom + 6
         line_half = winner_rect.width // 2 + 20
+        underline_color = tuple((c + bg) // 2 for c, bg in zip(self.winner_color[:3], theme.BG))
         pygame.draw.line(
             self.screen,
-            (*self.winner_color[:3], 120) if len(self.winner_color) > 3 else self.winner_color,
+            underline_color,
             (screen_cx - line_half, line_y),
             (screen_cx + line_half, line_y),
             2,
         )
 
-        # Draw turn count
-        turn_count = getattr(self.game_state, "turn", None)
-        if turn_count is not None:
-            turn_label = (
-                lang.get("game_over.turns", "Turns: {turns}").format(turns=turn_count)
-                if hasattr(lang, "get")
-                else f"Turns: {turn_count}"
-            )
+        # Draw turn count (1-based, matching the in-game HUD). The game
+        # state exposes ``turn_number``; the old ``turn`` lookup always
+        # returned None, so the count never showed.
+        turn_number = getattr(self.game_state, "turn_number", None)
+        if turn_number is not None:
+            turn_label = lang.get("game_over.turns", "Turns: {turns}").format(turns=turn_number + 1)
             turn_surface = self.label_font.render(turn_label, True, theme.TEXT_MUTED)
             turn_rect = turn_surface.get_rect(centerx=screen_cx, y=line_y + 12)
             self.screen.blit(turn_surface, turn_rect)

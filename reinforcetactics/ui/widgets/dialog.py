@@ -15,7 +15,7 @@ import pygame
 
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.widgets.button import Button, ButtonStyle
-from reinforcetactics.ui.widgets.text import wrap_text
+from reinforcetactics.ui.widgets.text import ellipsize, wrap_text
 from reinforcetactics.utils.fonts import get_display_font, get_font
 
 # (label, resolve value, style) for each action button, left to right.
@@ -64,11 +64,21 @@ class Dialog:
         self.quit_value = quit_value
         self.running = True
         self.result: Any = None
+        # Keyboard focus for the action buttons (arrows + Enter). -1 means
+        # nothing focused yet, so a stray Enter can't trigger a button the
+        # user never looked at.
+        self.selected_index = -1
 
         self.title_font = get_display_font(theme.FONT_SIZE_HEADING)
         self.message_font = get_font(theme.FONT_SIZE_BODY)
         self.button_font = get_font(theme.FONT_SIZE_BODY)
         self.hint_font = get_font(theme.FONT_SIZE_HINT)
+
+        # Snapshot of the screen behind the dialog. Re-blitted every frame
+        # so the translucent dim overlay is applied to a stable background
+        # instead of compounding on itself frame after frame (which fades
+        # whatever is behind the dialog to black within a second).
+        self._background = screen.copy()
 
         # Cached overlay surface to avoid per-frame allocation
         self._overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
@@ -87,10 +97,13 @@ class Dialog:
         button_width = max(_BUTTON_MIN_WIDTH, max(label_widths) + 30 if label_widths else _BUTTON_MIN_WIDTH)
         buttons_total = len(button_specs) * button_width + (len(button_specs) - 1) * _BUTTON_SPACING
 
+        # Title and hint are clamped like the message so an extra-long
+        # (e.g. translated) string can't push the panel past the screen —
+        # they get ellipsized at draw time instead of overflowing.
         content_width = max(
             min_width - 2 * _PADDING,
-            self.title_font.size(self.title)[0],
-            self.hint_font.size(self.hint)[0] if self.hint else 0,
+            min(self.title_font.size(self.title)[0], max_dialog_width - 2 * _PADDING),
+            min(self.hint_font.size(self.hint)[0], max_dialog_width - 2 * _PADDING) if self.hint else 0,
             buttons_total,
             min(self.message_font.size(self.message)[0], max_dialog_width - 2 * _PADDING),
         )
@@ -141,6 +154,16 @@ class Dialog:
                 return self._finish(self.cancel_value)
             if event.key in self.keymap:
                 return self._finish(self.keymap[event.key])
+            if event.key in (pygame.K_LEFT, pygame.K_UP) and self.buttons:
+                if self.selected_index < 0:
+                    self.selected_index = len(self.buttons) - 1
+                else:
+                    self.selected_index = (self.selected_index - 1) % len(self.buttons)
+            elif event.key in (pygame.K_RIGHT, pygame.K_DOWN, pygame.K_TAB) and self.buttons:
+                self.selected_index = (self.selected_index + 1) % len(self.buttons)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                if 0 <= self.selected_index < len(self.buttons):
+                    return self._finish(self.buttons[self.selected_index].payload)
 
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             for button in self.buttons:
@@ -154,6 +177,7 @@ class Dialog:
 
     def draw(self) -> None:
         """Draw the dialog (overlay, panel, texts, buttons)."""
+        self.screen.blit(self._background, (0, 0))
         self.screen.blit(self._overlay, (0, 0))
 
         pygame.draw.rect(self.screen, theme.PANEL_BG, self.dialog_rect, border_radius=theme.BORDER_RADIUS_DIALOG)
@@ -165,8 +189,10 @@ class Dialog:
             border_radius=theme.BORDER_RADIUS_DIALOG,
         )
 
+        max_text_width = self.dialog_rect.width - 2 * _PADDING
         y = self.dialog_rect.y + _PADDING
-        title_surface = self.title_font.render(self.title, True, theme.SELECTED)
+        title_text = ellipsize(self.title, self.title_font, max_text_width)
+        title_surface = self.title_font.render(title_text, True, theme.SELECTED)
         self.screen.blit(title_surface, title_surface.get_rect(centerx=self.dialog_rect.centerx, y=y))
         y += self.title_font.get_height() + 12
 
@@ -178,12 +204,17 @@ class Dialog:
         y += 10
 
         if self.hint:
-            hint_surface = self.hint_font.render(self.hint, True, theme.TEXT_MUTED)
+            hint_text = ellipsize(self.hint, self.hint_font, max_text_width)
+            hint_surface = self.hint_font.render(hint_text, True, theme.TEXT_MUTED)
             self.screen.blit(hint_surface, hint_surface.get_rect(centerx=self.dialog_rect.centerx, y=y))
 
         mouse_pos = pygame.mouse.get_pos()
-        for button in self.buttons:
-            button.draw(self.screen, hovered=button.collidepoint(mouse_pos))
+        for i, button in enumerate(self.buttons):
+            button.draw(
+                self.screen,
+                hovered=button.collidepoint(mouse_pos),
+                selected=i == self.selected_index,
+            )
 
     def run(self) -> Any:
         """Run the dialog loop until resolved.

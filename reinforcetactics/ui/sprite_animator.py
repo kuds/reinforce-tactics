@@ -20,6 +20,25 @@ from reinforcetactics.constants import (
 )
 
 
+def scale_unit_sprite(image, size):
+    """Scale a unit sprite to ``size`` x ``size`` preserving pixel-art quality.
+
+    Uses nearest-neighbour scaling when the source is the target size or an
+    integer multiple of it (keeps pixels crisp), and smooth scaling for
+    non-integer ratios (avoids ragged pixels).
+    """
+    width, height = image.get_size()
+    if (width, height) == (size, size):
+        return image
+    if width % size == 0 and height % size == 0:
+        return pygame.transform.scale(image, (size, size))
+    try:
+        return pygame.transform.smoothscale(image, (size, size))
+    except (pygame.error, ValueError):
+        # smoothscale requires a 24/32-bit surface; fall back if unsupported
+        return pygame.transform.scale(image, (size, size))
+
+
 class SpriteAnimator:
     """
     Manages sprite sheet animations for units.
@@ -162,8 +181,9 @@ class SpriteAnimator:
                         cx = (fw - cw) // 2
                         cy = (fh - ch) // 2
                         frame = frame.subsurface(pygame.Rect(cx, cy, cw, ch)).copy()
-                    if frame.get_size() != (sprite_size, sprite_size):
-                        frame = pygame.transform.scale(frame, (sprite_size, sprite_size))
+                    # Same smart scaler as static sprites: nearest-neighbour
+                    # for integer ratios, smoothscale otherwise.
+                    frame = scale_unit_sprite(frame, sprite_size)
                     state_frames.append(frame)
 
             if state_frames:
@@ -293,7 +313,10 @@ class SpriteAnimator:
         if delta_time is not None:
             timer["current_time"] += delta_time
             if timer["current_time"] >= frame_duration:
-                timer["current_time"] = 0.0
+                # Keep the overshoot instead of resetting to zero so frame
+                # pacing doesn't accumulate the per-frame remainder as drift
+                # (which slowed and jittered animations at low frame rates).
+                timer["current_time"] %= frame_duration
                 next_frame = (timer["current_frame"] + 1) % len(anim_frames)
                 timer["current_frame"] = next_frame
 

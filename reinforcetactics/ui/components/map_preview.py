@@ -98,8 +98,10 @@ class MapPreviewGenerator:
             self._cache[cache_key] = (preview, metadata)
             return preview, metadata
 
-        # Load map data
-        map_data = FileIO.load_map(map_path, for_ui=True, border_size=2)
+        # Load the raw (unpadded) map: UI padding inflates small maps to
+        # the 20x20 minimum, which made the metadata report padded
+        # dimensions/difficulty and left thumbnails mostly ocean.
+        map_data = FileIO.load_map(map_path, for_ui=False)
         if map_data is None:
             return None, {}
 

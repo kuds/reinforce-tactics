@@ -39,7 +39,7 @@ class MainMenu(Menu):
 
     def _refresh_options(self) -> None:
         """Rebuild options with current language strings."""
-        self.options.clear()
+        self.clear_options()
         self.title = self._get_title()
         self._setup_options()
 
