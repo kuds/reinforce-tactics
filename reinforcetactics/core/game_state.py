@@ -256,9 +256,7 @@ class GameState:
         # env drops the return value), so this game-lifetime accumulator is
         # the only reliable way for diagnostics to answer "how much gold did
         # each side silently spend on auto-heal" after the fact.
-        self.healing_totals: dict[int, dict[str, int]] = {
-            i: {"hp": 0, "gold": 0} for i in range(1, num_players + 1)
-        }
+        self.healing_totals: dict[int, dict[str, int]] = {i: {"hp": 0, "gold": 0} for i in range(1, num_players + 1)}
         self.game_over: bool = False
         self.winner: int | None = None
         # Why the game ended. Populated alongside ``game_over`` by
