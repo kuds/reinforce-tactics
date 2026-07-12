@@ -180,7 +180,7 @@ def _get_system_font(size: int) -> pygame.font.Font:
     try:
         available_fonts_lower = _get_available_fonts()
     except (pygame.error, OSError):
-        available_fonts_lower = set()
+        available_fonts_lower = []
 
     for candidate in CJK_FONT_CANDIDATES:
         candidate_normalized = candidate.lower().replace(" ", "")
