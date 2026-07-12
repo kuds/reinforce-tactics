@@ -1287,6 +1287,46 @@ class TestRunCurriculum:
         assert partial["history"][0]["promoted"] is False
         assert partial["final_model_path"] is not None
         assert (tmp_path / "final_model.zip").exists()
+        # The base fake never saves a best_model.zip, so the surfaced
+        # best-checkpoint path is None (see the SavesBest variant below
+        # for the populated case).
+        assert partial["best_model_path"] is None
+
+    def test_stall_surfaces_best_checkpoint(self, tmp_path):
+        """On stall, the stage's peak-WR ``best_model.zip`` is surfaced on
+        the exception / partial_result / run_status.json alongside the
+        collapsed end-of-stage policy: most stalls peak >= threshold
+        before crashing, so that checkpoint (not final_model.zip) is the
+        one worth retrying from -- it was already on disk but nothing
+        pointed at it."""
+        stages = [_stage("a", patience=2)]
+        program = {"a": [0.95, 0.40, 0.80]}
+        cfg = _make_cfg(stages)
+
+        def model_factory(vec_env, cfg_arg, output_dir):
+            return _FakeModelSavesBest(
+                win_rate_program=program,
+                _stage_names=[s.name for s in cfg_arg.curriculum.stages],
+            )
+
+        with pytest.raises(CurriculumStalled) as excinfo:
+            run_curriculum(
+                cfg,
+                output_dir=tmp_path,
+                train_env_factory=lambda stage, c: _FakeEnv(),
+                eval_env_factory=lambda stage, c: _FakeEnv(),
+                model_factory=model_factory,
+            )
+
+        best_path = excinfo.value.best_model_path
+        assert best_path is not None
+        assert best_path.endswith("best_model.zip")
+        assert Path(best_path).exists()
+        assert excinfo.value.partial_result()["best_model_path"] == best_path
+
+        status = json.loads((tmp_path / "run_status.json").read_text(encoding="utf-8"))
+        assert status["status"] == "curriculum_stalled"
+        assert status["best_model_path"] == best_path
 
     def test_installs_entropy_schedule_callback_for_dict_ent_coef(self, tmp_path):
         """When ``stage.ent_coef`` is a ``{start, end, schedule}`` mapping,
