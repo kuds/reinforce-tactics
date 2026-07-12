@@ -147,6 +147,16 @@ def _assert_replay_matches(original: GameState, replay_path: str) -> None:
         repl_hp = sum(u.health for u in repl_units)
         assert orig_hp == repl_hp, f"P{player} HP total mismatch: original={orig_hp}, replay={repl_hp}"
 
+        # Structure auto-heal economy: end_turn is re-executed during
+        # replay, so the re-accumulated healing_totals (HP restored /
+        # gold spent) must match the original game's. Catches divergence
+        # in the income/heal path that unit counts alone can miss (a
+        # heal that fired in one run but not the other can be masked by
+        # later combat).
+        orig_heal = original.healing_totals.get(player, {"hp": 0, "gold": 0})
+        repl_heal = replay_game.healing_totals.get(player, {"hp": 0, "gold": 0})
+        assert orig_heal == repl_heal, f"P{player} healing_totals mismatch: original={orig_heal}, replay={repl_heal}"
+
     # v2 invariant: no actions logged past the winning action.
     if original.game_over:
         winning_idx = game_info["winning_action_index"]

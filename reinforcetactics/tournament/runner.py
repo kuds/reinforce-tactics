@@ -518,6 +518,15 @@ class TournamentRunner:
             "final_units_p2": len(final_units_p2),
             "final_hp_total_p1": sum(u.health for u in final_units_p1),
             "final_hp_total_p2": sum(u.health for u in final_units_p2),
+            # Structure auto-heal economics (HP restored / gold spent over
+            # the game). Lets the balance notebook read the auto-heal
+            # subsidy per side straight from game_info instead of
+            # re-simulating the action log; also an extra determinism
+            # checksum since playback re-executes end_turn.
+            "heal_hp_p1": game_state.healing_totals.get(1, {}).get("hp", 0),
+            "heal_gold_p1": game_state.healing_totals.get(1, {}).get("gold", 0),
+            "heal_hp_p2": game_state.healing_totals.get(2, {}).get("hp", 0),
+            "heal_gold_p2": game_state.healing_totals.get(2, {}).get("gold", 0),
             "player_configs": [
                 GameState.build_player_config(
                     player_no=1,

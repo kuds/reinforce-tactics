@@ -1701,6 +1701,12 @@ class GameState:
             "replay_schema_version": 3,
             "final_unit_counts": final_counts,
             "final_hp_totals": final_hp,
+            # Structure auto-heal economics (HP restored / gold spent per
+            # player over the whole game). Queryable without re-simulating
+            # the action log, and doubles as a replay-integrity checksum:
+            # playback re-executes end_turn, so a faithful replay's
+            # re-accumulated healing_totals must match these values.
+            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
         }
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
