@@ -43,8 +43,8 @@ class UnitsMenu(Menu):
 
             self.add_option(option_text, make_callback)
 
-        # Add separator-like options
-        self.add_option("---", lambda: "separator")
+        # Visual separator: disabled so it can't be focused or clicked
+        self.add_option("---", lambda: "separator", enabled=False)
 
         # Quick actions
         self.add_option(lang.get("units.enable_all", "Enable All Units"), self._enable_all)
@@ -57,7 +57,7 @@ class UnitsMenu(Menu):
 
     def _refresh_options(self) -> None:
         """Refresh menu options after settings change."""
-        self.options.clear()
+        self.clear_options()
         self._setup_options()
 
     def _toggle_unit(self, unit_type: str) -> str:

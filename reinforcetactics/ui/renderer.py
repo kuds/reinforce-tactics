@@ -24,30 +24,11 @@ from reinforcetactics.constants import (
 )
 from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
 from reinforcetactics.ui import theme
-from reinforcetactics.ui.sprite_animator import SpriteAnimator
+from reinforcetactics.ui.sprite_animator import SpriteAnimator, scale_unit_sprite
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.settings import get_settings
-
-
-def scale_unit_sprite(image, size):
-    """Scale a unit sprite to ``size`` x ``size`` preserving pixel-art quality.
-
-    Uses nearest-neighbour scaling when the source is the target size or an
-    integer multiple of it (keeps pixels crisp), and smooth scaling for
-    non-integer ratios (avoids ragged pixels).
-    """
-    width, height = image.get_size()
-    if (width, height) == (size, size):
-        return image
-    if width % size == 0 and height % size == 0:
-        return pygame.transform.scale(image, (size, size))
-    try:
-        return pygame.transform.smoothscale(image, (size, size))
-    except (pygame.error, ValueError):
-        # smoothscale requires a 24/32-bit surface; fall back if unsupported
-        return pygame.transform.scale(image, (size, size))
 
 
 def _pulse(period_ms):
@@ -168,15 +149,15 @@ class Renderer:
         self._fog_shrouded.fill(theme.OVERLAY_FOG_SHROUDED)
 
         self._move_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
-        self._move_overlay.set_alpha(100)
+        self._move_overlay.set_alpha(theme.OVERLAY_MOVEMENT_ALPHA)
         self._move_overlay.fill(theme.OVERLAY_MOVEMENT)
 
         self._target_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
-        self._target_overlay.set_alpha(120)
+        self._target_overlay.set_alpha(theme.OVERLAY_TARGET_ALPHA)
         self._target_overlay.fill(theme.OVERLAY_TARGET)
 
         self._attack_range_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE))
-        self._attack_range_overlay.set_alpha(100)
+        self._attack_range_overlay.set_alpha(theme.OVERLAY_ATTACK_RANGE_ALPHA)
         self._attack_range_overlay.fill(theme.OVERLAY_ATTACK_RANGE)
 
         # Blend overlay cache (for unit tinting)
@@ -499,10 +480,13 @@ class Renderer:
                 pygame.draw.rect(self.screen, lighter, top_rect)
 
             elif tile.type == "f":  # Forest - random dots for texture
-                random.seed(tile.x * 1000 + tile.y)  # Deterministic randomness
+                # Local RNG: reseeding the global random module here would
+                # make gameplay rolls (e.g. Rogue evade) deterministic after
+                # every rendered frame.
+                rng = random.Random(tile.x * 1000 + tile.y)
                 for _ in range(3):
-                    x = rect.x + random.randint(5, rect.width - 5)
-                    y = rect.y + random.randint(5, rect.height - 5)
+                    x = rect.x + rng.randint(5, rect.width - 5)
+                    y = rect.y + rng.randint(5, rect.height - 5)
                     darker = tuple(max(c - 20, 0) for c in color)
                     pygame.draw.circle(self.screen, darker, (x, y), 2)
 
@@ -614,6 +598,22 @@ class Renderer:
         self._draw_haste_indicator(unit)
         self._draw_unit_health_bar(unit)
 
+    def _draw_status_badge(self, cache_key, text, color, *, topright=None, bottomleft=None):
+        """Draw a compact status badge: dark pill, colored border and text.
+
+        Sized to stay inside a single tile so badges never spill onto
+        neighbouring tiles or cover the unit sprite.
+        """
+        text_surface = self._cached_text(cache_key, text, get_font(14), color)
+        if topright is not None:
+            rect = text_surface.get_rect(topright=topright)
+        else:
+            rect = text_surface.get_rect(bottomleft=bottomleft)
+        bg_rect = rect.inflate(6, 2)
+        pygame.draw.rect(self.screen, theme.TOOLTIP_BG, bg_rect, border_radius=theme.BORDER_RADIUS_SMALL)
+        pygame.draw.rect(self.screen, color, bg_rect, 1, border_radius=theme.BORDER_RADIUS_SMALL)
+        self.screen.blit(text_surface, rect)
+
     def _draw_paralysis_indicator(self, unit):
         """Draw paralysis indicator if unit is paralyzed (pulsing border)."""
         if not unit.is_paralyzed():
@@ -623,26 +623,26 @@ class Renderer:
         border_color = _lerp_color(theme.STATUS_PARALYSIS, theme.STATUS_PARALYSIS_TINT, _pulse(theme.STATUS_PULSE_MS))
         pygame.draw.rect(self.screen, border_color, tile_rect, 3)
 
-        indicator_text = self._cached_text(
-            f"paralysis_{unit.paralyzed_turns}", f"P:{unit.paralyzed_turns}", get_font(24), theme.STATUS_PARALYSIS
+        self._draw_status_badge(
+            f"paralysis_{unit.paralyzed_turns}",
+            f"P{unit.paralyzed_turns}",
+            theme.STATUS_PARALYSIS_TINT,
+            topright=(tile_rect.right - 3, tile_rect.top + 3),
         )
-        indicator_rect = indicator_text.get_rect(topright=(unit.x * TILE_SIZE + TILE_SIZE - 2, unit.y * TILE_SIZE + 2))
-        bg_rect = indicator_rect.inflate(4, 2)
-        pygame.draw.rect(self.screen, theme.TEXT, bg_rect)
-        pygame.draw.rect(self.screen, theme.STATUS_PARALYSIS, bg_rect, 1)
-        self.screen.blit(indicator_text, indicator_rect)
 
     def _draw_haste_indicator(self, unit):
         """Draw haste indicator if unit is hasted."""
         if not unit.is_hasted:
             return
 
-        indicator_text = self._cached_text("haste", "h", get_font(16), theme.STATUS_HASTE)
-        indicator_rect = indicator_text.get_rect(bottomleft=(unit.x * TILE_SIZE + 2, unit.y * TILE_SIZE + TILE_SIZE - 2))
-        bg_rect = indicator_rect.inflate(4, 2)
-        pygame.draw.rect(self.screen, theme.TEXT, bg_rect)
-        pygame.draw.rect(self.screen, theme.STATUS_HASTE, bg_rect, 1)
-        self.screen.blit(indicator_text, indicator_rect)
+        # Anchored just above the health bar so neither covers the other.
+        bar_top = unit.y * TILE_SIZE + TILE_SIZE - theme.HEALTH_BAR_UNIT_HEIGHT - theme.HEALTH_BAR_MARGIN
+        self._draw_status_badge(
+            "haste",
+            "H",
+            theme.STATUS_HASTE,
+            bottomleft=(unit.x * TILE_SIZE + 3, bar_top - 2),
+        )
 
     def _draw_unit_sprite(self, unit, sprite):
         """Draw a unit using its sprite image."""
@@ -859,7 +859,7 @@ class Renderer:
         )
 
         if movement_positions:
-            alpha = self._overlay_alpha("move", (id(unit), unit.x, unit.y), 100)
+            alpha = self._overlay_alpha("move", (id(unit), unit.x, unit.y), theme.OVERLAY_MOVEMENT_ALPHA)
             self._move_overlay.set_alpha(alpha)
             for x, y in movement_positions:
                 self.screen.blit(self._move_overlay, (x * TILE_SIZE, y * TILE_SIZE))
@@ -874,7 +874,7 @@ class Renderer:
             valid_targets: List of unit objects that are valid targets
         """
         signature = tuple(sorted((t.x, t.y) for t in valid_targets))
-        alpha = self._overlay_alpha("target", signature, 120)
+        alpha = self._overlay_alpha("target", signature, theme.OVERLAY_TARGET_ALPHA)
         self._target_overlay.set_alpha(alpha)
         for target in valid_targets:
             self.screen.blit(self._target_overlay, (target.x * TILE_SIZE, target.y * TILE_SIZE))
@@ -888,7 +888,7 @@ class Renderer:
         Args:
             positions: List of (x, y) tuples for positions that can be attacked
         """
-        alpha = self._overlay_alpha("attack_range", tuple(sorted(positions)), 100)
+        alpha = self._overlay_alpha("attack_range", tuple(sorted(positions)), theme.OVERLAY_ATTACK_RANGE_ALPHA)
         self._attack_range_overlay.set_alpha(alpha)
         for x, y in positions:
             self.screen.blit(self._attack_range_overlay, (x * TILE_SIZE, y * TILE_SIZE))
@@ -914,6 +914,14 @@ class Renderer:
         unit = self.game_state.get_unit_at_position(grid_x, grid_y)
         if not unit:
             return
+
+        # Under fog of war, don't reveal stats of enemy units the viewing
+        # player can't currently see (mirrors the visibility rule used when
+        # drawing units).
+        fow_player = self._get_fow_player()
+        if fow_player is not None and unit.player != fow_player:
+            if self._get_visibility_state(unit.x, unit.y, fow_player) != VISIBLE:
+                return
 
         # Get unit data
         unit_data = UNIT_DATA.get(unit.type, {})
@@ -949,18 +957,18 @@ class Renderer:
         # Render the lines through a cache: re-render only when the hovered
         # unit (or its stats) changes, not on every mouse-motion frame.
         player_color = PLAYER_COLORS.get(unit.player, theme.TEXT)
+        font = get_font(20)
         cache_key = (tuple(lines), unit.player)
         if self._tooltip_cache is not None and self._tooltip_cache[0] == cache_key:
             line_surfaces = self._tooltip_cache[1]
         else:
-            font = get_font(20)
             line_surfaces = [
                 font.render(line, True, player_color if i == 0 else theme.TEXT_SECONDARY) for i, line in enumerate(lines)
             ]
             self._tooltip_cache = (cache_key, line_surfaces)
 
         padding = 8
-        line_height = 22
+        line_height = font.get_linesize()
         max_width = max(surface.get_width() for surface in line_surfaces)
 
         tooltip_width = max_width + 2 * padding

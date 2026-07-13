@@ -76,7 +76,7 @@ class GraphicsMenu(Menu):
 
     def _refresh_options(self) -> None:
         """Refresh menu options after settings change."""
-        self.options.clear()
+        self.clear_options()
         self._setup_options()
 
     def _toggle_unit_sprites(self) -> str:

@@ -60,8 +60,20 @@ def ellipsize(text: str, font: pygame.font.Font, max_width: int, keep_end: bool 
     if font.size(text)[0] <= max_width:
         return text
 
-    for cut in range(len(text) - 1, 0, -1):
+    def fits(cut: int) -> bool:
         candidate = ELLIPSIS + text[-cut:] if keep_end else text[:cut] + ELLIPSIS
-        if font.size(candidate)[0] <= max_width:
-            return candidate
-    return ELLIPSIS
+        return font.size(candidate)[0] <= max_width
+
+    # Binary search for the longest cut that fits: called every frame by
+    # widgets, so a linear shrink scan over near-full-length candidates
+    # (each an O(n) font.size measurement) is needlessly quadratic.
+    lo, hi = 0, len(text) - 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if fits(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    if lo == 0:
+        return ELLIPSIS
+    return ELLIPSIS + text[-lo:] if keep_end else text[:lo] + ELLIPSIS

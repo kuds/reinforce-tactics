@@ -121,6 +121,16 @@ class Menu:
         self.options.append((text, callback))
         self.option_enabled.append(enabled)
 
+    def clear_options(self) -> None:
+        """Remove all options (for menus that rebuild their option list).
+
+        Clears ``option_enabled`` together with ``options`` — clearing only
+        one desyncs the parallel lists and leaves stale enabled flags
+        gating the rebuilt options.
+        """
+        self.options.clear()
+        self.option_enabled.clear()
+
     def _is_enabled(self, index: int) -> bool:
         """Whether the option at ``index`` is enabled. Defaults to True if
         a subclass appends to ``self.options`` without going through

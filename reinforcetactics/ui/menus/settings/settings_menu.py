@@ -40,7 +40,7 @@ class SettingsMenu(Menu):
 
     def _refresh_options(self) -> None:
         """Rebuild options with current language strings."""
-        self.options.clear()
+        self.clear_options()
         self.title = get_language().get("settings.title", "Settings")
         self._setup_options()
 

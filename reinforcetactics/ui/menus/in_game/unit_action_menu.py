@@ -242,7 +242,9 @@ class UnitActionMenu:
         spacing = 35
 
         for i, action in enumerate(self.actions):
-            button_rect = pygame.Rect(self.menu_rect.x + 15, start_y + i * spacing, 190, 28)
+            # Use the full panel width (minus margins); labels that still
+            # don't fit are ellipsized by Button.draw instead of spilling.
+            button_rect = pygame.Rect(self.menu_rect.x + 15, start_y + i * spacing, self.menu_rect.width - 30, 28)
             button = widgets.Button(
                 button_rect,
                 action["name"],

@@ -345,9 +345,11 @@ class APIKeysMenu:
             raise ImportError("openai package not installed") from exc
 
         client = openai.OpenAI(api_key=api_key)
-        # Make a minimal API call to test the connection
+        # Make a minimal API call to test the connection. Uses the same
+        # default model as OpenAIBot so the test can't pass/fail against a
+        # different model than actual games use.
         response = client.chat.completions.create(
-            model="gpt-4o-mini", messages=[{"role": "user", "content": "Hello"}], max_completion_tokens=5
+            model="gpt-5-mini-2025-08-07", messages=[{"role": "user", "content": "Hello"}], max_completion_tokens=5
         )
         if not response.choices:
             raise ValueError("Invalid response from OpenAI")
@@ -360,25 +362,34 @@ class APIKeysMenu:
             raise ImportError("anthropic package not installed") from exc
 
         client = anthropic.Anthropic(api_key=api_key)
-        # Make a minimal API call to test the connection
+        # Minimal call on the current cheapest model (the previous
+        # claude-3-haiku-20240307 is deprecated and slated for retirement,
+        # which made the test fail with valid keys).
         response = client.messages.create(
-            model="claude-3-haiku-20240307", max_tokens=5, messages=[{"role": "user", "content": "Hello"}]
+            model="claude-haiku-4-5", max_tokens=5, messages=[{"role": "user", "content": "Hello"}]
         )
         if not response.content:
             raise ValueError("Invalid response from Anthropic")
 
     def _test_google(self, api_key: str) -> None:
         """Test Google Gemini API connection."""
+        # The legacy google.generativeai SDK is not installed by the [llm]
+        # extra -- GeminiBot uses the google-genai SDK, so test with the
+        # same package and default model.
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
         except ImportError as exc:
-            raise ImportError("google-generativeai package not installed") from exc
+            raise ImportError("google-genai package not installed") from exc
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        client = genai.Client(api_key=api_key)
         # Make a minimal API call to test the connection
-        response = model.generate_content("Hello", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
-        if not response.text:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Hello",
+            config=types.GenerateContentConfig(max_output_tokens=5),
+        )
+        if response.text is None and not response.candidates:
             raise ValueError("Invalid response from Google")
 
     def run(self) -> bool:

@@ -13,13 +13,9 @@ from typing import Any
 import numpy as np
 
 from reinforcetactics.utils.replay_actions import (
-    apply_recorded_attack,
-    apply_recorded_attack_v3,
-    apply_recorded_heal,
-    apply_recorded_heal_v3,
-    apply_recorded_move_v3,
-    apply_recorded_seize,
-    apply_recorded_seize_v3,
+    execute_replay_action as _execute_replay_action,
+)
+from reinforcetactics.utils.replay_actions import (
     get_schema_version,
 )
 
@@ -43,8 +39,10 @@ def record_game_to_video(
     output_path: str = "game_replay.mp4",
     fps: int = 4,
     map_file: str | None = None,
-    scale: int = 1,
-    use_pixel_art: bool = False,
+    scale: int | None = None,
+    use_pixel_art: bool | None = False,
+    show_hud: bool = True,
+    progress_callback: Any = None,
 ) -> str:
     """
     Record a sequence of game state snapshots to an MP4 video.
@@ -53,7 +51,16 @@ def record_game_to_video(
         game_states: List of game state snapshot dicts (from GameState.to_dict())
         output_path: Path for the output video file
         fps: Frames per second for the output video
-        map_file: Path to the map CSV file (needed to reconstruct game states)
+        map_file: Path to the map CSV file, used as the map fallback for
+               snapshots that don't embed their own ``map_data``
+        scale: Integer upscale factor (nearest-neighbour). ``None`` (default)
+               auto-picks the smallest factor that makes the short side at
+               least ~480 px so small boards stay readable.
+        use_pixel_art: True/False force pixel-art sprites on/off; ``None``
+               follows ``settings.json``.
+        show_hud: Stamp a compact turn/player badge onto each frame.
+        progress_callback: Optional ``callback(done, total)`` invoked after
+               each encoded snapshot.
 
     Returns:
         Path to the saved video file
@@ -65,12 +72,30 @@ def record_game_to_video(
     if not game_states:
         raise ValueError("No game states to record")
 
+    map_df = None
+    if map_file:
+        from reinforcetactics.utils.file_io import FileIO
+
+        map_df = FileIO.load_map(map_file)
+
     def _frames():
-        for state_dict in game_states:
-            gs = GameState.from_dict(state_dict, state_dict.get("map_data"))
-            renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
+        # One renderer reused across all frames: constructing a Renderer
+        # reloads every tile/unit sprite from disk, which used to happen
+        # once per snapshot.
+        renderer = None
+        total = len(game_states)
+        for i, state_dict in enumerate(game_states):
+            gs = GameState.from_dict(state_dict, state_dict.get("map_data") if "map_data" in state_dict else map_df)
+            if renderer is None:
+                renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
+            else:
+                renderer.game_state = gs
             renderer.render()
+            if show_hud:
+                _draw_video_hud(renderer.screen, gs)
             yield renderer.get_rgb_array()
+            if progress_callback is not None:
+                progress_callback(i + 1, total)
 
     return _write_frames_to_video(_frames(), output_path, fps, scale=scale)
 
@@ -82,8 +107,10 @@ def record_evaluation_to_video(
     fps: int = 4,
     max_steps: int = 500,
     deterministic: bool = True,
-    scale: int = 1,
-    use_pixel_art: bool = False,
+    scale: int | None = None,
+    use_pixel_art: bool | None = False,
+    show_hud: bool = True,
+    progress_callback: Any = None,
 ) -> dict[str, Any]:
     """
     Run one episode of a trained model and record it to video.
@@ -105,13 +132,22 @@ def record_evaluation_to_video(
         deterministic: Whether to use deterministic actions
         scale: Integer upscale factor applied with nearest-neighbour
                interpolation before encoding. The native render is
-               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map). The
-               default of 1 writes the native resolution; pass a larger
-               integer (e.g. 4) for a crisp upscaled video.
+               TILE_SIZE px per tile (e.g. 192x192 on a 6x6 map).
+               ``None`` (default) auto-picks the smallest factor that
+               makes the short side at least ~480 px so small boards
+               stay readable; pass 1 to force the native resolution.
         use_pixel_art: If True, render with the bundled pixel-art tile
                and unit sprites from ``assets/sprites/`` instead of the
                default fallback (coloured rects + unit letters). Falls
                back silently if the assets directory can't be located.
+               ``None`` follows ``settings.json``, matching the
+               interactive renderer.
+        show_hud: Stamp a compact turn/player badge onto each frame so
+               viewers can follow whose move it is (headless frames
+               otherwise carry no HUD at all).
+        progress_callback: Optional ``callback(done, total)`` invoked
+               after each recorded step for long-render progress
+               reporting (total is ``max_steps``).
 
     Returns:
         Dict with keys:
@@ -171,10 +207,15 @@ def record_evaluation_to_video(
     steps = 0
     done = False
 
+    def _capture_frame():
+        renderer.render()
+        if show_hud:
+            _draw_video_hud(renderer.screen, _get_gs())
+        return renderer.get_rgb_array()
+
     with _VideoWriter(output_path, fps, scale=scale) as writer:
         # Capture initial state
-        renderer.render()
-        last_frame = renderer.get_rgb_array()
+        last_frame = _capture_frame()
         writer.write(last_frame)
 
         while not done and steps < max_steps:
@@ -199,13 +240,20 @@ def record_evaluation_to_video(
 
             # Capture frame after each action
             renderer.game_state = _get_gs()
-            renderer.render()
-            last_frame = renderer.get_rgb_array()
+            last_frame = _capture_frame()
             writer.write(last_frame)
+            # Same beat as replay videos: hold one extra frame on end_turn
+            # (action_type 5) so the handover to the opponent reads as a
+            # pause instead of a jump-cut.
+            if info.get("action_type") == 5:
+                writer.write(last_frame)
+            if progress_callback is not None:
+                progress_callback(steps, max_steps)
 
         # Hold last frame with a game-over caption so viewers can see who
         # won (or why the episode ended) instead of staring at an unmarked
-        # mid-board freeze.
+        # mid-board freeze. Recaptured without the turn badge: the post-game
+        # turn counter would contradict the overlay's turn count.
         gs_final = _get_gs()
         eval_game_info = {
             "winner": info.get("winner") or (gs_final.winner if gs_final.game_over else None),
@@ -213,7 +261,8 @@ def record_evaluation_to_video(
             "max_turns": gs_final.max_turns,
             "end_reason": info.get("end_reason"),
         }
-        final_frame = _overlay_game_over(last_frame, eval_game_info, gs_final)
+        renderer.render()
+        final_frame = _overlay_game_over(renderer.get_rgb_array(), eval_game_info, gs_final)
         for _ in range(3 * fps):
             writer.write(final_frame)
 
@@ -265,8 +314,10 @@ def record_replay_to_video(
     replay_data: dict[str, Any],
     output_path: str = "replay.mp4",
     fps: int = 4,
-    scale: int = 1,
-    use_pixel_art: bool = False,
+    scale: int | None = None,
+    use_pixel_art: bool | None = False,
+    show_hud: bool = True,
+    progress_callback: Any = None,
 ) -> str:
     """
     Record a saved replay file to MP4 video using headless rendering.
@@ -279,6 +330,17 @@ def record_replay_to_video(
                     'actions', 'game_info'
         output_path: Path for the output video file
         fps: Frames per second for the output video
+        scale: Integer upscale factor (nearest-neighbour). ``None``
+                    (default) auto-picks the smallest factor that makes
+                    the short side at least ~480 px.
+        use_pixel_art: Render with the bundled pixel-art sprites instead
+                    of the fallback (coloured rects + unit letters).
+                    ``None`` follows ``settings.json``, matching the
+                    interactive renderer.
+        show_hud: Stamp a compact turn/player badge onto each frame.
+        progress_callback: Optional ``callback(done, total)`` invoked
+                    after each encoded action so long exports can report
+                    progress (e.g. the in-game replay viewer).
 
     Returns:
         Path to the saved video file
@@ -286,7 +348,6 @@ def record_replay_to_video(
     import pandas as pd
 
     _ensure_headless_pygame()
-    from reinforcetactics.constants import MIN_MAP_SIZE
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
 
@@ -297,32 +358,17 @@ def record_replay_to_video(
     if initial_map is None:
         raise ValueError("Replay data missing 'initial_map' in game_info")
 
-    # Convert to DataFrame
     map_df = pd.DataFrame(initial_map)
 
-    # Pad small maps (same logic as ReplayPlayer)
-    height, width = map_df.shape
-    offset_x, offset_y = 0, 0
-
-    if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-        min_h = max(height, MIN_MAP_SIZE)
-        min_w = max(width, MIN_MAP_SIZE)
-        pad_w = max(0, min_w - width)
-        pad_h = max(0, min_h - height)
-        if pad_w > 0 or pad_h > 0:
-            padded = pd.DataFrame(np.full((min_h, min_w), "o", dtype=object))
-            sy, sx = pad_h // 2, pad_w // 2
-            padded.iloc[sy : sy + height, sx : sx + width] = map_df.values
-            map_df = padded
-            offset_x, offset_y = sx, sy
-
-    # Add ocean border
+    # Add an ocean border for framing. Unlike the interactive ReplayPlayer,
+    # no MIN_MAP_SIZE padding is applied: that padding exists to leave room
+    # for on-screen controls, and in a video it only produces a huge dead
+    # ocean margin around a small board.
     border = 2
     h2, w2 = map_df.shape
     bordered = pd.DataFrame(np.full((h2 + 2 * border, w2 + 2 * border), "o", dtype=object))
     bordered.iloc[border : border + h2, border : border + w2] = map_df.values
-    offset_x += border
-    offset_y += border
+    offset_x, offset_y = border, border
 
     # Create game state and headless renderer
     game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
@@ -332,10 +378,15 @@ def record_replay_to_video(
     def _translate(x, y):
         return x + offset_x, y + offset_y
 
+    def _capture_frame():
+        renderer.render()
+        if show_hud:
+            _draw_video_hud(renderer.screen, game_state)
+        return renderer.get_rgb_array()
+
     with _VideoWriter(output_path, fps, scale=scale) as writer:
         # Capture initial state
-        renderer.render()
-        last_frame = renderer.get_rgb_array()
+        last_frame = _capture_frame()
         writer.write(last_frame)
 
         # Execute each action and capture frame. Stop the moment the game
@@ -347,23 +398,67 @@ def record_replay_to_video(
         # which would otherwise make the closing-frame overlay misreport
         # the final turn number.
         schema_version = get_schema_version(game_info)
-        for action in actions:
+        total = len(actions)
+        for i, action in enumerate(actions):
             _execute_replay_action(game_state, action, _translate, schema_version)
-            renderer.render()
-            last_frame = renderer.get_rgb_array()
+            last_frame = _capture_frame()
             writer.write(last_frame)
+            # Hold one extra frame at turn boundaries so the handover
+            # between players reads as a beat instead of flashing past.
+            if action.get("type") == "end_turn":
+                writer.write(last_frame)
+            if progress_callback is not None:
+                progress_callback(i + 1, total)
             if game_state.game_over:
                 break
 
         # Hold last frame with a "Game Over -- Winner: X" overlay so viewers
         # can see how the game ended. Tournament replays don't record an
         # explicit end_reason, so we synthesise one from game_info + final
-        # state.
-        final_frame = _overlay_game_over(last_frame, game_info, game_state)
+        # state. Recaptured without the turn badge: the post-game turn
+        # counter would contradict the overlay's authoritative turn count.
+        renderer.render()
+        final_frame = _overlay_game_over(renderer.get_rgb_array(), game_info, game_state)
         for _ in range(3 * fps):
             writer.write(final_frame)
 
     return output_path
+
+
+def _draw_video_hud(screen, game_state) -> None:
+    """Stamp a compact status badge (turn + player to move) onto a frame.
+
+    Headless renders skip the interactive HUD entirely, so without this a
+    video gives no indication of the turn number or whose move it is. The
+    badge sits in the top-left ocean border and scales with frame size.
+    """
+    import pygame
+
+    from reinforcetactics.constants import PLAYER_COLORS
+    from reinforcetactics.utils.fonts import get_font
+
+    turn_text = f"Turn {game_state.turn_number + 1}"
+    if game_state.max_turns:
+        turn_text += f"/{game_state.max_turns}"
+    player = game_state.current_player
+    label_text = f"{turn_text}  •  P{player}"
+
+    width = screen.get_width()
+    font = get_font(max(12, min(22, width // 32)))
+    label = font.render(label_text, True, (255, 255, 255))
+
+    pad = 6
+    swatch = max(8, label.get_height() - 8)
+    badge_w = pad + swatch + pad + label.get_width() + pad
+    badge_h = label.get_height() + 2 * (pad - 2)
+
+    badge = pygame.Surface((badge_w, badge_h), pygame.SRCALPHA)
+    badge.fill((10, 10, 20, 170))
+    swatch_rect = pygame.Rect(pad, (badge_h - swatch) // 2, swatch, swatch)
+    pygame.draw.rect(badge, PLAYER_COLORS.get(player, (255, 255, 255)), swatch_rect)
+    pygame.draw.rect(badge, (255, 255, 255), swatch_rect, 1)
+    badge.blit(label, (pad + swatch + pad, (badge_h - label.get_height()) // 2))
+    screen.blit(badge, (8, 8))
 
 
 def _overlay_game_over(frame, game_info: dict[str, Any], game_state) -> np.ndarray:
@@ -376,11 +471,17 @@ def _overlay_game_over(frame, game_info: dict[str, Any], game_state) -> np.ndarr
     import pygame
 
     winner = game_info.get("winner")
+    if winner is None and getattr(game_state, "game_over", False):
+        winner = game_state.winner
+    # Any positive player number counts as a win: FFA and team games have
+    # winners 3 and 4, which the old ``winner in (1, 2)`` check misreported
+    # as a draw. 0/None remain draws.
+    has_winner = isinstance(winner, int) and winner >= 1
     winner_name = game_info.get("winner_name")
     if not winner_name:
-        if winner in (1, 2):
+        if has_winner:
             winner_name = f"Player {winner}"
-        elif winner == 0 or winner is None:
+        else:
             winner_name = "Draw"
 
     turns = game_info.get("total_turns") or game_info.get("turns") or game_state.turn_number
@@ -395,7 +496,7 @@ def _overlay_game_over(frame, game_info: dict[str, Any], game_state) -> np.ndarr
         "max_steps_truncate": "Step Limit",
     }.get(end_reason or "", None)
 
-    if winner in (1, 2):
+    if has_winner:
         headline = "Game Over"
         subline = f"Winner: {winner_name}  (Turn {turns})"
         if reason_label:
@@ -436,130 +537,7 @@ def _overlay_game_over(frame, game_info: dict[str, Any], game_state) -> np.ndarr
     surface.blit(head_surf, head_surf.get_rect(midtop=(w // 2, top)))
     surface.blit(sub_surf, sub_surf.get_rect(midtop=(w // 2, top + head_surf.get_height() + spacing)))
 
-    return np.frombuffer(pygame.image.tostring(surface, "RGB"), dtype=np.uint8).reshape((h, w, 3))
-
-
-def _execute_replay_action(game_state, action, translate_fn, schema_version: int = 1):
-    """Execute a single replay action on the game state.
-
-    ``schema_version`` selects between v2 (apply recorded outcome) and
-    v1 (re-run engine). v2 is the only path that's safe against the
-    Rogue-evade RNG and missing counter-kill info in v1 attack records.
-    """
-    action_type = action.get("type")
-
-    # Defensive guard: v1 replays may have trailing post-victory
-    # actions (bot.py:302 tried to prevent this and didn't always
-    # succeed). Skipping them keeps the video from rendering frames
-    # after the game's already over.
-    if game_state.game_over:
-        return
-
-    try:
-        if action_type == "create_unit":
-            px, py = translate_fn(action["x"], action["y"])
-            unit = game_state.create_unit(action["unit_type"], px, py, action["player"])
-            if unit is not None and schema_version >= 3 and "unit_id" in action:
-                # Pin the unit's id to the recorded value so later actions
-                # can look it up. See replay_player.execute_action for the
-                # mirror of this logic and rationale.
-                unit.unit_id = action["unit_id"]
-                game_state._next_unit_id = max(game_state._next_unit_id, unit.unit_id + 1)
-        elif action_type == "move":
-            if schema_version >= 3 and "actor_unit_id" in action:
-                apply_recorded_move_v3(game_state, action, translate_fn)
-            else:
-                fx, fy = translate_fn(action["from_x"], action["from_y"])
-                tx, ty = translate_fn(action["to_x"], action["to_y"])
-                unit = game_state.get_unit_at_position(fx, fy)
-                if unit and unit.player == action["player"]:
-                    # Trust the recorded action: a unit that legitimately moved
-                    # a second time in the original turn (Sorcerer Haste resets
-                    # can_move/can_attack) was rejected here without this
-                    # override -- silent failure that diverged downstream state
-                    # and produced the ghost-action symptoms in MasterBot games.
-                    # Mirrors the same trust-the-recording stance in
-                    # replay_player.py's ReplayPlayer.execute_action.
-                    unit.can_move = True
-                    game_state.move_unit(unit, tx, ty)
-        elif action_type == "attack":
-            if schema_version >= 3 and "attacker_unit_id" in action:
-                apply_recorded_attack_v3(game_state, action, translate_fn)
-            elif schema_version >= 2:
-                apply_recorded_attack(game_state, action, translate_fn)
-            else:
-                ap = translate_fn(*action["attacker_pos"])
-                tp = translate_fn(*action["target_pos"])
-                attacker = game_state.get_unit_at_position(*ap)
-                target = game_state.get_unit_at_position(*tp)
-                if attacker and target:
-                    game_state.attack(attacker, target)
-        elif action_type == "seize":
-            if schema_version >= 3 and "actor_unit_id" in action:
-                apply_recorded_seize_v3(game_state, action, translate_fn)
-            elif schema_version >= 2:
-                apply_recorded_seize(game_state, action, translate_fn)
-            else:
-                pos = translate_fn(*action["position"])
-                unit = game_state.get_unit_at_position(*pos)
-                if unit:
-                    game_state.seize(unit)
-        elif action_type == "paralyze":
-            pp = translate_fn(*action["paralyzer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            paralyzer = game_state.get_unit_at_position(*pp)
-            target = game_state.get_unit_at_position(*tp)
-            if paralyzer and target:
-                game_state.paralyze(paralyzer, target)
-        elif action_type == "heal":
-            if schema_version >= 3 and "actor_unit_id" in action:
-                apply_recorded_heal_v3(game_state, action, translate_fn)
-            elif schema_version >= 2:
-                apply_recorded_heal(game_state, action, translate_fn)
-            else:
-                hp = translate_fn(*action["healer_pos"])
-                tp = translate_fn(*action["target_pos"])
-                healer = game_state.get_unit_at_position(*hp)
-                target = game_state.get_unit_at_position(*tp)
-                if healer and target:
-                    game_state.heal(healer, target)
-        elif action_type == "cure":
-            cp = translate_fn(*action["curer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            curer = game_state.get_unit_at_position(*cp)
-            target = game_state.get_unit_at_position(*tp)
-            if curer and target:
-                game_state.cure(curer, target)
-        elif action_type == "haste":
-            sp = translate_fn(*action["sorcerer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            sorcerer = game_state.get_unit_at_position(*sp)
-            target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.haste(sorcerer, target)
-        elif action_type == "defence_buff":
-            sp = translate_fn(*action["sorcerer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            sorcerer = game_state.get_unit_at_position(*sp)
-            target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.defence_buff(sorcerer, target)
-        elif action_type == "attack_buff":
-            sp = translate_fn(*action["sorcerer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            sorcerer = game_state.get_unit_at_position(*sp)
-            target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.attack_buff(sorcerer, target)
-        elif action_type == "resign":
-            game_state.resign(action["player"])
-        elif action_type == "end_turn":
-            old_history = game_state.action_history
-            game_state.action_history = []
-            game_state.end_turn()
-            game_state.action_history = old_history
-    except Exception as e:
-        logger.warning("Error executing replay action %s: %s", action_type, e)
+    return np.frombuffer(pygame.image.tobytes(surface, "RGB"), dtype=np.uint8).reshape((h, w, 3))
 
 
 class _VideoWriter:
@@ -569,7 +547,10 @@ class _VideoWriter:
 
     ``scale`` upscales each frame with nearest-neighbour interpolation
     before encoding so small grids (a 6x6 map renders at 192x192 px)
-    produce crisp, readable video.
+    produce crisp, readable video. ``scale=None`` auto-picks the smallest
+    factor that brings the short side to at least ``AUTO_SCALE_TARGET``
+    pixels (capped at ``AUTO_SCALE_MAX``), so callers get readable output
+    for tiny boards without upscaling already-large ones.
 
     Prefers ``imageio`` with the bundled ffmpeg backend (H.264 MP4s that
     play in QuickTime / browsers / VLC). Falls back to ``cv2.VideoWriter``
@@ -579,13 +560,20 @@ class _VideoWriter:
     and height).
     """
 
-    def __init__(self, output_path: str, fps: int, scale: int = 1):
+    AUTO_SCALE_TARGET = 480
+    AUTO_SCALE_MAX = 4
+
+    def __init__(self, output_path: str, fps: int, scale: int | None = None, quality: int = 8):
         self.output_path = str(output_path)
         self.fps = fps
-        self.scale = max(1, int(scale))
+        self.scale = None if scale is None else max(1, int(scale))
+        # imageio/ffmpeg variable-bitrate quality, 0 (worst) .. 10 (best).
+        # The imageio default of 5 visibly smears pixel-art edges.
+        self.quality = quality
         self._writer: Any = None
         self._cv2_writer: Any = None
         self._target_wh: tuple | None = None
+        self._resolved_scale = 1
         self._need_resize = False
         self._n_frames = 0
         self._backend = "unknown"
@@ -615,8 +603,13 @@ class _VideoWriter:
     def _lazy_init(self, first_frame) -> None:
         Path(self.output_path).parent.mkdir(parents=True, exist_ok=True)
         src_h, src_w = first_frame.shape[:2]
-        width = src_w * self.scale
-        height = src_h * self.scale
+        scale = self.scale
+        if scale is None:
+            short_side = min(src_w, src_h)
+            scale = max(1, min(self.AUTO_SCALE_MAX, -(-self.AUTO_SCALE_TARGET // short_side)))
+        self._resolved_scale = scale
+        width = src_w * scale
+        height = src_h * scale
         # yuv420p requires even width/height
         width += width % 2
         height += height % 2
@@ -631,8 +624,13 @@ class _VideoWriter:
                 self.output_path,
                 fps=self.fps,
                 codec="libx264",
+                quality=self.quality,
                 pixelformat="yuv420p",
                 macro_block_size=1,
+                # +faststart moves the moov atom to the front so embedded
+                # players (notebooks, browsers) start before the download
+                # finishes; animation tuning suits flat-colour board art.
+                output_params=["-movflags", "+faststart", "-tune", "animation"],
             )
             self._backend = "h264"
             return
@@ -646,14 +644,25 @@ class _VideoWriter:
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
         self._cv2_writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, (width, height))
+        if not self._cv2_writer.isOpened():
+            raise RuntimeError(
+                f"cv2.VideoWriter failed to open {self.output_path}; install imageio-ffmpeg for reliable H.264 output"
+            )
         self._backend = "mp4v"
 
     def _conform(self, frame):
+        # Pure-numpy resize so the imageio/H.264 path has no OpenCV
+        # dependency: integer nearest-neighbour upscale plus edge-padding
+        # to even dimensions.
         if not self._need_resize:
             return frame
-        import cv2
-
-        return cv2.resize(frame, self._target_wh, interpolation=cv2.INTER_NEAREST)
+        if self._resolved_scale > 1:
+            frame = frame.repeat(self._resolved_scale, axis=0).repeat(self._resolved_scale, axis=1)
+        h, w = frame.shape[:2]
+        target_w, target_h = self._target_wh
+        if (w, h) != (target_w, target_h):
+            frame = np.pad(frame, ((0, target_h - h), (0, target_w - w), (0, 0)), mode="edge")
+        return frame
 
     def close(self) -> None:
         if self._closed:
@@ -674,7 +683,7 @@ class _VideoWriter:
             )
 
 
-def _write_frames_to_video(frames, output_path: str, fps: int, scale: int = 1) -> str:
+def _write_frames_to_video(frames, output_path: str, fps: int, scale: int | None = None) -> str:
     """Stream an iterable of RGB ndarrays to an MP4. Memory stays bounded
     at ~one frame regardless of total length.
     """

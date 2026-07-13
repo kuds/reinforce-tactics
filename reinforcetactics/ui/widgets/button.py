@@ -13,6 +13,7 @@ from typing import Any, Self
 import pygame
 
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.widgets.text import ellipsize
 
 Color = tuple[int, int, int]
 
@@ -38,7 +39,7 @@ class ButtonStyle:
 # MENU_OPTION is the neutral style used by overlay menus and config screens.
 MENU_OPTION = ButtonStyle(text_hover_color=theme.HOVER)
 MENU_OPTION_SMALL = ButtonStyle(text_hover_color=theme.HOVER, border_radius=theme.BORDER_RADIUS_SMALL)
-PANEL_BUTTON = ButtonStyle(border_color=(60, 60, 80))
+PANEL_BUTTON = ButtonStyle(border_color=theme.PANEL_BUTTON_BORDER)
 CONFIRM = ButtonStyle(
     bg=theme.BTN_CONFIRM,
     bg_hover=theme.BTN_CONFIRM_HOVER,
@@ -153,7 +154,9 @@ class Button:
                 width=style.border_hover_width,
                 border_radius=style.border_radius,
             )
-        elif self.enabled and style.border_color is not None:
+        elif style.border_color is not None:
+            # Disabled buttons keep their resting border so they still read
+            # as buttons (just grayed out) instead of losing their outline.
             pygame.draw.rect(
                 screen,
                 style.border_color,
@@ -162,7 +165,11 @@ class Button:
                 border_radius=style.border_radius,
             )
 
-        text_surface = self.font.render(self.text, True, text_color)
+        # Ellipsize labels that don't fit (e.g. long translated strings in
+        # fixed-width buttons) instead of letting them spill past the rect.
+        max_label_width = self.rect.width - 2 * self.text_padding
+        label = ellipsize(self.text, self.font, max_label_width) if max_label_width > 0 else self.text
+        text_surface = self.font.render(label, True, text_color)
         if self.text_align == "left":
             text_rect = text_surface.get_rect(left=self.rect.left + self.text_padding, centery=self.rect.centery)
         else:
@@ -191,7 +198,7 @@ class CloseButton:
     def draw(self, screen: pygame.Surface, *, hovered: bool = False) -> None:
         """Draw the close button."""
         color = theme.BTN_CLOSE_HOVER if hovered else theme.BTN_CLOSE
-        pygame.draw.rect(screen, color, self.rect, border_radius=3)
+        pygame.draw.rect(screen, color, self.rect, border_radius=theme.BORDER_RADIUS_SMALL)
 
         margin = 4
         pygame.draw.line(

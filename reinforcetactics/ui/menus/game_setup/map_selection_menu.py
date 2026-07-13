@@ -40,7 +40,7 @@ class MapSelectionMenu(Menu):
                 # Load maps only from the specified game mode subfolder
                 subdir_path = os.path.join(self.maps_dir, self.game_mode)
                 if os.path.exists(subdir_path):
-                    for f in os.listdir(subdir_path):
+                    for f in sorted(os.listdir(subdir_path)):
                         if f.endswith(".csv"):
                             # Store full path including maps/ prefix
                             map_path = os.path.join(self.maps_dir, self.game_mode, f)
@@ -50,7 +50,7 @@ class MapSelectionMenu(Menu):
                 for subdir in ["1v1", "2v2"]:
                     subdir_path = os.path.join(self.maps_dir, subdir)
                     if os.path.exists(subdir_path):
-                        for f in os.listdir(subdir_path):
+                        for f in sorted(os.listdir(subdir_path)):
                             if f.endswith(".csv"):
                                 # Store full path including maps/ prefix
                                 self.available_maps.append(os.path.join(self.maps_dir, subdir, f))
@@ -79,8 +79,9 @@ class MapSelectionMenu(Menu):
         """Preload map previews for better responsiveness."""
         for map_file in self.available_maps:
             if map_file != "random":
-                # Generate small thumbnail (50x50) for list
-                self.preview_generator.generate_preview(map_file, 50, 50)
+                # Generate small thumbnail for the list at the exact size
+                # draw() uses (45px) -- a mismatched size defeats the preload
+                self.preview_generator.generate_preview(map_file, 45, 45)
                 # Generate larger preview (300x300) for detail panel
                 self.preview_generator.generate_preview(map_file, 300, 300)
 
