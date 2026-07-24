@@ -193,6 +193,8 @@ class PeriodicEvalCallback(BaseCallback):
         track_breakdown: bool = True,
         trace_dir: Any = None,
         results_jsonl_path: Any = None,
+        resample_eval_seeds: bool = False,
+        best_eligible_after: int = 0,
         verbose: int = 1,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -200,6 +202,23 @@ class PeriodicEvalCallback(BaseCallback):
         self.eval_freq = int(eval_freq)
         self.n_eval_episodes = int(n_eval_episodes)
         self.eval_seed_base = int(eval_seed_base)
+        # When False (the default) every eval in this stage replays the *same*
+        # ``n_eval_episodes`` seeds, so consecutive evals measure the same
+        # problem set and are directly comparable. Resampling per eval block --
+        # the old behaviour -- meant ``PromotionCallback``'s "patience
+        # consecutive crossings" compared two different benchmarks, and
+        # ``best_model.zip`` became an argmax over ~100 noisy estimates on
+        # different problems (winner's curse). Set True to restore the old
+        # rotate-every-eval behaviour.
+        self.resample_eval_seeds = bool(resample_eval_seeds)
+        # Stage-relative step count before an eval may claim ``best_model.zip``.
+        # The callback is constructed fresh per stage but gates on the
+        # *cumulative* ``num_timesteps`` (the curriculum runner passes
+        # ``reset_num_timesteps=False``), so the very first ``_on_step`` of a
+        # stage always fires an eval -- of the *carry-in* policy. Letting that
+        # eval win "best" meant ``restore_best_checkpoint_between_stages``
+        # could revert the stage's own training. 0 keeps the legacy behaviour.
+        self.best_eligible_after = int(best_eligible_after)
         self.save_dir = Path(save_dir) if save_dir is not None else None
         self.track_breakdown = bool(track_breakdown)
         # ``trace_dir`` (when set) is the root under which per-eval-block
@@ -221,6 +240,15 @@ class PeriodicEvalCallback(BaseCallback):
         # "skip-ahead" handoff failure documented in bootstrap_lessons_learned).
         self.best_timestep: int = -1
         self._last_eval_block: int = -1
+        # Cumulative counter at this stage's ``learn()`` entry, so
+        # ``best_eligible_after`` is measured stage-relative. Mirrors
+        # ``PromotionCallback._stage_start_step`` / ``EntropyScheduleCallback``.
+        # Initialized to 0 so direct ``_on_step`` driving (unit tests) keeps
+        # from-zero semantics.
+        self._stage_start_step: int = 0
+
+    def _on_training_start(self) -> None:
+        self._stage_start_step = int(self.num_timesteps)
 
     def _on_step(self) -> bool:
         # Trigger when num_timesteps crosses an eval_freq boundary. Using
@@ -233,7 +261,11 @@ class PeriodicEvalCallback(BaseCallback):
         return True
 
     def _do_eval(self) -> None:
-        eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
+        # Fixed problem set by default -- see ``resample_eval_seeds``.
+        if self.resample_eval_seeds:
+            eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
+        else:
+            eval_seed = self.eval_seed_base
         eval_kwargs: dict[str, Any] = {}
         if self.trace_dir is not None:
             # One subdir per eval block, named by the timestep at which
@@ -251,6 +283,13 @@ class PeriodicEvalCallback(BaseCallback):
         )
         m["timesteps"] = int(self.num_timesteps)
         m["eval_seed"] = eval_seed
+        # Stage-relative position of this eval, and whether it may claim
+        # ``best_model.zip``. Both are persisted so post-hoc analysis can tell
+        # a carry-in baseline row from a row this stage actually earned.
+        stage_elapsed = int(self.num_timesteps) - self._stage_start_step
+        best_eligible = stage_elapsed >= self.best_eligible_after
+        m["stage_steps"] = stage_elapsed
+        m["best_eligible"] = bool(best_eligible)
         self.results.append(m)
 
         # Incremental persistence: append the row now so a mid-stage kill
@@ -320,8 +359,11 @@ class PeriodicEvalCallback(BaseCallback):
             )
 
         # Save best by win rate, with avg_reward as a tiebreaker so we don't
-        # latch onto the first 0%-WR snapshot.
-        if self.save_dir is not None:
+        # latch onto the first 0%-WR snapshot. Evals inside the
+        # ``best_eligible_after`` window are recorded above but cannot claim
+        # the checkpoint -- they measure the policy this stage inherited, not
+        # one it produced.
+        if self.save_dir is not None and best_eligible:
             score = (m["win_rate"], m["avg_reward"])
             best = (self.best_win_rate, self._best_reward)
             if score > best:

@@ -1348,25 +1348,32 @@ class TestMaxTurns:
             reward_config=custom,
         )
         env.reset(seed=0)
-        last_reward = 0.0
+        last_info: dict = {}
         for _ in range(2_000):
-            _, last_reward, terminated, truncated, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+            _, _, terminated, truncated, last_info = env.step(np.array([5, 0, 0, 0, 0, 0]))
             if terminated or truncated:
                 break
-        # Last step's reward should include the -123 draw penalty.
-        # turn_penalty also fires on the same step, so reward <= -123.
-        assert last_reward <= -123.0
+        # Assert on the terminal component rather than the total: the terminal
+        # step also carries the PBRS closing charge (-Phi(s_prev)), whose sign
+        # depends on who was ahead, so the total is not a clean bound.
+        assert last_info["end_reason"] == "max_turns_draw"
+        assert last_info["reward_breakdown"]["terminal"] == pytest.approx(-123.0)
         env.close()
 
 
 class TestPotentialBasedShaping:
     """Tests for potential-based reward shaping (Ng et al., 1999).
 
-    Two invariants matter:
+    Three invariants matter:
     1. _prev_potential after reset() equals Phi(s_0), so the first step's
        shaping delta is Phi(s_1) - Phi(s_0), not Phi(s_1) - 0.
-    2. Phi(terminal) is treated as 0 — no shaping delta on terminal/truncated
-       steps. Otherwise the shaping corrupts the win/loss/draw signal.
+    2. Phi(terminal) = 0, which means the terminal step is *charged*
+       ``F = gamma*0 - Phi(s_prev)`` — not that the term is skipped. Skipping
+       leaves the telescoping sum with a dangling ``+gamma^(T-1) Phi(s_(T-1))``
+       and breaks the Ng et al. policy-invariance guarantee.
+    3. A step-limit truncation is not a termination: its successor state is
+       real and the learner bootstraps its value, so it takes the ordinary
+       ``gamma*Phi(s') - Phi(s)`` delta.
     """
 
     def test_prev_potential_initialized_to_phi_s0_after_reset(self):
@@ -1385,31 +1392,71 @@ class TestPotentialBasedShaping:
         assert env._prev_potential == env._compute_potential()
         env.close()
 
-    def test_no_shaping_delta_on_terminal_calculate_reward(self):
-        """On a terminal step, _calculate_reward must skip the shaping delta
-        and leave _prev_potential untouched.
+    def test_terminal_step_charges_negative_prev_potential(self):
+        """On a terminated step, _calculate_reward must charge -Phi(s_prev)
+        (i.e. F = gamma*0 - Phi(s_prev)) rather than skipping the term.
         """
         env = StrategyGameEnv(map_file=None, opponent=None, render_mode=None)
         env.reset()
         env._prev_potential = -50.0
         prev_before = env._prev_potential
 
-        terminal_reward, terminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=True)
-        assert terminal_reward == pytest.approx(1.0)
-        assert terminal_breakdown["shaping_delta"] == 0.0
+        terminal_reward, terminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminated=True)
+        assert terminal_breakdown["shaping_delta"] == pytest.approx(-prev_before)
+        assert terminal_reward == pytest.approx(1.0 - prev_before)
+        # _prev_potential is not advanced on termination; reset() re-seeds it.
         assert env._prev_potential == prev_before
 
-        # Same starting state, but non-terminal path: should add Phi(s) - prev_before
-        nonterminal_reward, nonterminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminal=False)
-        expected_delta = env._compute_potential() - prev_before
+        # Same starting state, but non-terminal path: should add
+        # gamma * Phi(s) - prev_before.
+        nonterminal_reward, nonterminal_breakdown = env._calculate_reward(action_reward=1.0, is_valid=True, terminated=False)
+        expected_delta = env.gamma * env._compute_potential() - prev_before
         assert nonterminal_reward == pytest.approx(1.0 + expected_delta)
         assert nonterminal_breakdown["shaping_delta"] == pytest.approx(expected_delta)
         env.close()
 
-    def test_invalid_action_penalty_still_applies_at_terminal(self):
-        """Even on terminal steps, the invalid_action penalty should fire.
-        Only the shaping delta is skipped at termination.
+    def test_discounted_shaping_return_telescopes_to_minus_phi_s0(self):
+        """The whole point of the terminal charge: the discounted sum of the
+        shaping deltas over an episode must collapse to the constant
+        -Phi(s_0), which is what makes the shaping policy-invariant.
+
+        With the term skipped at termination the sum instead carries a
+        dangling +gamma^(T-1) * Phi(s_(T-1)).
         """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=10_000,
+            max_turns=3,
+            # A deliberately large, easily-moved potential so a dangling term
+            # would be obvious rather than lost in float noise.
+            reward_config={"structure_control": 100.0, "unit_diff": 10.0, "income_diff": 0.0},
+            gamma=0.9,
+        )
+        env.reset(seed=0)
+        # Break the symmetric start so Phi(s_0) != 0 -- otherwise the identity
+        # reduces to "sum == 0", which holds even with the terminal term
+        # skipped, and the test would be vacuous.
+        neutral = [tile for row in env.game_state.grid.tiles for tile in row if tile.is_capturable() and tile.player is None]
+        assert neutral, "fixture expects neutral capturable tiles on the generated map"
+        neutral[0].player = env.agent_player
+        env._prev_potential = env._compute_potential()
+        phi_s0 = env._prev_potential
+        assert phi_s0 != 0.0, "test needs a non-zero starting potential to be meaningful"
+
+        discounted = 0.0
+        for t in range(10_000):
+            _, _, terminated, truncated, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+            discounted += (env.gamma**t) * info["reward_breakdown"]["shaping_delta"]
+            if terminated:
+                break
+            assert not truncated, "episode should end via max_turns, not the step cap"
+        assert discounted == pytest.approx(-phi_s0, abs=1e-6)
+        env.close()
+
+    def test_invalid_action_penalty_still_applies_at_terminal(self):
+        """Even on terminal steps, the invalid_action penalty should fire."""
         env = StrategyGameEnv(
             map_file=None,
             opponent=None,
@@ -1418,18 +1465,16 @@ class TestPotentialBasedShaping:
         )
         env.reset()
         before_invalid = env.episode_stats["invalid_actions"]
-        r, breakdown = env._calculate_reward(action_reward=2.0, is_valid=False, terminal=True)
-        assert r == pytest.approx(2.0 - 7.5)
+        prev_potential = env._prev_potential
+        r, breakdown = env._calculate_reward(action_reward=2.0, is_valid=False, terminated=True)
+        assert r == pytest.approx(2.0 - 7.5 - prev_potential)
         assert breakdown["invalid_penalty"] == pytest.approx(-7.5)
         assert breakdown["action"] == pytest.approx(2.0)
         assert env.episode_stats["invalid_actions"] == before_invalid + 1
         env.close()
 
-    def test_terminal_step_skips_shaping_in_full_step_loop(self):
-        """End-to-end: when game_over fires inside step(), the returned
-        reward should not contain a shaping delta — only action_reward + terminal.
-        """
-        env = StrategyGameEnv(
+    def _zero_potential_env(self):
+        return StrategyGameEnv(
             map_file=None,
             opponent=None,
             render_mode=None,
@@ -1444,16 +1489,58 @@ class TestPotentialBasedShaping:
                 "invalid_action": -10.0,
             },
         )
+
+    def test_terminal_step_charges_closing_potential_in_full_step_loop(self):
+        """End-to-end: when game_over fires inside step(), the returned reward
+        is the win bonus plus the PBRS closing charge -Phi(s_prev).
+        """
+        env = self._zero_potential_env()
         env.reset()
         # Force terminal at the start of step()
         env.game_state.game_over = True
         env.game_state.winner = 1
-        # Pre-set prev_potential to a non-zero value to make any stale delta visible
+        # Pre-set prev_potential so the closing charge is unmistakable.
         env._prev_potential = -42.0
         _, reward, terminated, _, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
         assert terminated is True
-        # Reward is exactly the win bonus — no shaping leaked, no turn_penalty.
+        assert reward == pytest.approx(1000.0 + 42.0)
+        env.close()
+
+    def test_terminal_reward_is_bare_bonus_when_potential_is_zero(self):
+        """With every potential coefficient at 0, Phi is identically 0 and the
+        closing charge vanishes — the terminal reward is just the win bonus.
+        """
+        env = self._zero_potential_env()
+        env.reset()
+        assert env._prev_potential == pytest.approx(0.0)
+        env.game_state.game_over = True
+        env.game_state.winner = 1
+        _, reward, terminated, _, _ = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert terminated is True
         assert reward == pytest.approx(1000.0)
+        env.close()
+
+    def test_truncation_takes_the_ordinary_delta_not_the_closing_charge(self):
+        """A step-limit truncation is an artificial cutoff, not a termination:
+        its successor state is real and the learner bootstraps its value, so
+        the ordinary gamma*Phi(s') - Phi(s) delta applies.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=2,
+            reward_config={"structure_control": 100.0, "unit_diff": 0.0, "income_diff": 0.0},
+        )
+        env.reset(seed=0)
+        env.step(np.array([5, 0, 0, 0, 0, 0]))
+        prev_before = env._prev_potential
+        _, _, terminated, truncated, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert truncated is True and terminated is False
+        expected = env.gamma * env._compute_potential() - prev_before
+        assert info["reward_breakdown"]["shaping_delta"] == pytest.approx(expected)
+        # ...and _prev_potential advanced, unlike on a termination.
+        assert env._prev_potential == pytest.approx(env._compute_potential())
         env.close()
 
 
@@ -1741,7 +1828,10 @@ class TestStepInfoDiagnostics:
         assert sum(b.values()) == pytest.approx(float(reward))
         env.close()
 
-    def test_breakdown_terminal_negative_on_truncated_draw(self):
+    def test_truncation_does_not_charge_the_draw_terminal(self):
+        """SB3 adds gamma * V(terminal_obs) on a truncation, so charging the
+        `draw` terminal here too would double-count. Default is 0.
+        """
         env = StrategyGameEnv(
             map_file=None,
             opponent="random",
@@ -1754,7 +1844,26 @@ class TestStepInfoDiagnostics:
         _, _, terminated, truncated, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
         assert truncated is True
         assert terminated is False
-        assert info["reward_breakdown"]["terminal"] == pytest.approx(-77.0)
+        assert info["end_reason"] == "max_steps_truncate"
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(0.0)
+        env.close()
+
+    def test_truncation_penalty_is_opt_in_via_reward_config(self):
+        """`truncation` is its own reward key so reinstating a penalty is an
+        explicit choice, not an accidental reuse of `draw`.
+        """
+        env = StrategyGameEnv(
+            map_file=None,
+            opponent="random",
+            render_mode=None,
+            max_steps=2,
+            reward_config={"draw": -77.0, "truncation": -12.5},
+        )
+        env.reset(seed=0)
+        env.step(np.array([5, 0, 0, 0, 0, 0]))
+        _, _, terminated, truncated, info = env.step(np.array([5, 0, 0, 0, 0, 0]))
+        assert truncated is True and terminated is False
+        assert info["reward_breakdown"]["terminal"] == pytest.approx(-12.5)
         env.close()
 
     def test_n_legal_actions_present_and_positive(self, env_default):

@@ -293,23 +293,18 @@ def _final_sanity_eval(result, cfg, episodes: int) -> None:
         return
     from sb3_contrib import MaskablePPO
 
-    from reinforcetactics.rl import make_maskable_env
+    from reinforcetactics.rl.bootstrap import make_stage_env
     from reinforcetactics.rl.evaluation import evaluate_model
 
     last_stage_name = result["history"][-1]["stage"]
     stage = next(s for s in cfg.curriculum.stages if s.name == last_stage_name)
-    env = make_maskable_env(
-        map_file=stage.map_file,
-        opponent=stage.opponent,
-        max_steps=stage.resolve_max_steps(cfg.env),
-        max_turns=stage.resolve_max_turns(cfg.env),
-        reward_config=stage.resolve_reward_config(cfg.env),
-        enabled_units=cfg.env.enabled_units,
-        action_space_type=cfg.env.action_space_type,
-        seed=cfg.seed + 9999,
-        opponent_kwargs=stage.opponent_kwargs,
-        pad_to_size=cfg.env.pad_to_size,
-    )
+    # Build through the single forwarding point rather than by hand: a
+    # hand-rolled make_maskable_env here silently dropped engine_overrides,
+    # max_flat_actions, max_actions_per_turn, gamma and the observation scale
+    # factors, so from v50 onward this "sanity check" was evaluating on default
+    # engine rules and its WR was not comparable to the in-training evals it
+    # exists to cross-check.
+    env = make_stage_env(stage, cfg.env, seed=cfg.seed + 9999, gamma=cfg.ppo.gamma)
     model = MaskablePPO.load(result["final_model_path"])
     metrics = evaluate_model(model, env, n_episodes=episodes, seed=cfg.seed + 9999)
     env.close()
@@ -366,7 +361,7 @@ def main() -> int:
     import matplotlib.pyplot as plt  # MPLBACKEND=Agg set above
 
     from reinforcetactics.rl.bootstrap import CurriculumStalled, run_curriculum
-    from reinforcetactics.rl.config import load_config
+    from reinforcetactics.rl.config import load_config, save_config
 
     config_path = Path(args.config)
     cfg = load_config(config_path)
@@ -381,7 +376,17 @@ def main() -> int:
 
     import shutil
 
+    # The source YAML, for provenance...
     shutil.copy2(config_path, output_dir / config_path.name)
+    # ...and the config actually used. ``_apply_set_overrides`` and the device
+    # resolution above already mutated ``cfg``, so the copied YAML alone would
+    # record ``gamma: 0.99`` for a run launched with
+    # ``--set ppo.gamma=0.997``. Best-effort: a dump failure must not stop the
+    # run, but without this a --set sweep is unreproducible from its own record.
+    try:
+        save_config(cfg, output_dir / "resolved_config.yaml")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] could not write resolved_config.yaml: {exc}")
 
     print(f"\n🚀 Bootstrap run {run_id} on {cfg.ppo.device}")
     print(f"Output dir: {output_dir}")

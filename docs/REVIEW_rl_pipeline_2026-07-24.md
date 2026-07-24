@@ -718,6 +718,9 @@ silently produce a plausible-looking but wrong training curve.
 Correctness first, then the two never-tested axes, then the plumbing that lets a
 run survive. Each experiment is one variant off v52a so attribution stays clean.
 
+> **Status:** items 1-5 are implemented. See "Landed" at the bottom of this
+> section for exactly what changed and what it does *not* fix.
+
 **Correctness (do before any new sweep — these change what the numbers mean):**
 
 1. **Charge the terminal `-Phi(s_prev)`** (2.1). ~3 lines in
@@ -764,6 +767,35 @@ run survive. Each experiment is one variant off v52a so attribution stays clean.
     wrapper's RNG off `np_random` and hold two policy objects instead of
     swapping `state_dict`s per opponent action.
 16. Re-run any conclusion you intend to keep at **3 seeds**.
+
+### Landed (items 1-5)
+
+| change | file |
+| --- | --- |
+| Terminal step charges `F = gamma*0 - Phi(s_prev)` instead of skipping the shaping term. A step-limit truncation keeps the ordinary delta — its successor state is real and gets bootstrapped. | `gym_env.py` `_calculate_reward` (`terminal` -> `terminated`) |
+| Truncation no longer charges the `draw` terminal. New opt-in `reward_config['truncation']` (default 0.0) if an explicit penalty is wanted. | `gym_env.py` step |
+| Eval replays one fixed problem set per stage. `EvalConfig.resample_eval_seeds` restores the old rotate-every-eval behaviour. | `callbacks.py`, `config.py` |
+| Evals inside `best_eligible_after` stage-relative steps are recorded but cannot claim `best_model.zip`. Bootstrap passes `eval_freq`; `EvalConfig.best_eligible_after` overrides. Each eval row now carries `stage_steps` and `best_eligible`. | `callbacks.py`, `bootstrap.py`, `config.py` |
+| `make_stage_env` forwards `gamma`; `_final_sanity_eval` goes through it instead of hand-rolling an env. | `bootstrap.py`, `train_bootstrap.py`, `imitation.py` |
+| `resolved_config.yaml` written next to the source YAML so `--set` overrides are in the run record. | `train_bootstrap.py` |
+
+Eight tests were added, each verified to fail against the previous behaviour —
+including a telescoping check that the discounted shaping return equals
+`-Phi(s_0)` exactly, on a deliberately asymmetric start so it cannot pass
+vacuously.
+
+**What this does *not* fix.** The terminal charge restores Ng et al.
+invariance, but it does **not** remove the ~190/episode drain measured in 2.1.
+That drain is `(1 - gamma) * Phi` accumulated over ~1900 micro-actions, and its
+size is set by `gamma` and by steps-per-episode — not by the terminal term,
+whose discounted weight at `gamma=0.99, T=1900` is ~1e-9. Removing the drain
+needs item 7 (`gamma` up, episode length down) or per-game-turn shaping cadence.
+Treat item 1 as the correctness precondition that makes raising `gamma` safe,
+not as the fix for the draw attractor on its own.
+
+**Comparability.** These change the reward function and the eval protocol, so
+numbers from here on are not comparable with the archived runs. Re-run v52a
+unchanged as the new anchor before reading any treatment effect.
 
 ---
 

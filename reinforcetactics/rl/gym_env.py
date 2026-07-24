@@ -1411,17 +1411,20 @@ class StrategyGameEnv(gym.Env):
         return potential
 
     def _calculate_reward(
-        self, action_reward: float, is_valid: bool, terminal: bool = False
+        self, action_reward: float, is_valid: bool, terminated: bool = False
     ) -> tuple[float, dict[str, float]]:
         """Calculate total reward including potential-based shaping terms.
 
         Args:
             action_reward: Reward from the executed action.
             is_valid: Whether the action was a valid game action.
-            terminal: True if this step ends the episode (terminated or
-                truncated). Potential-based shaping (Ng et al., 1999)
-                requires Phi(terminal) = 0 to preserve the optimal policy,
-                so the shaping delta is skipped on terminal steps.
+            terminated: True if the *game* ended on this step (a win, a loss,
+                or a max-turns draw). Potential-based shaping (Ng et al.,
+                1999) requires Phi(terminal) = 0, which means charging
+                ``F = gamma*0 - Phi(s_prev)`` here -- not skipping the term.
+                Pass False for a step-limit truncation: the state is real and
+                the learner bootstraps its value, so the ordinary
+                ``gamma*Phi(s') - Phi(s)`` delta is the correct one there.
 
         Returns:
             (total_reward, breakdown) where breakdown has keys
@@ -1443,17 +1446,38 @@ class StrategyGameEnv(gym.Env):
             breakdown["invalid_penalty"] = float(penalty)
             self.episode_stats["invalid_actions"] += 1
 
-        if not terminal:
-            # Potential-based reward shaping: reward += gamma * Phi(s') - Phi(s).
-            # Using the trainer's discount preserves the policy-invariance
-            # guarantee from Ng et al. (1999); a gamma=1 approximation biases
-            # the policy toward states where Phi is sustained at a high value
-            # over long horizons.
+        # Potential-based reward shaping: reward += gamma * Phi(s') - Phi(s).
+        # Using the trainer's discount preserves the policy-invariance
+        # guarantee from Ng et al. (1999); a gamma=1 approximation biases
+        # the policy toward states where Phi is sustained at a high value
+        # over long horizons.
+        #
+        # Ng et al. requires Phi(terminal) = 0. *Skipping* the shaping on
+        # terminal steps is not the same thing: it leaves the telescoping sum
+        # with a dangling ``+gamma^(T-1) * Phi(s_(T-1))`` instead of collapsing
+        # to the constant ``-Phi(s_0)``, so the guarantee formally does not
+        # hold. Charging ``F = gamma*0 - Phi(s_prev)`` on the terminal step
+        # restores it.
+        #
+        # Only a real game termination gets that treatment. A step-limit
+        # truncation is an artificial cutoff whose successor state is real and
+        # whose value the learner bootstraps, so it takes the ordinary delta.
+        #
+        # NOTE on magnitude: the per-step delta for a quiet board is
+        # ``(gamma - 1) * Phi``, i.e. a drain proportional to *step count*.
+        # At gamma=0.99 over ~1900 micro-actions that is ~-190 per episode for
+        # a 10-structure lead. This terminal charge makes the *discounted*
+        # shaping return exactly -Phi(s_0); it does not shrink the per-step
+        # drain. That is governed by ``(1 - gamma)`` and by how many env steps
+        # an episode takes -- see docs/REVIEW_rl_pipeline_2026-07-24.md 2.1.
+        if terminated:
+            delta = -self._prev_potential
+        else:
             current_potential = self._compute_potential()
             delta = self.gamma * current_potential - self._prev_potential
-            reward += delta
-            breakdown["shaping_delta"] = float(delta)
             self._prev_potential = current_potential
+        reward += delta
+        breakdown["shaping_delta"] = float(delta)
 
         return reward, breakdown
 
@@ -1499,14 +1523,13 @@ class StrategyGameEnv(gym.Env):
         action_reward, is_valid = self._execute_action(action_dict)
 
         # Determine terminal status BEFORE shaping so potential-based shaping
-        # can be skipped on terminal steps (where Phi(terminal) must be 0
-        # for the shaping to be policy-invariant).
+        # can charge ``-Phi(s_prev)`` on a real termination (where
+        # Phi(terminal) must be 0 for the shaping to be policy-invariant).
         terminated = self.game_state.game_over
         truncated = self.current_step >= self.max_steps
-        terminal = terminated or truncated
 
         # Calculate total reward
-        reward, breakdown = self._calculate_reward(action_reward, is_valid, terminal=terminal)
+        reward, breakdown = self._calculate_reward(action_reward, is_valid, terminated=terminated)
         self.episode_stats["reward"] += reward
 
         # Classify how the episode ended so eval/diagnostics can split
@@ -1571,9 +1594,22 @@ class StrategyGameEnv(gym.Env):
                 terminal_bonus = self.reward_config["loss"]
                 self.episode_stats["winner"] = self.game_state.winner
         elif truncated:
-            # Truncation penalty: agent hit step limit without finishing the game.
-            # Without this, the agent has no incentive to end games decisively.
-            terminal_bonus = self.reward_config.get("draw", 0.0)
+            # Step-limit truncation. ``truncated=True`` is the correct
+            # Gymnasium signal, and SB3's on-policy rollout collector responds
+            # to it by adding ``gamma * V(terminal_obs)`` to this step's reward
+            # (the ``TimeLimit.truncated`` path in ``collect_rollouts``).
+            #
+            # Charging the ``draw`` terminal here as well double-counts: the
+            # transition would carry both "this is a terminal draw, take the
+            # penalty" and "this is an artificial cutoff, keep your future
+            # value". Measured on the deepest archived run, truncation fires on
+            # 27-42 of every 80 eval episodes, so this is not a corner case.
+            #
+            # The bootstrap value already prices "the game was unfinished", so
+            # the default charge is 0. Set ``reward_config['truncation']`` to
+            # reinstate an explicit penalty -- but note it stacks with the
+            # bootstrap rather than replacing it.
+            terminal_bonus = self.reward_config.get("truncation", 0.0)
             self.episode_stats["winner"] = None
 
         reward += terminal_bonus

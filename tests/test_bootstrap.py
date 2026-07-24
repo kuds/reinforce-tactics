@@ -137,6 +137,160 @@ class TestBestCheckpointTimestep:
         assert (tmp_path / "best_model.zip").exists()
 
 
+def _wr_program_eval(wr_program, seen_seeds=None):
+    """Build a fake ``evaluate_model`` that returns a scripted WR sequence and
+    optionally records the seed each call received."""
+
+    def fake_eval(model, env, **kwargs):
+        if seen_seeds is not None:
+            seen_seeds.append(kwargs.get("seed"))
+        wr = next(wr_program)
+        return {
+            "win_rate": wr,
+            "avg_reward": wr,
+            "avg_length": 1.0,
+            "avg_turns": 1.0,
+            "std_reward": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+            "seize_available_rate": 0.0,
+            "max_legal_actions": 0,
+        }
+
+    return fake_eval
+
+
+def _drive_evals(cb, timesteps):
+    """Mirror SB3's num_timesteps sync and fire one eval per entry."""
+    for ts in timesteps:
+        cb.num_timesteps = ts
+        cb.model.num_timesteps = ts
+        cb._last_eval_block = ts // cb.eval_freq
+        cb._do_eval()
+
+
+class TestEvalSeedStability:
+    """Consecutive evals must measure the *same* problem set.
+
+    Resampling the 80-episode benchmark every eval block makes
+    ``PromotionCallback``'s "patience consecutive crossings" compare two
+    different benchmarks, and turns ``best_model.zip`` into an argmax over
+    many noisy estimates on different problems (winner's curse).
+    """
+
+    def test_seed_is_fixed_across_evals_by_default(self, tmp_path, monkeypatch):
+        seeds: list = []
+        monkeypatch.setattr(
+            "reinforcetactics.rl.callbacks.evaluate_model",
+            _wr_program_eval(iter([0.1, 0.2, 0.3]), seeds),
+        )
+        cb = PeriodicEvalCallback(
+            eval_env=object(), eval_freq=100, n_eval_episodes=1, eval_seed_base=7, save_dir=tmp_path, verbose=0
+        )
+        cb.model = _BestStubModel()
+        _drive_evals(cb, (100, 200, 300))
+        assert seeds == [7, 7, 7]
+
+    def test_resample_eval_seeds_restores_rotation(self, tmp_path, monkeypatch):
+        seeds: list = []
+        monkeypatch.setattr(
+            "reinforcetactics.rl.callbacks.evaluate_model",
+            _wr_program_eval(iter([0.1, 0.2, 0.3]), seeds),
+        )
+        cb = PeriodicEvalCallback(
+            eval_env=object(),
+            eval_freq=100,
+            n_eval_episodes=1,
+            eval_seed_base=7,
+            save_dir=tmp_path,
+            resample_eval_seeds=True,
+            verbose=0,
+        )
+        cb.model = _BestStubModel()
+        _drive_evals(cb, (100, 200, 300))
+        assert seeds == [7 + 1000 * 1, 7 + 1000 * 2, 7 + 1000 * 3]
+
+
+class TestBestEligibleAfter:
+    """The stage-entry eval measures the *carry-in* policy.
+
+    ``PeriodicEvalCallback`` is built fresh per stage but gates on the
+    cumulative counter (the runner passes ``reset_num_timesteps=False``), so
+    the first ``_on_step`` of every stage always fires an eval. Letting that
+    eval claim ``best_model.zip`` means ``restore_best_checkpoint_between_
+    stages`` can rewind the stage's own training.
+    """
+
+    def test_carry_in_eval_cannot_claim_best(self, tmp_path, monkeypatch):
+        # Carry-in policy is the strongest thing this stage ever sees.
+        monkeypatch.setattr(
+            "reinforcetactics.rl.callbacks.evaluate_model",
+            _wr_program_eval(iter([1.0, 0.40, 0.60])),
+        )
+        cb = PeriodicEvalCallback(
+            eval_env=object(),
+            eval_freq=100,
+            n_eval_episodes=1,
+            save_dir=tmp_path,
+            best_eligible_after=100,
+            verbose=0,
+        )
+        cb.model = _BestStubModel()
+        cb.num_timesteps = 5_000
+        cb._on_training_start()  # stage entry at a large cumulative counter
+        _drive_evals(cb, (5_000, 5_100, 5_200))
+
+        # The 1.0 carry-in eval is recorded but not eligible; best is the
+        # strongest eval the stage actually produced.
+        assert [r["win_rate"] for r in cb.results] == [1.0, 0.40, 0.60]
+        assert [r["best_eligible"] for r in cb.results] == [False, True, True]
+        assert [r["stage_steps"] for r in cb.results] == [0, 100, 200]
+        assert cb.best_win_rate == pytest.approx(0.60)
+        assert cb.best_timestep == 5_200
+
+    def test_default_zero_keeps_legacy_eligibility(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "reinforcetactics.rl.callbacks.evaluate_model",
+            _wr_program_eval(iter([1.0, 0.40])),
+        )
+        cb = PeriodicEvalCallback(eval_env=object(), eval_freq=100, n_eval_episodes=1, save_dir=tmp_path, verbose=0)
+        cb.model = _BestStubModel()
+        cb.num_timesteps = 5_000
+        cb._on_training_start()
+        _drive_evals(cb, (5_000, 5_100))
+        assert cb.best_win_rate == pytest.approx(1.0)
+        assert cb.best_timestep == 5_000
+
+    def test_pre_window_evals_still_reach_the_promotion_callback(self, tmp_path, monkeypatch):
+        """Eligibility gates the *checkpoint*, not the promotion streak --
+        that is ``min_timesteps_before_promotion``'s job. Keep them separate.
+        """
+        monkeypatch.setattr(
+            "reinforcetactics.rl.callbacks.evaluate_model",
+            _wr_program_eval(iter([0.9, 0.9])),
+        )
+        cb = PeriodicEvalCallback(
+            eval_env=object(),
+            eval_freq=100,
+            n_eval_episodes=1,
+            save_dir=tmp_path,
+            best_eligible_after=1_000_000,
+            verbose=0,
+        )
+        cb.model = _BestStubModel()
+        cb.num_timesteps = 5_000
+        cb._on_training_start()
+        _drive_evals(cb, (5_000, 5_100))
+
+        promote = PromotionCallback(eval_callback=cb, threshold=0.8, patience=2, verbose=0)
+        assert _step_promote(promote, num_timesteps=5_100) is False
+        assert promote.promoted is True
+        # ...while nothing was ever saved as best.
+        assert cb.best_win_rate == -1.0
+        assert not (tmp_path / "best_model.zip").exists()
+
+
 class TestPeriodicEvalJsonlPersistence:
     """``results_jsonl_path`` gets one JSON line per eval, appended the
     moment the eval finishes — so a run killed mid-stage (the routine
