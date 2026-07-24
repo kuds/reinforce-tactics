@@ -161,7 +161,8 @@ both of which land directly on promotion, `best_model.zip` and stall.
 
 ```python
 m = evaluate_model(
-    self.model, self.eval_env,
+    self.model,
+    self.eval_env,
     n_episodes=self.n_eval_episodes,
     seed=eval_seed,
     track_breakdown=self.track_breakdown,
@@ -351,7 +352,7 @@ the stage best (`best_win_rate` starts at `-1.0`, `:214`). So when the stage
 later promotes and the runner does
 
 ```python
-model.set_parameters(str(best_ckpt), exact_match=True)   # :1011
+model.set_parameters(str(best_ckpt), exact_match=True)  # :1011
 ```
 
 it can restore the policy *as it was at stage entry*, discarding everything the
@@ -523,7 +524,7 @@ a pass-bot. The "self-play" agent is training against noise.
 
 ```python
 self.agent_player = 2
-self.env.agent_player = 2     # :545
+self.env.agent_player = 2  # :545
 ```
 
 `gymnasium.Wrapper` overrides `__getattr__` but **not** `__setattr__`, so this
@@ -560,9 +561,16 @@ they were meant to resolve.
 
 ```python
 env = make_maskable_env(
-    map_file=..., opponent=..., max_steps=..., max_turns=..., reward_config=...,
-    enabled_units=..., action_space_type=..., seed=cfg.seed + 9999,
-    opponent_kwargs=..., pad_to_size=cfg.env.pad_to_size,
+    map_file=...,
+    opponent=...,
+    max_steps=...,
+    max_turns=...,
+    reward_config=...,
+    enabled_units=...,
+    action_space_type=...,
+    seed=cfg.seed + 9999,
+    opponent_kwargs=...,
+    pad_to_size=cfg.env.pad_to_size,
 )
 ```
 
@@ -577,6 +585,7 @@ in-training evals it is meant to cross-check.
 
 ```python
 from reinforcetactics.rl.bootstrap import make_stage_env
+
 env = make_stage_env(stage, cfg.env, seed=cfg.seed + 9999)
 ```
 
