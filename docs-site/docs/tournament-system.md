@@ -246,18 +246,14 @@ from stable_baselines3 import PPO
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
-env = StrategyGameEnv(
-    map_file='maps/1v1/beginner.csv',
-    opponent='bot',
-    render_mode=None
-)
+env = StrategyGameEnv(map_file="maps/1v1/beginner.csv", opponent="bot", render_mode=None)
 
 # Train model
-model = PPO('MultiInputPolicy', env, verbose=1)
+model = PPO("MultiInputPolicy", env, verbose=1)
 model.learn(total_timesteps=100000)
 
 # Save model
-model.save('models/my_trained_bot')
+model.save("models/my_trained_bot")
 ```
 
 The saved model will be automatically discovered and used in tournaments.

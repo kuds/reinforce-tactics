@@ -207,8 +207,8 @@ A composition cap, gated on minimum army size to preserve early-game
 tempo:
 
 ```python
-WARRIOR_SHARE_CAP = 0.5      # SimpleBot; 0.6 on MediumBot
-WARRIOR_CAP_MIN_UNITS = 3    # 4 on MediumBot
+WARRIOR_SHARE_CAP = 0.5  # SimpleBot; 0.6 on MediumBot
+WARRIOR_CAP_MIN_UNITS = 3  # 4 on MediumBot
 
 if total_units >= WARRIOR_CAP_MIN_UNITS:
     w_share = w_count / total_units
@@ -460,8 +460,7 @@ the filename couldn't disambiguate.
 
 ```python
 replay_filename = (
-    f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
-    f"{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
+    f"game_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{bot1_desc.name}_vs_{bot2_desc.name}_{map_config.stem}.json"
 )
 ```
 

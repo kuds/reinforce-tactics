@@ -113,9 +113,9 @@ python scripts/train/train_self_play.py
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 env = StrategyGameEnv(
-    map_file='maps/1v1/beginner.csv',
-    opponent='bot',
-    render_mode=None  # None for headless, 'human' for GUI
+    map_file="maps/1v1/beginner.csv",
+    opponent="bot",
+    render_mode=None,  # None for headless, 'human' for GUI
 )
 
 obs, info = env.reset()
@@ -130,11 +130,11 @@ from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.llm_bot import OpenAIBot, ClaudeBot, GeminiBot
 from reinforcetactics.utils.file_io import FileIO
 
-map_data = FileIO.load_map('maps/1v1/test_map.csv')
+map_data = FileIO.load_map("maps/1v1/test_map.csv")
 game = GameState(map_data, num_players=2)
 
 # Requires API key in environment (OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY)
-bot = ClaudeBot(game, player=2, model='claude-sonnet-4-5-20250929')
+bot = ClaudeBot(game, player=2, model="claude-sonnet-4-5-20250929")
 ```
 
 See the `examples/` directory for more, including an action-masking training demo.
