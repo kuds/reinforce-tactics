@@ -21,23 +21,29 @@ optimizer or the representation.** `gamma`, `learning_rate`, `n_steps`,
 `batch_size`, `clip_range`, `pool` and the action-head design are byte-identical
 across every run ever logged.
 
-Four findings I would act on before running another sweep variant:
+Five findings I would act on before running another sweep variant:
 
 1. **The potential-based shaping charges the agent ~190 per episode for being
    ahead, while winning pays 50.** `(gamma-1)*Phi` per micro-action, ~1900
    micro-actions per episode. The archive's measured `shaping_delta` matches the
    arithmetic to within 0.3%. Symmetrically, a *losing* agent is paid to stall.
    That is a bistable incentive, and the archive shows exactly that bistability.
-2. **The agent has never once won by HQ capture.** 480 eval episodes across the
+2. **Every gate decision is measured on the wrong object.** The eval runs
+   `deterministic=True` (PPO optimizes the stochastic policy) against an
+   **80-episode benchmark that is redrawn on every eval**. So `patience`
+   consecutive crossings compares two different problem sets, and
+   `best_model.zip` is an argmax over ~100 noisy estimates — the luckiest draw,
+   not the best policy.
+3. **The agent has never once won by HQ capture.** 480 eval episodes across the
    deepest run: `captures_by_type.hq == 0` in every single eval, 100% of wins
    `by_elimination`. The reward has been paying 80 for an HQ win vs 50 for
    elimination since v49. Paying more for something the policy never does is not
    a reward-tuning problem — it is a capability problem.
-3. **`pool: masked_avg` compresses the whole board to 64 numbers** before the
+4. **`pool: masked_avg` compresses the whole board to 64 numbers** before the
    policy head (`extractors.py:189-195`). With `flat_discrete`'s positional
    action indices on top, the policy cannot express "move *this* unit to *that*
    tile". Every config in the repo uses `masked_avg`.
-4. **`gamma: 0.99` over ~2000-step episodes makes the terminal reward
+5. **`gamma: 0.99` over ~2000-step episodes makes the terminal reward
    arithmetically invisible** (`0.99^2000 = 1.9e-9`). This is documented in the
    July 12 review and was never applied to a single config, including v54.
 
@@ -129,7 +135,7 @@ Two things make this bite rather than cancel out:
   the telescoping sum is left with a dangling `+gamma^(T-1) * Phi(s_(T-1))`.
   Ng et al.'s policy-invariance guarantee formally does not apply.
 - **GAE cannot see the compensation.** With `gamma=0.99, lambda=0.95` the
-  advantage window is ~17 steps (see 2.2). The compensating terminal term sits
+  advantage window is ~17 steps (see 2.3). The compensating terminal term sits
   ~1900 steps away. Locally, the only thing the optimizer sees is
   "shed material lead -> reward goes up".
 
@@ -146,7 +152,57 @@ is ahead is pushed down, and a policy that is behind is pushed to stall.
 3. Or make `Phi` bounded/normalized so a large lead cannot dominate the
    terminal reward.
 
-### 2.2 `gamma: 0.99` puts the terminal outside the horizon — never varied
+### 2.2 Every gate decision is made on a policy PPO never optimizes, against a benchmark that is resampled each time
+
+Two independent problems in `PeriodicEvalCallback._do_eval` (`callbacks.py:235-254`),
+both of which land directly on promotion, `best_model.zip` and stall.
+
+**(a) The eval measures the deterministic-argmax policy.**
+
+```python
+m = evaluate_model(
+    self.model, self.eval_env,
+    n_episodes=self.n_eval_episodes,
+    seed=eval_seed,
+    track_breakdown=self.track_breakdown,
+    **eval_kwargs,
+)
+```
+
+No `deterministic` argument is passed, and `evaluate_model`'s default is
+`deterministic: bool = True` (`evaluation.py:97`). PPO optimizes the *stochastic*
+policy; with `ent_coef` held at 0.05-0.10 for most of a stage those two policies
+are far apart. Every promotion, every `best_model.zip` save, and every stall
+verdict is therefore a measurement of an object the optimizer is not improving.
+
+It also makes the metric brittle in exactly the observed way: argmax over a
+positionally-shuffled action list (2.6) can flip wholesale on a small weight
+change, which a stochastic policy would average over.
+
+**(b) The 80-episode benchmark is redrawn on every eval.**
+
+```python
+eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
+```
+
+with `_last_eval_block = num_timesteps // eval_freq` (`:229`) and per-episode
+seeds `seed + ep_idx` (`evaluation.py:217`). Consecutive evals therefore draw
+**completely disjoint** 80-seed problem sets. Two consequences:
+
+- `patience` counts consecutive crossings of a gate whose *problem set changes
+  between the two measurements* — it is measuring benchmark noise as if it were
+  policy change.
+- `best_model.zip` is `argmax` over ~30-100 noisy estimates on different
+  benchmarks. That is a textbook winner's curse: the saved "best" is
+  systematically the luckiest draw, not the best policy — and 2.8 then
+  propagates that lucky checkpoint into the next stage.
+
+**Fix**: pass `deterministic=False` for the promotion metric (or report both);
+and hold the eval seed set **fixed** across a stage (`eval_seed_base` alone, or
+a fixed seed block rotated only per stage) so consecutive evals are comparable.
+Both are one-line changes and together they make the gate mean what it says.
+
+### 2.3 `gamma: 0.99` puts the terminal outside the horizon — never varied
 
 `configs/**/*.yaml` — **all 65 configs**, including the newest
 `v54_uncapped_frontier.yaml:593`.
@@ -168,7 +224,7 @@ per episode — `max_actions_per_turn: 20-30` would take a 75-turn game from
 ~2000 steps to ~1500. Do both; gamma alone asks the value head to represent a
 1000-step return over unnormalized rewards.
 
-### 2.3 Truncation is charged the draw penalty *and* gets the time-limit bootstrap
+### 2.4 Truncation is charged the draw penalty *and* gets the time-limit bootstrap
 
 `gym_env.py:1504-1506, 1573-1577`
 
@@ -189,7 +245,7 @@ has *already* added `draw: -50` to the same transition.
 So the value target for a truncated step is `-50 + gamma*V(s_T)` — the agent is
 simultaneously told "this is a terminal draw, take the penalty" and "this is an
 artificial cutoff, keep your future value". The two are contradictory, and the
-bug fires on **27-42 of every 80 eval episodes** (2.9), so it is not a corner
+bug fires on **27-42 of every 80 eval episodes** (2.10), so it is not a corner
 case.
 
 **Fix**: pick one semantic.
@@ -199,7 +255,7 @@ case.
 - If it is a genuine time limit, drop the `draw` bonus from the `elif truncated`
   branch and let the bootstrap carry the value.
 
-### 2.4 The policy is spatially blind — never varied
+### 2.5 The policy is spatially blind — never varied
 
 `reinforcetactics/rl/extractors.py:189-195`
 
@@ -229,7 +285,7 @@ position-agnostic attrition. The policy does exactly the one it can represent.
 **Fix**: run one variant with `pool: flatten`, everything else held at v52a.
 It is a one-line config change and it tests the never-tested axis.
 
-### 2.5 `flat_discrete` action indices are positional and rebuilt every step
+### 2.6 `flat_discrete` action indices are positional and rebuilt every step
 
 `gym_env.py:1065-1069` and `_build_flat_actions` (`gym_env.py:247-302`)
 
@@ -240,16 +296,16 @@ shifts every index after it; when gold crosses a unit's cost, the whole
 `create_unit` prefix changes length and shifts everything.
 
 So the logit-to-action mapping is state-dependent and volatile *within* an
-episode. Combined with 2.4 the policy cannot infer the enumeration from the
+episode. Combined with 2.5 the policy cannot infer the enumeration from the
 observation — it can only learn coarse regularities ("low indices are
 create_unit, the last is end_turn"). That is a mechanical explanation for why
 deterministic-argmax eval swings 1.00 -> 0.21 -> 0.99 across adjacent evals.
 
 **Fix (larger)**: a pointer/per-cell action head — score each (unit, target)
-pair from its own spatial feature vector — removes 2.4 and 2.5 at once.
+pair from its own spatial feature vector — removes 2.5 and 2.6 at once.
 `pool: flatten` is the prerequisite.
 
-### 2.6 No learning-rate schedule reaches PPO at all
+### 2.7 No learning-rate schedule reaches PPO at all
 
 `reinforcetactics/rl/config.py:116` declares `lr_schedule: str = "constant"`,
 but `:137` drops it:
@@ -272,7 +328,7 @@ attribute per stage and correctly handles `reset_num_timesteps=False` via
 either honour `lr_schedule` in `as_sb3_kwargs` or add
 `CurriculumStage.learning_rate_schedule`.
 
-### 2.7 `best_model.zip` is usually the *carry-in* policy, so promotion can undo the stage
+### 2.8 `best_model.zip` is usually the *carry-in* policy, so promotion can undo the stage
 
 `callbacks.py:224, 229-232, 324-331` interacting with `bootstrap.py:997-1013`
 
@@ -315,7 +371,7 @@ to `PeriodicEvalCallback` — record the stage-entry eval as a *baseline* row bu
 skip the `model.save` for it. Two lines, and it makes
 `restore_best_checkpoint_between_stages` mean what its name says.
 
-### 2.8 A stall is run-fatal, and the good checkpoint is left on disk
+### 2.9 A stall is run-fatal, and the good checkpoint is left on disk
 
 `bootstrap.py:934-981`
 
@@ -350,7 +406,7 @@ tuning.
 3. `run_curriculum(start_stage=K)` + a run manifest, so a killed session
    resumes instead of restarting.
 
-### 2.9 `max_steps: 3000` is a truncation cliff that the metric can't see
+### 2.10 `max_steps: 3000` is a truncation cliff that the metric can't see
 
 `gym_env.py:1505` `truncated = self.current_step >= self.max_steps`;
 `:1573-1577` scores truncation with the **draw** reward; `evaluation.py:366`
@@ -372,7 +428,7 @@ observed.
 real value; and log `truncated` separately from `max_turns_draw` in the
 promotion metric so the gate stops conflating "slow" with "bad".
 
-### 2.10 Promotion gates are a coin flip near threshold
+### 2.11 Promotion gates are a coin flip near threshold
 
 `callbacks.py:415-430` requires `patience` **consecutive** evals over the gate.
 At WR 0.75 with 80 episodes the standard error is 4.8pp, so two consecutive
@@ -382,7 +438,7 @@ and 41/41 stalls burned their full budget waiting for it.
 **Fix**: gate on a Wilson lower bound of the win rate, or on a rolling mean of
 the last K evals, instead of raw consecutive point estimates.
 
-### 2.11 The BC / imitation subsystem targets an action space that cannot learn
+### 2.12 The BC / imitation subsystem targets an action space that cannot learn
 
 `gym_env.py:1059-1060` documents multi_discrete masks as a
 "per-dimension boolean masks (**union over-approximation**)" — per-dimension
@@ -403,7 +459,24 @@ demonstrated action inside `build_flat_actions(...)`, which is already a
 module-level pure function (`gym_env.py:230-302`) shared with `ModelBot`. Or
 retire the subsystem and delete the configs, so it stops being a trap.
 
-### 2.12 Self-play RNG is unseeded; opponent inference is on the hot path
+Two more reasons a BC warm-start would underperform even after that port:
+
+- **The value head is left at random init on top of a BC-shifted shared trunk.**
+  `imitation.py:1331` selects `bc_params = [p for n, p in
+  policy.named_parameters() if not n.startswith("value_net")]`, so BC trains the
+  `features_extractor` but not the final value head. SB3's
+  `MaskableActorCriticPolicy` defaults to `share_features_extractor=True` and no
+  config overrides it, so PPO's first updates see an enormous value loss and
+  push it back through the shared extractor at `vf_coef: 0.5` — undoing the
+  clone within a few updates. Freeze the extractor for the first N updates, or
+  regress the value head on demo returns before handing off.
+- **Demonstrations are collected on a different engine.** `imitation.py:707-713`
+  constructs `GameState(map_data, num_players=2, max_turns=..., enabled_units=...,
+  fog_of_war=...)` and omits both `engine_overrides` and `rng`. Any config from
+  v50 onward (`damage_model: hp_scaled`, `W: {cost: 300}`) therefore clones a
+  bot that was playing a different game.
+
+### 2.13 Self-play RNG is unseeded; opponent inference is on the hot path
 
 `self_play.py:542`
 
@@ -429,7 +502,50 @@ policy instances instead.
 episode is computed against the other seat's potential. Low severity but free
 to fix.
 
-### 2.13 Single-seed sweeps
+Three further defects in the same file are more serious than the RNG issue, and
+each independently makes self-play not-self-play. I verified all three against
+the source:
+
+**(a) The opponent is never given action masks.** `self_play.py:332`:
+
+```python
+action, _ = self.opponent_model.predict(obs, deterministic=self.opponent_deterministic)
+```
+
+`MaskablePPO.predict` treats a missing `action_masks` as "no masking", so the
+opponent samples freely over the full `MultiDiscrete([10, 8, W, H, W, H])`.
+Nearly every such joint action is illegal (2.12), so the opponent is effectively
+a pass-bot. The "self-play" agent is training against noise.
+
+**(b) `swap_players` never reaches the game.** `make_self_play_env` composes
+`SelfPlayEnv(ActionMaskedEnv(StrategyGameEnv(...)))` (`:751-754`), so
+`self.env` is the wrapper. `SelfPlayEnv.reset` then does:
+
+```python
+self.agent_player = 2
+self.env.agent_player = 2     # :545
+```
+
+`gymnasium.Wrapper` overrides `__getattr__` but **not** `__setattr__`, so this
+creates a fresh attribute on the *wrapper* that shadows the delegation.
+`StrategyGameEnv.agent_player` stays `1`. On every swapped episode the base env
+scores rewards, computes the potential and picks the terminal bonus for the
+wrong seat while `SelfPlayEnv` believes the agent is player 2.
+
+**(c) `SubprocVecEnv` silently disables opponent updates entirely.**
+`_SelfPlayCallback._get_self_play_envs` (`:627-643`) reaches the envs only via
+`hasattr(self.env, "envs")`. `SubprocVecEnv` has no `.envs` — the envs live in
+child processes — and the `isinstance(self.env, SelfPlayEnv)` fallbacks don't
+match a VecEnv either, so the method returns `[]` and `_update_opponents` /
+`_add_to_pool` are no-ops. Every bootstrap config sets `use_subprocess: true`.
+
+Given (a)-(c), no self-play result in the archive should be trusted, and
+`opponent: "self"` in a curriculum degrades further still: `gym_env.py:1751-1760`
+falls back to `self.opponent = None` when no self-play factory was registered,
+and the bootstrap path never registers one — a silently do-nothing opponent that
+config validation accepts (`"self"` is in `_BOT_OPPONENT_TYPES`, `:76`).
+
+### 2.14 Single-seed sweeps
 
 50/56 runs used `seed: 42`, n=1. v21 re-ran a *just-cleared* stage on identical
 settings and went from cleared to peak 0.86 / final 0.0125. Most single-knob
@@ -438,7 +554,7 @@ they were meant to resolve.
 
 ---
 
-### 2.14 The final sanity eval does not use the stage's env
+### 2.15 The final sanity eval does not use the stage's env
 
 `scripts/train/train_bootstrap.py:301-312` hand-rolls its env:
 
@@ -467,6 +583,47 @@ env = make_stage_env(stage, cfg.env, seed=cfg.seed + 9999)
 (`make_stage_env` should also forward `gamma`; it currently does not — see
 section 3.)
 
+### 2.16 The alternative algorithms have their own correctness bugs
+
+These are not on the bootstrap critical path, but they are load-bearing for
+anyone who runs `train_feudal_rl.py` or `train_alphazero.py`, and each would
+silently produce a plausible-looking but wrong training curve.
+
+**Feudal RL**
+- `feudal_rl.py:1258-1262` vs `:1295-1296` — `manager_segment_open`,
+  `manager_reward_accum` and `manager_step_count` are **locals** reset on every
+  `collect_rollout()` call, but `self.current_goal` / `self.goal_step_counter`
+  persist on the agent. Reward earned under goal `g_k` is credited to `g_(k+1)`
+  across every rollout boundary.
+- `feudal_rl.py:1324-1325` — `done = terminated or truncated` is stored as both
+  `w_dones` and `m_dones`, and `_compute_gae` uses it as the terminal indicator.
+  Every time-limit episode gets its value bootstrap zeroed.
+- `feudal_rl.py:1358` — the manager critic regresses on an **undiscounted**
+  intra-segment reward sum while GAE applies `gamma^k` to the bootstrap; the two
+  are inconsistent.
+- `feudal_rl.py:823, 1983-2003` — worker reward mixes an intrinsic term in
+  roughly `[-10, +15]` with the raw env reward, unnormalized; and two goal
+  bonuses scale linearly in nearby-unit count with no cap.
+
+**AlphaZero**
+- `alphazero_trainer.py:315-326` — `self.network.train()` is set before
+  `_training_phase()` and never switched back before `_evaluation_phase`.
+  BatchNorm running statistics are then overwritten by batch-size-1 MCTS
+  forwards during evaluation.
+- `alphazero_trainer.py:522-525` — `_evaluation_phase` returns `0.5` when
+  `total_decided == 0`, and `_play_eval_game` builds its `GameState` with **no
+  `max_turns`**, so an all-truncated eval returns exactly the value that
+  guarantees permanent rejection of every candidate network. Rejection also
+  reverts weights but not the Adam/scheduler state.
+- `alphazero_trainer.py:98-139` — `self_play_game` caps on `max_steps=400`
+  counted in *individual actions*, with no `max_turns` on the `GameState`. Given
+  the ~2000-step episodes measured for PPO, essentially every self-play game
+  truncates and is labelled a draw, training the value head to predict 0
+  everywhere.
+- `alphazero_trainer.py:574, 612` — `_save_checkpoint` persists five config keys
+  and `load_checkpoint` does `cls(**config)`, so `map_file`, `enabled_units` and
+  `lr` are silently dropped on resume.
+
 ---
 
 ## 3. Smaller things worth fixing
@@ -494,7 +651,7 @@ section 3.)
 - `bootstrap.py:1055` `make_stage_env` does not forward `gamma`, so any replay
   or re-eval env computes `shaping_delta` with the default 0.99 even when the
   run trained at a different discount. This becomes wrong the moment
-  recommendation 2.2 is applied.
+  recommendation 2.3 is applied.
 - `bootstrap.py:752` reads `stage.n_eval_episodes`, whose default is `30`
   (`config.py:255`). `cfg.eval.n_eval_episodes` is **never read** by the
   curriculum runner. Today every shipped stage sets the override, so nothing is
@@ -527,6 +684,32 @@ section 3.)
   win_rate X did not reach threshold Y", even when the peak exceeded the
   threshold (28/41 cases). "Peaked at 100%, never held it for 2 consecutive
   evals" is a different failure and should read differently.
+- `scripts/train/train_bootstrap.py:373-384` — the run directory gets
+  `shutil.copy2(config_path, ...)`, i.e. the **source** YAML, *after*
+  `_apply_set_overrides` and the device resolution have already mutated `cfg`.
+  A run launched with `--set ppo.gamma=0.997` records `gamma: 0.99`. Dump the
+  resolved config instead — this matters the moment you start sweeping via
+  `--set`.
+- `bootstrap.py:764` — per-step eval tracing is hard-wired on
+  (`trace_dir=stage_dir / "traces"`) with no config knob and no size cap, and
+  `evaluation.py:223` allocates the per-step buffer for *every* episode, not
+  just matching ones. A stalled stage writing to a Drive-backed run dir can
+  produce a lot of JSONL for episodes that are 2000+ steps long.
+- `evaluation.py:215-235` — eval is a strictly sequential single-env loop with
+  one inference call per step. At 80 episodes x ~2000 steps that is 160k
+  sequential GPU round-trips per eval, against 50k *vectorized* training steps
+  between evals. Eval, not training, may well be the wall-clock bottleneck —
+  which matters directly because wall-clock death is one of the two run-fatal
+  modes. Vectorize it or drop `n_eval_episodes` between promotions.
+- `gym_env.py:420` — `map_file: null` draws a random map once in `__init__` via
+  the module-global numpy RNG, before any seeding exists, so `reset(seed=...)`
+  cannot reproduce it and each vec worker gets a different board. Not used by
+  the bootstrap configs, but it is a live trap.
+- Preemption: `train_bootstrap.py` writes to `benchmarks/bootstrap/<run_id>` and
+  uploads once from a `finally` block, while the container's periodic uploader
+  syncs a different hardcoded directory list. There is no SIGTERM handler. On a
+  Vertex/Colab preemption the whole run directory is lost — for a project whose
+  deepest run died to wall-clock, this is worth an hour of work.
 
 ---
 
@@ -540,40 +723,47 @@ run survive. Each experiment is one variant off v52a so attribution stays clean.
 1. **Charge the terminal `-Phi(s_prev)`** (2.1). ~3 lines in
    `_calculate_reward`. Removes the "being ahead is taxed" gradient that the
    archive confirms to 0.3%.
-2. **Pick one truncation semantic** (2.3). Either `terminated=True` on
+2. **Pick one truncation semantic** (2.4). Either `terminated=True` on
    `max_steps`, or drop the `draw` bonus from the truncation branch. ~2 lines.
-3. **Make the stage-entry eval baseline-only** (2.7). ~5 lines in
+3. **Fix the eval methodology** (2.2): hold the eval seed set fixed across a
+   stage, and gate on the stochastic policy (`deterministic=False`) or report
+   both. Two lines, and every subsequent number becomes comparable.
+4. **Make the stage-entry eval baseline-only** (2.8). ~5 lines in
    `PeriodicEvalCallback`. Stops `restore_best_checkpoint_between_stages` from
    reverting a stage's own training.
-4. **Point `_final_sanity_eval` at `make_stage_env`** (2.14), and forward
-   `gamma` from `make_stage_env`. ~3 lines.
+5. **Point `_final_sanity_eval` at `make_stage_env`** (2.15), and forward
+   `gamma` from `make_stage_env`. ~3 lines. Dump the *resolved* config rather
+   than the source YAML (section 3) before running any `--set` sweep.
 
 **Then the two axes nobody has swept:**
 
-5. **`pool: flatten`** (one line). Watch `captures_by_type.hq` — if it leaves 0,
+6. **`pool: flatten`** (one line). Watch `captures_by_type.hq` — if it leaves 0,
    that is the answer to the biggest open question in the archive.
-6. **`gamma: 0.997` + `max_actions_per_turn: 25`** (two lines). Brings the
+7. **`gamma: 0.997` + `max_actions_per_turn: 25`** (two lines). Brings the
    terminal inside the horizon and shortens the episode at the same time.
-7. **Stage-relative LR anneal** (~40 lines, copy `EntropyScheduleCallback`).
+8. **Stage-relative LR anneal** (~40 lines, copy `EntropyScheduleCallback`).
    The other half of the bistability fix.
 
 **Then the plumbing that decides whether a run can ever finish:**
 
-8. **Within-stage best-checkpoint restore on regression** (~30 lines). Converts
+9. **Within-stage best-checkpoint restore on regression** (~30 lines). Converts
    the dominant stall mode into promotions using a checkpoint already on disk.
-9. **Retry-from-best on stall, and resume-from-stage-K** (~60 lines). Without
+10. **Retry-from-best on stall, and resume-from-stage-K** (~60 lines). Without
    it 108M steps of curriculum cannot be reached at ~6M steps per session, no
    matter what else is fixed.
-10. **Wilson lower bound in `PromotionCallback`** (~10 lines).
+11. **Wilson lower bound in `PromotionCallback`** (~10 lines).
 
 **Then hygiene:**
 
-11. Back-port the v49/v52a reward values into `configs/ppo/bootstrap.yaml`.
-12. Non-zero exit on stall in `train_bootstrap.py`.
-13. Port BC to `flat_discrete`, or retire it and delete the three configs.
-14. Seed the self-play wrapper's RNG off `np_random`; hold two policy objects
-    instead of swapping `state_dict`s per opponent action.
-15. Re-run any conclusion you intend to keep at **3 seeds**.
+12. Back-port the v49/v52a reward values into `configs/ppo/bootstrap.yaml`.
+13. Non-zero exit on stall in `train_bootstrap.py`.
+14. Port BC to `flat_discrete`, or retire it and delete the three configs.
+15. Fix the three self-play defects in 2.13 — opponent masks, the
+    `agent_player` write that lands on the wrapper, and `SubprocVecEnv`
+    returning no envs — before trusting any self-play result. Then seed the
+    wrapper's RNG off `np_random` and hold two policy objects instead of
+    swapping `state_dict`s per opponent action.
+16. Re-run any conclusion you intend to keep at **3 seeds**.
 
 ---
 
