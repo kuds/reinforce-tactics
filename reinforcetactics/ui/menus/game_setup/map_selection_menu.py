@@ -4,10 +4,18 @@ import os
 
 import pygame
 
+from reinforcetactics.ui import theme
+from reinforcetactics.ui.components.list_panel import ScrollList, draw_panel, split_panels
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
+
+# Split-panel proportions and row metrics for this screen.
+LIST_FRACTION = 0.4
+ITEM_HEIGHT = 60
+THUMBNAIL_SIZE = 45
+PREVIEW_SIZE = 300
 
 
 class MapSelectionMenu(Menu):
@@ -79,18 +87,37 @@ class MapSelectionMenu(Menu):
         """Preload map previews for better responsiveness."""
         for map_file in self.available_maps:
             if map_file != "random":
-                # Generate small thumbnail for the list at the exact size
-                # draw() uses (45px) -- a mismatched size defeats the preload
-                self.preview_generator.generate_preview(map_file, 45, 45)
-                # Generate larger preview (300x300) for detail panel
-                self.preview_generator.generate_preview(map_file, 300, 300)
+                # Generate the thumbnail at the exact size the list draws it;
+                # a mismatched size defeats the preload.
+                self.preview_generator.generate_preview(map_file, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+                # Generate the larger preview for the detail panel
+                self.preview_generator.generate_preview(map_file, PREVIEW_SIZE, PREVIEW_SIZE)
+
+    def _panels(self) -> tuple[pygame.Rect, pygame.Rect]:
+        """The list and detail panel rectangles for the current window."""
+        return split_panels(self.screen, LIST_FRACTION)
+
+    def _scroll_list(self) -> ScrollList:
+        """The list geometry, shared by hit-testing and drawing."""
+        left_panel, _ = self._panels()
+        return ScrollList(left_panel, ITEM_HEIGHT)
+
+    def _populate_option_rects(self) -> None:
+        """Populate option_rects for click detection matching the panel layout.
+
+        Without this override the base class's centred full-width rows were
+        used for the first frame's hit-testing, so an early click landed on
+        the wrong option (or on nothing at all).
+        """
+        scroll_list = self._scroll_list()
+        self.max_visible_options = scroll_list.capacity
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, len(self.options))
 
     def draw(self) -> None:
         """Draw the map selection menu with split-panel layout."""
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
         # Draw title
         if self.title:
@@ -98,143 +125,97 @@ class MapSelectionMenu(Menu):
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=20)
             self.screen.blit(title_surface, title_rect)
 
-        # Define split panel layout
-        panel_top = 80
-        panel_height = screen_height - panel_top - 20
+        left_panel, right_panel = self._panels()
+        draw_panel(self.screen, left_panel)
+        draw_panel(self.screen, right_panel)
 
-        # Left panel for map list (40% of width)
-        left_panel_width = int(screen_width * 0.4)
-        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
-
-        # Right panel for preview and details (60% of width)
-        right_panel_x = left_panel_width
-        right_panel_width = screen_width - left_panel_width - 10
-        right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
-
-        # Draw panel backgrounds
-        pygame.draw.rect(self.screen, (40, 40, 50), left_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (40, 40, 50), right_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), left_panel_rect, width=2, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), right_panel_rect, width=2, border_radius=8)
-
-        # Draw map list in left panel
-        self._draw_map_list(left_panel_rect)
-
-        # Draw preview and details in right panel
-        self._draw_preview_panel(right_panel_rect)
+        self._draw_map_list(left_panel)
+        self._draw_preview_panel(right_panel)
 
         pygame.display.flip()
 
     def _draw_map_list(self, panel_rect: pygame.Rect) -> None:
         """Draw the scrollable map list with thumbnails."""
-        self.option_rects = []
-
-        # Calculate visible area for scrolling
-        list_padding = 10
-        item_height = 60
-        list_y = panel_rect.y + list_padding
-        max_visible = (panel_rect.height - 2 * list_padding) // item_height
-
+        scroll_list = ScrollList(panel_rect, ITEM_HEIGHT)
         # Sync with base class so keyboard scrolling matches the visible count
-        self.max_visible_options = max_visible
+        self.max_visible_options = scroll_list.capacity
 
-        # Determine which items to show based on scroll
-        start_idx = self.scroll_offset
-        end_idx = min(start_idx + max_visible, len(self.options))
+        total = len(self.options)
+        start_idx, _ = scroll_list.visible_range(self.scroll_offset, total)
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, total)
 
-        for i in range(start_idx, end_idx):
-            display_idx = i - start_idx
+        text_font = get_font(theme.FONT_SIZE_SUBHEADING)
+
+        for display_idx, item_rect in enumerate(self.option_rects):
+            i = start_idx + display_idx
             text, _ = self.options[i]
-            # Get map file safely - the Back option is at the end and has no corresponding map
+            # The Back option sits at the end and has no corresponding map.
             map_file = self.available_maps[i] if i < len(self.available_maps) else None
 
-            # Calculate item position
-            item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(panel_rect.x + list_padding, item_y, panel_rect.width - 2 * list_padding, item_height - 5)
-
-            # Determine styling
             is_selected = i == self.selected_index
             is_hovered = i == self.hover_index
+            scroll_list.draw_row(self.screen, item_rect, selected=is_selected, hovered=is_hovered)
 
-            # Choose colors
             if is_selected:
-                bg_color = self.option_bg_selected_color
                 text_color = self.selected_color
             elif is_hovered:
-                bg_color = self.option_bg_hover_color
                 text_color = self.hover_color
             else:
-                bg_color = self.option_bg_color
                 text_color = self.text_color
 
-            # Draw background
-            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=5)
-            if is_selected or is_hovered:
-                border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
-
-            # Draw thumbnail if this is a map (not Back button) and not random
-            thumbnail_size = 45
             if map_file and map_file != "random":
-                thumbnail, _ = self.preview_generator.generate_preview(map_file, thumbnail_size, thumbnail_size)
+                thumbnail, _ = self.preview_generator.generate_preview(map_file, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
                 if thumbnail:
                     thumb_x = item_rect.x + 5
-                    thumb_y = item_rect.y + (item_rect.height - thumbnail_size) // 2
+                    thumb_y = item_rect.y + (item_rect.height - THUMBNAIL_SIZE) // 2
                     self.screen.blit(thumbnail, (thumb_x, thumb_y))
+                    thumb_rect = pygame.Rect(thumb_x, thumb_y, THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+                    pygame.draw.rect(self.screen, theme.FRAME_BORDER, thumb_rect, width=1)
 
-                    # Draw border around thumbnail
-                    thumb_rect = pygame.Rect(thumb_x, thumb_y, thumbnail_size, thumbnail_size)
-                    pygame.draw.rect(self.screen, (100, 100, 120), thumb_rect, width=1)
-
-            # Draw text with offset for thumbnail
-            text_x = item_rect.x + thumbnail_size + 15
-            text_font = get_font(28)
+            # Offset the label past the thumbnail column so every row's text
+            # starts on the same vertical line.
+            text_x = item_rect.x + THUMBNAIL_SIZE + 15
             text_surface = text_font.render(text, True, text_color)
             text_rect = text_surface.get_rect(midleft=(text_x, item_rect.centery))
             self.screen.blit(text_surface, text_rect)
 
-            # Store rect for click detection
-            # Note: These rects are stored in display order (0 to visible items)
-            # The base Menu class handles mapping these to actual option indices
-            self.option_rects.append(item_rect)
+        scroll_list.draw_scroll_indicators(self.screen, self.scroll_offset, total)
 
     def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
         """Draw the preview and details panel."""
         # Get currently selected/hovered map
         active_index = self.hover_index if self.hover_index >= 0 else self.selected_index
 
+        placeholder_font = get_font(theme.FONT_SIZE_HEADING)
         if active_index < 0 or active_index >= len(self.available_maps):
-            # Draw placeholder
-            font = get_font(32)
-            text = font.render("Select a map to preview", True, (150, 150, 150))
-            text_rect = text.get_rect(center=panel_rect.center)
-            self.screen.blit(text, text_rect)
+            ScrollList.draw_empty_hint(self.screen, panel_rect, "Select a map to preview", placeholder_font)
             return
 
         map_file = self.available_maps[active_index]
 
-        # Generate preview and get metadata
-        preview_size = 300
-        preview, metadata = self.preview_generator.generate_preview(map_file, preview_size, preview_size)
+        preview, metadata = self.preview_generator.generate_preview(map_file, PREVIEW_SIZE, PREVIEW_SIZE)
 
         if not preview or not metadata:
+            # "Random Map" has nothing to render; say so rather than leaving
+            # the panel blank.
+            ScrollList.draw_empty_hint(self.screen, panel_rect, "No preview available", placeholder_font)
             return
 
         # Draw preview image
-        preview_x = panel_rect.x + (panel_rect.width - preview_size) // 2
+        preview_x = panel_rect.x + (panel_rect.width - PREVIEW_SIZE) // 2
         preview_y = panel_rect.y + 20
         self.screen.blit(preview, (preview_x, preview_y))
 
         # Draw border around preview
-        preview_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-        pygame.draw.rect(self.screen, (100, 100, 120), preview_rect, width=2)
+        preview_rect = pygame.Rect(preview_x, preview_y, PREVIEW_SIZE, PREVIEW_SIZE)
+        pygame.draw.rect(self.screen, theme.FRAME_BORDER, preview_rect, width=theme.BORDER_WIDTH_HOVER)
 
         # Draw metadata below preview
-        info_y = preview_y + preview_size + 20
+        info_y = preview_y + PREVIEW_SIZE + 20
         info_x = panel_rect.x + 20
 
-        info_font = get_font(28)
-        label_font = get_font(24)
+        info_font = get_font(theme.FONT_SIZE_SUBHEADING)
+        label_font = get_font(theme.FONT_SIZE_BODY)
 
         # Map name
         name_surface = info_font.render(metadata["name"], True, self.title_color)

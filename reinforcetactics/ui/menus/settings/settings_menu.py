@@ -4,7 +4,7 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.base import Menu, drain_events
 from reinforcetactics.ui.menus.settings.api_keys_menu import APIKeysMenu
 from reinforcetactics.ui.menus.settings.graphics_menu import GraphicsMenu
 from reinforcetactics.ui.menus.settings.language_menu import LanguageMenu
@@ -71,61 +71,27 @@ class SettingsMenu(Menu):
         """Open API keys configuration menu."""
         return "api_keys_menu"
 
-    def run(self) -> Any | None:
-        """
-        Run the settings menu loop with submenu handling.
+    # Sentinel returned by an option -> sub-menu class to open for it.
+    _SUBMENUS = {
+        "language_menu": LanguageMenu,
+        "graphics_menu": GraphicsMenu,
+        "units_menu": UnitsMenu,
+        "api_keys_menu": APIKeysMenu,
+    }
 
-        Returns:
-            Result from selected option, or None
-        """
-        result = None
-        clock = pygame.time.Clock()
+    def _on_result(self, result: Any) -> tuple[bool, Any]:
+        """Open the requested sub-menu (or absorb a toggle) and stay put."""
+        if result == "toggled":
+            return False, None
 
-        # Populate option_rects before event loop for click detection
-        self._populate_option_rects()
+        submenu_cls = self._SUBMENUS.get(result)
+        if submenu_cls is None:
+            # Anything else (e.g. Back) is the caller's answer.
+            return True, result
 
-        # Clear any residual events AFTER option_rects are populated
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    return None
-
-                result = self.handle_input(event)
-                if result is not None:
-                    # Handle toggled settings (stay in menu)
-                    if result == "toggled":
-                        self._populate_option_rects()
-                    # Handle submenu navigation
-                    elif result == "language_menu":
-                        language_menu = LanguageMenu(self.screen)
-                        language_menu.run()
-                        pygame.event.clear()
-                        # Refresh options with new language strings
-                        self._refresh_options()
-                        self._populate_option_rects()
-                    elif result == "graphics_menu":
-                        graphics_menu = GraphicsMenu(self.screen)
-                        graphics_menu.run()
-                        pygame.event.clear()
-                        # Continue in settings menu
-                    elif result == "units_menu":
-                        units_menu = UnitsMenu(self.screen)
-                        units_menu.run()
-                        pygame.event.clear()
-                        # Continue in settings menu
-                    elif result == "api_keys_menu":
-                        api_keys_menu = APIKeysMenu(self.screen)
-                        api_keys_menu.run()
-                        pygame.event.clear()
-                        # Continue in settings menu
-                    else:
-                        # For other results (like None from Back button), exit
-                        return result
-
-            self.draw()
-            clock.tick(30)
-
-        return result
+        submenu_cls(self.screen).run()
+        drain_events()
+        if result == "language_menu":
+            # Rebuild with the newly selected language's strings.
+            self._refresh_options()
+        return False, None

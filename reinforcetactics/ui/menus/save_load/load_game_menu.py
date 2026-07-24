@@ -7,13 +7,19 @@ from typing import Any
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS
+from reinforcetactics.ui import theme
+from reinforcetactics.ui.components.list_panel import ScrollList, draw_panel, split_panels
 from reinforcetactics.ui.components.map_preview import get_tile_color
-from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.menus.in_game.confirmation_dialog import ConfirmationDialog
 from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
+from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
+
+# Split-panel proportions and row metrics for this screen.
+LIST_FRACTION = 0.55
+ITEM_HEIGHT = 50
 
 
 class LoadGameMenu(Menu):
@@ -212,35 +218,20 @@ class LoadGameMenu(Menu):
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
+    def _panels(self) -> tuple[pygame.Rect, pygame.Rect]:
+        """The list and detail panel rectangles for the current window."""
+        return split_panels(self.screen, LIST_FRACTION)
+
+    def _scroll_list(self) -> ScrollList:
+        """The list geometry, shared by hit-testing and drawing."""
+        left_panel, _ = self._panels()
+        return ScrollList(left_panel, ITEM_HEIGHT)
+
     def _populate_option_rects(self) -> None:
         """Populate option_rects for click detection matching split-panel layout."""
-        screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
-
-        # Must match the layout in draw() and _draw_save_list()
-        panel_top = 80
-        panel_height = screen_height - panel_top - 20
-        left_panel_width = int(screen_width * 0.55)
-        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
-
-        # Calculate visible area for scrolling (same as _draw_save_list)
-        list_padding = 10
-        item_height = 50
-        list_y = left_panel_rect.y + list_padding
-        max_visible = (left_panel_rect.height - 2 * list_padding) // item_height
-
-        # Determine which items to show based on scroll
-        start_idx = self.scroll_offset
-        end_idx = min(start_idx + max_visible, len(self.options))
-
-        self.option_rects = []
-        for i in range(start_idx, end_idx):
-            display_idx = i - start_idx
-            item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(
-                left_panel_rect.x + list_padding, item_y, left_panel_rect.width - 2 * list_padding, item_height - 5
-            )
-            self.option_rects.append(item_rect)
+        scroll_list = self._scroll_list()
+        self.max_visible_options = scroll_list.capacity
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, len(self.options))
 
     def _generate_save_map_preview(self, filepath: str, width: int, height: int) -> pygame.Surface | None:
         """Generate a map preview from save's tile data."""
@@ -260,7 +251,7 @@ class LoadGameMenu(Menu):
         try:
             # Create preview surface
             preview = pygame.Surface((width, height))
-            preview.fill((30, 30, 40))
+            preview.fill(theme.BG)
 
             # Calculate tile size
             tile_width = width / map_width
@@ -298,7 +289,7 @@ class LoadGameMenu(Menu):
                 unit_color = PLAYER_COLORS.get(player, (255, 255, 255))
                 pygame.draw.circle(preview, unit_color, (center_x, center_y), radius)
                 # Add a small dark outline
-                pygame.draw.circle(preview, (20, 20, 20), (center_x, center_y), radius, 1)
+                pygame.draw.circle(preview, theme.PREVIEW_UNIT_OUTLINE, (center_x, center_y), radius, 1)
 
             self._preview_cache[cache_key] = preview
             return preview
@@ -311,7 +302,6 @@ class LoadGameMenu(Menu):
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
         # Draw title
         if self.title:
@@ -319,107 +309,51 @@ class LoadGameMenu(Menu):
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=20)
             self.screen.blit(title_surface, title_rect)
 
-        # Define split panel layout
-        panel_top = 80
-        panel_height = screen_height - panel_top - 20
+        left_panel, right_panel = self._panels()
+        draw_panel(self.screen, left_panel)
+        draw_panel(self.screen, right_panel)
 
-        # Left panel for save list (55% of width)
-        left_panel_width = int(screen_width * 0.55)
-        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
-
-        # Right panel for preview and details (45% of width)
-        right_panel_x = left_panel_width
-        right_panel_width = screen_width - left_panel_width - 10
-        right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
-
-        # Draw panel backgrounds
-        pygame.draw.rect(self.screen, (40, 40, 50), left_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (40, 40, 50), right_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), left_panel_rect, width=2, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), right_panel_rect, width=2, border_radius=8)
-
-        # Draw save list in left panel
-        self._draw_save_list(left_panel_rect)
-
-        # Draw preview and details in right panel
-        self._draw_preview_panel(right_panel_rect)
+        self._draw_save_list(left_panel)
+        self._draw_preview_panel(right_panel)
 
         pygame.display.flip()
 
     def _draw_save_list(self, panel_rect: pygame.Rect) -> None:
         """Draw the scrollable save list."""
-        self.option_rects = []
-
-        # Calculate visible area for scrolling
-        list_padding = 10
-        item_height = 50
-        list_y = panel_rect.y + list_padding
-        max_visible = (panel_rect.height - 2 * list_padding) // item_height
-
+        scroll_list = ScrollList(panel_rect, ITEM_HEIGHT)
         # Sync with base class so keyboard scrolling and mouse-wheel bounds
-        # match the visible count (same as ReplaySelectionMenu)
-        self.max_visible_options = max_visible
+        # match the visible count.
+        self.max_visible_options = scroll_list.capacity
 
-        # Determine which items to show based on scroll
-        start_idx = self.scroll_offset
-        end_idx = min(start_idx + max_visible, len(self.options))
+        total = len(self.options)
+        start_idx, _ = scroll_list.visible_range(self.scroll_offset, total)
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, total)
 
-        for i in range(start_idx, end_idx):
-            display_idx = i - start_idx
+        text_font = get_font(theme.FONT_SIZE_BODY)
+
+        for display_idx, item_rect in enumerate(self.option_rects):
+            i = start_idx + display_idx
             text, _ = self.options[i]
 
-            # Calculate item position
-            item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(panel_rect.x + list_padding, item_y, panel_rect.width - 2 * list_padding, item_height - 5)
-
-            # Determine styling
             is_selected = i == self.selected_index
             is_hovered = i == self.hover_index
+            scroll_list.draw_row(self.screen, item_rect, selected=is_selected, hovered=is_hovered)
 
-            # Choose colors
             if is_selected:
-                bg_color = self.option_bg_selected_color
                 text_color = self.selected_color
             elif is_hovered:
-                bg_color = self.option_bg_hover_color
                 text_color = self.hover_color
             else:
-                bg_color = self.option_bg_color
                 text_color = self.text_color
 
-            # Draw background
-            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=5)
-            if is_selected or is_hovered:
-                border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=5)
-
-            # Draw text
-            text_font = get_font(24)
-            text_surface = text_font.render(text, True, text_color)
+            # Ellipsize rather than hard-clipping: a chopped glyph reads as a
+            # rendering glitch, "..." reads as "there is more".
+            label = ellipsize(text, text_font, item_rect.width - 20)
+            text_surface = text_font.render(label, True, text_color)
             text_rect = text_surface.get_rect(midleft=(item_rect.x + 10, item_rect.centery))
-
-            # Clip text if too long
-            if text_rect.width > item_rect.width - 20:
-                clip_rect = pygame.Rect(0, 0, item_rect.width - 20, text_rect.height)
-                text_surface = text_surface.subsurface(clip_rect)
-                text_rect = text_surface.get_rect(midleft=(item_rect.x + 10, item_rect.centery))
-
             self.screen.blit(text_surface, text_rect)
 
-            # Store rect for click detection
-            self.option_rects.append(item_rect)
-
-        # Draw scroll indicators if needed
-        if len(self.options) > max_visible:
-            if self.scroll_offset > 0:
-                up_icon = get_arrow_up_icon(size=16, color=self.hover_color)
-                up_rect = up_icon.get_rect(centerx=panel_rect.centerx, y=panel_rect.y + 2)
-                self.screen.blit(up_icon, up_rect)
-
-            if end_idx < len(self.options):
-                down_icon = get_arrow_down_icon(size=16, color=self.hover_color)
-                down_rect = down_icon.get_rect(centerx=panel_rect.centerx, bottom=panel_rect.bottom - 2)
-                self.screen.blit(down_icon, down_rect)
+        scroll_list.draw_scroll_indicators(self.screen, self.scroll_offset, total)
 
     def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
         """Draw the preview and details panel."""
@@ -428,10 +362,8 @@ class LoadGameMenu(Menu):
 
         if active_index < 0 or active_index >= len(self.save_files):
             # Draw placeholder
-            font = get_font(28)
-            text = font.render("Select a save to preview", True, (150, 150, 150))
-            text_rect = text.get_rect(center=panel_rect.center)
-            self.screen.blit(text, text_rect)
+            font = get_font(theme.FONT_SIZE_SUBHEADING)
+            ScrollList.draw_empty_hint(self.screen, panel_rect, "Select a save to preview", font)
             return
 
         filepath = self.save_files[active_index]
@@ -447,15 +379,15 @@ class LoadGameMenu(Menu):
         if preview:
             self.screen.blit(preview, (preview_x, preview_y))
             preview_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, (100, 100, 120), preview_rect, width=2)
+            pygame.draw.rect(self.screen, theme.FRAME_BORDER, preview_rect, width=theme.BORDER_WIDTH_HOVER)
         else:
             # Draw placeholder for missing preview
             placeholder_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, (50, 50, 60), placeholder_rect)
-            pygame.draw.rect(self.screen, (100, 100, 120), placeholder_rect, width=2)
+            pygame.draw.rect(self.screen, theme.PLACEHOLDER_BG, placeholder_rect)
+            pygame.draw.rect(self.screen, theme.FRAME_BORDER, placeholder_rect, width=theme.BORDER_WIDTH_HOVER)
 
-            placeholder_font = get_font(24)
-            placeholder_text = placeholder_font.render("No Preview", True, (120, 120, 120))
+            placeholder_font = get_font(theme.FONT_SIZE_BODY)
+            placeholder_text = placeholder_font.render("No Preview", True, theme.TEXT_PLACEHOLDER)
             placeholder_text_rect = placeholder_text.get_rect(center=placeholder_rect.center)
             self.screen.blit(placeholder_text, placeholder_text_rect)
 
@@ -465,16 +397,16 @@ class LoadGameMenu(Menu):
         line_spacing = 26
 
         # Title: Map Name
-        title_font = get_font(24)
+        title_font = get_font(theme.FONT_SIZE_BODY)
         map_name = metadata.get("map_name", "Unknown Map")
         title_surface = title_font.render(map_name, True, self.title_color)
         self.screen.blit(title_surface, (info_x, info_y))
         info_y += 32
 
         # Info lines
-        info_font = get_font(20)
-        label_color = (180, 180, 180)
-        value_color = (255, 255, 255)
+        info_font = get_font(theme.FONT_SIZE_LABEL)
+        label_color = theme.TEXT_INSTRUCTION
+        value_color = theme.TEXT
 
         # Game status
         lang = get_language()
@@ -486,7 +418,7 @@ class LoadGameMenu(Menu):
 
         if game_over:
             status_text = lang.get("load_game.status_completed", "Completed")
-            status_color = (255, 100, 100)
+            status_color = theme.STATUS_INVALID
             status_value = info_font.render(status_text, True, status_color)
             self.screen.blit(status_value, (info_x + status_label.get_width(), info_y))
             info_y += line_spacing
@@ -497,12 +429,12 @@ class LoadGameMenu(Menu):
                 self.screen.blit(winner_label, (info_x, info_y))
                 self.screen.blit(winner_value, (info_x + winner_label.get_width(), info_y))
             else:
-                draw_text = info_font.render("Draw", True, (200, 200, 100))
+                draw_text = info_font.render("Draw", True, theme.RESULT_DRAW)
                 self.screen.blit(draw_text, (info_x, info_y))
             info_y += line_spacing
         else:
             status_text = lang.get("load_game.status_in_progress", "In Progress")
-            status_color = (100, 255, 100)
+            status_color = theme.STATUS_VALID
             status_value = info_font.render(status_text, True, status_color)
             self.screen.blit(status_value, (info_x + status_label.get_width(), info_y))
             info_y += line_spacing
@@ -528,7 +460,7 @@ class LoadGameMenu(Menu):
 
         # Draw separator
         info_y += 5
-        pygame.draw.line(self.screen, (80, 80, 100), (info_x, info_y), (panel_rect.right - 20, info_y), 1)
+        pygame.draw.line(self.screen, theme.PANEL_BORDER, (info_x, info_y), (panel_rect.right - 20, info_y), 1)
         info_y += 10
 
         # Player info with units and gold
@@ -537,7 +469,7 @@ class LoadGameMenu(Menu):
         unit_types_per_player = metadata.get("unit_types_per_player", {})
 
         for player_num in range(1, num_players + 1):
-            player_color = PLAYER_COLORS.get(player_num, (200, 200, 200))
+            player_color = PLAYER_COLORS.get(player_num, theme.TEXT_NEUTRAL)
 
             # Player header
             player_name = metadata.get(f"player{player_num}", f"Player {player_num}")
@@ -550,7 +482,7 @@ class LoadGameMenu(Menu):
             # Gold
             gold = player_gold.get(player_num, 0)
             gold_label = info_font.render("  Gold: ", True, label_color)
-            gold_value = info_font.render(f"{gold}", True, (255, 215, 0))  # Gold color
+            gold_value = info_font.render(f"{gold}", True, theme.HUD_GOLD_TEXT)
             self.screen.blit(gold_label, (info_x, info_y))
             self.screen.blit(gold_value, (info_x + gold_label.get_width(), info_y))
             info_y += line_spacing
@@ -567,19 +499,19 @@ class LoadGameMenu(Menu):
             # Unit type breakdown on same line
             if unit_types:
                 bx = info_x + units_label.get_width() + units_value.get_width() + 10
-                small_font = get_font(16)
+                small_font = get_font(theme.FONT_SIZE_CAPTION)
                 breakdown_parts = []
                 for utype, count in sorted(unit_types.items()):
                     breakdown_parts.append(f"{count}{utype}")
                 breakdown_text = " ".join(breakdown_parts)
-                breakdown_surf = small_font.render(f"({breakdown_text})", True, (140, 140, 140))
+                breakdown_surf = small_font.render(f"({breakdown_text})", True, theme.TEXT_SUBTLE)
                 self.screen.blit(breakdown_surf, (bx, info_y + 2))
 
             info_y += line_spacing
 
         # Draw separator before date
         info_y += 5
-        pygame.draw.line(self.screen, (80, 80, 100), (info_x, info_y), (panel_rect.right - 20, info_y), 1)
+        pygame.draw.line(self.screen, theme.PANEL_BORDER, (info_x, info_y), (panel_rect.right - 20, info_y), 1)
         info_y += 10
 
         # Date

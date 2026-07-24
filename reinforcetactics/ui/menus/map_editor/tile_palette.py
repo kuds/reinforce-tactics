@@ -3,6 +3,7 @@
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
@@ -42,10 +43,10 @@ class TilePalette:
         self.tile_font = get_font(14)
 
         # Colors
-        self.bg_color = (40, 40, 50)
-        self.border_color = (100, 100, 120)
-        self.selected_color = (255, 200, 50)
-        self.text_color = (255, 255, 255)
+        self.bg_color = theme.PANEL_BG
+        self.border_color = theme.FRAME_BORDER
+        self.selected_color = theme.SELECTED
+        self.text_color = theme.TEXT
 
         # Layout
         self.tile_size = 30
@@ -163,7 +164,7 @@ class TilePalette:
             pygame.draw.rect(screen, tile_color, tile_rect)
 
             # Draw border
-            border_color = self.selected_color if is_selected else (80, 80, 80)
+            border_color = self.selected_color if is_selected else theme.SWATCH_BORDER
             border_width = 3 if is_selected else 1
             pygame.draw.rect(screen, border_color, tile_rect, width=border_width)
 
@@ -222,7 +223,7 @@ class TilePalette:
             pygame.draw.rect(screen, tile_color, tile_rect)
 
             # Draw border
-            border_color = self.selected_color if is_selected else (80, 80, 80)
+            border_color = self.selected_color if is_selected else theme.SWATCH_BORDER
             border_width = 3 if is_selected else 1
             pygame.draw.rect(screen, border_color, tile_rect, width=border_width)
 
@@ -263,18 +264,18 @@ class TilePalette:
         button_rect = pygame.Rect(current_x, current_y, button_size, button_size)
 
         # Neutral color (gray)
-        neutral_color = (150, 150, 150)
+        neutral_color = theme.TEXT_PLACEHOLDER
         pygame.draw.rect(screen, neutral_color, button_rect)
 
         # Draw border
-        border_color = self.selected_color if is_selected else (80, 80, 80)
+        border_color = self.selected_color if is_selected else theme.SWATCH_BORDER
         border_width = 3 if is_selected else 1
         pygame.draw.rect(screen, border_color, button_rect, width=border_width)
 
         # Draw "N" for Neutral
         neutral_label = lang.get("map_editor.tile_palette.neutral", "Neutral")
         neutral_text = neutral_label[0] if neutral_label else "N"  # First letter, fallback to 'N'
-        num_surface = self.tile_font.render(neutral_text, True, (0, 0, 0))
+        num_surface = self.tile_font.render(neutral_text, True, theme.SWATCH_LABEL)
         num_rect = num_surface.get_rect(center=button_rect.center)
         screen.blit(num_surface, num_rect)
 
@@ -291,16 +292,16 @@ class TilePalette:
             button_rect = pygame.Rect(current_x, current_y, button_size, button_size)
 
             # Draw button with player color
-            player_color = PLAYER_COLORS.get(player_num, (200, 200, 200))
+            player_color = PLAYER_COLORS.get(player_num, theme.TEXT_NEUTRAL)
             pygame.draw.rect(screen, player_color, button_rect)
 
             # Draw border
-            border_color = self.selected_color if is_selected else (80, 80, 80)
+            border_color = self.selected_color if is_selected else theme.SWATCH_BORDER
             border_width = 3 if is_selected else 1
             pygame.draw.rect(screen, border_color, button_rect, width=border_width)
 
             # Draw player number
-            num_surface = self.tile_font.render(str(player_num), True, (0, 0, 0))
+            num_surface = self.tile_font.render(str(player_num), True, theme.SWATCH_LABEL)
             num_rect = num_surface.get_rect(center=button_rect.center)
             screen.blit(num_surface, num_rect)
 

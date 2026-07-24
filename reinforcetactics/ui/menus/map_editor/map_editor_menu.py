@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pygame
 
-from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.base import Menu, drain_events
 from reinforcetactics.ui.menus.game_setup.map_selection_menu import MapSelectionMenu
 from reinforcetactics.ui.menus.map_editor.map_editor import MapEditor
 from reinforcetactics.ui.menus.map_editor.new_map_dialog import NewMapDialog
@@ -45,7 +45,7 @@ class MapEditorMenu(Menu):
         # Show new map dialog
         dialog = NewMapDialog(self.screen)
         result = dialog.run()
-        pygame.event.clear()
+        drain_events()
 
         if not result:
             return None  # User cancelled
@@ -79,7 +79,7 @@ class MapEditorMenu(Menu):
             num_players,
         )
         editor_result = editor.run()
-        pygame.event.clear()
+        drain_events()
 
         return editor_result
 
@@ -93,13 +93,13 @@ class MapEditorMenu(Menu):
         # Show map selection for 1v1 maps
         map_menu_1v1 = MapSelectionMenu(self.screen, game_mode="1v1")
         selected_map = map_menu_1v1.run()
-        pygame.event.clear()
+        drain_events()
 
         if not selected_map:
             # Try 2v2 maps if user cancelled 1v1
             map_menu_2v2 = MapSelectionMenu(self.screen, game_mode="2v2")
             selected_map = map_menu_2v2.run()
-            pygame.event.clear()
+            drain_events()
 
         if not selected_map or selected_map == "random":
             return None  # User cancelled or selected random
@@ -116,7 +116,7 @@ class MapEditorMenu(Menu):
         # Launch editor
         editor = MapEditor(self.screen, map_data, selected_map, num_players)
         editor_result = editor.run()
-        pygame.event.clear()
+        drain_events()
 
         return editor_result
 
@@ -152,26 +152,4 @@ class MapEditorMenu(Menu):
         Returns:
             Result dict or None
         """
-        result = None
-        clock = pygame.time.Clock()
-
-        # Populate option_rects before event loop for click detection
-        self._populate_option_rects()
-
-        # Clear any residual events AFTER option_rects are populated
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    return None
-
-                result = self.handle_input(event)
-                if result is not None:
-                    return result
-
-            self.draw()
-            clock.tick(30)
-
-        return result
+        return super().run()

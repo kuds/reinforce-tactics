@@ -6,6 +6,7 @@ from typing import Any
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.widgets import TextInput
 from reinforcetactics.utils.language import get_language
@@ -88,7 +89,7 @@ class SaveGameMenu(Menu):
         # Draw instructions
         lang = get_language()
         instructions = lang.get("save_game.instructions", "Press ENTER to save, ESC to cancel")
-        inst_surface = self.option_font.render(instructions, True, (150, 150, 150))
+        inst_surface = self.option_font.render(instructions, True, theme.TEXT_PLACEHOLDER)
         inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=screen_height // 2 + 50)
         self.screen.blit(inst_surface, inst_rect)
 

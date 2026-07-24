@@ -4,6 +4,7 @@ import pandas as pd
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
+from reinforcetactics.ui import theme
 from reinforcetactics.utils.fonts import get_font
 
 
@@ -38,9 +39,9 @@ class EditorCanvas:
         self.is_painting = False
 
         # Colors
-        self.bg_color = (30, 30, 40)
-        self.grid_color = (60, 60, 70)
-        self.highlight_color = (255, 255, 0)
+        self.bg_color = theme.BG
+        self.grid_color = theme.EDITOR_GRID
+        self.highlight_color = theme.OVERLAY_MOVEMENT_BORDER
         self.hover_color = (255, 255, 255, 100)
 
         # Fonts
@@ -177,7 +178,7 @@ class EditorCanvas:
             self._draw_coordinates(screen)
 
         # Draw border
-        pygame.draw.rect(screen, (100, 100, 120), bg_rect, width=2)
+        pygame.draw.rect(screen, theme.FRAME_BORDER, bg_rect, width=theme.BORDER_WIDTH_HOVER)
 
     def _draw_tiles(self, screen: pygame.Surface) -> None:
         """
@@ -285,11 +286,11 @@ class EditorCanvas:
 
         tile_x, tile_y = self.hover_tile
         coord_text = f"X: {tile_x}, Y: {tile_y}"
-        coord_surface = self.coord_font.render(coord_text, True, (255, 255, 255))
+        coord_surface = self.coord_font.render(coord_text, True, theme.TEXT)
 
         # Draw with background
         coord_rect = coord_surface.get_rect(x=self.x + 10, y=self.y + self.height - 30)
         bg_rect = coord_rect.inflate(10, 5)
-        pygame.draw.rect(screen, (40, 40, 50), bg_rect)
-        pygame.draw.rect(screen, (100, 100, 120), bg_rect, width=1)
+        pygame.draw.rect(screen, theme.PANEL_BG, bg_rect)
+        pygame.draw.rect(screen, theme.FRAME_BORDER, bg_rect, width=1)
         screen.blit(coord_surface, coord_rect)

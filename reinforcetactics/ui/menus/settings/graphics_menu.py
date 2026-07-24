@@ -2,6 +2,7 @@
 
 import pygame
 
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.widgets import TextInput
 from reinforcetactics.utils.fonts import get_font
@@ -192,7 +193,7 @@ class GraphicsMenu(Menu):
         self.screen.blit(title_surface, title_rect)
 
         # Draw instructions
-        instructions_font = get_font(24)
+        instructions_font = get_font(theme.FONT_SIZE_BODY)
         instructions = [
             lang.get("graphics.path_hint", "Enter the path to your sprites folder"),
             lang.get("graphics.path_example", "Example: images/sprites/units"),
@@ -203,7 +204,7 @@ class GraphicsMenu(Menu):
 
         y_offset = 120
         for instruction in instructions:
-            inst_surface = instructions_font.render(instruction, True, (180, 180, 180))
+            inst_surface = instructions_font.render(instruction, True, theme.TEXT_INSTRUCTION)
             inst_rect = inst_surface.get_rect(centerx=screen_width // 2, y=y_offset)
             self.screen.blit(inst_surface, inst_rect)
             y_offset += 30
@@ -217,35 +218,12 @@ class GraphicsMenu(Menu):
             input_box_width,
             input_box_height,
         )
-        self.path_input.draw(self.screen, input_box, get_font(28))
+        self.path_input.draw(self.screen, input_box, get_font(theme.FONT_SIZE_SUBHEADING))
 
         pygame.display.flip()
 
-    def run(self) -> str | None:
-        """Run the graphics menu loop."""
-        result = None
-        clock = pygame.time.Clock()
-
-        self._populate_option_rects()
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    return None
-
-                result = self.handle_input(event)
-                if result is not None:
-                    # Handle special results
-                    if result in ("toggled", "saved", "cancelled", "editing"):
-                        # Stay in menu, refresh display
-                        self._populate_option_rects()
-                        result = None
-                    else:
-                        return result
-
-            self.draw()
-            clock.tick(30)
-
-        return result
+    def _on_result(self, result: str) -> tuple[bool, str | None]:
+        """Absorb toggles and path-editing transitions; stay in the menu."""
+        if result in ("toggled", "saved", "cancelled", "editing"):
+            return False, None
+        return True, result

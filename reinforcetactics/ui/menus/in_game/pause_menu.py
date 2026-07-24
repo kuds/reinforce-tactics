@@ -4,7 +4,7 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.base import Menu, drain_events
 from reinforcetactics.utils.language import get_language
 
 
@@ -37,6 +37,39 @@ class PauseMenu(Menu):
         self.add_option(lang.get("pause.main_menu", "Main Menu"), lambda: "main_menu")
         self.add_option(lang.get("pause.quit", "Quit"), lambda: "quit")
 
+    def _on_quit_event(self) -> tuple[bool, str]:
+        """Window close button -> treat as a quit request."""
+        return True, self._handle_quit_option()
+
+    def _on_result(self, result: str) -> tuple[bool, str | None]:
+        """Resolve a pause-menu option, opening sub-menus/dialogs inline."""
+        if result == "resume":
+            return True, "resume"
+
+        if result == "save":
+            self._handle_save_option()
+            return False, None
+
+        if result == "settings":
+            self._handle_settings_option()
+            return False, None
+
+        if result == "main_menu":
+            if self._handle_main_menu_option():
+                return True, "main_menu"
+            # Cancelled -> the dialog's ESC must not also close the pause menu.
+            self.running = True
+            return False, None
+
+        if result == "quit":
+            quit_result = self._handle_quit_option()
+            if quit_result in ("save_quit", "quit"):
+                return True, quit_result
+            self.running = True
+            return False, None
+
+        return False, None
+
     def run(self) -> str:
         """
         Run the pause menu loop with sub-menu handling.
@@ -47,53 +80,9 @@ class PauseMenu(Menu):
             'save_quit' - Player wants to save and then quit the application
             'quit'      - Player wants to quit without saving
         """
-        clock = pygame.time.Clock()
-
-        self._populate_option_rects()
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    # Window close button -> treat as quit request
-                    return self._handle_quit_option()
-
-                result = self.handle_input(event)
-                if result is not None:
-                    if result == "resume":
-                        return "resume"
-
-                    elif result == "save":
-                        self._handle_save_option()
-                        # Stay in pause menu after saving
-                        self._populate_option_rects()
-
-                    elif result == "settings":
-                        self._handle_settings_option()
-                        # Stay in pause menu after settings
-                        self._populate_option_rects()
-
-                    elif result == "main_menu":
-                        confirmed = self._handle_main_menu_option()
-                        if confirmed:
-                            return "main_menu"
-                        # User cancelled -> stay in pause menu
-                        self.running = True
-                        self._populate_option_rects()
-
-                    elif result == "quit":
-                        quit_result = self._handle_quit_option()
-                        if quit_result in ("save_quit", "quit"):
-                            return quit_result
-                        # 'cancel' -> stay in pause menu
-                        self.running = True
-                        self._populate_option_rects()
-
-            self.draw()
-            clock.tick(30)
-
+        result = super().run()
         # Loop exited via ESC (base class sets self.running = False)
-        return "resume"
+        return result if result else "resume"
 
     def _handle_save_option(self) -> None:
         """Open the SaveGameMenu as a sub-menu."""
@@ -101,7 +90,7 @@ class PauseMenu(Menu):
 
         save_menu = SaveGameMenu(self.game, self.screen)
         save_result = save_menu.run()
-        pygame.event.clear()
+        drain_events()
 
         if save_result:
             print(f"Game saved to {save_result}")
@@ -112,7 +101,7 @@ class PauseMenu(Menu):
 
         settings_menu = SettingsMenu(self.screen)
         settings_menu.run()
-        pygame.event.clear()
+        drain_events()
 
     def _handle_main_menu_option(self) -> bool:
         """
@@ -132,7 +121,7 @@ class PauseMenu(Menu):
             cancel_text=lang.get("common.cancel", "Cancel"),
         )
         confirmed = dialog.run()
-        pygame.event.clear()
+        drain_events()
         return confirmed
 
     def _handle_quit_option(self) -> str:
@@ -146,5 +135,5 @@ class PauseMenu(Menu):
 
         dialog = QuitConfirmDialog(self.screen)
         quit_result = dialog.run()
-        pygame.event.clear()
+        drain_events()
         return quit_result

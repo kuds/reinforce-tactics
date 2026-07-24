@@ -22,6 +22,9 @@ TRANSLATIONS = {
         "main_menu.credits": "Credits",
         "main_menu.settings": "Settings",
         "main_menu.quit": "Quit",
+        "main_menu.menu_hint": "Arrows: Move   Enter: Select   Esc: Quit",
+        "main_menu.quit_confirm_title": "Quit Reinforce Tactics",
+        "main_menu.quit_confirm_msg": "Close the game?",
         # Settings Menu
         "settings_title": "SETTINGS",
         "settings_language": "Language",
@@ -93,6 +96,7 @@ TRANSLATIONS = {
         "game_over.main_menu": "Main Menu",
         "game_over.quit": "Quit",
         # Common
+        "common.menu_hint": "Arrows: Move   Enter: Select   Esc: Back",
         "common.back": "Back",
         "common.confirm": "Confirm",
         "common.cancel": "Cancel",
@@ -189,6 +193,9 @@ TRANSLATIONS = {
         "main_menu.credits": "Crédits",
         "main_menu.settings": "Paramètres",
         "main_menu.quit": "Quitter",
+        "main_menu.menu_hint": "Flèches : Naviguer   Entrée : Sélectionner   Échap : Quitter",
+        "main_menu.quit_confirm_title": "Quitter Reinforce Tactics",
+        "main_menu.quit_confirm_msg": "Fermer le jeu ?",
         # Settings Menu
         "settings_title": "PARAMÈTRES",
         "settings_language": "Langue",
@@ -260,6 +267,7 @@ TRANSLATIONS = {
         "game_over.main_menu": "Menu Principal",
         "game_over.quit": "Quitter",
         # Common
+        "common.menu_hint": "Flèches : Naviguer   Entrée : Sélectionner   Échap : Retour",
         "common.back": "Retour",
         "common.confirm": "Confirmer",
         "common.cancel": "Annuler",
@@ -356,6 +364,9 @@ TRANSLATIONS = {
         "main_menu.credits": "크레딧",
         "main_menu.settings": "설정",
         "main_menu.quit": "종료",
+        "main_menu.menu_hint": "방향키: 이동   Enter: 선택   Esc: 종료",
+        "main_menu.quit_confirm_title": "Reinforce Tactics 종료",
+        "main_menu.quit_confirm_msg": "게임을 종료할까요?",
         # Settings Menu
         "settings_title": "설정",
         "settings_language": "언어",
@@ -427,6 +438,7 @@ TRANSLATIONS = {
         "game_over.main_menu": "메인 메뉴",
         "game_over.quit": "종료",
         # Common
+        "common.menu_hint": "방향키: 이동   Enter: 선택   Esc: 뒤로",
         "common.back": "뒤로",
         "common.confirm": "확인",
         "common.cancel": "취소",
@@ -523,6 +535,9 @@ TRANSLATIONS = {
         "main_menu.credits": "Créditos",
         "main_menu.settings": "Configuración",
         "main_menu.quit": "Salir",
+        "main_menu.menu_hint": "Flechas: Mover   Enter: Seleccionar   Esc: Salir",
+        "main_menu.quit_confirm_title": "Salir de Reinforce Tactics",
+        "main_menu.quit_confirm_msg": "¿Cerrar el juego?",
         # Settings Menu
         "settings_title": "CONFIGURACIÓN",
         "settings_language": "Idioma",
@@ -594,6 +609,7 @@ TRANSLATIONS = {
         "game_over.main_menu": "Menú Principal",
         "game_over.quit": "Salir",
         # Common
+        "common.menu_hint": "Flechas: Mover   Enter: Seleccionar   Esc: Atrás",
         "common.back": "Atrás",
         "common.confirm": "Confirmar",
         "common.cancel": "Cancelar",
@@ -655,6 +671,9 @@ TRANSLATIONS = {
         "main_menu.credits": "制作人员",
         "main_menu.settings": "设置",
         "main_menu.quit": "退出",
+        "main_menu.menu_hint": "方向键: 移动   Enter: 选择   Esc: 退出",
+        "main_menu.quit_confirm_title": "退出 Reinforce Tactics",
+        "main_menu.quit_confirm_msg": "确定要关闭游戏吗？",
         # Settings Menu
         "settings_title": "设置",
         "settings_language": "语言",
@@ -726,6 +745,7 @@ TRANSLATIONS = {
         "game_over.main_menu": "主菜单",
         "game_over.quit": "退出",
         # Common
+        "common.menu_hint": "方向键: 移动   Enter: 选择   Esc: 返回",
         "common.back": "返回",
         "common.confirm": "确认",
         "common.cancel": "取消",

@@ -44,10 +44,12 @@ class GameOverMenu(Menu):
         """Save game replay."""
         return self.game_state.save_replay_to_file()
 
-    def _options_start_y(self) -> int:
+    def _options_min_top(self) -> int:
         # Keep the options clear of the winner banner + underline + turn
-        # count stack drawn above them, whatever the window height.
-        return max(self.screen.get_height() // 3, 50 + self.title_font.get_height() * 2 + 80)
+        # count stack drawn above them, whatever the window height. This is
+        # a floor rather than a preference: the banner is painted over the
+        # options, so a short window must scroll the list, not overlap it.
+        return theme.TITLE_MARGIN_Y + self.title_font.get_height() * 2 + 80
 
     def _draw_content(self) -> None:
         super()._draw_content()
@@ -59,10 +61,10 @@ class GameOverMenu(Menu):
         winner_template = lang.get("game_over.winner", "Player {player} Wins!")
         winner_text = winner_template.format(player=self.winner)
 
-        # Position below the base-class title (drawn at y=50) instead of a
-        # hardcoded y that collides with tall display-font titles.
+        # Position below the base-class title instead of a hardcoded y that
+        # collides with tall display-font titles.
         winner_surface = self.title_font.render(winner_text, True, self.winner_color)
-        winner_rect = winner_surface.get_rect(centerx=screen_cx, y=50 + self.title_font.get_height() + 16)
+        winner_rect = winner_surface.get_rect(centerx=screen_cx, y=theme.TITLE_MARGIN_Y + self.title_font.get_height() + 16)
         self.screen.blit(winner_surface, winner_rect)
 
         # Draw decorative underline in a dimmed player color. (draw.line

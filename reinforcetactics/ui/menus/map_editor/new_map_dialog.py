@@ -5,6 +5,7 @@ from typing import Any
 import pygame
 
 from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
@@ -30,13 +31,13 @@ class NewMapDialog(Menu):
         self.active_field = "width"  # 'width', 'height', or 'players'
 
         # Fonts
-        self.label_font = get_font(32)
-        self.value_font = get_font(36)
-        self.info_font = get_font(24)
+        self.label_font = get_font(theme.FONT_SIZE_HEADING)
+        self.value_font = get_font(theme.FONT_SIZE_HEADING)
+        self.info_font = get_font(theme.FONT_SIZE_BODY)
 
         # Colors
-        self.active_color = (255, 200, 50)
-        self.inactive_color = (150, 150, 150)
+        self.active_color = theme.SELECTED
+        self.inactive_color = theme.TEXT_PLACEHOLDER
 
         # Setup options
         self._setup_options()
@@ -153,7 +154,7 @@ class NewMapDialog(Menu):
 
         # Draw controls hint
         hint_text = "Use UP/DOWN to adjust, TAB to switch fields, ENTER to create"
-        hint_surface = self.info_font.render(hint_text, True, (180, 180, 180))
+        hint_surface = self.info_font.render(hint_text, True, theme.TEXT_INSTRUCTION)
         hint_rect = hint_surface.get_rect(centerx=screen_width // 2, y=start_y + spacing * 3)
         self.screen.blit(hint_surface, hint_rect)
 
@@ -187,10 +188,12 @@ class NewMapDialog(Menu):
         # Draw background rectangle
         bg_rect = pygame.Rect(value_rect.x - 10, value_rect.y - 5, value_rect.width + 20, value_rect.height + 10)
         bg_color = self.option_bg_selected_color if is_active else self.option_bg_color
-        pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=5)
+        pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=theme.BORDER_RADIUS_SMALL)
 
         if is_active:
-            pygame.draw.rect(self.screen, color, bg_rect, width=2, border_radius=5)
+            pygame.draw.rect(
+                self.screen, color, bg_rect, width=theme.BORDER_WIDTH_HOVER, border_radius=theme.BORDER_RADIUS_SMALL
+            )
 
         self.screen.blit(value_surface, value_rect)
 
@@ -241,12 +244,14 @@ class NewMapDialog(Menu):
             )
 
             # Draw background
-            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=8)
+            pygame.draw.rect(self.screen, bg_color, bg_rect, border_radius=theme.BORDER_RADIUS)
 
             # Draw border for selected/hovered
             if is_selected or is_hovered:
                 border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, bg_rect, width=2, border_radius=8)
+                pygame.draw.rect(
+                    self.screen, border_color, bg_rect, width=theme.BORDER_WIDTH_HOVER, border_radius=theme.BORDER_RADIUS
+                )
 
             # Draw text
             self.screen.blit(text_surface, text_rect)

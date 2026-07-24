@@ -24,6 +24,32 @@ PANEL_BORDER = (80, 80, 100)
 PANEL_BUTTON_BORDER = (60, 60, 80)
 BORDER = (100, 150, 200)
 
+# Hairline border around thumbnails, map previews and list rows. Reads as a
+# separator rather than a panel edge, so it is dimmer than PANEL_BORDER.
+FRAME_BORDER = (100, 100, 120)
+# Filler behind a preview that could not be generated.
+PLACEHOLDER_BG = (50, 50, 60)
+# "Nothing selected yet" / "No Preview" copy inside an empty panel.
+TEXT_PLACEHOLDER = (150, 150, 150)
+# Instructional copy under a title (keyboard hints, examples, prompts).
+TEXT_INSTRUCTION = (180, 180, 180)
+# De-emphasised inline detail, e.g. the unit-type breakdown on a save row.
+TEXT_SUBTLE = (140, 140, 140)
+# Neutral stand-in when a value has no player colour of its own.
+TEXT_NEUTRAL = (200, 200, 200)
+# Outline drawn around unit dots on a minimap preview so they stay legible
+# against a same-brightness tile.
+PREVIEW_UNIT_OUTLINE = (20, 20, 20)
+
+# ── Map editor ───────────────────────────────────────────────────────
+EDITOR_GRID = (60, 60, 70)
+# Resting outline on an unselected palette swatch.
+SWATCH_BORDER = (80, 80, 80)
+# Label drawn on top of a bright swatch, where white would disappear.
+SWATCH_LABEL = (0, 0, 0)
+# A drawn (tied) game result.
+RESULT_DRAW = (200, 200, 100)
+
 # ── Buttons ──────────────────────────────────────────────────────────
 BTN_CONFIRM = (80, 150, 80)
 BTN_CONFIRM_HOVER = (100, 180, 100)
@@ -36,6 +62,11 @@ BTN_CLOSE_HOVER = (255, 80, 80)
 BTN_QUIT = (150, 120, 50)
 BTN_QUIT_HOVER = (180, 150, 70)
 BTN_QUIT_BORDER_HOVER = (255, 220, 120)
+
+# Neutral action button (API-key screen), plus its pass/fail result states.
+BTN_NEUTRAL = (60, 60, 80)
+BTN_TEST_OK = (50, 150, 50)
+BTN_TEST_FAIL = (150, 50, 50)
 
 BTN_END_TURN = (70, 120, 70)
 BTN_END_TURN_HOVER = (100, 150, 100)
@@ -112,12 +143,40 @@ MENU_OPTION_SPACING = 60
 OPTION_PADDING_X = 40
 OPTION_PADDING_Y = 6
 
+# ── Menu screen layout ───────────────────────────────────────────────
+# Gutter kept clear on the left/right of a centred option list, so a long
+# (or translated) label is ellipsized instead of running off the window.
+SCREEN_MARGIN_X = 20
+# Space between the top of the window and the screen title.
+TITLE_MARGIN_Y = 50
+# Smallest gap left between the title and the first option row. Sized to
+# clear the "Scroll Up" affordance, which is drawn just above the list.
+OPTIONS_MIN_TOP_GAP = 36
+# Room reserved under the option list for the scroll-down affordance and
+# the "3-10 / 22" position readout.
+OPTIONS_BOTTOM_RESERVE = 34
+# Upper bound on simultaneously visible rows. The real count is whatever
+# also fits the window, which can be lower on a small in-game screen.
+MAX_VISIBLE_OPTIONS = 8
+
+# ── Split-panel list screens (map / save / replay selection) ─────────
+# Y where both panels start (below the screen title).
+PANEL_TOP = 80
+# Inset from the window edges, and from a panel's edge to its contents.
+PANEL_MARGIN = 10
+
 # ── Font sizes ───────────────────────────────────────────────────────
+# A single type scale. Screens should pick the nearest role below rather
+# than passing an ad-hoc pixel size to ``get_font``.
 FONT_SIZE_TITLE = 48
 FONT_SIZE_HEADING = 32
 FONT_SIZE_OPTION = 32
+FONT_SIZE_SUBHEADING = 28
 FONT_SIZE_BODY = 24
+FONT_SIZE_LABEL = 20
 FONT_SIZE_HINT = 18
+FONT_SIZE_CAPTION = 16
+FONT_SIZE_MICRO = 14
 FONT_SIZE_INDICATOR = 24
 
 # ── Replay player controls ───────────────────────────────────────────

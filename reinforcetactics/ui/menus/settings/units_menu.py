@@ -97,31 +97,8 @@ class UnitsMenu(Menu):
         self._refresh_options()
         return "toggled"
 
-    def run(self) -> str | None:
-        """Run the units menu loop."""
-        result = None
-        clock = pygame.time.Clock()
-
-        self._populate_option_rects()
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    return None
-
-                result = self.handle_input(event)
-                if result is not None:
-                    # Handle special results
-                    if result in ("toggled", "separator", "cannot_disable_last"):
-                        # Stay in menu, refresh display
-                        self._populate_option_rects()
-                        result = None
-                    else:
-                        return result
-
-            self.draw()
-            clock.tick(30)
-
-        return result
+    def _on_result(self, result: str) -> tuple[bool, str | None]:
+        """Absorb in-place toggles; anything else leaves the menu."""
+        if result in ("toggled", "separator", "cannot_disable_last"):
+            return False, None
+        return True, result
