@@ -8,12 +8,19 @@ from typing import Any
 import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS
+from reinforcetactics.ui import theme
+from reinforcetactics.ui.components.list_panel import ScrollList, draw_panel, split_panels
 from reinforcetactics.ui.components.map_preview import MapPreviewGenerator, get_tile_color
-from reinforcetactics.ui.icons import get_arrow_down_icon, get_arrow_up_icon
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
+from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
+
+# Split-panel proportions and row metrics for this screen. Replay rows are
+# two-line cards, so they are taller than the save/map rows.
+LIST_FRACTION = 0.55
+ITEM_HEIGHT = 62
 
 
 class ReplaySelectionMenu(Menu):
@@ -181,35 +188,20 @@ class ReplaySelectionMenu(Menu):
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
+    def _panels(self) -> tuple[pygame.Rect, pygame.Rect]:
+        """The list and detail panel rectangles for the current window."""
+        return split_panels(self.screen, LIST_FRACTION)
+
+    def _scroll_list(self) -> ScrollList:
+        """The list geometry, shared by hit-testing and drawing."""
+        left_panel, _ = self._panels()
+        return ScrollList(left_panel, ITEM_HEIGHT, row_gap=4)
+
     def _populate_option_rects(self) -> None:
         """Populate option_rects for click detection matching split-panel layout."""
-        screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
-
-        # Must match the layout in draw() and _draw_replay_list()
-        panel_top = 80
-        panel_height = screen_height - panel_top - 20
-        left_panel_width = int(screen_width * 0.55)
-        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
-
-        # Calculate visible area for scrolling (same as _draw_replay_list)
-        list_padding = 10
-        item_height = 62
-        list_y = left_panel_rect.y + list_padding
-        max_visible = (left_panel_rect.height - 2 * list_padding) // item_height
-
-        # Determine which items to show based on scroll
-        start_idx = self.scroll_offset
-        end_idx = min(start_idx + max_visible, len(self.options))
-
-        self.option_rects = []
-        for i in range(start_idx, end_idx):
-            display_idx = i - start_idx
-            item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(
-                left_panel_rect.x + list_padding, item_y, left_panel_rect.width - 2 * list_padding, item_height - 4
-            )
-            self.option_rects.append(item_rect)
+        scroll_list = self._scroll_list()
+        self.max_visible_options = scroll_list.capacity
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, len(self.options))
 
     def _generate_replay_map_preview(self, filepath: str, width: int, height: int) -> pygame.Surface | None:
         """Generate a map preview from replay's initial map data."""
@@ -226,7 +218,7 @@ class ReplaySelectionMenu(Menu):
         try:
             # Create preview surface
             preview = pygame.Surface((width, height))
-            preview.fill((30, 30, 40))
+            preview.fill(theme.BG)
 
             map_height = len(initial_map)
             map_width = len(initial_map[0]) if map_height > 0 else 0
@@ -262,7 +254,6 @@ class ReplaySelectionMenu(Menu):
         self.screen.fill(self.bg_color)
 
         screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
 
         # Draw title
         if self.title:
@@ -270,81 +261,43 @@ class ReplaySelectionMenu(Menu):
             title_rect = title_surface.get_rect(centerx=screen_width // 2, y=20)
             self.screen.blit(title_surface, title_rect)
 
-        # Define split panel layout
-        panel_top = 80
-        panel_height = screen_height - panel_top - 20
+        left_panel, right_panel = self._panels()
+        draw_panel(self.screen, left_panel)
+        draw_panel(self.screen, right_panel)
 
-        # Left panel for replay list (55% of width)
-        left_panel_width = int(screen_width * 0.55)
-        left_panel_rect = pygame.Rect(10, panel_top, left_panel_width - 20, panel_height)
-
-        # Right panel for preview and details (45% of width)
-        right_panel_x = left_panel_width
-        right_panel_width = screen_width - left_panel_width - 10
-        right_panel_rect = pygame.Rect(right_panel_x, panel_top, right_panel_width, panel_height)
-
-        # Draw panel backgrounds
-        pygame.draw.rect(self.screen, (40, 40, 50), left_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (40, 40, 50), right_panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), left_panel_rect, width=2, border_radius=8)
-        pygame.draw.rect(self.screen, (80, 80, 100), right_panel_rect, width=2, border_radius=8)
-
-        # Draw replay list in left panel
-        self._draw_replay_list(left_panel_rect)
-
-        # Draw preview and details in right panel
-        self._draw_preview_panel(right_panel_rect)
+        self._draw_replay_list(left_panel)
+        self._draw_preview_panel(right_panel)
 
         pygame.display.flip()
 
     def _draw_replay_list(self, panel_rect: pygame.Rect) -> None:
         """Draw the scrollable replay list with two-line item cards."""
-        self.option_rects = []
-
-        # Calculate visible area for scrolling
-        list_padding = 10
-        item_height = 62
-        list_y = panel_rect.y + list_padding
-        max_visible = (panel_rect.height - 2 * list_padding) // item_height
-
+        scroll_list = ScrollList(panel_rect, ITEM_HEIGHT, row_gap=4)
         # Sync with base class so keyboard scrolling matches the visible count
-        self.max_visible_options = max_visible
+        self.max_visible_options = scroll_list.capacity
 
-        # Determine which items to show based on scroll
-        start_idx = self.scroll_offset
-        end_idx = min(start_idx + max_visible, len(self.options))
+        total = len(self.options)
+        start_idx, _ = scroll_list.visible_range(self.scroll_offset, total)
+        self.option_rects = scroll_list.item_rects(self.scroll_offset, total)
 
-        main_font = get_font(20)
-        sub_font = get_font(16)
+        main_font = get_font(theme.FONT_SIZE_LABEL)
+        sub_font = get_font(theme.FONT_SIZE_CAPTION)
 
-        for i in range(start_idx, end_idx):
-            display_idx = i - start_idx
+        for display_idx, item_rect in enumerate(self.option_rects):
+            i = start_idx + display_idx
             text, _ = self.options[i]
             is_replay_item = i < len(self.replay_files)
 
-            # Calculate item position
-            item_y = list_y + display_idx * item_height
-            item_rect = pygame.Rect(panel_rect.x + list_padding, item_y, panel_rect.width - 2 * list_padding, item_height - 4)
-
-            # Determine styling
             is_selected = i == self.selected_index
             is_hovered = i == self.hover_index
+            scroll_list.draw_row(self.screen, item_rect, selected=is_selected, hovered=is_hovered)
 
             if is_selected:
-                bg_color = self.option_bg_selected_color
                 text_color = self.selected_color
             elif is_hovered:
-                bg_color = self.option_bg_hover_color
                 text_color = self.hover_color
             else:
-                bg_color = self.option_bg_color
                 text_color = self.text_color
-
-            # Draw background
-            pygame.draw.rect(self.screen, bg_color, item_rect, border_radius=6)
-            if is_selected or is_hovered:
-                border_color = self.selected_color if is_selected else self.hover_color
-                pygame.draw.rect(self.screen, border_color, item_rect, width=2, border_radius=6)
 
             if is_replay_item:
                 # Get metadata for richer rendering
@@ -358,9 +311,9 @@ class ReplaySelectionMenu(Menu):
                 if winner and winner in PLAYER_COLORS:
                     pip_color = PLAYER_COLORS[winner]
                 elif metadata.get("result") == "Draw":
-                    pip_color = (200, 200, 100)
+                    pip_color = theme.RESULT_DRAW
                 else:
-                    pip_color = (100, 100, 120)
+                    pip_color = theme.FRAME_BORDER
                 pygame.draw.rect(self.screen, pip_color, pip_rect, border_radius=2)
 
                 # Text area starts after the pip
@@ -368,10 +321,7 @@ class ReplaySelectionMenu(Menu):
                 max_text_width = item_rect.width - pip_width - 20
 
                 # Main line: matchup text
-                main_surface = main_font.render(text, True, text_color)
-                if main_surface.get_width() > max_text_width:
-                    clip_rect = pygame.Rect(0, 0, max_text_width, main_surface.get_height())
-                    main_surface = main_surface.subsurface(clip_rect)
+                main_surface = main_font.render(ellipsize(text, main_font, max_text_width), True, text_color)
                 self.screen.blit(main_surface, (text_x, item_rect.y + 8))
 
                 # Subtitle: result, turns, map
@@ -388,11 +338,8 @@ class ReplaySelectionMenu(Menu):
                 subtitle = "  |  ".join(parts) if parts else ""
 
                 if subtitle:
-                    sub_color = (160, 160, 170) if not (is_selected or is_hovered) else (190, 180, 140)
-                    sub_surface = sub_font.render(subtitle, True, sub_color)
-                    if sub_surface.get_width() > max_text_width:
-                        clip_rect = pygame.Rect(0, 0, max_text_width, sub_surface.get_height())
-                        sub_surface = sub_surface.subsurface(clip_rect)
+                    sub_color = theme.HOVER if (is_selected or is_hovered) else theme.TEXT_MUTED
+                    sub_surface = sub_font.render(ellipsize(subtitle, sub_font, max_text_width), True, sub_color)
                     self.screen.blit(sub_surface, (text_x, item_rect.y + 32))
             else:
                 # Non-replay items (e.g. "Back" button) - simple centered text
@@ -400,20 +347,7 @@ class ReplaySelectionMenu(Menu):
                 text_rect = text_surface.get_rect(center=item_rect.center)
                 self.screen.blit(text_surface, text_rect)
 
-            # Store rect for click detection
-            self.option_rects.append(item_rect)
-
-        # Draw scroll indicators if needed
-        if len(self.options) > max_visible:
-            if self.scroll_offset > 0:
-                up_icon = get_arrow_up_icon(size=16, color=self.hover_color)
-                up_rect = up_icon.get_rect(centerx=panel_rect.centerx, y=panel_rect.y + 2)
-                self.screen.blit(up_icon, up_rect)
-
-            if end_idx < len(self.options):
-                down_icon = get_arrow_down_icon(size=16, color=self.hover_color)
-                down_rect = down_icon.get_rect(centerx=panel_rect.centerx, bottom=panel_rect.bottom - 2)
-                self.screen.blit(down_icon, down_rect)
+        scroll_list.draw_scroll_indicators(self.screen, self.scroll_offset, total)
 
     def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
         """Draw the preview and details panel."""
@@ -422,10 +356,8 @@ class ReplaySelectionMenu(Menu):
 
         if active_index < 0 or active_index >= len(self.replay_files):
             # Draw placeholder
-            font = get_font(28)
-            text = font.render("Select a replay to preview", True, (150, 150, 150))
-            text_rect = text.get_rect(center=panel_rect.center)
-            self.screen.blit(text, text_rect)
+            font = get_font(theme.FONT_SIZE_SUBHEADING)
+            ScrollList.draw_empty_hint(self.screen, panel_rect, "Select a replay to preview", font)
             return
 
         filepath = self.replay_files[active_index]
@@ -441,15 +373,15 @@ class ReplaySelectionMenu(Menu):
         if preview:
             self.screen.blit(preview, (preview_x, preview_y))
             preview_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, (100, 100, 120), preview_rect, width=2)
+            pygame.draw.rect(self.screen, theme.FRAME_BORDER, preview_rect, width=theme.BORDER_WIDTH_HOVER)
         else:
             # Draw placeholder for missing preview
             placeholder_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, (50, 50, 60), placeholder_rect)
-            pygame.draw.rect(self.screen, (100, 100, 120), placeholder_rect, width=2)
+            pygame.draw.rect(self.screen, theme.PLACEHOLDER_BG, placeholder_rect)
+            pygame.draw.rect(self.screen, theme.FRAME_BORDER, placeholder_rect, width=theme.BORDER_WIDTH_HOVER)
 
-            placeholder_font = get_font(24)
-            placeholder_text = placeholder_font.render("No Preview", True, (120, 120, 120))
+            placeholder_font = get_font(theme.FONT_SIZE_BODY)
+            placeholder_text = placeholder_font.render("No Preview", True, theme.TEXT_PLACEHOLDER)
             placeholder_text_rect = placeholder_text.get_rect(center=placeholder_rect.center)
             self.screen.blit(placeholder_text, placeholder_text_rect)
 
@@ -459,16 +391,16 @@ class ReplaySelectionMenu(Menu):
         line_spacing = 28
 
         # Title: Map Name
-        title_font = get_font(26)
+        title_font = get_font(theme.FONT_SIZE_SUBHEADING)
         map_name = metadata.get("map_name", "Unknown Map")
         title_surface = title_font.render(map_name, True, self.title_color)
         self.screen.blit(title_surface, (info_x, info_y))
         info_y += 35
 
         # Info lines
-        info_font = get_font(22)
-        label_color = (180, 180, 180)
-        value_color = (255, 255, 255)
+        info_font = get_font(theme.FONT_SIZE_LABEL)
+        label_color = theme.TEXT_INSTRUCTION
+        value_color = theme.TEXT
 
         # Result
         result = metadata.get("result", "Unknown")
@@ -476,9 +408,9 @@ class ReplaySelectionMenu(Menu):
         if winner and winner in PLAYER_COLORS:
             result_color = PLAYER_COLORS[winner]
         elif result == "Draw":
-            result_color = (200, 200, 100)
+            result_color = theme.RESULT_DRAW
         else:
-            result_color = (150, 150, 150)
+            result_color = theme.TEXT_PLACEHOLDER
 
         result_label = info_font.render("Result: ", True, label_color)
         result_value = info_font.render(result, True, result_color)
@@ -515,7 +447,7 @@ class ReplaySelectionMenu(Menu):
             if p_name is None:
                 p_name = f"Player {p_idx + 1}"
             p_num = p_idx + 1
-            p_label = info_font.render(f"P{p_num}: ", True, PLAYER_COLORS.get(p_num, (200, 200, 200)))
+            p_label = info_font.render(f"P{p_num}: ", True, PLAYER_COLORS.get(p_num, theme.TEXT_NEUTRAL))
             p_value = info_font.render(p_name, True, value_color)
             self.screen.blit(p_label, (info_x, info_y))
             self.screen.blit(p_value, (info_x + p_label.get_width(), info_y))

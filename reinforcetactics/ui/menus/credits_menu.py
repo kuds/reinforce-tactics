@@ -1,7 +1,5 @@
 """Credits menu."""
 
-from typing import Any
-
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
@@ -28,6 +26,10 @@ class CreditsMenu(Menu):
     def _options_start_y(self) -> int:
         """Start the option list (Back button) below the credits text."""
         return int(self.screen.get_height() * 0.7)
+
+    def _options_min_top(self) -> int:
+        """Never let the layout pull the Back button up into the credits."""
+        return self._options_start_y()
 
     def _draw_content(self) -> None:
         """Draw the credits menu with additional information."""
@@ -61,35 +63,3 @@ class CreditsMenu(Menu):
         description = lang.get("credits.description", "Turn-Based Strategy Game with Reinforcement Learning")
         description_surface = self.option_font.render(description, True, self.text_color)
         self.screen.blit(description_surface, description_surface.get_rect(centerx=screen_cx, y=y))
-
-    def run(self) -> Any | None:
-        """
-        Run the credits menu loop.
-
-        Returns:
-            Result from selected option, or None
-        """
-        result = None
-        clock = pygame.time.Clock()
-
-        # Populate option_rects before event loop for click detection
-        self._populate_option_rects()
-
-        # Clear any residual events AFTER option_rects are populated
-        pygame.event.clear()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    return None
-
-                result = self.handle_input(event)
-                if result is not None:
-                    # For Back button (returns None), exit
-                    return result
-
-            self.draw()
-            clock.tick(30)
-
-        return result

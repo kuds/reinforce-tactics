@@ -39,12 +39,12 @@ class APIKeysMenu:
         self.bg_color = theme.BG
         self.text_color = theme.TEXT
         self.title_color = theme.TITLE
-        self.button_color = (60, 60, 80)
+        self.button_color = theme.BTN_NEUTRAL
 
         # Fonts
         self.title_font = get_display_font(theme.FONT_SIZE_TITLE)
-        self.label_font = get_font(28)
-        self.input_font = get_font(24)
+        self.label_font = get_font(theme.FONT_SIZE_SUBHEADING)
+        self.input_font = get_font(theme.FONT_SIZE_BODY)
 
         # Get language instance
         self.lang = get_language()
@@ -214,15 +214,15 @@ class APIKeysMenu:
             test_icon = None
             if status == "testing":
                 test_text = "Testing..."
-                test_color = (150, 150, 150)
+                test_color = theme.TEXT_PLACEHOLDER
             elif status == "success":
                 test_text = "Test"
-                test_color = (50, 150, 50)
-                test_icon = get_checkmark_icon(size=16, color=(255, 255, 255))
+                test_color = theme.BTN_TEST_OK
+                test_icon = get_checkmark_icon(size=16, color=theme.TEXT)
             elif status == "failed":
                 test_text = "Test"
-                test_color = (150, 50, 50)
-                test_icon = get_x_icon(size=16, color=(255, 255, 255))
+                test_color = theme.BTN_TEST_FAIL
+                test_icon = get_x_icon(size=16, color=theme.TEXT)
             else:
                 test_text = "Test"
                 test_color = self.button_color
@@ -283,7 +283,7 @@ class APIKeysMenu:
         else:
             final_color = bg_color
 
-        pygame.draw.rect(self.screen, final_color, button_rect, border_radius=5)
+        pygame.draw.rect(self.screen, final_color, button_rect, border_radius=theme.BORDER_RADIUS_SMALL)
 
         # Draw icon and text
         if icon:
@@ -422,6 +422,6 @@ class APIKeysMenu:
                     return result
 
             self.draw()
-            clock.tick(60)
+            clock.tick(theme.MENU_FRAMERATE)
 
         return False

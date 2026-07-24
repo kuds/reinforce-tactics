@@ -7,6 +7,7 @@ import pandas as pd
 import pygame
 
 from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
 from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.utils.file_io import FileIO
@@ -67,14 +68,14 @@ class MapEditor:
         self.canvas = EditorCanvas(20, 100, canvas_width, canvas_height, self.map_data)
 
         # Fonts
-        self.title_font = get_font(28)
-        self.info_font = get_font(18)
-        self.shortcut_font = get_font(14)
+        self.title_font = get_font(theme.FONT_SIZE_SUBHEADING)
+        self.info_font = get_font(theme.FONT_SIZE_HINT)
+        self.shortcut_font = get_font(theme.FONT_SIZE_MICRO)
 
         # Colors
-        self.bg_color = (30, 30, 40)
-        self.text_color = (255, 255, 255)
-        self.title_color = (100, 200, 255)
+        self.bg_color = theme.BG
+        self.text_color = theme.TEXT
+        self.title_color = theme.TITLE
 
         # Keyboard state
         self.ctrl_pressed = False
@@ -102,7 +103,7 @@ class MapEditor:
                 self._handle_event(event)
 
             self.draw()
-            clock.tick(30)
+            clock.tick(theme.MENU_FRAMERATE)
 
         return None
 
@@ -342,7 +343,7 @@ class MapEditor:
 
         current_x = shortcuts_x
         for shortcut in shortcuts:
-            shortcut_surface = self.shortcut_font.render(shortcut, True, (180, 180, 180))
+            shortcut_surface = self.shortcut_font.render(shortcut, True, theme.TEXT_INSTRUCTION)
             self.screen.blit(shortcut_surface, (current_x, shortcuts_y))
             current_x += shortcut_surface.get_width() + 20
 
