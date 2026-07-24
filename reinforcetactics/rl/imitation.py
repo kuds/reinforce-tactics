@@ -1612,7 +1612,7 @@ def evaluate_bc_against_bot_ladder(
 
     results: dict[str, dict[str, Any]] = {}
     for opp in opponents:
-        env = make_stage_env(first_stage, cfg.env, opponent=opp, seed=eval_seed)
+        env = make_stage_env(first_stage, cfg.env, opponent=opp, seed=eval_seed, gamma=cfg.ppo.gamma)
         try:
             metrics = evaluate_model(
                 model,

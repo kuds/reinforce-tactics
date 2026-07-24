@@ -76,15 +76,11 @@ from reinforcetactics.rl.masking import make_maskable_env
 # Per-dimension masking (original, higher invalid rate)
 env_multi = make_maskable_env(
     opponent="bot",
-    action_space_type="multi_discrete"  # default
+    action_space_type="multi_discrete",  # default
 )
 
 # Exact masking (recommended for training)
-env_flat = make_maskable_env(
-    opponent="bot",
-    action_space_type="flat_discrete",
-    max_flat_actions=512
-)
+env_flat = make_maskable_env(opponent="bot", action_space_type="flat_discrete", max_flat_actions=512)
 ```
 
 Vectorized environments:
@@ -92,12 +88,7 @@ Vectorized environments:
 ```python
 from reinforcetactics.rl.masking import make_maskable_vec_env
 
-vec_env = make_maskable_vec_env(
-    n_envs=4,
-    opponent="bot",
-    action_space_type="flat_discrete",
-    max_flat_actions=512
-)
+vec_env = make_maskable_vec_env(n_envs=4, opponent="bot", action_space_type="flat_discrete", max_flat_actions=512)
 ```
 
 ### Impact on Model/Policy

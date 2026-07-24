@@ -86,11 +86,7 @@ python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent bot
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 # Create environment
-env = StrategyGameEnv(
-    map_file='maps/1v1/beginner.csv',
-    opponent='bot',
-    render_mode=None
-)
+env = StrategyGameEnv(map_file="maps/1v1/beginner.csv", opponent="bot", render_mode=None)
 
 # Standard Gym API
 obs, info = env.reset()

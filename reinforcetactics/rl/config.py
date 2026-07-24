@@ -479,6 +479,18 @@ class EvalConfig:
     # ``eval_seed_base + 1000 * eval_block + episode_idx``. The default leaves
     # ample headroom for any reasonable n_envs and total_timesteps.
     seed_offset: int = 1_000_000
+    # Redraw the eval problem set on every eval block instead of replaying a
+    # fixed one. The fixed set (default) is what makes ``patience`` consecutive
+    # crossings and the ``best_model.zip`` argmax comparable across evals;
+    # resampling turns both into measurements of benchmark noise. Kept as an
+    # escape hatch for anyone who wants the pre-2026-07-24 behaviour or is
+    # worried about overfitting to a fixed eval set.
+    resample_eval_seeds: bool = False
+    # Stage-relative env steps before an eval may claim ``best_model.zip``.
+    # ``None`` resolves to ``eval_freq`` (skip the stage-entry warm eval and
+    # any block-boundary eval immediately after it). Set 0 to let the carry-in
+    # policy compete for the stage's best checkpoint, as it used to.
+    best_eligible_after: int | None = None
 
 
 @dataclass

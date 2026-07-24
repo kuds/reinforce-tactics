@@ -111,7 +111,7 @@ flat_actions.append(END_TURN_ACTION)  # Always available
 
 # Mask: exactly len(flat_actions) are valid
 mask = np.zeros(MAX_ACTIONS, dtype=bool)
-mask[:len(flat_actions)] = True
+mask[: len(flat_actions)] = True
 ```
 
 This eliminates invalid actions entirely. The agent only ever samples from
@@ -130,7 +130,7 @@ learn from actual gameplay signals.
 
 ```python
 reward_config = {
-    'invalid_action': -0.1,  # Was -10.0
+    "invalid_action": -0.1,  # Was -10.0
     # ... rest unchanged
 }
 ```
@@ -190,11 +190,7 @@ random opponent, then gradually add unit types and increase opponent difficulty:
 
 ```python
 # Phase 1: Warriors only vs random
-env = make_maskable_env(
-    enabled_units=['W'],
-    opponent='random',
-    reward_config={'invalid_action': -0.1}
-)
+env = make_maskable_env(enabled_units=["W"], opponent="random", reward_config={"invalid_action": -0.1})
 
 # Phase 2: Add Archers
 # Phase 3: Full unit set vs SimpleBot
@@ -207,7 +203,7 @@ env = make_maskable_env(
 degenerate episodes:
 
 ```python
-max_steps = 200    # Was 500
+max_steps = 200  # Was 500
 turn_penalty = -1.0  # Was -0.1; stronger incentive to act, not stall
 ```
 
@@ -220,6 +216,7 @@ normalization would help the neural network learn:
 ```python
 # Wrap with VecNormalize
 from stable_baselines3.common.vec_env import VecNormalize
+
 vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
 ```
 

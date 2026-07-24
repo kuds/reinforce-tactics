@@ -94,12 +94,12 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.utils.file_io import FileIO
 
-map_data = FileIO.load_map('maps/1v1/beginner.csv')
+map_data = FileIO.load_map("maps/1v1/beginner.csv")
 game = GameState(map_data)
 
 # Create some units
-game.create_unit('W', 5, 5, player=1)
-game.create_unit('M', 6, 5, player=1)
+game.create_unit("W", 5, 5, player=1)
+game.create_unit("M", 6, 5, player=1)
 
 print(f"Player 1 units: {len([u for u in game.units if u.player == 1])}")
 print(f"Player 1 gold: ${game.player_gold[1]}")
@@ -116,12 +116,12 @@ print("Headless mode working!")
 # test_rl.py
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
-env = StrategyGameEnv(map_file='maps/1v1/beginner.csv', opponent='bot')
+env = StrategyGameEnv(map_file="maps/1v1/beginner.csv", opponent="bot")
 obs, info = env.reset()
 
 print("Observation space:", env.observation_space)
 print("Action space:", env.action_space)
-print("Grid shape:", obs['grid'].shape)
+print("Grid shape:", obs["grid"].shape)
 print("RL environment working!")
 
 # Take a few random actions

@@ -45,6 +45,11 @@ from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
 
 ConfigPath = str | Path
 
+# Fallback discount for ``make_stage_env`` when a caller doesn't pass one.
+# Mirrors ``StrategyGameEnv``'s default; only correct while ``ppo.gamma`` is
+# left at 0.99, which is why the parameter is documented as "pass cfg.ppo.gamma".
+_DEFAULT_SHAPING_GAMMA = 0.99
+
 
 class CurriculumStalled(RuntimeError):
     """Raised when a stage exhausts its budget without promoting.
@@ -766,6 +771,16 @@ def run_curriculum(
             # (Colab disconnect) leaves the stage's eval timeline on disk.
             # ``eval_results.json`` below is still written at stage end.
             results_jsonl_path=stage_dir / "eval_results.jsonl",
+            # Replay one fixed problem set for every eval in this stage, so
+            # PromotionCallback's consecutive-crossings gate and the best-model
+            # argmax compare like with like.
+            resample_eval_seeds=cfg.eval.resample_eval_seeds,
+            # The first _on_step of a stage always fires an eval (block index
+            # is derived from the cumulative counter), which measures the
+            # carry-in policy. Keep it out of the best-checkpoint race so
+            # restore_best_checkpoint_between_stages can't rewind this stage's
+            # own training. Defaults to one eval interval.
+            best_eligible_after=(cfg.eval.eval_freq if cfg.eval.best_eligible_after is None else cfg.eval.best_eligible_after),
         )
         promote_cb = PromotionCallback(
             eval_callback=eval_cb,
@@ -1059,6 +1074,7 @@ def make_stage_env(
     seed: int,
     opponent: str | None = None,
     opponent_kwargs: dict[str, Any] | None = None,
+    gamma: float | None = None,
 ) -> Any:
     """Build a ``make_maskable_env`` matching the production env for a stage.
 
@@ -1089,6 +1105,13 @@ def make_stage_env(
         opponent_kwargs: Optional override for ``stage.opponent_kwargs``.
             Used when ``opponent`` is overridden and the new opponent
             type takes different constructor kwargs.
+        gamma: The trainer's discount. The env uses it for the
+            potential-based shaping delta (``gamma * Phi(s') - Phi(s)``),
+            so an env built without it reports a different
+            ``reward_breakdown['shaping_delta']`` -- and hence a different
+            total reward -- than training measured. ``None`` falls back to
+            the env's own default, which is only correct while
+            ``ppo.gamma`` is left at 0.99. Pass ``cfg.ppo.gamma``.
 
     Returns:
         ``ActionMaskedEnv`` ready to feed into ``MaskablePPO.predict``
@@ -1123,6 +1146,10 @@ def make_stage_env(
         unit_count_scale=env_cfg.unit_count_scale,
         engine_overrides=env_cfg.engine_overrides,
         seed=seed,
+        # Matches ``make_maskable_env`` / ``StrategyGameEnv``'s own default so
+        # omitting the argument is behaviour-preserving, but stated here rather
+        # than left implicit -- the shaping delta depends on it.
+        gamma=_DEFAULT_SHAPING_GAMMA if gamma is None else float(gamma),
     )
 
 
@@ -1213,7 +1240,7 @@ def record_curriculum_replays(
             print(f"[{stage_name}] no matching CurriculumStage in cfg, skipping video")
             continue
 
-        replay_env = make_stage_env(stage, cfg.env, seed=cfg.seed + seed_offset)
+        replay_env = make_stage_env(stage, cfg.env, seed=cfg.seed + seed_offset, gamma=cfg.ppo.gamma)
         try:
             model = MaskablePPO.load(ckpt_path)
             video_path = videos_dir / f"{stage_name}.mp4"
