@@ -46,3 +46,9 @@ build/
 /_*.md
 /_*.json
 /_*.txt
+
+# uv resolves the pyproject into this lockfile whenever it is used to set up
+# an environment. The project installs via pip (pyproject.toml +
+# requirements.txt) and does not track a uv lockfile, so this is a local
+# tooling artifact. Delete this entry if uv ever becomes the supported path.
+/uv.lock
