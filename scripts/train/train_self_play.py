@@ -48,6 +48,7 @@ from reinforcetactics.rl.masking import make_maskable_vec_env
 # Local imports
 from reinforcetactics.rl.self_play import (
     OpponentPool,
+    SelfPlayCallback,
     SelfPlayEnv,
     make_self_play_env,
     make_self_play_vec_env,
@@ -56,116 +57,6 @@ from reinforcetactics.rl.self_play import (
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-class SelfPlayTrainingCallback(BaseCallback):
-    """
-    Custom callback for self-play training that integrates with SB3.
-
-    Handles:
-    - Opponent model updates
-    - Adding models to opponent pool
-    - Win rate tracking
-    - Logging
-    """
-
-    def __init__(
-        self,
-        envs: list[SelfPlayEnv],
-        opponent_pool: OpponentPool | None = None,
-        update_freq: int = 10000,
-        add_to_pool_freq: int = 50000,
-        min_win_rate_for_pool: float = 0.55,
-        verbose: int = 1,
-    ):
-        super().__init__(verbose)
-        self.envs = envs
-        self.opponent_pool = opponent_pool
-        self.update_freq = update_freq
-        self.add_to_pool_freq = add_to_pool_freq
-        self.min_win_rate_for_pool = min_win_rate_for_pool
-
-        self.win_rate_history: list[float] = []
-        self.pool_additions = 0
-
-    def _on_training_start(self) -> None:
-        """Initialize opponents with the current model."""
-        logger.info("Initializing self-play opponents with current model...")
-        self._update_all_opponents()
-
-    def _on_step(self) -> bool:
-        """Called after each step."""
-        # Update opponents periodically
-        if self.n_calls % self.update_freq == 0:
-            self._update_all_opponents()
-            self._log_stats()
-
-        # Add to pool periodically
-        if self.opponent_pool and self.n_calls % self.add_to_pool_freq == 0:
-            self._try_add_to_pool()
-
-        return True
-
-    def _update_all_opponents(self) -> None:
-        """Update all opponent models to current policy."""
-        for env in self.envs:
-            env.set_opponent_model(self.model)
-            env.update_opponent_from_current()
-
-    def _try_add_to_pool(self) -> None:
-        """Add current model to pool if win rate is good enough."""
-        if not self.opponent_pool:
-            return
-
-        avg_win_rate = self._get_average_win_rate()
-        self.win_rate_history.append(avg_win_rate)
-
-        if avg_win_rate >= self.min_win_rate_for_pool:
-            self.opponent_pool.add_model(self.model, timestep=self.num_timesteps, win_rate=avg_win_rate)
-            self.pool_additions += 1
-            logger.info(
-                "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
-                self.num_timesteps,
-                avg_win_rate * 100,
-                self.opponent_pool.size,
-            )
-        else:
-            logger.info(
-                "Step %d: Win rate %.2f%% below threshold %.2f%%, not adding to pool",
-                self.num_timesteps,
-                avg_win_rate * 100,
-                self.min_win_rate_for_pool * 100,
-            )
-
-    def _get_average_win_rate(self) -> float:
-        """Get average win rate across all environments."""
-        win_rates = []
-        for env in self.envs:
-            win_rates.append(env.get_win_rate())
-        return float(np.mean(win_rates)) if win_rates else 0.5
-
-    def _log_stats(self) -> None:
-        """Log training statistics."""
-        avg_win_rate = self._get_average_win_rate()
-
-        # Get total games and wins
-        total_games = sum(env.stats["total_games"] for env in self.envs)
-        total_wins = sum(env.stats["agent_wins"] for env in self.envs)
-
-        logger.info(
-            "Step %d: Win rate: %.2f%%, Total games: %d, Wins: %d",
-            self.num_timesteps,
-            avg_win_rate * 100,
-            total_games,
-            total_wins,
-        )
-
-        # Log to tensorboard if available
-        if self.logger:
-            self.logger.record("self_play/win_rate", avg_win_rate)
-            self.logger.record("self_play/total_games", total_games)
-            if self.opponent_pool:
-                self.logger.record("self_play/pool_size", self.opponent_pool.size)
 
 
 class MixedTrainingCallback(BaseCallback):
@@ -322,7 +213,7 @@ def train_self_play(args) -> Path:
     callbacks: list[BaseCallback] = []
 
     # Self-play callback
-    self_play_callback = SelfPlayTrainingCallback(
+    self_play_callback = SelfPlayCallback(
         envs=self_play_envs,
         opponent_pool=opponent_pool,
         update_freq=args.opponent_update_freq,
@@ -480,7 +371,7 @@ def train_mixed(args) -> Path:
     callbacks: list[BaseCallback] = []
 
     # Self-play callback
-    self_play_callback = SelfPlayTrainingCallback(
+    self_play_callback = SelfPlayCallback(
         envs=self_play_envs,
         opponent_pool=opponent_pool,
         update_freq=args.opponent_update_freq,

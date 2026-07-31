@@ -579,36 +579,45 @@ def _make_callback_class():
         (``init_callback`` → ``on_training_start`` → ``on_step`` → …).
 
         This callback:
-        1. Periodically updates the opponent model to the current policy
-        2. Optionally adds models to the opponent pool
-        3. Tracks win rates and training progress
+        1. Initializes opponents with the current model at training start
+        2. Periodically updates the opponent model to the current policy
+        3. Optionally adds models to the opponent pool
+        4. Tracks win rates and logs stats (incl. tensorboard when available)
 
         Usage:
-            callback = SelfPlayCallback(
-                env,
-                update_freq=10000,
-                add_to_pool_freq=50000
-            )
+            # Auto-discovery from a (vec) env:
+            callback = SelfPlayCallback(env, update_freq=10000, add_to_pool_freq=50000)
+            # Or with an explicit env list + shared pool (the training script's form):
+            callback = SelfPlayCallback(envs=self_play_envs, opponent_pool=pool)
             model.learn(total_timesteps=1000000, callback=callback)
         """
 
         def __init__(
             self,
-            env: SelfPlayEnv | Any,
+            env: SelfPlayEnv | Any = None,
             update_freq: int = 10000,
             add_to_pool_freq: int = 50000,
             min_win_rate_for_pool: float = 0.55,
             verbose: int = 1,
+            *,
+            envs: list[SelfPlayEnv] | None = None,
+            opponent_pool: Any = None,
         ):
             """
             Initialize the callback.
 
             Args:
-                env: The SelfPlayEnv or vectorized environment
+                env: The SelfPlayEnv or vectorized environment to discover
+                    self-play envs from. Mutually exclusive with ``envs``.
                 update_freq: How often to update opponent to current model
                 add_to_pool_freq: How often to add model to opponent pool
                 min_win_rate_for_pool: Minimum win rate to add to pool
                 verbose: Verbosity level
+                envs: Explicit list of ``SelfPlayEnv`` instances (skips
+                    discovery). Used by the training script, which already
+                    holds the unwrapped envs.
+                opponent_pool: Shared :class:`OpponentPool` to add snapshots
+                    to. Defaults to the first pool found on the envs.
             """
             if _BaseCallback is not None:
                 super().__init__(verbose=verbose)
@@ -619,37 +628,61 @@ def _make_callback_class():
                 self.model = None
                 self.verbose = verbose
 
+            if env is None and envs is None:
+                raise ValueError("SelfPlayCallback needs either env= or envs=")
+
             self.env = env
+            self._explicit_envs = list(envs) if envs is not None else None
+            self.opponent_pool = opponent_pool
             self.update_freq = update_freq
             self.add_to_pool_freq = add_to_pool_freq
             self.min_win_rate_for_pool = min_win_rate_for_pool
 
+            self.win_rate_history: list[float] = []
+            self.pool_additions = 0
+
         def _get_self_play_envs(self) -> list[SelfPlayEnv]:
-            """Get all SelfPlayEnv instances from the environment."""
+            """Get all SelfPlayEnv instances (explicit list or discovered)."""
+            if self._explicit_envs is not None:
+                return self._explicit_envs
+
             envs = []
-
-            # Handle vectorized environments
-            if hasattr(self.env, "envs"):
-                for env in self.env.envs:
-                    if isinstance(env, SelfPlayEnv):
-                        envs.append(env)
-                    elif hasattr(env, "env") and isinstance(env.env, SelfPlayEnv):
-                        envs.append(env.env)
-            elif isinstance(self.env, SelfPlayEnv):
-                envs.append(self.env)
-            elif hasattr(self.env, "env") and isinstance(self.env.env, SelfPlayEnv):
-                envs.append(self.env.env)
-
+            # Vectorized envs: unwrap each sub-env's .env chain until a
+            # SelfPlayEnv shows up (Monitor/wrapper layers in between).
+            candidates = self.env.envs if hasattr(self.env, "envs") else [self.env]
+            for env in candidates:
+                current = env
+                while current is not None:
+                    if isinstance(current, SelfPlayEnv):
+                        envs.append(current)
+                        break
+                    current = getattr(current, "env", None)
             return envs
+
+        def _resolve_pool(self):
+            """The shared pool if given, else the first env pool found."""
+            if self.opponent_pool is not None:
+                return self.opponent_pool
+            for env in self._get_self_play_envs():
+                if env.opponent_pool is not None:
+                    return env.opponent_pool
+            return None
 
         def _init_callback(self) -> None:
             """Called by BaseCallback.init_callback() after self.model is set."""
+
+        def _on_training_start(self) -> None:
+            """Initialize opponents with the current model."""
+            if self.verbose >= 1:
+                logger.info("Initializing self-play opponents with current model...")
+            self._update_opponents(log=False)
 
         def _on_step(self) -> bool:
             """Called after each env.step() by BaseCallback.on_step()."""
             # Update opponent model
             if self.n_calls % self.update_freq == 0:
                 self._update_opponents()
+                self._log_stats()
 
             # Add to pool
             if self.n_calls % self.add_to_pool_freq == 0:
@@ -657,39 +690,79 @@ def _make_callback_class():
 
             return True
 
-        def _update_opponents(self) -> None:
+        def _get_average_win_rate(self) -> float:
+            """Average win rate across all self-play envs."""
+            win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
+            return float(np.mean(win_rates)) if win_rates else 0.5
+
+        def _update_opponents(self, log: bool = True) -> None:
             """Update all opponents to current model."""
             for env in self._get_self_play_envs():
                 env.set_opponent_model(self.model)
                 env.update_opponent_from_current()
 
-            if self.verbose >= 1:
-                win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
-                avg_win_rate = np.mean(win_rates) if win_rates else 0.5
-                logger.info("Step %d: Updated opponents. Avg win rate: %.2f%%", self.n_calls, avg_win_rate * 100)
+            if log and self.verbose >= 1:
+                logger.info(
+                    "Step %d: Updated opponents. Avg win rate: %.2f%%",
+                    self.n_calls,
+                    self._get_average_win_rate() * 100,
+                )
 
-        def _add_to_pool(self) -> None:
-            """Add current model to opponent pool if win rate is good enough."""
+        def _log_stats(self) -> None:
+            """Log training statistics (and tensorboard series when attached)."""
+            if self.verbose < 1 and getattr(self, "logger", None) is None:
+                return
             envs = self._get_self_play_envs()
             if not envs:
                 return
+            avg_win_rate = self._get_average_win_rate()
+            total_games = sum(env.stats["total_games"] for env in envs)
+            total_wins = sum(env.stats["agent_wins"] for env in envs)
 
-            # Check win rate
-            win_rates = [env.get_win_rate() for env in envs]
-            avg_win_rate = np.mean(win_rates) if win_rates else 0.5
+            if self.verbose >= 1:
+                logger.info(
+                    "Step %d: Win rate: %.2f%%, Total games: %d, Wins: %d",
+                    self.num_timesteps,
+                    avg_win_rate * 100,
+                    total_games,
+                    total_wins,
+                )
+
+            # Tensorboard, via SB3's logger (present once attached to a model).
+            sb3_logger = getattr(self, "logger", None)
+            if sb3_logger is not None:
+                sb3_logger.record("self_play/win_rate", avg_win_rate)
+                sb3_logger.record("self_play/total_games", total_games)
+                pool = self._resolve_pool()
+                if pool is not None:
+                    sb3_logger.record("self_play/pool_size", pool.size)
+
+        def _add_to_pool(self) -> None:
+            """Add current model to opponent pool if win rate is good enough."""
+            pool = self._resolve_pool()
+            if pool is None or not self._get_self_play_envs():
+                return
+
+            avg_win_rate = self._get_average_win_rate()
+            self.win_rate_history.append(avg_win_rate)
 
             if avg_win_rate >= self.min_win_rate_for_pool:
-                for env in envs:
-                    if env.opponent_pool is not None:
-                        env.opponent_pool.add_model(self.model, timestep=self.n_calls, win_rate=avg_win_rate)
-                        if self.verbose >= 1:
-                            logger.info(
-                                "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
-                                self.n_calls,
-                                avg_win_rate * 100,
-                                env.opponent_pool.size,
-                            )
-                        break  # Only add once
+                pool.add_model(self.model, timestep=self.num_timesteps, win_rate=avg_win_rate)
+                self.pool_additions += 1
+                if self.verbose >= 1:
+                    logger.info(
+                        "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
+                        self.num_timesteps,
+                        avg_win_rate * 100,
+                        pool.size,
+                    )
+            elif self.verbose >= 1:
+                logger.info(
+                    "Step %d: Win rate %.2f%% below threshold %.2f%%, not adding to pool",
+                    self.num_timesteps,
+                    avg_win_rate * 100,
+                    self.min_win_rate_for_pool * 100,
+                )
 
     return _SelfPlayCallback
 
