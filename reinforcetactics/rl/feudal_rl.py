@@ -3,6 +3,9 @@ Feudal Reinforcement Learning Architecture
 Manager-Worker hierarchy for strategy games
 """
 
+from dataclasses import dataclass, field
+from typing import Any
+
 import numpy as np
 import torch
 from torch import nn
@@ -1018,6 +1021,25 @@ def merge_finalized_buffers(buffers: list["FeudalRolloutBuffer"]) -> "FeudalRoll
     return merged
 
 
+@dataclass
+class _EnvRolloutState:
+    """Per-env mutable rollout state threaded through ``_rollout_step``.
+
+    ``collect_rollout`` keeps exactly one (synced with the agent's
+    persistent ``current_goal`` / ``goal_step_counter`` / ``_last_obs``
+    before and after the loop); ``collect_rollout_vec`` keeps one per env.
+    """
+
+    obs: Any
+    goal: "torch.Tensor | None" = None
+    goal_counter: int = 0
+    manager_open: bool = False
+    manager_steps: int = 0
+    manager_reward: float = 0.0
+    end_reasons: list[str] = field(default_factory=list)
+    reward_breakdown: dict[str, float] = field(default_factory=dict)
+
+
 class FeudalRLAgent:
     """
     Complete Feudal RL agent with manager and worker.
@@ -1254,151 +1276,191 @@ class FeudalRLAgent:
         if self._last_obs is None:
             self._last_obs, _ = env.reset()
             self.reset_goal()
-        obs = self._last_obs
-        manager_reward_accum = 0.0
-        manager_step_count = 0
-        # Track whether we have opened a manager segment *in this buffer*.
-        # Prevents closing a segment from a previous rollout in a fresh buffer.
-        manager_segment_open = False
+
+        # Wrap the agent's persistent scalar state for the shared step core;
+        # written back after the loop so ``select_action`` / the next rollout
+        # see exactly what the pre-refactor code left behind.
+        state = _EnvRolloutState(
+            obs=self._last_obs,
+            goal=self.current_goal,
+            goal_counter=self.goal_step_counter,
+        )
 
         # When the AR worker captures stage-conditional masks we don't also
         # need the per-dim 6-tuple — the PPO update path keys off store_masks.
         env_supports_masks = hasattr(env, "action_masks") and not use_ar_masks
-        end_reasons: list[str] = []
-        reward_breakdown_sums: dict[str, float] = {}
 
         self.feature_extractor.eval()
         self.manager.eval()
         self.worker.eval()
 
         for _ in range(n_steps):
-            obs_tensor = self._obs_to_tensor(obs)
-            step_masks_np = env.action_masks() if env_supports_masks else None
-            worker_mask_tensors = self._masks_to_tensors(step_masks_np)
-
+            obs_tensor = self._obs_to_tensor(state.obs)
             with torch.no_grad():
                 features = self.feature_extractor(obs_tensor)
-
-                # Check if manager needs to set a new goal
-                need_new_goal = self.current_goal is None or self.goal_step_counter >= self.manager_horizon
-
-                if need_new_goal:
-                    # Close previous manager segment if one was opened in this buffer
-                    if manager_segment_open and manager_step_count > 0:
-                        buf.end_manager_segment(manager_reward_accum, done=False, segment_length=manager_step_count)
-                        manager_reward_accum = 0.0
-                        manager_step_count = 0
-
-                    # Sample new goal (single forward pass returns goal, log_prob, value)
-                    goal, m_log_prob, m_value = self.manager.sample_goal(features)
-                    buf.add_manager_step(obs, goal.cpu().numpy()[0], m_log_prob.item(), m_value.squeeze(-1).item())
-                    self.current_goal = goal
-                    self.goal_step_counter = 0
-                    manager_segment_open = True
-
-                # Worker selects action conditioned on goal. Three paths:
-                #   - AR worker + env supports structured masks: stage-conditional masking.
-                #   - AR worker, no structured masks: unmasked AR sampling (warned above).
-                #   - Legacy 6-head worker: per-dim masks from env.action_masks() if present.
-                ar_step_masks_np: dict[str, np.ndarray] | None = None
-                if use_ar_masks:
-                    provider = StructuredMaskProvider(
-                        env.structured_action_masks(),
-                        grid_height=self.grid_height,
-                        grid_width=self.grid_width,
-                        device=self.device,
-                    )
-                    action, w_log_prob, w_value, cond_masks = self.worker.sample_action_with_provider(
-                        features, self.current_goal, provider
-                    )
-                    ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
-                elif self.autoregressive_worker:
-                    action, w_log_prob, w_value = self.worker.sample_action(features, self.current_goal)
-                else:
-                    action, w_log_prob, w_value = self.worker.sample_action(
-                        features, self.current_goal, action_masks=worker_mask_tensors
-                    )
-
-            # Step environment
-            action_np = action.cpu().numpy()[0]
-            next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
-            done = terminated or truncated
-            # Scale extrinsic rewards before they enter the buffer. Default
-            # 1.0 leaves behavior unchanged; setting reward_scale << 1 keeps
-            # value-function targets in a numerically sane range when the
-            # env's terminal magnitude (e.g. ±5000) would otherwise dwarf
-            # the value head's MSE budget.
-            if reward_scale != 1.0:
-                ext_reward = float(ext_reward) * reward_scale
-
-            # Surface info diagnostics so the training loop can show them.
-            for k, v in info.get("reward_breakdown", {}).items():
-                reward_breakdown_sums[k] = reward_breakdown_sums.get(k, 0.0) + float(v)
-
-            # Compute intrinsic reward
-            assert self.current_goal is not None
-            goal_np = self.current_goal.cpu().numpy()[0]
-            int_reward = compute_intrinsic_reward(next_obs, goal_np)
-
-            # Store worker transition
-            buf.add_worker_step(
-                obs,
-                action_np,
-                w_log_prob.item(),
-                w_value.squeeze(-1).item(),
-                goal_np,
-                ext_reward,
-                int_reward,
-                done,
-                worker_reward_alpha,
-                action_masks=step_masks_np,
-                masks=ar_step_masks_np,
+            self._rollout_step(
+                env,
+                state,
+                buf,
+                features,
+                use_ar_masks=use_ar_masks,
+                env_supports_masks=env_supports_masks,
+                worker_reward_alpha=worker_reward_alpha,
+                reward_scale=reward_scale,
             )
 
-            manager_reward_accum += ext_reward
-            manager_step_count += 1
-            self.goal_step_counter += 1
-
-            if done:
-                if manager_segment_open and manager_step_count > 0:
-                    buf.end_manager_segment(manager_reward_accum, done=True, segment_length=manager_step_count)
-                manager_reward_accum = 0.0
-                manager_step_count = 0
-                manager_segment_open = False
-                reason = info.get("end_reason")
-                if reason is not None:
-                    end_reasons.append(reason)
-                obs, _ = env.reset()
-                self.reset_goal()
-            else:
-                obs = next_obs
-
         # Close any pending manager segment
-        if manager_segment_open and manager_step_count > 0:
-            buf.end_manager_segment(manager_reward_accum, done=False, segment_length=manager_step_count)
+        if state.manager_open and state.manager_steps > 0:
+            buf.end_manager_segment(state.manager_reward, done=False, segment_length=state.manager_steps)
 
         # Bootstrap last values for GAE
         with torch.no_grad():
-            obs_tensor = self._obs_to_tensor(obs)
+            obs_tensor = self._obs_to_tensor(state.obs)
             features = self.feature_extractor(obs_tensor)
-            # Need a goal for worker value bootstrap
-            if self.current_goal is None:
-                self.current_goal, _, _ = self.manager.sample_goal(features)
-            _, last_w_value = self.worker(features, self.current_goal)
-            _, _, _, last_m_value = self.manager(features)
+            last_w_value, last_m_value = self._bootstrap_env_values(features, state)
 
-        self._last_obs = obs
+        self._last_obs = state.obs
+        self.current_goal = state.goal
+        self.goal_step_counter = state.goal_counter
 
         buf.finalize()
-        buf.compute_advantages(last_w_value.item(), last_m_value.item(), gamma, gae_lambda)
-        buf.end_reasons = end_reasons
-        buf.reward_breakdown = reward_breakdown_sums
+        buf.compute_advantages(last_w_value, last_m_value, gamma, gae_lambda)
+        buf.end_reasons = state.end_reasons
+        buf.reward_breakdown = state.reward_breakdown
 
         self.feature_extractor.train()
         self.manager.train()
         self.worker.train()
 
         return buf
+
+    def _rollout_step(
+        self,
+        env,
+        state: _EnvRolloutState,
+        buf: FeudalRolloutBuffer,
+        features: torch.Tensor,
+        *,
+        use_ar_masks: bool,
+        env_supports_masks: bool,
+        worker_reward_alpha: float,
+        reward_scale: float,
+    ) -> None:
+        """Advance one env by one step — the shared core of both collectors.
+
+        ``features`` is the feature-extractor output for ``state.obs``
+        (shape ``(1, feat_dim)``), computed by the caller (batched across
+        envs in the vec path). Mutates ``state`` and appends to ``buf``.
+        """
+        step_masks_np = env.action_masks() if env_supports_masks else None
+        worker_mask_tensors = self._masks_to_tensors(step_masks_np)
+
+        with torch.no_grad():
+            # Check if manager needs to set a new goal
+            need_new_goal = state.goal is None or state.goal_counter >= self.manager_horizon
+
+            if need_new_goal:
+                # Close previous manager segment if one was opened in this buffer
+                if state.manager_open and state.manager_steps > 0:
+                    buf.end_manager_segment(state.manager_reward, done=False, segment_length=state.manager_steps)
+                    state.manager_reward = 0.0
+                    state.manager_steps = 0
+
+                # Sample new goal (single forward pass returns goal, log_prob, value)
+                goal, m_log_prob, m_value = self.manager.sample_goal(features)
+                buf.add_manager_step(state.obs, goal.cpu().numpy()[0], m_log_prob.item(), m_value.squeeze(-1).item())
+                state.goal = goal
+                state.goal_counter = 0
+                state.manager_open = True
+
+            # Worker selects action conditioned on goal. Three paths:
+            #   - AR worker + env supports structured masks: stage-conditional masking.
+            #   - AR worker, no structured masks: unmasked AR sampling (caller warned).
+            #   - Legacy 6-head worker: per-dim masks from env.action_masks() if present.
+            ar_step_masks_np: dict[str, np.ndarray] | None = None
+            if use_ar_masks:
+                provider = StructuredMaskProvider(
+                    env.structured_action_masks(),
+                    grid_height=self.grid_height,
+                    grid_width=self.grid_width,
+                    device=self.device,
+                )
+                action, w_log_prob, w_value, cond_masks = self.worker.sample_action_with_provider(
+                    features, state.goal, provider
+                )
+                ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
+            elif self.autoregressive_worker:
+                action, w_log_prob, w_value = self.worker.sample_action(features, state.goal)
+            else:
+                action, w_log_prob, w_value = self.worker.sample_action(features, state.goal, action_masks=worker_mask_tensors)
+
+        # Step environment
+        action_np = action.cpu().numpy()[0]
+        next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
+        done = terminated or truncated
+        # Scale extrinsic rewards before they enter the buffer. Default
+        # 1.0 leaves behavior unchanged; setting reward_scale << 1 keeps
+        # value-function targets in a numerically sane range when the
+        # env's terminal magnitude (e.g. ±5000) would otherwise dwarf
+        # the value head's MSE budget.
+        if reward_scale != 1.0:
+            ext_reward = float(ext_reward) * reward_scale
+
+        # Surface info diagnostics so the training loop can show them.
+        for k, v in info.get("reward_breakdown", {}).items():
+            state.reward_breakdown[k] = state.reward_breakdown.get(k, 0.0) + float(v)
+
+        # Compute intrinsic reward
+        assert state.goal is not None
+        goal_np = state.goal.cpu().numpy()[0]
+        int_reward = compute_intrinsic_reward(next_obs, goal_np)
+
+        # Store worker transition
+        buf.add_worker_step(
+            state.obs,
+            action_np,
+            w_log_prob.item(),
+            w_value.squeeze(-1).item(),
+            goal_np,
+            ext_reward,
+            int_reward,
+            done,
+            worker_reward_alpha,
+            action_masks=step_masks_np,
+            masks=ar_step_masks_np,
+        )
+
+        state.manager_reward += ext_reward
+        state.manager_steps += 1
+        state.goal_counter += 1
+
+        if done:
+            if state.manager_open and state.manager_steps > 0:
+                buf.end_manager_segment(state.manager_reward, done=True, segment_length=state.manager_steps)
+            state.manager_reward = 0.0
+            state.manager_steps = 0
+            state.manager_open = False
+            reason = info.get("end_reason")
+            if reason is not None:
+                state.end_reasons.append(reason)
+            state.obs, _ = env.reset()
+            state.goal = None
+            state.goal_counter = 0
+        else:
+            state.obs = next_obs
+
+    def _bootstrap_env_values(self, features: torch.Tensor, state: _EnvRolloutState) -> tuple[float, float]:
+        """Worker/manager value bootstrap for GAE at rollout end.
+
+        Caller must hold ``torch.no_grad()``. Samples a goal into ``state``
+        when the episode just ended (goal is None) — matching the historic
+        behavior where that sampled goal also persists into the next rollout.
+        """
+        if state.goal is None:
+            state.goal, _, _ = self.manager.sample_goal(features)
+        _, last_w_value = self.worker(features, state.goal)
+        _, _, _, last_m_value = self.manager(features)
+        return last_w_value.item(), last_m_value.item()
 
     def collect_rollout_vec(
         self,
@@ -1447,16 +1509,16 @@ class FeudalRLAgent:
         if not hasattr(self, "_last_obs_vec") or len(getattr(self, "_last_obs_vec", []) or []) != n_envs:
             # Auto-init on first vec call (or when n_envs changed).
             self._last_obs_vec = [e.reset()[0] for e in envs]
-        obs_per_env = list(self._last_obs_vec)
-        goal_per_env: list[torch.Tensor | None] = [None] * n_envs
-        goal_counter_per_env = [0] * n_envs
-        manager_open_per_env = [False] * n_envs
-        manager_step_count_per_env = [0] * n_envs
-        manager_reward_accum_per_env = [0.0] * n_envs
-
+        states = [_EnvRolloutState(obs=o) for o in self._last_obs_vec]
         bufs = [FeudalRolloutBuffer(store_masks=use_ar_masks) for _ in range(n_envs)]
-        end_reasons_per_env: list[list[str]] = [[] for _ in range(n_envs)]
-        reward_breakdown_per_env: list[dict[str, float]] = [{} for _ in range(n_envs)]
+
+        def _batched_features() -> torch.Tensor:
+            batched_obs = self._batch_obs_to_tensor(
+                np.stack([s.obs["grid"] for s in states]),
+                np.stack([s.obs["units"] for s in states]),
+                np.stack([s.obs["global_features"] for s in states]),
+            )
+            return self.feature_extractor(batched_obs)  # (n_envs, feat_dim)
 
         self.feature_extractor.eval()
         self.manager.eval()
@@ -1464,146 +1526,41 @@ class FeudalRLAgent:
 
         for _ in range(n_steps):
             # Batch obs across envs for one feature-extractor forward pass.
-            batched_obs = self._batch_obs_to_tensor(
-                np.stack([o["grid"] for o in obs_per_env]),
-                np.stack([o["units"] for o in obs_per_env]),
-                np.stack([o["global_features"] for o in obs_per_env]),
-            )
             with torch.no_grad():
-                features = self.feature_extractor(batched_obs)  # (n_envs, feat_dim)
+                features = _batched_features()
 
             for env_idx in range(n_envs):
-                env = envs[env_idx]
-                env_features = features[env_idx : env_idx + 1]
-                step_masks_np = env.action_masks() if env_supports_masks else None
-                worker_mask_tensors = self._masks_to_tensors(step_masks_np)
-
-                with torch.no_grad():
-                    need_new_goal = goal_per_env[env_idx] is None or goal_counter_per_env[env_idx] >= self.manager_horizon
-                    if need_new_goal:
-                        if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
-                            bufs[env_idx].end_manager_segment(
-                                manager_reward_accum_per_env[env_idx],
-                                done=False,
-                                segment_length=manager_step_count_per_env[env_idx],
-                            )
-                            manager_reward_accum_per_env[env_idx] = 0.0
-                            manager_step_count_per_env[env_idx] = 0
-                        goal, m_log_prob, m_value = self.manager.sample_goal(env_features)
-                        bufs[env_idx].add_manager_step(
-                            obs_per_env[env_idx],
-                            goal.cpu().numpy()[0],
-                            m_log_prob.item(),
-                            m_value.squeeze(-1).item(),
-                        )
-                        goal_per_env[env_idx] = goal
-                        goal_counter_per_env[env_idx] = 0
-                        manager_open_per_env[env_idx] = True
-
-                    ar_step_masks_np: dict[str, np.ndarray] | None = None
-                    if use_ar_masks:
-                        provider = StructuredMaskProvider(
-                            env.structured_action_masks(),
-                            grid_height=self.grid_height,
-                            grid_width=self.grid_width,
-                            device=self.device,
-                        )
-                        action, w_log_prob, w_value, cond_masks = self.worker.sample_action_with_provider(
-                            env_features, goal_per_env[env_idx], provider
-                        )
-                        ar_step_masks_np = {k: v.cpu().numpy().squeeze(0) for k, v in cond_masks.items()}
-                    elif self.autoregressive_worker:
-                        action, w_log_prob, w_value = self.worker.sample_action(env_features, goal_per_env[env_idx])
-                    else:
-                        action, w_log_prob, w_value = self.worker.sample_action(
-                            env_features, goal_per_env[env_idx], action_masks=worker_mask_tensors
-                        )
-
-                action_np = action.cpu().numpy()[0]
-                next_obs, ext_reward, terminated, truncated, info = env.step(action_np)
-                done = terminated or truncated
-                if reward_scale != 1.0:
-                    ext_reward = float(ext_reward) * reward_scale
-
-                for k, v in info.get("reward_breakdown", {}).items():
-                    reward_breakdown_per_env[env_idx][k] = reward_breakdown_per_env[env_idx].get(k, 0.0) + float(v)
-
-                goal_np = goal_per_env[env_idx].cpu().numpy()[0]
-                int_reward = compute_intrinsic_reward(next_obs, goal_np)
-
-                bufs[env_idx].add_worker_step(
-                    obs_per_env[env_idx],
-                    action_np,
-                    w_log_prob.item(),
-                    w_value.squeeze(-1).item(),
-                    goal_np,
-                    ext_reward,
-                    int_reward,
-                    done,
-                    worker_reward_alpha,
-                    action_masks=step_masks_np,
-                    masks=ar_step_masks_np,
+                self._rollout_step(
+                    envs[env_idx],
+                    states[env_idx],
+                    bufs[env_idx],
+                    features[env_idx : env_idx + 1],
+                    use_ar_masks=use_ar_masks,
+                    env_supports_masks=env_supports_masks,
+                    worker_reward_alpha=worker_reward_alpha,
+                    reward_scale=reward_scale,
                 )
-
-                manager_reward_accum_per_env[env_idx] += ext_reward
-                manager_step_count_per_env[env_idx] += 1
-                goal_counter_per_env[env_idx] += 1
-
-                if done:
-                    if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
-                        bufs[env_idx].end_manager_segment(
-                            manager_reward_accum_per_env[env_idx],
-                            done=True,
-                            segment_length=manager_step_count_per_env[env_idx],
-                        )
-                    manager_reward_accum_per_env[env_idx] = 0.0
-                    manager_step_count_per_env[env_idx] = 0
-                    manager_open_per_env[env_idx] = False
-                    reason = info.get("end_reason")
-                    if reason is not None:
-                        end_reasons_per_env[env_idx].append(reason)
-                    next_obs, _ = env.reset()
-                    goal_per_env[env_idx] = None
-                    goal_counter_per_env[env_idx] = 0
-
-                obs_per_env[env_idx] = next_obs
 
         # Close any pending manager segments.
-        for env_idx in range(n_envs):
-            if manager_open_per_env[env_idx] and manager_step_count_per_env[env_idx] > 0:
-                bufs[env_idx].end_manager_segment(
-                    manager_reward_accum_per_env[env_idx],
-                    done=False,
-                    segment_length=manager_step_count_per_env[env_idx],
-                )
+        for state, buf in zip(states, bufs):
+            if state.manager_open and state.manager_steps > 0:
+                buf.end_manager_segment(state.manager_reward, done=False, segment_length=state.manager_steps)
 
         # Bootstrap last values for GAE — per env.
-        last_w_values: list[float] = []
-        last_m_values: list[float] = []
+        last_values: list[tuple[float, float]] = []
         with torch.no_grad():
-            batched_obs = self._batch_obs_to_tensor(
-                np.stack([o["grid"] for o in obs_per_env]),
-                np.stack([o["units"] for o in obs_per_env]),
-                np.stack([o["global_features"] for o in obs_per_env]),
-            )
-            features = self.feature_extractor(batched_obs)
+            features = _batched_features()
             for env_idx in range(n_envs):
-                env_features = features[env_idx : env_idx + 1]
-                if goal_per_env[env_idx] is None:
-                    goal_per_env[env_idx], _, _ = self.manager.sample_goal(env_features)
-                _, lw = self.worker(env_features, goal_per_env[env_idx])
-                _, _, _, lm = self.manager(env_features)
-                last_w_values.append(lw.item())
-                last_m_values.append(lm.item())
+                last_values.append(self._bootstrap_env_values(features[env_idx : env_idx + 1], states[env_idx]))
 
-        self._last_obs_vec = obs_per_env
+        self._last_obs_vec = [s.obs for s in states]
 
         # Per-env finalize + GAE; then concatenate into the merged buffer.
-        for env_idx in range(n_envs):
-            bufs[env_idx].finalize()
-            bufs[env_idx].compute_advantages(last_w_values[env_idx], last_m_values[env_idx], gamma, gae_lambda)
-            bufs[env_idx].end_reasons = end_reasons_per_env[env_idx]
-            bufs[env_idx].reward_breakdown = reward_breakdown_per_env[env_idx]
+        for buf, state, (last_w, last_m) in zip(bufs, states, last_values):
+            buf.finalize()
+            buf.compute_advantages(last_w, last_m, gamma, gae_lambda)
+            buf.end_reasons = state.end_reasons
+            buf.reward_breakdown = state.reward_breakdown
 
         merged = merge_finalized_buffers(bufs)
 
