@@ -473,38 +473,28 @@ class PromotionCallback(BaseCallback):
         return True
 
 
-class EntropyScheduleCallback(BaseCallback):
-    """Anneal ``model.ent_coef`` from ``start`` to ``end`` over a stage.
+class ScheduledAttrCallback(BaseCallback):
+    """Shared machinery for annealing a model attribute over a stage budget.
 
-    Use case: PPO benefits from elevated exploration on map-shift /
-    opponent-shift transitions, but holding a high entropy coefficient
-    for the entire stage prevents the policy from committing as it
-    approaches the promotion threshold (eval WR oscillates ±15%
-    between adjacent evals because sampled actions remain noisy). A
-    schedule that starts high and cools to a small commitment-phase
-    value gives both: early exploration plus late convergence.
-
-    SB3 reads ``self.ent_coef`` fresh inside every ``train()`` step
-    (see ``stable_baselines3.ppo.ppo.PPO.train``), so writing the
-    attribute in ``_on_step`` is the documented way to drive a
-    schedule without subclassing PPO. The bootstrap runner installs
-    this callback per stage and removes it on stage exit.
+    Subclasses set ``_target_attr`` (the ``model`` attribute written every
+    step), ``_tb_key`` (the tensorboard series name), and override
+    ``_validate_range`` for their domain. Concrete schedules:
+    :class:`EntropyScheduleCallback` and
+    :class:`~reinforcetactics.rl.purchase_exploration.PurchaseExploreScheduleCallback`.
+    Deliberately a common base rather than sibling subclassing so
+    ``isinstance(cb, EntropyScheduleCallback)`` stays False for the
+    purchase-ε schedule (the bootstrap tests rely on that).
 
     Progress is computed against ``total_timesteps`` (the stage's
     own budget), starting from whatever ``num_timesteps`` was when
     the stage's ``learn()`` call began. That matters because the
     bootstrap runner uses ``reset_num_timesteps=False``, so
     ``num_timesteps`` is cumulative across stages.
-
-    Args:
-        start: Initial entropy coefficient.
-        end: Final entropy coefficient at the end of the stage.
-        total_timesteps: Stage budget (matches ``learn(total_timesteps=...)``).
-        schedule: ``"linear"`` (default) or ``"cosine"`` (smooth half-cosine
-            from ``start`` to ``end``).
     """
 
     _SCHEDULES = ("linear", "cosine")
+    _target_attr: str
+    _tb_key: str
 
     def __init__(
         self,
@@ -515,8 +505,7 @@ class EntropyScheduleCallback(BaseCallback):
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose=verbose)
-        if start < 0 or end < 0:
-            raise ValueError(f"start/end must be >= 0, got start={start}, end={end}")
+        self._validate_range(start, end)
         if total_timesteps <= 0:
             raise ValueError(f"total_timesteps must be > 0, got {total_timesteps}")
         if schedule not in self._SCHEDULES:
@@ -526,6 +515,9 @@ class EntropyScheduleCallback(BaseCallback):
         self.total_timesteps = int(total_timesteps)
         self.schedule = schedule
         self._stage_start_step: int | None = None
+
+    def _validate_range(self, start: float, end: float) -> None:
+        raise NotImplementedError
 
     def _on_training_start(self) -> None:
         # ``num_timesteps`` is cumulative across stages because the
@@ -551,11 +543,44 @@ class EntropyScheduleCallback(BaseCallback):
         new_value = float(self._value_at(progress))
         # Setting the attribute is cheap; SB3 picks it up on the next
         # train() iteration. Use setattr so mypy doesn't complain about
-        # ``ent_coef`` not being declared on ``BaseAlgorithm`` -- it's
-        # a PPO/MaskablePPO-specific field, not part of the base class.
-        setattr(self.model, "ent_coef", new_value)
+        # e.g. ``ent_coef`` not being declared on ``BaseAlgorithm`` -- the
+        # targets are PPO/MaskablePPO-specific fields, not base-class ones.
+        setattr(self.model, self._target_attr, new_value)
         # Tensorboard: emit the live coefficient so the schedule shows
         # up alongside other train/* curves. ``record`` is buffered
         # until the next logger.dump(), which SB3 calls after train().
-        self.logger.record("train/ent_coef", new_value)
+        self.logger.record(self._tb_key, new_value)
         return True
+
+
+class EntropyScheduleCallback(ScheduledAttrCallback):
+    """Anneal ``model.ent_coef`` from ``start`` to ``end`` over a stage.
+
+    Use case: PPO benefits from elevated exploration on map-shift /
+    opponent-shift transitions, but holding a high entropy coefficient
+    for the entire stage prevents the policy from committing as it
+    approaches the promotion threshold (eval WR oscillates ±15%
+    between adjacent evals because sampled actions remain noisy). A
+    schedule that starts high and cools to a small commitment-phase
+    value gives both: early exploration plus late convergence.
+
+    SB3 reads ``self.ent_coef`` fresh inside every ``train()`` step
+    (see ``stable_baselines3.ppo.ppo.PPO.train``), so writing the
+    attribute in ``_on_step`` is the documented way to drive a
+    schedule without subclassing PPO. The bootstrap runner installs
+    this callback per stage and removes it on stage exit.
+
+    Args:
+        start: Initial entropy coefficient.
+        end: Final entropy coefficient at the end of the stage.
+        total_timesteps: Stage budget (matches ``learn(total_timesteps=...)``).
+        schedule: ``"linear"`` (default) or ``"cosine"`` (smooth half-cosine
+            from ``start`` to ``end``).
+    """
+
+    _target_attr = "ent_coef"
+    _tb_key = "train/ent_coef"
+
+    def _validate_range(self, start: float, end: float) -> None:
+        if start < 0 or end < 0:
+            raise ValueError(f"start/end must be >= 0, got start={start}, end={end}")

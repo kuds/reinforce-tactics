@@ -28,12 +28,12 @@ Pieces:
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from stable_baselines3.common.callbacks import BaseCallback
+
+from reinforcetactics.rl.callbacks import ScheduledAttrCallback
 
 # Layout of the MultiDiscrete action vector used by ``StrategyGameEnv``:
 # [action_type, unit_type, from_x, from_y, to_x, to_y]. ``create_unit``
@@ -253,14 +253,15 @@ def install_purchase_explore_hook(model: Any, eps: float, seed: int | None = Non
     policy._purchase_explore_installed = True
 
 
-class PurchaseExploreScheduleCallback(BaseCallback):
+class PurchaseExploreScheduleCallback(ScheduledAttrCallback):
     """Anneal ``model.purchase_explore_eps`` over a stage budget.
 
-    Mirrors :class:`reinforcetactics.rl.callbacks.EntropyScheduleCallback`:
-    progress is computed against ``total_timesteps`` from the start of
-    the current stage's ``learn()`` call (so it survives
-    ``reset_num_timesteps=False`` curriculum runs). Linear or cosine
-    interpolation between ``start`` and ``end``.
+    All scheduling machinery lives in
+    :class:`reinforcetactics.rl.callbacks.ScheduledAttrCallback` (shared
+    with ``EntropyScheduleCallback``): progress is computed against
+    ``total_timesteps`` from the start of the current stage's ``learn()``
+    call (so it survives ``reset_num_timesteps=False`` curriculum runs),
+    with linear or cosine interpolation between ``start`` and ``end``.
 
     The ε hook is read fresh on every rollout step (see
     :func:`install_purchase_explore_hook`), so writing
@@ -269,44 +270,9 @@ class PurchaseExploreScheduleCallback(BaseCallback):
     attaching this callback; otherwise ε mutation has no effect.
     """
 
-    _SCHEDULES = ("linear", "cosine")
+    _target_attr = "purchase_explore_eps"
+    _tb_key = "train/purchase_explore_eps"
 
-    def __init__(
-        self,
-        start: float,
-        end: float,
-        total_timesteps: int,
-        schedule: str = "linear",
-        verbose: int = 0,
-    ) -> None:
-        super().__init__(verbose=verbose)
+    def _validate_range(self, start: float, end: float) -> None:
         if not 0.0 <= start <= 1.0 or not 0.0 <= end <= 1.0:
             raise ValueError(f"start/end must be in [0, 1], got start={start}, end={end}")
-        if total_timesteps <= 0:
-            raise ValueError(f"total_timesteps must be > 0, got {total_timesteps}")
-        if schedule not in self._SCHEDULES:
-            raise ValueError(f"schedule must be one of {self._SCHEDULES}, got '{schedule}'")
-        self.start = float(start)
-        self.end = float(end)
-        self.total_timesteps = int(total_timesteps)
-        self.schedule = schedule
-        self._stage_start_step: int | None = None
-
-    def _on_training_start(self) -> None:
-        self._stage_start_step = int(self.num_timesteps)
-
-    def _value_at(self, progress: float) -> float:
-        progress = max(0.0, min(1.0, progress))
-        if self.schedule == "linear":
-            return self.start + (self.end - self.start) * progress
-        return self.end + 0.5 * (self.start - self.end) * (1.0 + math.cos(math.pi * progress))
-
-    def _on_step(self) -> bool:
-        if self._stage_start_step is None:
-            self._stage_start_step = int(self.num_timesteps)
-        elapsed = int(self.num_timesteps) - self._stage_start_step
-        progress = elapsed / self.total_timesteps if self.total_timesteps > 0 else 1.0
-        new_value = float(self._value_at(progress))
-        setattr(self.model, "purchase_explore_eps", new_value)
-        self.logger.record("train/purchase_explore_eps", new_value)
-        return True
