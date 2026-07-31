@@ -22,6 +22,7 @@ from typing import Optional
 import numpy as np
 import torch
 
+from reinforcetactics.rl.gym_env import ACTION_KEY_MAP, _action_pos, build_per_dim_masks
 from reinforcetactics.rl.observation import build_observation
 
 logger = logging.getLogger(__name__)
@@ -93,80 +94,18 @@ class MCTSNode:
         area = grid_width * grid_height
         flat_map = {}
 
-        def flat_idx(action_type_idx: int, x: int, y: int) -> int:
-            return action_type_idx * area + y * grid_width + x
+        # Decode table over the canonical layout. ACTION_KEY_MAP's dict order
+        # (heal before cure) plus the first-wins guard reproduce the historic
+        # per-index collision behavior exactly.
+        for key, (at_idx, _src_fields, tgt_fields) in ACTION_KEY_MAP.items():
+            for action in legal_actions.get(key, []):
+                tx, ty = _action_pos(action, tgt_fields)
+                idx = at_idx * area + ty * grid_width + tx
+                if idx not in flat_map:
+                    flat_map[idx] = {"key": key, "action": action}
 
-        # Map structured actions to flat indices
-        # 0: Create unit
-        for action in legal_actions.get("create_unit", []):
-            idx = flat_idx(0, action["x"], action["y"])
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "create_unit", "action": action}
-
-        # 1: Move
-        for action in legal_actions.get("move", []):
-            idx = flat_idx(1, action["to_x"], action["to_y"])
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "move", "action": action}
-
-        # 2: Attack
-        for action in legal_actions.get("attack", []):
-            target = action["target"]
-            idx = flat_idx(2, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "attack", "action": action}
-
-        # 3: Seize
-        for action in legal_actions.get("seize", []):
-            tile = action["tile"]
-            idx = flat_idx(3, tile.x, tile.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "seize", "action": action}
-
-        # 4: Heal / Cure
-        for action in legal_actions.get("heal", []):
-            target = action["target"]
-            idx = flat_idx(4, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "heal", "action": action}
-
-        for action in legal_actions.get("cure", []):
-            target = action["target"]
-            idx = flat_idx(4, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "cure", "action": action}
-
-        # 5: End turn — map to a single canonical index (0, 0)
-        idx = flat_idx(5, 0, 0)
-        flat_map[idx] = {"key": "end_turn", "action": {}}
-
-        # 6: Paralyze
-        for action in legal_actions.get("paralyze", []):
-            target = action["target"]
-            idx = flat_idx(6, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "paralyze", "action": action}
-
-        # 7: Haste
-        for action in legal_actions.get("haste", []):
-            target = action["target"]
-            idx = flat_idx(7, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "haste", "action": action}
-
-        # 8: Defence buff
-        for action in legal_actions.get("defence_buff", []):
-            target = action["target"]
-            idx = flat_idx(8, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "defence_buff", "action": action}
-
-        # 9: Attack buff
-        for action in legal_actions.get("attack_buff", []):
-            target = action["target"]
-            idx = flat_idx(9, target.x, target.y)
-            if idx not in flat_map:
-                flat_map[idx] = {"key": "attack_buff", "action": action}
+        # 5: End turn — always legal, single canonical index at (0, 0)
+        flat_map[5 * area] = {"key": "end_turn", "action": {}}
 
         self._legal_actions_cache = flat_map
         return flat_map
@@ -292,40 +231,15 @@ def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_acti
     Returns:
         (grid, units, global_features, action_mask) as numpy arrays.
     """
-    # Build flat action mask (kept local; Phase 2 will consolidate mask logic)
+    # Flat action mask from the shared builder (masks current_player by
+    # default, matching the value convention described above).
     area = grid_width * grid_height
-    mask_size = num_action_types * area
-    mask = np.zeros(mask_size, dtype=np.float32)
-
-    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
-
-    def set_mask(action_type_idx, x, y):
-        idx = action_type_idx * area + y * grid_width + x
-        if 0 <= idx < mask_size:
-            mask[idx] = 1.0
-
-    for action in legal_actions.get("create_unit", []):
-        set_mask(0, action["x"], action["y"])
-    for action in legal_actions.get("move", []):
-        set_mask(1, action["to_x"], action["to_y"])
-    for action in legal_actions.get("attack", []):
-        set_mask(2, action["target"].x, action["target"].y)
-    for action in legal_actions.get("seize", []):
-        set_mask(3, action["tile"].x, action["tile"].y)
-    for action in legal_actions.get("heal", []):
-        set_mask(4, action["target"].x, action["target"].y)
-    for action in legal_actions.get("cure", []):
-        set_mask(4, action["target"].x, action["target"].y)
-    # End turn: always valid at canonical position (0,0)
-    set_mask(5, 0, 0)
-    for action in legal_actions.get("paralyze", []):
-        set_mask(6, action["target"].x, action["target"].y)
-    for action in legal_actions.get("haste", []):
-        set_mask(7, action["target"].x, action["target"].y)
-    for action in legal_actions.get("defence_buff", []):
-        set_mask(8, action["target"].x, action["target"].y)
-    for action in legal_actions.get("attack_buff", []):
-        set_mask(9, action["target"].x, action["target"].y)
+    mask, *_ = build_per_dim_masks(
+        game_state,
+        grid_width,
+        grid_height,
+        flat_action_size=num_action_types * area,
+    )
 
     obs = build_observation(
         game_state,
