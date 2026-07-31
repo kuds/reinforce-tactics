@@ -61,8 +61,59 @@ def _get_back_translations() -> set:
     return _BACK_TRANSLATIONS_CACHE
 
 
-class Menu:
+class ScreenBootstrapMixin:
+    """Shared pygame screen bootstrap for top-level screens.
+
+    ``Menu`` and the standalone screens (``PlayerConfigMenu``,
+    ``APIKeysMenu``, ``MapEditor``) all need the same init dance —
+    ensure pygame, create-or-borrow the display surface, set the
+    caption — and the same window-close contract. Each used to copy
+    it, and the copies drifted (two screens swallowed the window
+    close button). Subclasses override the class attributes to vary
+    window size / caption / clipboard setup.
+    """
+
+    WINDOW_SIZE: tuple[int, int] = (900, 700)
+    CAPTION: str = "Reinforce Tactics"
+    INIT_CLIPBOARD: bool = False
+
+    screen: pygame.Surface
+    owns_screen: bool
+    running: bool
+
+    def _init_screen(self, screen: pygame.Surface | None) -> None:
+        """Ensure pygame is up and bind (or create) the display surface."""
+        # Initialize pygame if not already done
+        if not pygame.get_init():
+            pygame.init()
+
+        # Create screen if not provided
+        self.owns_screen = screen is None
+        if self.owns_screen:
+            self.screen = pygame.display.set_mode(self.WINDOW_SIZE)
+            pygame.display.set_caption(self.CAPTION)
+            if self.INIT_CLIPBOARD:
+                init_clipboard()
+        else:
+            assert screen is not None
+            self.screen = screen
+
+        self.running = True
+
+    def _repost_quit_if_borrowed(self) -> None:
+        """Re-post QUIT for the parent loop when the screen is borrowed.
+
+        Without this, a screen that returns on ``pygame.QUIT`` swallows
+        the close request instead of propagating it all the way out.
+        """
+        if not self.owns_screen:
+            pygame.event.post(pygame.event.Event(pygame.QUIT))
+
+
+class Menu(ScreenBootstrapMixin):
     """Base class for game menus. Manages its own screen if not provided."""
+
+    INIT_CLIPBOARD = True
 
     def __init__(self, screen: pygame.Surface | None = None, title: str = "") -> None:
         """
@@ -72,22 +123,9 @@ class Menu:
             screen: Optional pygame display surface. If None, creates its own.
             title: Menu title
         """
-        # Initialize pygame if not already done
-        if not pygame.get_init():
-            pygame.init()
-
-        # Create screen if not provided
-        self.owns_screen = screen is None
-        if self.owns_screen:
-            self.screen = pygame.display.set_mode((900, 700))
-            pygame.display.set_caption("Reinforce Tactics")
-            init_clipboard()
-        else:
-            assert screen is not None
-            self.screen = screen
+        self._init_screen(screen)
 
         self.title = title
-        self.running = True
         self.selected_index = 0
         self.options: list[tuple[str, Callable[[], Any]]] = []
         # Parallel list: self.option_enabled[i] gates whether options[i] can
@@ -547,11 +585,9 @@ class Menu:
             :meth:`run` should return if so.
         """
         self.running = False
-        # Re-post QUIT for the parent menu if we don't own the screen, so
-        # the close request propagates all the way out instead of only
+        # Propagate the close request to the parent menu instead of only
         # dismissing this screen.
-        if not self.owns_screen:
-            pygame.event.post(pygame.event.Event(pygame.QUIT))
+        self._repost_quit_if_borrowed()
         return True, None
 
     def _on_result(self, result: Any) -> tuple[bool, Any]:

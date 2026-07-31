@@ -4,14 +4,17 @@ import pygame
 
 from reinforcetactics.ui import theme, widgets
 from reinforcetactics.ui.icons import get_checkmark_icon, get_x_icon
+from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
 from reinforcetactics.ui.widgets import TextInput
-from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
 
 
-class APIKeysMenu:
+class APIKeysMenu(ScreenBootstrapMixin):
     """Menu for configuring LLM API keys."""
+
+    CAPTION = "Reinforce Tactics - API Keys"
+    INIT_CLIPBOARD = True
 
     def __init__(self, screen: pygame.Surface | None = None) -> None:
         """
@@ -20,20 +23,7 @@ class APIKeysMenu:
         Args:
             screen: Optional pygame surface. If None, creates its own.
         """
-        # Initialize pygame if not already done
-        if not pygame.get_init():
-            pygame.init()
-
-        # Create screen if not provided
-        self.owns_screen = screen is None
-        if self.owns_screen:
-            self.screen = pygame.display.set_mode((900, 700))
-            pygame.display.set_caption("Reinforce Tactics - API Keys")
-            init_clipboard()
-        else:
-            self.screen = screen
-
-        self.running = True
+        self._init_screen(screen)
 
         # Colors (from shared theme)
         self.bg_color = theme.BG
@@ -409,12 +399,7 @@ class APIKeysMenu:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                    # Re-post QUIT for the parent menu if we don't own the
-                    # screen (mirrors Menu._on_quit_event), so the close
-                    # request propagates out instead of only dismissing
-                    # this screen.
-                    if not self.owns_screen:
-                        pygame.event.post(pygame.event.Event(pygame.QUIT))
+                    self._repost_quit_if_borrowed()
                     return False
 
                 result = self.handle_input(event)

@@ -8,6 +8,7 @@ import pygame
 
 from reinforcetactics.constants import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
 from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.utils.file_io import FileIO
@@ -15,8 +16,11 @@ from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
 
-class MapEditor:
+class MapEditor(ScreenBootstrapMixin):
     """Main map editor class."""
+
+    WINDOW_SIZE = (1500, 1000)
+    CAPTION = "Map Editor - Reinforce Tactics"
 
     def __init__(
         self,
@@ -34,23 +38,11 @@ class MapEditor:
             map_filename: Optional filename for the map being edited
             num_players: Number of players (2-4)
         """
-        # Initialize pygame if not already done
-        if not pygame.get_init():
-            pygame.init()
-
-        # Create screen if not provided
-        self.owns_screen = screen is None
-        if self.owns_screen:
-            self.screen = pygame.display.set_mode((1500, 1000))
-            pygame.display.set_caption("Map Editor - Reinforce Tactics")
-        else:
-            assert screen is not None
-            self.screen = screen
+        self._init_screen(screen)
 
         self.map_data = map_data
         self.map_filename = map_filename
         self.num_players = num_players
-        self.running = True
         self.modified = False
 
         # Initialize components
@@ -98,12 +90,7 @@ class MapEditor:
                     if self.modified:
                         # TODO: Add save confirmation dialog
                         pass
-                    # Re-post QUIT for the parent menu if we don't own the
-                    # screen (mirrors Menu._on_quit_event), so the close
-                    # request propagates out instead of only dismissing
-                    # this screen.
-                    if not self.owns_screen:
-                        pygame.event.post(pygame.event.Event(pygame.QUIT))
+                    self._repost_quit_if_borrowed()
                     return {"type": "exit"}
 
                 self._handle_event(event)
