@@ -138,55 +138,21 @@ def _default_train_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
 
     return make_maskable_vec_env(
         n_envs=cfg.env.n_envs,
-        map_file=stage.map_file,
-        opponent=stage.opponent,
-        max_steps=stage.resolve_max_steps(cfg.env),
-        max_turns=stage.resolve_max_turns(cfg.env),
-        reward_config=stage.resolve_reward_config(cfg.env),
-        enabled_units=cfg.env.enabled_units,
-        action_space_type=cfg.env.action_space_type,
-        max_flat_actions=cfg.env.max_flat_actions,
-        max_actions_per_turn=cfg.env.max_actions_per_turn,
         seed=cfg.seed,
         use_subprocess=cfg.env.use_subprocess,
-        opponent_kwargs=stage.opponent_kwargs,
         gamma=cfg.ppo.gamma,
-        pad_to_size=cfg.env.pad_to_size,
-        gold_scale=cfg.env.gold_scale,
-        turn_scale=cfg.env.turn_scale,
-        unit_count_scale=cfg.env.unit_count_scale,
-        engine_overrides=cfg.env.engine_overrides,
+        **_stage_env_kwargs(stage, cfg.env),
     )
 
 
 def _default_eval_env_factory(stage: CurriculumStage, cfg: TrainingConfig):
-    from reinforcetactics.rl.masking import make_maskable_env
-
     # Offset the eval env's construction seed away from the training envs'
     # range (``cfg.seed + rank``) so eval episodes don't deterministically
     # share map / opponent RNG state with concurrent training rollouts. Per
     # eval block ``PeriodicEvalCallback`` reseeds the env on every reset
     # via ``evaluate_model(seed=...)`` -- this offset matters mainly for
     # the initial ``env.reset(seed=...)`` inside ``make_maskable_env``.
-    return make_maskable_env(
-        map_file=stage.map_file,
-        opponent=stage.opponent,
-        max_steps=stage.resolve_max_steps(cfg.env),
-        max_turns=stage.resolve_max_turns(cfg.env),
-        reward_config=stage.resolve_reward_config(cfg.env),
-        enabled_units=cfg.env.enabled_units,
-        action_space_type=cfg.env.action_space_type,
-        max_flat_actions=cfg.env.max_flat_actions,
-        max_actions_per_turn=cfg.env.max_actions_per_turn,
-        seed=cfg.seed + cfg.eval.seed_offset,
-        opponent_kwargs=stage.opponent_kwargs,
-        gamma=cfg.ppo.gamma,
-        pad_to_size=cfg.env.pad_to_size,
-        gold_scale=cfg.env.gold_scale,
-        turn_scale=cfg.env.turn_scale,
-        unit_count_scale=cfg.env.unit_count_scale,
-        engine_overrides=cfg.env.engine_overrides,
-    )
+    return make_stage_env(stage, cfg.env, seed=cfg.seed + cfg.eval.seed_offset, gamma=cfg.ppo.gamma)
 
 
 def _read_map_dims(map_file: str) -> tuple[int, int]:
@@ -1067,6 +1033,51 @@ def run_curriculum(
 # ---------------------------------------------------------------------------
 
 
+def _stage_env_kwargs(
+    stage: CurriculumStage,
+    env_cfg: Any,
+    *,
+    opponent: str | None = None,
+    opponent_kwargs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The shared env-parameter set for a stage, spelled out exactly once.
+
+    Feeds both :func:`make_stage_env` (single eval/replay envs) and the
+    default vec-env training factory, so a new env parameter cannot be
+    forwarded in one path and silently dropped in the other — the drift
+    class ``make_stage_env``'s docstring describes. ``seed`` and ``gamma``
+    stay with the callers: they are the two knobs that legitimately differ
+    between train / eval / replay envs.
+    """
+    if opponent is None:
+        opponent = stage.opponent
+        if opponent_kwargs is None:
+            opponent_kwargs = stage.opponent_kwargs
+
+    return {
+        "map_file": stage.map_file,
+        "opponent": opponent,
+        "max_steps": stage.resolve_max_steps(env_cfg),
+        "max_turns": stage.resolve_max_turns(env_cfg),
+        "reward_config": stage.resolve_reward_config(env_cfg),
+        "enabled_units": env_cfg.enabled_units,
+        "action_space_type": env_cfg.action_space_type,
+        # Must match training: a config with a non-default cap (e.g.
+        # max_flat_actions: 1024) trains a Discrete(1024) policy, and a
+        # replay/sanity env silently built at the 512 default would
+        # reject the checkpoint (or worse, evaluate a truncated action
+        # space). This was the drift bug this helper exists to prevent.
+        "max_flat_actions": env_cfg.max_flat_actions,
+        "max_actions_per_turn": env_cfg.max_actions_per_turn,
+        "pad_to_size": env_cfg.pad_to_size,
+        "opponent_kwargs": opponent_kwargs,
+        "gold_scale": env_cfg.gold_scale,
+        "turn_scale": env_cfg.turn_scale,
+        "unit_count_scale": env_cfg.unit_count_scale,
+        "engine_overrides": env_cfg.engine_overrides,
+    }
+
+
 def make_stage_env(
     stage: CurriculumStage,
     env_cfg: Any,
@@ -1119,37 +1130,13 @@ def make_stage_env(
     """
     from reinforcetactics.rl.masking import make_maskable_env
 
-    if opponent is None:
-        opponent = stage.opponent
-        if opponent_kwargs is None:
-            opponent_kwargs = stage.opponent_kwargs
-
     return make_maskable_env(
-        map_file=stage.map_file,
-        opponent=opponent,
-        max_steps=stage.resolve_max_steps(env_cfg),
-        max_turns=stage.resolve_max_turns(env_cfg),
-        reward_config=stage.resolve_reward_config(env_cfg),
-        enabled_units=env_cfg.enabled_units,
-        action_space_type=env_cfg.action_space_type,
-        # Must match training: a config with a non-default cap (e.g.
-        # max_flat_actions: 1024) trains a Discrete(1024) policy, and a
-        # replay/sanity env silently built at the 512 default would
-        # reject the checkpoint (or worse, evaluate a truncated action
-        # space). This was the drift bug this helper exists to prevent.
-        max_flat_actions=env_cfg.max_flat_actions,
-        max_actions_per_turn=env_cfg.max_actions_per_turn,
-        pad_to_size=env_cfg.pad_to_size,
-        opponent_kwargs=opponent_kwargs,
-        gold_scale=env_cfg.gold_scale,
-        turn_scale=env_cfg.turn_scale,
-        unit_count_scale=env_cfg.unit_count_scale,
-        engine_overrides=env_cfg.engine_overrides,
         seed=seed,
         # Matches ``make_maskable_env`` / ``StrategyGameEnv``'s own default so
         # omitting the argument is behaviour-preserving, but stated here rather
         # than left implicit -- the shaping delta depends on it.
         gamma=_DEFAULT_SHAPING_GAMMA if gamma is None else float(gamma),
+        **_stage_env_kwargs(stage, env_cfg, opponent=opponent, opponent_kwargs=opponent_kwargs),
     )
 
 
