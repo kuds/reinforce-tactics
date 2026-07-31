@@ -8,22 +8,21 @@ import pygame
 
 from reinforcetactics.constants import PLAYER_COLORS
 from reinforcetactics.ui import theme
-from reinforcetactics.ui.components.list_panel import ScrollList, draw_panel, split_panels
 from reinforcetactics.ui.components.map_preview import get_tile_color
-from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.ui.menus.in_game.confirmation_dialog import ConfirmationDialog
+from reinforcetactics.ui.menus.list_detail import ListDetailMenu, draw_preview_or_placeholder
 from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
 
-# Split-panel proportions and row metrics for this screen.
-LIST_FRACTION = 0.55
-ITEM_HEIGHT = 50
 
-
-class LoadGameMenu(Menu):
+class LoadGameMenu(ListDetailMenu):
     """Menu for loading saved games with visual previews and info."""
+
+    LIST_FRACTION = 0.55
+    ITEM_HEIGHT = 50
+    EMPTY_HINT = "Select a save to preview"
 
     def __init__(self, screen: pygame.Surface | None = None, saves_dir: str = "saves") -> None:
         """
@@ -72,12 +71,12 @@ class LoadGameMenu(Menu):
                 # Try parsing our format "YYYY-MM-DD HH-MM-SS"
                 date_str = timestamp_str.split(" ")[0] if timestamp_str else "Unknown"
             except (ValueError, TypeError):
-                date_str = self._extract_date_from_filename(os.path.basename(filepath))
+                date_str = extract_date_from_filename(os.path.basename(filepath))
 
             # Get player info
             player_configs = data.get("player_configs", [])
-            player1_name = self._get_player_display_name(player_configs, 0)
-            player2_name = self._get_player_display_name(player_configs, 1)
+            player1_name = get_player_display_name(player_configs, 0)
+            player2_name = get_player_display_name(player_configs, 1)
 
             # Get turn info
             turn_number = data.get("turn_number", 0)
@@ -153,7 +152,7 @@ class LoadGameMenu(Menu):
         except (OSError, json.JSONDecodeError):
             # Store minimal metadata for failed loads
             self.save_metadata[filepath] = {
-                "date": self._extract_date_from_filename(os.path.basename(filepath)),
+                "date": extract_date_from_filename(os.path.basename(filepath)),
                 "timestamp": "",
                 "player1": "Player 1",
                 "player2": "Player 2",
@@ -173,14 +172,6 @@ class LoadGameMenu(Menu):
                 "winner": None,
                 "num_players": 2,
             }
-
-    def _extract_date_from_filename(self, filename: str) -> str:
-        """Extract date from save filename."""
-        return extract_date_from_filename(filename)
-
-    def _get_player_display_name(self, player_configs: list[dict], player_idx: int) -> str:
-        """Get a display name for a player from config."""
-        return get_player_display_name(player_configs, player_idx)
 
     def _get_display_name(self, filepath: str) -> str:
         """Get user-friendly display name for a save."""
@@ -218,20 +209,9 @@ class LoadGameMenu(Menu):
 
         self.add_option(get_language().get("common.back", "Back"), lambda: None)
 
-    def _panels(self) -> tuple[pygame.Rect, pygame.Rect]:
-        """The list and detail panel rectangles for the current window."""
-        return split_panels(self.screen, LIST_FRACTION)
-
-    def _scroll_list(self) -> ScrollList:
-        """The list geometry, shared by hit-testing and drawing."""
-        left_panel, _ = self._panels()
-        return ScrollList(left_panel, ITEM_HEIGHT)
-
-    def _populate_option_rects(self) -> None:
-        """Populate option_rects for click detection matching split-panel layout."""
-        scroll_list = self._scroll_list()
-        self.max_visible_options = scroll_list.capacity
-        self.option_rects = scroll_list.item_rects(self.scroll_offset, len(self.options))
+    def _detail_items(self) -> list:
+        """The saves backing the detail panel (Back has no detail)."""
+        return self.save_files
 
     def _generate_save_map_preview(self, filepath: str, width: int, height: int) -> pygame.Surface | None:
         """Generate a map preview from save's tile data."""
@@ -297,75 +277,18 @@ class LoadGameMenu(Menu):
         except Exception:
             return None
 
-    def draw(self) -> None:
-        """Draw the load game menu with split-panel layout."""
-        self.screen.fill(self.bg_color)
-
-        screen_width = self.screen.get_width()
-
-        # Draw title
-        if self.title:
-            title_surface = self.title_font.render(self.title, True, self.title_color)
-            title_rect = title_surface.get_rect(centerx=screen_width // 2, y=20)
-            self.screen.blit(title_surface, title_rect)
-
-        left_panel, right_panel = self._panels()
-        draw_panel(self.screen, left_panel)
-        draw_panel(self.screen, right_panel)
-
-        self._draw_save_list(left_panel)
-        self._draw_preview_panel(right_panel)
-
-        pygame.display.flip()
-
-    def _draw_save_list(self, panel_rect: pygame.Rect) -> None:
-        """Draw the scrollable save list."""
-        scroll_list = ScrollList(panel_rect, ITEM_HEIGHT)
-        # Sync with base class so keyboard scrolling and mouse-wheel bounds
-        # match the visible count.
-        self.max_visible_options = scroll_list.capacity
-
-        total = len(self.options)
-        start_idx, _ = scroll_list.visible_range(self.scroll_offset, total)
-        self.option_rects = scroll_list.item_rects(self.scroll_offset, total)
-
+    def _draw_row_content(self, index: int, item_rect, text: str, text_color) -> None:
+        """A single ellipsized label line."""
         text_font = get_font(theme.FONT_SIZE_BODY)
+        # Ellipsize rather than hard-clipping: a chopped glyph reads as a
+        # rendering glitch, "..." reads as "there is more".
+        label = ellipsize(text, text_font, item_rect.width - 20)
+        text_surface = text_font.render(label, True, text_color)
+        text_rect = text_surface.get_rect(midleft=(item_rect.x + 10, item_rect.centery))
+        self.screen.blit(text_surface, text_rect)
 
-        for display_idx, item_rect in enumerate(self.option_rects):
-            i = start_idx + display_idx
-            text, _ = self.options[i]
-
-            is_selected = i == self.selected_index
-            is_hovered = i == self.hover_index
-            scroll_list.draw_row(self.screen, item_rect, selected=is_selected, hovered=is_hovered)
-
-            if is_selected:
-                text_color = self.selected_color
-            elif is_hovered:
-                text_color = self.hover_color
-            else:
-                text_color = self.text_color
-
-            # Ellipsize rather than hard-clipping: a chopped glyph reads as a
-            # rendering glitch, "..." reads as "there is more".
-            label = ellipsize(text, text_font, item_rect.width - 20)
-            text_surface = text_font.render(label, True, text_color)
-            text_rect = text_surface.get_rect(midleft=(item_rect.x + 10, item_rect.centery))
-            self.screen.blit(text_surface, text_rect)
-
-        scroll_list.draw_scroll_indicators(self.screen, self.scroll_offset, total)
-
-    def _draw_preview_panel(self, panel_rect: pygame.Rect) -> None:
+    def _draw_detail_content(self, panel_rect, active_index: int) -> None:
         """Draw the preview and details panel."""
-        # Get currently selected/hovered save
-        active_index = self.hover_index if self.hover_index >= 0 else self.selected_index
-
-        if active_index < 0 or active_index >= len(self.save_files):
-            # Draw placeholder
-            font = get_font(theme.FONT_SIZE_SUBHEADING)
-            ScrollList.draw_empty_hint(self.screen, panel_rect, "Select a save to preview", font)
-            return
-
         filepath = self.save_files[active_index]
         metadata = self.save_metadata.get(filepath, {})
 
@@ -376,20 +299,7 @@ class LoadGameMenu(Menu):
         preview_x = panel_rect.x + (panel_rect.width - preview_size) // 2
         preview_y = panel_rect.y + 15
 
-        if preview:
-            self.screen.blit(preview, (preview_x, preview_y))
-            preview_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, theme.FRAME_BORDER, preview_rect, width=theme.BORDER_WIDTH_HOVER)
-        else:
-            # Draw placeholder for missing preview
-            placeholder_rect = pygame.Rect(preview_x, preview_y, preview_size, preview_size)
-            pygame.draw.rect(self.screen, theme.PLACEHOLDER_BG, placeholder_rect)
-            pygame.draw.rect(self.screen, theme.FRAME_BORDER, placeholder_rect, width=theme.BORDER_WIDTH_HOVER)
-
-            placeholder_font = get_font(theme.FONT_SIZE_BODY)
-            placeholder_text = placeholder_font.render("No Preview", True, theme.TEXT_PLACEHOLDER)
-            placeholder_text_rect = placeholder_text.get_rect(center=placeholder_rect.center)
-            self.screen.blit(placeholder_text, placeholder_text_rect)
+        draw_preview_or_placeholder(self.screen, preview, preview_x, preview_y, preview_size)
 
         # Draw metadata below preview
         info_y = preview_y + preview_size + 20
