@@ -225,25 +225,12 @@ def create_bot_instance(
     """
     bot_type = descriptor.bot_type
 
-    if bot_type == BotType.SIMPLE:
-        from reinforcetactics.game.bot import SimpleBot
+    if bot_type in (BotType.SIMPLE, BotType.MEDIUM, BotType.ADVANCED, BotType.MASTER):
+        # Scripted ladder bots resolve through the canonical registry
+        # (BotType values are accepted identifiers).
+        from reinforcetactics.game.bot_registry import build_scripted
 
-        return SimpleBot(game_state, player, rng=rng)
-
-    elif bot_type == BotType.MEDIUM:
-        from reinforcetactics.game.bot import MediumBot
-
-        return MediumBot(game_state, player, rng=rng)
-
-    elif bot_type == BotType.ADVANCED:
-        from reinforcetactics.game.bot import AdvancedBot
-
-        return AdvancedBot(game_state, player, rng=rng)
-
-    elif bot_type == BotType.MASTER:
-        from reinforcetactics.game.bot import MasterBot
-
-        return MasterBot(game_state, player, rng=rng)
+        return build_scripted(bot_type, game_state, player=player, rng=rng)
 
     elif bot_type == BotType.LLM:
         return _create_llm_bot(

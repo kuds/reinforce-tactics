@@ -15,15 +15,10 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import (
-    AdvancedBot,
-    BalancedRandomBot,
-    MediumBot,
-    MixedBot,
-    NoopBot,
-    RandomBot,
-    SimpleBot,
-)
+from reinforcetactics.game.bot import NoopBot
+from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS
+from reinforcetactics.game.bot_registry import build_scripted as build_scripted_bot
+from reinforcetactics.game.bot_registry import canonical_name as canonical_bot_name
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
     GOLD_SCALE,
@@ -1624,50 +1619,25 @@ class StrategyGameEnv(gym.Env):
         # np_random keeps reset(seed=...) reproducible while injecting
         # genuine per-episode opponent variance.
         opponent_player = 3 - self.agent_player
-        if self.opponent_type in ("bot", "simple"):
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = SimpleBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "medium":
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = MediumBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "mixed":
-            # Per-episode bridge between SimpleBot and MediumBot: MixedBot
-            # samples one of the two at construction (here, in reset()) so
-            # the whole episode plays a consistent opponent. Seed the choice
-            # from gymnasium's np_random for reproducibility under reset(seed=...).
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = MixedBot(
-                self.game_state,
-                player=opponent_player,
-                rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
-            )
-        elif self.opponent_type == "advanced":
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = AdvancedBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "noop":
+        if self.opponent_type == "noop":
+            # NoopBot never chooses anything — no rng, and deliberately no
+            # np_random draw so seeded episode streams stay byte-identical
+            # with the historic behavior.
             self.opponent = NoopBot(self.game_state, player=opponent_player)
-        elif self.opponent_type == "random":
-            # Derive a seeded RNG from gymnasium's np_random so the random
-            # opponent is reproducible whenever reset() is called with a seed.
+        elif self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent_type != "self":
+            # Scripted opponent via the bot registry ("bot" aliases simple).
+            # ``opponent_kwargs`` is forwarded only to the stochastic bots
+            # (mixed / random / balanced_random) — the historic contract;
+            # the deterministic ladder takes rng purely for tiebreaks.
             bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = RandomBot(
+            name = canonical_bot_name(self.opponent_type)
+            extra = self.opponent_kwargs if name in STOCHASTIC_BOTS else {}
+            self.opponent = build_scripted_bot(
+                name,
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
-            )
-        elif self.opponent_type == "balanced_random":
-            # One build attempt + one random action per owned unit per turn,
-            # so action throughput scales with army size. A more resilient
-            # stepping stone than RandomBot capped at low max_actions: the
-            # bot keeps producing pressure proportional to its current units.
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = BalancedRandomBot(
-                self.game_state,
-                player=opponent_player,
-                rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
+                **extra,
             )
         elif self.opponent_type == "self":
             # Self-play: the training script supplies a callable that builds

@@ -38,16 +38,7 @@ import numpy as np
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import (
-    AdvancedBot,
-    BalancedRandomBot,
-    MasterBot,
-    MediumBot,
-    MixedBot,
-    NoopBot,
-    RandomBot,
-    SimpleBot,
-)
+from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS, build_scripted, canonical_name
 from reinforcetactics.rl.gym_env import build_per_dim_masks
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
@@ -118,23 +109,14 @@ def _make_bot(
     det_rng = (tiebreak_rng if tiebreak_rng is not None else rng) if stochastic_tiebreak else None
 
     def factory(game_state: GameState, player: int) -> Any:
-        if name in ("simple", "bot"):
-            return SimpleBot(game_state, player=player, rng=det_rng)
-        if name == "medium":
-            return MediumBot(game_state, player=player, rng=det_rng)
-        if name == "mixed":
-            return MixedBot(game_state, player=player, rng=rng)
-        if name == "advanced":
-            return AdvancedBot(game_state, player=player, rng=det_rng)
-        if name == "master":
-            return MasterBot(game_state, player=player, rng=det_rng)
-        if name == "noop":
-            return NoopBot(game_state, player=player)
-        if name == "random":
-            return RandomBot(game_state, player=player, rng=rng)
-        if name == "balanced_random":
-            return BalancedRandomBot(game_state, player=player, rng=rng)
-        raise ValueError(f"Unknown bot type for imitation: {name!r}")
+        try:
+            canonical = canonical_name(name)
+        except KeyError:
+            raise ValueError(f"Unknown bot type for imitation: {name!r}") from None
+        # Stochastic bots draw actions from the shared rng stream; the
+        # deterministic ladder gets the tiebreak rng (see docstring above).
+        bot_rng = rng if canonical in STOCHASTIC_BOTS else det_rng
+        return build_scripted(canonical, game_state, player=player, rng=bot_rng)
 
     return factory
 
