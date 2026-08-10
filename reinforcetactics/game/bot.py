@@ -1428,19 +1428,15 @@ class MixedBot(BotUnitMixin, BaseBot):
         # crashes at reset whenever the coin flip picks the easy side,
         # which blocks the curriculum from progressing past random_20
         # into the harder simple/medium opponents.
-        if name == "simple":
-            return SimpleBot(game_state, player=player, rng=rng, **kwargs)
-        if name == "medium":
-            return MediumBot(game_state, player=player, rng=rng, **kwargs)
-        if name == "advanced":
-            return AdvancedBot(game_state, player=player, rng=rng, **kwargs)
-        if name == "master":
-            return MasterBot(game_state, player=player, rng=rng, **kwargs)
-        if name == "random":
-            return RandomBot(game_state, player=player, rng=rng, **kwargs)
-        if name == "balanced_random":
-            return BalancedRandomBot(game_state, player=player, rng=rng, **kwargs)
-        raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
+        #
+        # ``_BOT_NAMES`` stays the whitelist of what MixedBot accepts (no
+        # mixed-in-mixed, no noop); the registry does the name→class
+        # resolution. Deferred import: the registry imports this module.
+        if name not in cls._BOT_NAMES:
+            raise ValueError(f"MixedBot: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
+        from reinforcetactics.game.bot_registry import build_scripted
+
+        return build_scripted(name, game_state, player=player, rng=rng, **kwargs)
 
     def take_turn(self):
         self._inner.take_turn()

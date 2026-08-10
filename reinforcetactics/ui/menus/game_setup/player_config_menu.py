@@ -7,6 +7,7 @@ from typing import Any
 import pygame
 
 from reinforcetactics.ui import theme, widgets
+from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
@@ -24,7 +25,7 @@ except ImportError:
     TKINTER_AVAILABLE = False
 
 
-class PlayerConfigMenu:
+class PlayerConfigMenu(ScreenBootstrapMixin):
     """Menu for configuring players (Human vs Computer) with difficulty settings."""
 
     def __init__(self, screen: pygame.Surface | None = None, game_mode: str = "1v1") -> None:
@@ -42,21 +43,10 @@ class PlayerConfigMenu:
         if game_mode not in ["1v1", "2v2"]:
             raise ValueError(f"Invalid game_mode: {game_mode}. Must be '1v1' or '2v2'")
 
-        # Initialize pygame if not already done
-        if not pygame.get_init():
-            pygame.init()
-
-        # Create screen if not provided
-        self.owns_screen = screen is None
-        if self.owns_screen:
-            self.screen = pygame.display.set_mode((900, 700))
-            pygame.display.set_caption("Reinforce Tactics")
-        else:
-            self.screen = screen
+        self._init_screen(screen)
 
         self.game_mode = game_mode
         self.num_players = 2 if game_mode == "1v1" else 4
-        self.running = True
 
         # Colors (from shared theme)
         self.bg_color = theme.BG
@@ -657,12 +647,7 @@ class PlayerConfigMenu:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                    # Re-post QUIT for the parent menu if we don't own the
-                    # screen (mirrors Menu._on_quit_event), so the close
-                    # request propagates out instead of only dismissing
-                    # this screen.
-                    if not self.owns_screen:
-                        pygame.event.post(pygame.event.Event(pygame.QUIT))
+                    self._repost_quit_if_borrowed()
                     return None
 
                 result = self.handle_input(event)

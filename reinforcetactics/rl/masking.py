@@ -112,6 +112,61 @@ class ActionMaskedEnv(gym.Wrapper):
         return stats
 
 
+def _build_strategy_env(
+    *,
+    map_file: str | None,
+    opponent: str,
+    render_mode: str | None,
+    max_steps: int,
+    max_turns: int | None,
+    reward_config: dict[str, float] | None,
+    enabled_units: list[str] | None,
+    action_space_type: str,
+    max_flat_actions: int,
+    max_actions_per_turn: int | None,
+    opponent_kwargs: dict[str, Any] | None,
+    gamma: float,
+    pad_to_size: tuple[int, int] | None,
+    engine_overrides: dict[str, Any] | None,
+    gold_scale: float | None,
+    turn_scale: float | None,
+    unit_count_scale: float | None,
+) -> StrategyGameEnv:
+    """Construct a ``StrategyGameEnv`` from the shared parameter set.
+
+    The single place the env-construction kwargs are spelled out for the
+    masking wrappers — ``make_maskable_env`` and the per-rank vec-env
+    builder both delegate here, so a new env parameter is added exactly
+    once. Scale factors are forwarded only when explicitly set so the
+    env's own defaults stay in charge otherwise.
+    """
+    scale_kwargs: dict[str, Any] = {}
+    if gold_scale is not None:
+        scale_kwargs["gold_scale"] = gold_scale
+    if turn_scale is not None:
+        scale_kwargs["turn_scale"] = turn_scale
+    if unit_count_scale is not None:
+        scale_kwargs["unit_count_scale"] = unit_count_scale
+
+    return StrategyGameEnv(
+        map_file=map_file,
+        opponent=opponent,
+        render_mode=render_mode,
+        max_steps=max_steps,
+        max_turns=max_turns,
+        reward_config=reward_config,
+        enabled_units=enabled_units,
+        action_space_type=action_space_type,
+        max_flat_actions=max_flat_actions,
+        max_actions_per_turn=max_actions_per_turn,
+        opponent_kwargs=opponent_kwargs,
+        gamma=gamma,
+        pad_to_size=pad_to_size,
+        engine_overrides=engine_overrides,
+        **scale_kwargs,
+    )
+
+
 def make_maskable_env(
     map_file: str | None = None,
     opponent: str = "bot",
@@ -163,15 +218,7 @@ def make_maskable_env(
         # Reproducible eval against a random opponent:
         env = make_maskable_env(opponent="random", seed=42)
     """
-    scale_kwargs: dict[str, Any] = {}
-    if gold_scale is not None:
-        scale_kwargs["gold_scale"] = gold_scale
-    if turn_scale is not None:
-        scale_kwargs["turn_scale"] = turn_scale
-    if unit_count_scale is not None:
-        scale_kwargs["unit_count_scale"] = unit_count_scale
-
-    env = StrategyGameEnv(
+    env = _build_strategy_env(
         map_file=map_file,
         opponent=opponent,
         render_mode=render_mode,
@@ -186,7 +233,9 @@ def make_maskable_env(
         gamma=gamma,
         pad_to_size=pad_to_size,
         engine_overrides=engine_overrides,
-        **scale_kwargs,
+        gold_scale=gold_scale,
+        turn_scale=turn_scale,
+        unit_count_scale=unit_count_scale,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -196,6 +245,7 @@ def make_maskable_env(
 def _make_env_fn(
     rank: int,
     seed: int,
+    *,
     map_file: str | None,
     opponent: str,
     max_steps: int,
@@ -219,20 +269,16 @@ def _make_env_fn(
     Used for vectorized environment creation. Each sub-env is
     ``Monitor(ActionMaskedEnv(StrategyGameEnv))`` — the Monitor layer
     feeds SB3's ``ep_info_buffer`` (rollout/ep_rew_mean, ep_len_mean).
-    """
 
-    scale_kwargs: dict[str, Any] = {}
-    if gold_scale is not None:
-        scale_kwargs["gold_scale"] = gold_scale
-    if turn_scale is not None:
-        scale_kwargs["turn_scale"] = turn_scale
-    if unit_count_scale is not None:
-        scale_kwargs["unit_count_scale"] = unit_count_scale
+    Env parameters are keyword-only: this used to be called with 18
+    positional arguments, where any parameter reordering silently
+    mis-wired every sub-env.
+    """
 
     def _init() -> gym.Env:
         from stable_baselines3.common.monitor import Monitor
 
-        env = StrategyGameEnv(
+        env = _build_strategy_env(
             map_file=map_file,
             opponent=opponent,
             render_mode=None,  # No rendering in vectorized envs
@@ -247,7 +293,9 @@ def _make_env_fn(
             gamma=gamma,
             pad_to_size=pad_to_size,
             engine_overrides=engine_overrides,
-            **scale_kwargs,
+            gold_scale=gold_scale,
+            turn_scale=turn_scale,
+            unit_count_scale=unit_count_scale,
         )
         env.reset(seed=seed + rank)
         # Monitor must be the outer wrapper: it injects the ``episode``
@@ -324,22 +372,22 @@ def make_maskable_vec_env(
         _make_env_fn(
             i,
             seed,
-            map_file,
-            opponent,
-            max_steps,
-            reward_config,
-            enabled_units,
-            action_space_type,
-            max_flat_actions,
-            max_turns,
-            opponent_kwargs,
-            gamma,
-            pad_to_size,
-            gold_scale,
-            turn_scale,
-            unit_count_scale,
-            max_actions_per_turn,
-            engine_overrides,
+            map_file=map_file,
+            opponent=opponent,
+            max_steps=max_steps,
+            reward_config=reward_config,
+            enabled_units=enabled_units,
+            action_space_type=action_space_type,
+            max_flat_actions=max_flat_actions,
+            max_turns=max_turns,
+            opponent_kwargs=opponent_kwargs,
+            gamma=gamma,
+            pad_to_size=pad_to_size,
+            gold_scale=gold_scale,
+            turn_scale=turn_scale,
+            unit_count_scale=unit_count_scale,
+            max_actions_per_turn=max_actions_per_turn,
+            engine_overrides=engine_overrides,
         )
         for i in range(n_envs)
     ]

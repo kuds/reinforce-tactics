@@ -46,16 +46,9 @@ def get_player_type(bot_type):
     Returns:
         Player type string: 'bot', 'llm', or 'rl'
     """
-    # LLM bots
-    if bot_type in ("OpenAIBot", "ClaudeBot", "GeminiBot"):
-        return "llm"
+    from reinforcetactics.game.bot_registry import player_type
 
-    # RL model bots
-    if bot_type == "ModelBot":
-        return "rl"
-
-    # Standard bots (SimpleBot, MediumBot, AdvancedBot, MasterBot)
-    return "bot"
+    return player_type(bot_type)
 
 
 def create_bot(game, player_num, bot_type, settings, model_path=None):
@@ -76,17 +69,10 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         ValueError: If bot creation fails due to configuration issues
         ImportError: If required dependencies for bot type are missing
     """
-    from reinforcetactics.game.bot import AdvancedBot, MasterBot, MediumBot, SimpleBot
+    from reinforcetactics.game.bot import SimpleBot
+    from reinforcetactics.game.bot_registry import build_scripted, canonical_name
     from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, OpenAIBot
 
-    if bot_type == "SimpleBot":
-        return SimpleBot(game, player=player_num)
-    if bot_type == "MediumBot":
-        return MediumBot(game, player=player_num)
-    if bot_type == "AdvancedBot":
-        return AdvancedBot(game, player=player_num)
-    if bot_type == "MasterBot":
-        return MasterBot(game, player=player_num)
     if bot_type == "OpenAIBot":
         api_key = settings.get_api_key("openai") or None
         return OpenAIBot(game, player=player_num, api_key=api_key)
@@ -102,6 +88,13 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
         if not model_path:
             raise ValueError("model_path is required for ModelBot")
         return ModelBot(game, player=player_num, model_path=model_path)
+    # Scripted bots ('SimpleBot' .. 'MasterBot' and their short-name
+    # aliases) resolve through the registry. GUI bots take no rng — they
+    # stay deterministic, matching historic behavior.
+    try:
+        return build_scripted(canonical_name(bot_type), game, player=player_num)
+    except KeyError:
+        pass
     print(f"⚠️  Unknown bot type '{bot_type}', using SimpleBot")
     return SimpleBot(game, player=player_num)
 

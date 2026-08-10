@@ -38,17 +38,8 @@ import numpy as np
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import (
-    AdvancedBot,
-    BalancedRandomBot,
-    MasterBot,
-    MediumBot,
-    MixedBot,
-    NoopBot,
-    RandomBot,
-    SimpleBot,
-)
-from reinforcetactics.rl.gym_env import StrategyGameEnv
+from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS, build_scripted, canonical_name
+from reinforcetactics.rl.gym_env import build_per_dim_masks
 from reinforcetactics.rl.observation import build_observation
 from reinforcetactics.utils.file_io import FileIO
 
@@ -59,7 +50,7 @@ NUM_ACTION_TYPES = 10
 NUM_UNIT_TYPES = 8
 
 # Action-type index for end_turn (matches _wrap_end_turn's snapshot and
-# StrategyGameEnv._ACTION_KEY_MAP). Scripted bots emit exactly one end_turn
+# gym_env.ACTION_KEY_MAP). Scripted bots emit exactly one end_turn
 # per game-turn vs. many move / build / attack actions per turn, so the raw
 # demonstration mix is ~10:1 against end_turn. The cross-entropy loss then
 # suppresses the end_turn logit in ~90% of gradient updates, producing the
@@ -118,23 +109,14 @@ def _make_bot(
     det_rng = (tiebreak_rng if tiebreak_rng is not None else rng) if stochastic_tiebreak else None
 
     def factory(game_state: GameState, player: int) -> Any:
-        if name in ("simple", "bot"):
-            return SimpleBot(game_state, player=player, rng=det_rng)
-        if name == "medium":
-            return MediumBot(game_state, player=player, rng=det_rng)
-        if name == "mixed":
-            return MixedBot(game_state, player=player, rng=rng)
-        if name == "advanced":
-            return AdvancedBot(game_state, player=player, rng=det_rng)
-        if name == "master":
-            return MasterBot(game_state, player=player, rng=det_rng)
-        if name == "noop":
-            return NoopBot(game_state, player=player)
-        if name == "random":
-            return RandomBot(game_state, player=player, rng=rng)
-        if name == "balanced_random":
-            return BalancedRandomBot(game_state, player=player, rng=rng)
-        raise ValueError(f"Unknown bot type for imitation: {name!r}")
+        try:
+            canonical = canonical_name(name)
+        except KeyError:
+            raise ValueError(f"Unknown bot type for imitation: {name!r}") from None
+        # Stochastic bots draw actions from the shared rng stream; the
+        # deterministic ladder gets the tiebreak rng (see docstring above).
+        bot_rng = rng if canonical in STOCHASTIC_BOTS else det_rng
+        return build_scripted(canonical, game_state, player=player, rng=bot_rng)
 
     return factory
 
@@ -303,91 +285,6 @@ class DemonstrationDataset:
 
 
 # ---------------------------------------------------------------------------
-# Mask helper — mirrors StrategyGameEnv._build_masks but is callable without
-# instantiating the env. Keeps imitation independent of env wiring while
-# preserving the exact MaskablePPO contract (per-dimension union mask).
-# ---------------------------------------------------------------------------
-
-
-def _compute_masks(
-    game_state: GameState,
-    width: int,
-    height: int,
-    enabled_units: list[str],
-) -> tuple[
-    np.ndarray,  # flat (10*W*H,) for obs.action_mask
-    np.ndarray,  # at_mask (10,)
-    np.ndarray,  # ut_mask (8,)
-    np.ndarray,  # fx_mask (W,)
-    np.ndarray,  # fy_mask (H,)
-    np.ndarray,  # tx_mask (W,)
-    np.ndarray,  # ty_mask (H,)
-]:
-    """Compute the env's mask layout for the current player.
-
-    This is a thin replication of ``StrategyGameEnv._build_masks`` factored so
-    that the demonstration recorder does not have to construct a full env.
-    """
-    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
-    area = width * height
-
-    flat = np.zeros(NUM_ACTION_TYPES * area, dtype=np.float32)
-    at = np.zeros(NUM_ACTION_TYPES, dtype=bool)
-    ut = np.zeros(NUM_UNIT_TYPES, dtype=bool)
-    fx = np.zeros(width, dtype=bool)
-    fy = np.zeros(height, dtype=bool)
-    tx = np.zeros(width, dtype=bool)
-    ty = np.zeros(height, dtype=bool)
-
-    # (action_key, action_type_idx, src_field, tgt_field) — same map as gym_env.
-    action_map = StrategyGameEnv._ACTION_KEY_MAP
-
-    def _pos(action: dict[str, Any], fields: Any) -> tuple[int, int]:
-        if isinstance(fields, str):
-            o = action[fields]
-            return o.x, o.y
-        return action[fields[0]], action[fields[1]]
-
-    for key, (at_idx, src_fields, tgt_fields) in action_map.items():
-        for action in legal_actions.get(key, []):
-            at[at_idx] = True
-
-            tx_, ty_ = _pos(action, tgt_fields)
-            tx[tx_] = True
-            ty[ty_] = True
-            flat_idx = at_idx * area + ty_ * width + tx_
-            if 0 <= flat_idx < flat.size:
-                flat[flat_idx] = 1.0
-
-            if src_fields is not None:
-                sx, sy = _pos(action, src_fields)
-                fx[sx] = True
-                fy[sy] = True
-            else:
-                fx[tx_] = True
-                fy[ty_] = True
-
-            if key == "create_unit":
-                ut[UNIT_TYPE_TO_IDX.get(action["unit_type"], 0)] = True
-
-    # End turn always legal at canonical (0, 0).
-    at[5] = True
-    flat[5 * area] = 1.0
-    fx[0] = True
-    fy[0] = True
-    tx[0] = True
-    ty[0] = True
-
-    if not ut.any():
-        if enabled_units:
-            ut[UNIT_TYPE_TO_IDX.get(enabled_units[0], 0)] = True
-        else:
-            ut[0] = True
-
-    return flat, at, ut, fx, fy, tx, ty
-
-
-# ---------------------------------------------------------------------------
 # GameState method interception
 # ---------------------------------------------------------------------------
 
@@ -444,7 +341,10 @@ class _ActionRecorder:
     # -- snapshot helpers --------------------------------------------------
 
     def _snapshot(self, action: np.ndarray) -> None:
-        flat, at, ut, fx, fy, tx, ty = _compute_masks(self.game_state, self.width, self.height, self.enabled_units)
+        # Shared mask builder (same layout as StrategyGameEnv._build_masks),
+        # callable without instantiating an env. Masks the current player,
+        # which during recording is always the demonstrator.
+        flat, at, ut, fx, fy, tx, ty = build_per_dim_masks(self.game_state, self.width, self.height, self.enabled_units)
 
         # Action mask is recorded on the Demonstration separately (per-dim
         # masks for MaskablePPO); we deliberately do NOT include it in the

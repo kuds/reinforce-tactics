@@ -1588,18 +1588,19 @@ class GameState:
         if config.get("type") == "human":
             return "human"
 
-        bot_type = config.get("bot_type", "")
+        # Prefer the type already resolved by the app / tournament layers
+        # (create_bots_from_config and the tournament runner both stamp it).
+        resolved = config.get("player_type")
+        if resolved:
+            return resolved
 
-        # LLM bots
-        if bot_type in ("OpenAIBot", "ClaudeBot", "GeminiBot"):
-            return "llm"
+        # Fallback for configs that never went through those layers.
+        # Deferred import: the engine must not import the game layer at
+        # module load (core stays self-contained); this only runs on the
+        # save-replay path.
+        from reinforcetactics.game.bot_registry import player_type
 
-        # RL model bots
-        if bot_type == "ModelBot":
-            return "rl"
-
-        # Standard bots (SimpleBot, MediumBot, AdvancedBot)
-        return "bot"
+        return player_type(config.get("bot_type", ""))
 
     @staticmethod
     def build_player_config(

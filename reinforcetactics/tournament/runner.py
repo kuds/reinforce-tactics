@@ -18,6 +18,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from reinforcetactics.core.game_state import GameState
+from reinforcetactics.game.bot_registry import player_type as bot_player_type
 from reinforcetactics.utils.file_io import FileIO
 
 from .bots import BotDescriptor, BotType, create_bot_instance
@@ -438,16 +439,6 @@ class TournamentRunner:
         assert self.config.replay_dir is not None
         replay_path = str(Path(self.config.replay_dir) / map_config.stem / replay_filename)
 
-        # Map bot_type to player_type
-        type_mapping = {
-            BotType.SIMPLE: "bot",
-            BotType.MEDIUM: "bot",
-            BotType.ADVANCED: "bot",
-            BotType.MASTER: "bot",
-            BotType.LLM: "llm",
-            BotType.MODEL: "rl",
-        }
-
         # Inline the unpadded map data so the replay is self-contained --
         # video rendering and the replay viewer no longer need the source
         # CSV to still exist at ``map_config.path`` and the
@@ -531,14 +522,14 @@ class TournamentRunner:
                 GameState.build_player_config(
                     player_no=1,
                     name=bot1_desc.name,
-                    player_type=type_mapping.get(bot1_desc.bot_type, "bot"),
+                    player_type=bot_player_type(bot1_desc.bot_type),
                     temperature=bot1_desc.temperature,
                     max_tokens=bot1_desc.max_tokens,
                 ),
                 GameState.build_player_config(
                     player_no=2,
                     name=bot2_desc.name,
-                    player_type=type_mapping.get(bot2_desc.bot_type, "bot"),
+                    player_type=bot_player_type(bot2_desc.bot_type),
                     temperature=bot2_desc.temperature,
                     max_tokens=bot2_desc.max_tokens,
                 ),

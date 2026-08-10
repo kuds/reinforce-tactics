@@ -15,15 +15,10 @@ from gymnasium import spaces
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import (
-    AdvancedBot,
-    BalancedRandomBot,
-    MediumBot,
-    MixedBot,
-    NoopBot,
-    RandomBot,
-    SimpleBot,
-)
+from reinforcetactics.game.bot import NoopBot
+from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS
+from reinforcetactics.game.bot_registry import build_scripted as build_scripted_bot
+from reinforcetactics.game.bot_registry import canonical_name as canonical_bot_name
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
     GOLD_SCALE,
@@ -77,9 +72,9 @@ _BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced",
 
 
 # Mapping from action key → (action_type_idx, source_key, target_key).
-# Module-level so both StrategyGameEnv and the free mask builders below
-# share the same canonical layout.
-_ACTION_KEY_MAP_MODULE = {
+# The single canonical layout, shared by StrategyGameEnv, the free mask
+# builders below, and external consumers (imitation recorder, MCTS).
+ACTION_KEY_MAP = {
     "create_unit": (0, None, ("x", "y")),
     "move": (1, ("from_x", "from_y"), ("to_x", "to_y")),
     "attack": (2, "attacker", "target"),
@@ -107,16 +102,24 @@ def build_per_dim_masks(
     grid_height: int,
     enabled_units: list[str] | None = None,
     flat_action_size: int | None = None,
+    player: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Pure-function port of ``StrategyGameEnv._build_masks``.
+    """The single implementation behind ``StrategyGameEnv._build_masks``.
 
-    Used by ``StrategyGameEnv`` itself and by ``ModelBot`` so a feudal /
-    flat-PPO checkpoint can be played in the GUI / tournament without
-    constructing a full ``StrategyGameEnv`` around the live ``game_state``.
+    Also used directly by ``ModelBot``, the imitation recorder, and MCTS so
+    a checkpoint can be played against an arbitrary live ``game_state``
+    without constructing a full ``StrategyGameEnv`` around it.
+
+    Args:
+        player: Whose legal actions to mask. Defaults to
+            ``game_state.current_player``; the env passes its
+            ``agent_player`` explicitly (see ``_build_masks``).
 
     Returns ``(flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask)``.
     """
-    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
+    if player is None:
+        player = game_state.current_player
+    legal_actions = game_state.get_legal_actions(player=player)
     area = grid_width * grid_height
     flat_size = flat_action_size if flat_action_size is not None else 10 * area
 
@@ -128,7 +131,7 @@ def build_per_dim_masks(
     tx_mask = np.zeros(grid_width, dtype=bool)
     ty_mask = np.zeros(grid_height, dtype=bool)
 
-    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+    for key, (at_idx, src_fields, tgt_fields) in ACTION_KEY_MAP.items():
         for action in legal_actions.get(key, []):
             at_mask[at_idx] = True
             tx, ty = _action_pos(action, tgt_fields)
@@ -167,14 +170,22 @@ def build_structured_masks(
     game_state: "GameState",
     grid_width: int,
     grid_height: int,
+    player: int | None = None,
 ) -> "StructuredActionMasks":
-    """Pure-function port of ``StrategyGameEnv._build_structured_masks``.
+    """The single implementation behind ``StrategyGameEnv._build_structured_masks``.
 
     Same purpose as :func:`build_per_dim_masks` — a free function so external
     callers (e.g. ``ModelBot`` for AR worker inference) can build masks
     against an arbitrary live ``game_state`` without owning an env.
+
+    Args:
+        player: Whose legal actions to mask. Defaults to
+            ``game_state.current_player``; the env passes its
+            ``agent_player`` explicitly.
     """
-    legal_actions = game_state.get_legal_actions(player=game_state.current_player)
+    if player is None:
+        player = game_state.current_player
+    legal_actions = game_state.get_legal_actions(player=player)
     H, W = grid_height, grid_width
     num_action_types = 10
     num_unit_types = 8
@@ -192,7 +203,7 @@ def build_structured_masks(
             target[key] = m
         m[ty, tx] = True
 
-    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+    for key, (at_idx, src_fields, tgt_fields) in ACTION_KEY_MAP.items():
         for action in legal_actions.get(key, []):
             tx, ty = _action_pos(action, tgt_fields)
             if src_fields is not None:
@@ -249,7 +260,7 @@ def build_flat_actions(
     actions: list[np.ndarray] = []
     seen = set()
 
-    for key, (at_idx, src_fields, tgt_fields) in _ACTION_KEY_MAP_MODULE.items():
+    for key, (at_idx, src_fields, tgt_fields) in ACTION_KEY_MAP.items():
         for action in legal_actions.get(key, []):
             tx, ty = _action_pos(action, tgt_fields)
 
@@ -766,22 +777,6 @@ class StrategyGameEnv(gym.Env):
             unit_count_scale=self.unit_count_scale,
         )
 
-    # Mapping from action key → (action_type_idx, source_key, target_key)
-    # source_key/target_key name the dict keys or object attrs for from/to positions.
-    _ACTION_KEY_MAP = {
-        # key            idx  from_fields            to_fields
-        "create_unit": (0, None, ("x", "y")),
-        "move": (1, ("from_x", "from_y"), ("to_x", "to_y")),
-        "attack": (2, "attacker", "target"),
-        "seize": (3, "unit", "tile"),
-        "heal": (4, "healer", "target"),
-        "cure": (4, "curer", "target"),
-        "paralyze": (6, "paralyzer", "target"),
-        "haste": (7, "sorcerer", "target"),
-        "defence_buff": (8, "sorcerer", "target"),
-        "attack_buff": (9, "sorcerer", "target"),
-    }
-
     def _build_masks(
         self,
     ) -> tuple[
@@ -830,78 +825,14 @@ class StrategyGameEnv(gym.Env):
         # ``current_player`` here would silently mask for the opponent
         # whenever a caller queries between the agent's end_turn and the
         # opponent's turn completing.
-        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
-
-        width = self.grid_width
-        height = self.grid_height
-        area = width * height
-
-        # Flat target mask: size 10 * W * H
-        flat_mask = np.zeros(self._get_action_space_size(), dtype=np.float32)
-
-        # Per-dimension masks for MaskablePPO
-        at_mask = np.zeros(10, dtype=bool)
-        ut_mask = np.zeros(8, dtype=bool)
-        fx_mask = np.zeros(width, dtype=bool)
-        fy_mask = np.zeros(height, dtype=bool)
-        tx_mask = np.zeros(width, dtype=bool)
-        ty_mask = np.zeros(height, dtype=bool)
-
-        unit_type_to_idx = UNIT_TYPE_TO_IDX
-
-        def _pos(obj_or_dict, fields):
-            """Extract (x, y) from an object (.x/.y) or a dict (fields tuple)."""
-            if isinstance(fields, str):
-                # fields is the name of an object attribute with .x, .y
-                o = obj_or_dict[fields]
-                return o.x, o.y
-            # fields is a tuple of dict keys like ('to_x', 'to_y')
-            return obj_or_dict[fields[0]], obj_or_dict[fields[1]]
-
-        for key, (at_idx, src_fields, tgt_fields) in self._ACTION_KEY_MAP.items():
-            for action in legal_actions.get(key, []):
-                at_mask[at_idx] = True
-
-                # Target position — used for both flat and per-dim masks
-                tx, ty = _pos(action, tgt_fields)
-                tx_mask[tx] = True
-                ty_mask[ty] = True
-
-                # Flat mask: set bit at (action_type, target_x, target_y)
-                flat_idx = at_idx * area + ty * width + tx
-                if 0 <= flat_idx < flat_mask.size:
-                    flat_mask[flat_idx] = 1.0
-
-                # Source position — per-dim only
-                if src_fields is not None:
-                    sx, sy = _pos(action, src_fields)
-                    fx_mask[sx] = True
-                    fy_mask[sy] = True
-                else:
-                    # create_unit: no source, mark building pos for from
-                    fx_mask[tx] = True
-                    fy_mask[ty] = True
-
-                # unit_type for create_unit
-                if key == "create_unit":
-                    ut_mask[unit_type_to_idx.get(action["unit_type"], 0)] = True
-
-        # 5: End Turn — always valid (single canonical entry at position 0,0)
-        at_mask[5] = True
-        flat_mask[5 * area] = 1.0
-        fx_mask[0] = True
-        fy_mask[0] = True
-        tx_mask[0] = True
-        ty_mask[0] = True
-
-        # Ensure unit_type mask has at least one valid option
-        if not ut_mask.any():
-            if self.enabled_units:
-                ut_mask[unit_type_to_idx.get(self.enabled_units[0], 0)] = True
-            else:
-                ut_mask[0] = True
-
-        return flat_mask, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask
+        return build_per_dim_masks(
+            self.game_state,
+            self.grid_width,
+            self.grid_height,
+            enabled_units=self.enabled_units,
+            flat_action_size=self._get_action_space_size(),
+            player=self.agent_player,
+        )
 
     def _build_structured_masks(self) -> StructuredActionMasks:
         """
@@ -915,63 +846,12 @@ class StrategyGameEnv(gym.Env):
 
         Masks describe the *agent's* legal actions (see ``_build_masks``).
         """
-        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
-
-        H, W = self.grid_height, self.grid_width
-        num_action_types = 10
-        num_unit_types = 8
-
-        atype = np.zeros(num_action_types, dtype=bool)
-        source = np.zeros((num_action_types, H, W), dtype=bool)
-        target: dict[tuple[int, int, int], np.ndarray] = {}
-        unit_type: dict[tuple[int, int], np.ndarray] = {}
-
-        unit_type_to_idx = UNIT_TYPE_TO_IDX
-
-        def _pos(action, fields):
-            if isinstance(fields, str):
-                o = action[fields]
-                return o.x, o.y
-            return action[fields[0]], action[fields[1]]
-
-        def _mark_target(at_idx: int, sx: int, sy: int, tx: int, ty: int) -> None:
-            key = (at_idx, sx, sy)
-            m = target.get(key)
-            if m is None:
-                m = np.zeros((H, W), dtype=bool)
-                target[key] = m
-            m[ty, tx] = True
-
-        for key, (at_idx, src_fields, tgt_fields) in self._ACTION_KEY_MAP.items():
-            for action in legal_actions.get(key, []):
-                tx, ty = _pos(action, tgt_fields)
-                if src_fields is not None:
-                    sx, sy = _pos(action, src_fields)
-                else:
-                    # create_unit: source = building position = target
-                    sx, sy = tx, ty
-
-                atype[at_idx] = True
-                source[at_idx, sy, sx] = True
-                _mark_target(at_idx, sx, sy, tx, ty)
-
-                if key == "create_unit":
-                    ut_idx = unit_type_to_idx.get(action["unit_type"], 0)
-                    ukey = (sx, sy)
-                    m = unit_type.get(ukey)
-                    if m is None:
-                        m = np.zeros(num_unit_types, dtype=bool)
-                        unit_type[ukey] = m
-                    m[ut_idx] = True
-
-        # End turn: always legal, single canonical entry.
-        atype[5] = True
-        source[5, 0, 0] = True
-        end_t = np.zeros((H, W), dtype=bool)
-        end_t[0, 0] = True
-        target[(5, 0, 0)] = end_t
-
-        return StructuredActionMasks(atype=atype, source=source, target=target, unit_type=unit_type)
+        return build_structured_masks(
+            self.game_state,
+            self.grid_width,
+            self.grid_height,
+            player=self.agent_player,
+        )
 
     def structured_action_masks(self) -> StructuredActionMasks:
         """
@@ -1739,50 +1619,25 @@ class StrategyGameEnv(gym.Env):
         # np_random keeps reset(seed=...) reproducible while injecting
         # genuine per-episode opponent variance.
         opponent_player = 3 - self.agent_player
-        if self.opponent_type in ("bot", "simple"):
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = SimpleBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "medium":
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = MediumBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "mixed":
-            # Per-episode bridge between SimpleBot and MediumBot: MixedBot
-            # samples one of the two at construction (here, in reset()) so
-            # the whole episode plays a consistent opponent. Seed the choice
-            # from gymnasium's np_random for reproducibility under reset(seed=...).
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = MixedBot(
-                self.game_state,
-                player=opponent_player,
-                rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
-            )
-        elif self.opponent_type == "advanced":
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = AdvancedBot(self.game_state, player=opponent_player, rng=random.Random(bot_seed))
-        elif self.opponent_type == "noop":
+        if self.opponent_type == "noop":
+            # NoopBot never chooses anything — no rng, and deliberately no
+            # np_random draw so seeded episode streams stay byte-identical
+            # with the historic behavior.
             self.opponent = NoopBot(self.game_state, player=opponent_player)
-        elif self.opponent_type == "random":
-            # Derive a seeded RNG from gymnasium's np_random so the random
-            # opponent is reproducible whenever reset() is called with a seed.
+        elif self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent_type != "self":
+            # Scripted opponent via the bot registry ("bot" aliases simple).
+            # ``opponent_kwargs`` is forwarded only to the stochastic bots
+            # (mixed / random / balanced_random) — the historic contract;
+            # the deterministic ladder takes rng purely for tiebreaks.
             bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = RandomBot(
+            name = canonical_bot_name(self.opponent_type)
+            extra = self.opponent_kwargs if name in STOCHASTIC_BOTS else {}
+            self.opponent = build_scripted_bot(
+                name,
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
-            )
-        elif self.opponent_type == "balanced_random":
-            # One build attempt + one random action per owned unit per turn,
-            # so action throughput scales with army size. A more resilient
-            # stepping stone than RandomBot capped at low max_actions: the
-            # bot keeps producing pressure proportional to its current units.
-            bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            self.opponent = BalancedRandomBot(
-                self.game_state,
-                player=opponent_player,
-                rng=random.Random(bot_seed),
-                **self.opponent_kwargs,
+                **extra,
             )
         elif self.opponent_type == "self":
             # Self-play: the training script supplies a callable that builds
