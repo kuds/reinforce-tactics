@@ -53,34 +53,27 @@ class Tile:
         if self.type == "t":
             self.max_health = TOWER_MAX_HEALTH
             self.health = TOWER_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "h":
             self.max_health = HEADQUARTERS_MAX_HEALTH
             self.health = HEADQUARTERS_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "b":
             self.max_health = BUILDING_MAX_HEALTH
             self.health = BUILDING_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         else:
             self.max_health = None
             self.health = None
-            self.original_player = None
             self.regenerating = False
-
-    def get_color(self):
-        """Calculate the final color for this tile based on type and player ownership."""
-        return self.color_for(self.type, self.player)
 
     @staticmethod
     def color_for(tile_type, owner):
         """The color of a ``tile_type`` tile owned by player ``owner`` (None = neutral).
 
-        Separate from :meth:`get_color` so the renderer can draw a structure
-        under fog of war with the owner its viewer knows, not the live one.
+        Takes the owner rather than reading a tile's, so the renderer can draw
+        a structure under fog of war with the owner its viewer knows, not the
+        live one.
         """
         base_color = TILE_COLORS.get(tile_type, (0, 0, 0))
 

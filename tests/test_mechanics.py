@@ -149,60 +149,6 @@ class TestMovement:
         assert (2, 3) in reachable
 
 
-class TestAdjacentUnits:
-    """Test getting adjacent units."""
-
-    def test_get_adjacent_enemies(self):
-        """Test finding adjacent enemy units."""
-        unit = Unit("W", 5, 5, 1)
-        enemy1 = Unit("W", 6, 5, 2)  # Right
-        enemy2 = Unit("M", 5, 4, 2)  # Up
-        ally = Unit("C", 4, 5, 1)  # Left (same player)
-
-        units = [unit, enemy1, enemy2, ally]
-
-        adjacent_enemies = GameMechanics.get_adjacent_enemies(unit, units)
-
-        assert len(adjacent_enemies) == 2
-        assert enemy1 in adjacent_enemies
-        assert enemy2 in adjacent_enemies
-        assert ally not in adjacent_enemies
-
-    def test_get_adjacent_allies(self):
-        """Test finding damaged adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, damaged
-        ally1.health = 10
-        ally2 = Unit("M", 5, 4, 1)  # Up, full health
-        ally2.health = ally2.max_health
-        enemy = Unit("W", 4, 5, 2)  # Left, different player
-
-        units = [unit, ally1, ally2, enemy]
-
-        adjacent_allies = GameMechanics.get_adjacent_allies(unit, units)
-
-        assert len(adjacent_allies) == 1
-        assert ally1 in adjacent_allies
-        assert ally2 not in adjacent_allies  # Full health
-        assert enemy not in adjacent_allies  # Different player
-
-    def test_get_adjacent_paralyzed_allies(self):
-        """Test finding paralyzed adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, paralyzed
-        ally1.paralyzed_turns = 2
-        ally2 = Unit("M", 5, 4, 1)  # Up, not paralyzed
-        ally2.paralyzed_turns = 0
-
-        units = [unit, ally1, ally2]
-
-        adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(unit, units)
-
-        assert len(adjacent_paralyzed) == 1
-        assert ally1 in adjacent_paralyzed
-        assert ally2 not in adjacent_paralyzed
-
-
 class TestAttackableEnemies:
     """Test finding enemies within attack range."""
 

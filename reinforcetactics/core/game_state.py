@@ -50,8 +50,11 @@ _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
 # the field are version 1 (everything before it existed) and still load.
 # 2: adds the fields ``from_dict`` needs to resume a game exactly
 # (winning_action_index, healing_totals, per-unit has_moved, fog-of-war
-# attack snapshot and ambushed flag, padding metadata, original_map_data, the
-# fog-of-war state).
+# attack snapshot and ambushed flag, the fog-of-war state). Early version 2
+# saves also carry padding metadata (original_map_width/height,
+# map_padding_offset_x/y, original_map_data); nothing ever set it, so it
+# always described the saved grid itself, and ``from_dict`` ignores it
+# (with a warning should the offsets not be zero).
 SAVE_FORMAT_VERSION = 2
 
 # Unit attribute types a search clone can share with the original unit.
@@ -403,7 +406,8 @@ class GameState:
         Initialize the game state.
 
         Args:
-            map_data: 2D array containing map information
+            map_data: Tile codes by row: a pandas DataFrame, numpy array or
+                list of lists
             num_players: Number of players (default 2)
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
@@ -562,25 +566,12 @@ class GameState:
         # Optional map file reference for saving
         self.map_file_used: str | None = None
 
-        # Original map dimensions (before padding)
-        # These default to the current grid dimensions if not set
-        self.original_map_width: int = self.grid.width
-        self.original_map_height: int = self.grid.height
-        self.map_padding_offset_x: int = 0
-        self.map_padding_offset_y: int = 0
-
-        # Store initial map data for replays (as 2D list of tile codes)
-        # This stores the PADDED map by default
-        if isinstance(map_data, pd.DataFrame):
-            self.initial_map_data: list[list[str]] = map_data.values.tolist()
-        elif isinstance(map_data, np.ndarray):
-            self.initial_map_data: list[list[str]] = map_data.tolist()
-        else:
-            self.initial_map_data: list[list[str]] = [list(row) for row in map_data]
-
-        # Store original unpadded map data (will be set via set_map_metadata if map was padded)
-        # If not set, defaults to the same as initial_map_data (no padding)
-        self.original_map_data: list[list[str]] | None = None
+        # The tile codes the grid was built from (a 2D list), for saves and
+        # replays. Every coordinate the engine uses or records -- units,
+        # structures, action_history -- is on this grid: a GUI game's map is
+        # the UI-padded one (FileIO.load_map(for_ui=True)), so its saves and
+        # replays carry that padding too, and stay self-consistent.
+        self.initial_map_data: list[list[str]] = np.asarray(map_data, dtype=object).tolist()
 
         # Player configurations (human vs bot)
         self.player_configs: list[dict[str, Any]] = []
@@ -619,61 +610,6 @@ class GameState:
             teams=self._teams_arg,
             map_teams=self._map_teams,
         )
-
-    def set_map_metadata(
-        self,
-        original_width: int,
-        original_height: int,
-        padding_offset_x: int,
-        padding_offset_y: int,
-        map_file: str | None = None,
-        original_map_data: list[list[str]] | None = None,
-    ) -> None:
-        """
-        Set metadata about the original map before padding.
-
-        Args:
-            original_width: Width of the map before padding
-            original_height: Height of the map before padding
-            padding_offset_x: X offset added by padding (left side)
-            padding_offset_y: Y offset added by padding (top side)
-            map_file: Path to the map file
-            original_map_data: The unpadded map data (2D list of tile codes)
-        """
-        self.original_map_width = original_width
-        self.original_map_height = original_height
-        self.map_padding_offset_x = padding_offset_x
-        self.map_padding_offset_y = padding_offset_y
-        if map_file:
-            self.map_file_used = map_file
-        if original_map_data:
-            self.original_map_data = original_map_data
-
-    def padded_to_original_coords(self, x: int, y: int) -> tuple[int, int]:
-        """
-        Convert padded map coordinates to original map coordinates.
-
-        Args:
-            x: X coordinate in padded map
-            y: Y coordinate in padded map
-
-        Returns:
-            Tuple of (original_x, original_y)
-        """
-        return (x - self.map_padding_offset_x, y - self.map_padding_offset_y)
-
-    def original_to_padded_coords(self, x: int, y: int) -> tuple[int, int]:
-        """
-        Convert original map coordinates to padded map coordinates.
-
-        Args:
-            x: X coordinate in original map
-            y: Y coordinate in original map
-
-        Returns:
-            Tuple of (padded_x, padded_y)
-        """
-        return (x + self.map_padding_offset_x, y + self.map_padding_offset_y)
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
@@ -1051,11 +987,13 @@ class GameState:
         """
         Record an action for replay purposes.
 
-        Automatically converts any coordinate parameters from padded to original coordinates.
+        Coordinates are recorded as given, on this game's grid: a replay
+        stores ``initial_map_data`` with them, and its playback translates
+        both onto its own display padding the same way.
 
         Args:
             action_type: Type of action (move, attack, create_unit, etc.)
-            **kwargs: Action-specific parameters (coordinates will be converted)
+            **kwargs: Action-specific parameters
         """
         # Don't log anything once the game has been decided. Without this,
         # bots that don't break their per-unit loop on game_over append
@@ -1066,51 +1004,12 @@ class GameState:
         if self.game_over:
             return
 
-        # Convert coordinate parameters from padded to original
-        converted_kwargs = {}
-        for key, value in kwargs.items():
-            if key in ["x", "y", "from_x", "from_y", "to_x", "to_y"]:
-                # Single coordinate value
-                if key.endswith("_x"):
-                    # Store x coordinate to pair with y
-                    converted_kwargs[key] = value
-                elif key.endswith("_y"):
-                    # Convert the x,y pair
-                    x_key = key.replace("_y", "_x")
-                    if x_key in kwargs:
-                        orig_x, orig_y = self.padded_to_original_coords(kwargs[x_key], value)
-                        converted_kwargs[x_key] = orig_x
-                        converted_kwargs[key] = orig_y
-                    else:
-                        converted_kwargs[key] = value
-                elif key == "x":
-                    # Will be converted when we see 'y'
-                    converted_kwargs[key] = value
-                elif key == "y":
-                    # Convert x,y pair
-                    if "x" in kwargs:
-                        orig_x, orig_y = self.padded_to_original_coords(kwargs["x"], value)
-                        converted_kwargs["x"] = orig_x
-                        converted_kwargs[key] = orig_y
-                    else:
-                        converted_kwargs[key] = value
-            elif key in ["position", "attacker_pos", "target_pos", "healer_pos", "paralyzer_pos", "curer_pos"]:
-                # Tuple/list of (x, y) coordinates
-                if isinstance(value, (tuple, list)) and len(value) == 2:
-                    orig_x, orig_y = self.padded_to_original_coords(value[0], value[1])
-                    converted_kwargs[key] = (orig_x, orig_y)
-                else:
-                    converted_kwargs[key] = value
-            else:
-                # Non-coordinate parameter, keep as-is
-                converted_kwargs[key] = value
-
         action_record = {
             "turn": self.turn_number,
             "player": self.current_player,
             "type": action_type,
             "timestamp": datetime.now().isoformat(),
-            **converted_kwargs,
+            **kwargs,
         }
         self.action_history.append(action_record)
 
@@ -2217,7 +2116,7 @@ class GameState:
             last is not None
             and last.get("type") == "move"
             and last.get("actor_unit_id") == unit.unit_id
-            and (last.get("to_x"), last.get("to_y")) == self.padded_to_original_coords(unit.x, unit.y)
+            and (last.get("to_x"), last.get("to_y")) == (unit.x, unit.y)
         )
 
     def cancel_move(self, unit: Unit) -> bool:
@@ -2409,7 +2308,6 @@ class GameState:
             "mechanics",
             "enabled_units",
             "initial_map_data",
-            "original_map_data",
             "player_configs",
             "game_start_time",
         }
@@ -2515,15 +2413,6 @@ class GameState:
             # map at the save writer's indent=2, about a quarter of an
             # early-game save and a shrinking share as action_history grows.
             "map_data": [list(row) for row in self.initial_map_data],
-            # Padding metadata: the replay written from a continued game
-            # stores the unpadded map and original coordinates.
-            "original_map_width": self.original_map_width,
-            "original_map_height": self.original_map_height,
-            "map_padding_offset_x": self.map_padding_offset_x,
-            "map_padding_offset_y": self.map_padding_offset_y,
-            "original_map_data": (
-                [list(row) for row in self.original_map_data] if self.original_map_data is not None else None
-            ),
             "player_configs": copy.deepcopy(self.player_configs),
             "enabled_units": list(self.enabled_units),
             "fog_of_war": self.fog_of_war,
@@ -2747,9 +2636,6 @@ class GameState:
         """
         from reinforcetactics.utils.file_io import FileIO
 
-        # Use original unpadded map if available, otherwise use initial_map_data
-        map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
-
         # Build player_configs for replay
         # If already in standardized format (has 'player_no'), use directly
         # Otherwise, transform from old format for backward compatibility
@@ -2798,7 +2684,8 @@ class GameState:
             "start_time": self.game_start_time.isoformat(),
             "end_time": datetime.now().isoformat(),
             "map_file": self.map_file_used,
-            "initial_map": map_to_save,
+            # The grid the actions' coordinates refer to (see record_action)
+            "initial_map": self.initial_map_data,
             "player_configs": enhanced_player_configs,
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
@@ -2838,7 +2725,6 @@ class GameState:
         terrain = save_data.get("map_data")
         if not terrain:
             return None
-        # TileGrid indexes a 2D frame/array, not a list of lists.
         return pd.DataFrame(terrain)
 
     @classmethod
@@ -2953,13 +2839,17 @@ class GameState:
 
         game.map_file_used = save_data.get("map_file")
 
-        # Padding metadata (version 2+; older saves keep the unpadded defaults)
-        game.original_map_width = save_data.get("original_map_width", game.original_map_width)
-        game.original_map_height = save_data.get("original_map_height", game.original_map_height)
-        game.map_padding_offset_x = save_data.get("map_padding_offset_x", 0)
-        game.map_padding_offset_y = save_data.get("map_padding_offset_y", 0)
-        original_map_data = save_data.get("original_map_data")
-        game.original_map_data = [list(row) for row in original_map_data] if original_map_data else None
+        # Early version 2 saves carry padding metadata, always zero offsets
+        # (see SAVE_FORMAT_VERSION). Only a script calling the since-removed
+        # GameState.set_map_metadata could have saved others, and then the
+        # saved action_history is not on the saved grid.
+        offsets = (save_data.get("map_padding_offset_x") or 0, save_data.get("map_padding_offset_y") or 0)
+        if offsets != (0, 0):
+            logger.warning(
+                "Save records map padding offsets %s; its action history is not on its grid, so a replay "
+                "saved from this game will misplace the actions before the save",
+                offsets,
+            )
 
         # Restore player_configs (backward compatible with old saves)
         game.player_configs = copy.deepcopy(save_data.get("player_configs", []))

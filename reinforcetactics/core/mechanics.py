@@ -122,19 +122,6 @@ class GameMechanics:
         return lambda x, y: (x, y) not in blocked and tiles[y][x].is_walkable()
 
     @staticmethod
-    def get_adjacent_enemies(unit, units, teams=None):
-        """Get list of enemy units adjacent to the given unit."""
-        adjacent_enemies = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
-
-        for enemy in units:
-            if not same_side(enemy.player, unit.player, teams) and enemy.health > 0:
-                if (enemy.x, enemy.y) in adjacent_positions:
-                    adjacent_enemies.append(enemy)
-
-        return adjacent_enemies
-
-    @staticmethod
     def get_attackable_enemies(unit, units, grid, teams=None):
         """
         Get list of enemy units within the given unit's attack range.
@@ -167,20 +154,6 @@ class GameMechanics:
                     attackable_enemies.append(enemy)
 
         return attackable_enemies
-
-    @staticmethod
-    def get_adjacent_allies(unit, units, teams=None):
-        """Get list of damaged friendly units adjacent to the given unit."""
-        adjacent_allies = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
-
-        for ally in units:
-            if same_side(ally.player, unit.player, teams) and ally.health > 0 and ally != unit:
-                if (ally.x, ally.y) in adjacent_positions:
-                    if ally.health < ally.max_health:
-                        adjacent_allies.append(ally)
-
-        return adjacent_allies
 
     # Per-target ally rules. Each ``is_*`` predicate is the single definition
     # of "may this caster target this unit"; the matching ``get_*`` list
@@ -217,20 +190,6 @@ class GameMechanics:
         Get paralyzed friendly units within the Cleric's cure range (1..CLERIC_HEAL_RANGE).
         """
         return [ally for ally in units if GameMechanics.is_curable_ally(cleric, ally, teams)]
-
-    @staticmethod
-    def get_adjacent_paralyzed_allies(unit, units, teams=None):
-        """Get list of paralyzed friendly units adjacent to the given unit."""
-        adjacent_paralyzed = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
-
-        for ally in units:
-            if same_side(ally.player, unit.player, teams) and ally.health > 0 and ally != unit:
-                if (ally.x, ally.y) in adjacent_positions:
-                    if ally.is_paralyzed():
-                        adjacent_paralyzed.append(ally)
-
-        return adjacent_paralyzed
 
     @staticmethod
     def is_enemy_flanked(attacker, target, units, teams=None):

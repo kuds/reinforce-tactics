@@ -15,18 +15,14 @@ class TileGrid:
         Initialize the grid from map data.
 
         Args:
-            map_data: 2D array (pandas DataFrame or numpy array) containing tile information
+            map_data: Tile codes by row: a pandas DataFrame, numpy array or
+                list of lists
         """
-        self.tiles = []
-        self.width = map_data.shape[1]
-        self.height = map_data.shape[0]
-
-        for y in range(self.height):
-            row = []
-            for x in range(self.width):
-                tile = Tile(map_data.iloc[y, x] if hasattr(map_data, "iloc") else map_data[y, x], x, y)
-                row.append(tile)
-            self.tiles.append(row)
+        codes = np.asarray(map_data, dtype=object)
+        if codes.ndim != 2:
+            raise ValueError(f"map_data must be a 2D grid of tile codes, got shape {codes.shape}")
+        self.height, self.width = codes.shape
+        self.tiles = [[Tile(codes[y, x], x, y) for x in range(self.width)] for y in range(self.height)]
 
         # Structure (HQ/building/tower) positions in row-major order. Tile
         # types never change after the grid is built, so fog-of-war code can
@@ -40,10 +36,6 @@ class TileGrid:
         if 0 <= x < self.width and 0 <= y < self.height:
             return self.tiles[y][x]
         return None
-
-    def get_tiles_by_player(self, player):
-        """Get all tiles owned by a player."""
-        return [tile for row in self.tiles for tile in row if tile.player == player]
 
     def get_capturable_tiles(self, player=None):
         """Get all capturable tiles, optionally filtered by player."""
@@ -92,22 +84,3 @@ class TileGrid:
             "height": self.height,
             "tiles": [tile.to_dict() for row in self.tiles for tile in row if tile.is_capturable()],
         }
-
-    @classmethod
-    def from_dict(cls, data, map_data):
-        """Restore grid from dictionary."""
-        grid = cls(map_data)
-
-        # Restore tile states
-        for tile_data in data.get("tiles", []):
-            x, y = tile_data["x"], tile_data["y"]
-            if 0 <= x < grid.width and 0 <= y < grid.height:
-                tile = grid.tiles[y][x]
-                if tile_data.get("player"):
-                    tile.player = tile_data["player"]
-                if tile_data.get("health") is not None:
-                    tile.health = tile_data["health"]
-                if tile_data.get("regenerating") is not None:
-                    tile.regenerating = tile_data["regenerating"]
-
-        return grid

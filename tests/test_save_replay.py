@@ -395,8 +395,9 @@ class TestFullSaveLoadCycle:
             # Load the save data
             save_data = FileIO.load_game(save_path)
 
-            # Restore game state
-            restored_game = GameState.from_dict(save_data, game_with_actions.grid.to_numpy())
+            # Restore game state (the tile codes, as rows; this used to pass
+            # the RL encoding grid.to_numpy(), which built an all-ocean map)
+            restored_game = GameState.from_dict(save_data, game_with_actions.initial_map_data)
 
             # Verify basic state
             assert restored_game.current_player == game_with_actions.current_player
