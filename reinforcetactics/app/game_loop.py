@@ -62,6 +62,9 @@ class GameSession:  # pylint: disable=too-few-public-methods
         self.input_handler = InputHandler(game, renderer, bots, num_players)
         self.clock = pygame.time.Clock()
         self.running = True
+        # (turn_number, current_player) at which a bot neither ended its turn
+        # nor raised; bots aren't re-run until the state moves on.
+        self._stalled_bot_state = None
 
     def run(self):
         """
@@ -85,6 +88,15 @@ class GameSession:  # pylint: disable=too-few-public-methods
         print()
 
         while self.running and not self.game.game_over:
+            # Bots also move without a human ending a turn first: a bot in seat
+            # 1, a save loaded on a bot's turn, or an all-bot game. Bot turns
+            # used to run only from the End Turn handlers, so these games sat
+            # at turn 0 and the human could play the bot's units (pygame-5).
+            if self._bot_should_act():
+                self._render_frame()  # show the board before a possibly slow bot turn
+                self._run_pending_bot_turns()
+                continue
+
             # Get mouse position once per frame
             mouse_pos = pygame.mouse.get_pos()
 
@@ -136,6 +148,27 @@ class GameSession:  # pylint: disable=too-few-public-methods
                 print(f"Replay saved to {replay_path}")
 
         return self._exit_reason
+
+    def _bot_should_act(self):
+        """Whether the seat to move is a bot that hasn't stalled at this state."""
+        if self.game.game_over or self.game.current_player not in self.bots:
+            return False
+        return (self.game.turn_number, self.game.current_player) != self._stalled_bot_state
+
+    def _run_pending_bot_turns(self):
+        """Play bot turns until a human is to move (or the input handler's cap).
+
+        Called once per frame, so events are pumped and the board redrawn
+        between batches of bot turns. A bot that returns without ending its
+        turn (and without raising, which the input handler already contains)
+        is not re-run every frame: the state is marked stalled and the human
+        is told, until something changes it.
+        """
+        before = (self.game.turn_number, self.game.current_player)
+        self.input_handler._process_bot_turns()
+        if not self.game.game_over and (self.game.turn_number, self.game.current_player) == before:
+            self._stalled_bot_state = before
+            self.input_handler.show_notice(f"Player {before[1]}'s bot did not finish its turn")
 
     def _handle_pause(self):
         """
