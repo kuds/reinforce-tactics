@@ -1,16 +1,20 @@
 """Reliability tests for the LLM bots (review §1.9: aibots-1, -3, -4, -14).
 
 Covers the Claude request shape (no assistant prefill, no sampling params
-for models that reject them, text read from every content block), error
-classification and retry policy for all three providers, the failed-turn
-limit that raises LLMBotError, and the LLM-side legality check that stops
-repeated SEIZEs, friendly fire and repeated attacks.
+for models that reject them, temperature via extra_body for the rest, text
+read from every content block), OpenAI temperature handling, client timeouts,
+error classification and retry policy for all three providers, the
+failed-turn limit that raises LLMBotError (unparseable replies included),
+how a tournament records such a game, and the LLM-side legality check that
+stops repeated SEIZEs, friendly fire and repeated attacks.
 
-No network: each provider SDK is replaced by a fake module in sys.modules.
+No network: each provider SDK is replaced by a fake module in sys.modules
+(the fake anthropic client takes exactly the anthropic 1.x keywords).
 New names are reached through the ``llm_bot`` module object rather than
 imported at the top, so each test fails on its own against older code.
 """
 
+import inspect
 import json
 import sys
 import types
@@ -138,6 +142,10 @@ class APIConnectionError(Exception):
     """Same class name as the SDKs' transport error, which carries no status."""
 
 
+class UnknownApiResponseError(ValueError):
+    """Same name and base as google-genai's error for a reply that isn't JSON."""
+
+
 class FakeGenaiAPIError(Exception):
     """Mimics google.genai.errors.APIError: ``code`` plus the JSON body in ``details``."""
 
@@ -164,14 +172,55 @@ def openai_response(content: str | None, finish_reason: str = "stop") -> SimpleN
     )
 
 
+# Keyword arguments of messages.create in the anthropic SDK 1.x (1.8.0),
+# which `pip install anthropic` resolves to today. 1.x removed temperature,
+# top_p and top_k, so passing one is a TypeError raised before any request;
+# a fake that accepted **kw hid exactly that bug.
+ANTHROPIC_1X_CREATE_PARAMS = frozenset(
+    {
+        "max_tokens",
+        "messages",
+        "model",
+        "cache_control",
+        "container",
+        "inference_geo",
+        "metadata",
+        "output_config",
+        "service_tier",
+        "stop_sequences",
+        "stream",
+        "system",
+        "thinking",
+        "tool_choice",
+        "tools",
+        "user_profile_id",
+        "workspace_id",
+        "extra_headers",
+        "extra_query",
+        "extra_body",
+        "timeout",
+    }
+)
+
+
 @pytest.fixture
 def fake_anthropic(monkeypatch):
     server = FakeServer(claude_response(END_TURN_REPLY))
 
+    def create(**kw):
+        """messages.create with the anthropic 1.x signature."""
+        unexpected = sorted(set(kw) - ANTHROPIC_1X_CREATE_PARAMS)
+        if unexpected:
+            raise TypeError(f"Messages.create() got an unexpected keyword argument '{unexpected[0]}'")
+        missing = sorted({"max_tokens", "messages", "model"} - set(kw))
+        if missing:
+            raise TypeError(f"Messages.create() missing required keyword argument '{missing[0]}'")
+        return server.respond(kw)
+
     class Anthropic:
         def __init__(self, **kwargs):
             server.clients.append(kwargs)
-            self.messages = SimpleNamespace(create=lambda **kw: server.respond(kw))
+            self.messages = SimpleNamespace(create=create)
 
     module = types.ModuleType("anthropic")
     module.__version__ = "0.0.0-test"  # type: ignore[attr-defined]
@@ -275,19 +324,56 @@ class TestClaudeRequest:
         request = fake_anthropic.calls[-1]
         assert request["model"] == model
         assert not {"temperature", "top_p", "top_k"} & set(request)
+        assert not {"temperature", "top_p", "top_k"} & set(request.get("extra_body") or {})
         # Cleared so logs and replays record what was actually used.
         assert bot.temperature is None
 
     @pytest.mark.parametrize(
         "model", ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"]
     )
-    def test_temperature_still_sent_to_models_that_accept_it(self, game, fake_anthropic, model):
+    def test_temperature_reaches_models_that_accept_it_via_extra_body(self, game, fake_anthropic, sleeps, model):
+        """anthropic 1.x has no temperature= keyword; extra_body works on 0.x and 1.x.
+
+        Sent as a keyword, every request raised TypeError inside the SDK and
+        each turn was passed after three attempts.
+        """
         _start_player2_turn(game)
+        fake_anthropic.script.append(claude_response(CREATE_REPLY))
         bot = ClaudeBot(game, player=2, api_key="sk-ant-test", model=model, temperature=0.5)
 
         bot.take_turn()
 
-        assert fake_anthropic.calls[-1]["temperature"] == 0.5
+        request = fake_anthropic.calls[-1]
+        assert "temperature" not in request
+        assert request["extra_body"] == {"temperature": 0.5}
+        assert len(fake_anthropic.calls) == 1
+        assert sleeps == []
+        assert any(u.player == 2 and (u.x, u.y) == (8, 9) for u in game.units)
+
+    def test_no_extra_body_without_temperature(self, game, fake_anthropic):
+        _start_player2_turn(game)
+        ClaudeBot(game, player=2, api_key="sk-ant-test").take_turn()
+        assert "extra_body" not in fake_anthropic.calls[-1]
+
+    def test_request_fits_installed_anthropic_sdk_signature(self, game):
+        """With a real anthropic SDK installed, every keyword ClaudeBot sends is one it takes."""
+        anthropic = pytest.importorskip("anthropic")
+        signature = inspect.signature(anthropic.Anthropic(api_key="sk-ant-test").messages.create)
+        requests = []  # keyword arguments of each create() call
+
+        def create(**kw):
+            signature.bind(**kw)  # TypeError on a keyword the installed SDK doesn't take
+            requests.append(kw)
+            return claude_response(END_TURN_REPLY)
+
+        _start_player2_turn(game)
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test", model="claude-haiku-4-5-20251001", temperature=0.5)
+        bot._client = SimpleNamespace(messages=SimpleNamespace(create=create))
+
+        bot.take_turn()
+
+        assert len(requests) == 1
+        assert requests[0]["extra_body"] == {"temperature": 0.5}
 
     def test_text_read_from_every_text_block(self, game, fake_anthropic, sleeps):
         """A reply that starts with a non-text block and splits its text still parses."""
@@ -313,6 +399,21 @@ class TestClaudeRequest:
         assert bot.consecutive_failed_turns == 1
         assert game.current_player == 1
 
+    def test_replies_truncated_at_max_tokens_hit_the_failed_turn_limit(self, game, fake_anthropic, sleeps):
+        """Without the prefill, a reply cut off mid-JSON has no actions list; it's a failed turn."""
+        _start_player2_turn(game)
+        fake_anthropic.default_response = claude_response(CREATE_REPLY[:30], stop_reason="max_tokens")
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
+
+        for _ in range(2):
+            bot.take_turn()
+            game.end_turn()
+        with pytest.raises(llm_bot.LLMBotError, match="3 turns in a row"):
+            bot.take_turn()
+
+        assert len(fake_anthropic.calls) == 3
+        assert not any(u.player == 2 for u in game.units)
+
     def test_retired_model_is_called_out(self, game, fake_anthropic, caplog):
         assert "claude-opus-4-1-20250805" not in llm_bot.ANTHROPIC_MODELS
         with caplog.at_level("WARNING", logger="reinforcetactics.game.llm_bot"):
@@ -322,6 +423,38 @@ class TestClaudeRequest:
     def test_default_model_unchanged(self):
         assert ClaudeBot._default_model_name == "claude-haiku-4-5-20251001"
         assert "claude-haiku-4-5-20251001" in llm_bot.ANTHROPIC_MODELS
+
+
+# ---------------------------------------------------------------------------
+# aibots-4: sampling parameters OpenAI reasoning models reject (a 400 is now
+# fatal instead of silently passing turns)
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIRequest:
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-5-mini-2025-08-07", "gpt-5-nano-2025-08-07", "gpt-5-2025-08-07", "gpt-5", "gpt-5-pro", "o3-mini", "o1"],
+    )
+    def test_no_temperature_for_models_that_reject_it(self, game, fake_openai, sleeps, model):
+        """These 400 on a non-default temperature, which is now fatal (not retried) on turn 1."""
+        _start_player2_turn(game)
+        bot = OpenAIBot(game, player=2, api_key="sk-test", model=model, temperature=0.5)
+
+        bot.take_turn()
+
+        assert "temperature" not in fake_openai.calls[-1]
+        assert bot.temperature is None
+
+    @pytest.mark.parametrize("model", ["gpt-5.2", "gpt-5.1", "gpt-4.1", "gpt-5-chat-latest"])
+    def test_temperature_sent_to_models_that_accept_it(self, game, fake_openai, model):
+        _start_player2_turn(game)
+        bot = OpenAIBot(game, player=2, api_key="sk-test", model=model, temperature=0.5)
+
+        bot.take_turn()
+
+        assert fake_openai.calls[-1]["temperature"] == 0.5
+        assert bot.temperature == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +491,23 @@ class TestClientConstruction:
         GeminiBot(game, player=2, api_key="g-test", request_timeout=30.0)
         assert len(fake_genai.clients) == 1
         assert fake_genai.clients[0]["http_options"].timeout == 30_000
+
+    @pytest.mark.parametrize(
+        "max_tokens, expected_timeout",
+        [(None, 300.0), (8_000, 300.0), (16_000, 450.0), (32_000, 900.0)],
+    )
+    def test_default_timeout_grows_with_max_tokens(self, game, fake_anthropic, max_tokens, expected_timeout):
+        """A fixed 300 s cut off full-length 16K-token replies, then retried (and re-billed) them."""
+        ClaudeBot(game, player=2, api_key="sk-ant-test", max_tokens=max_tokens)
+        assert fake_anthropic.clients[0]["timeout"] == pytest.approx(expected_timeout)
+
+    def test_explicit_timeout_is_used_as_given(self, game, fake_anthropic):
+        ClaudeBot(game, player=2, api_key="sk-ant-test", max_tokens=32_000, request_timeout=42.0)
+        ClaudeBot(game, player=2, api_key="sk-ant-test", request_timeout=None)
+        assert fake_anthropic.clients[0]["timeout"] == 42.0
+        assert "timeout" not in fake_anthropic.clients[1]  # None: the SDK's default
+        with pytest.raises(ValueError, match="request_timeout"):
+            ClaudeBot(game, player=2, api_key="sk-ant-test", request_timeout="soon")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "bot_class, modules",
@@ -538,10 +688,73 @@ class TestErrorHandling:
             (TimeoutError(), True),
             (ConnectionResetError(), True),
             (RuntimeError("something unexpected"), True),
+            # Raised in-process before any request: same result every time.
+            (TypeError("Messages.create() got an unexpected keyword argument 'temperature'"), False),
+            (AttributeError("module 'openai' has no attribute 'OpenAI'"), False),
+            (ValueError("temperature: Input should be less than or equal to 2"), False),
+            # A reply the SDK couldn't decode may be a garbled one-off.
+            (json.JSONDecodeError("Expecting value", "<html>", 0), True),
+            (UnknownApiResponseError("response is not JSON"), True),
         ],
     )
     def test_classification(self, error, retryable):
         assert llm_bot._classify_llm_error(error).retryable is retryable
+
+    def test_local_sdk_error_fails_fast(self, game, sleeps):
+        """A TypeError from the SDK call used to be retried and then passed, turn after turn."""
+        _start_player2_turn(game)
+        error = TypeError("Messages.create() got an unexpected keyword argument 'temperature'")
+        bot = ScriptedBot(game, player=2, api_key="k", script=[error] * 3)
+
+        with pytest.raises(llm_bot.LLMBotError, match="unexpected keyword argument") as excinfo:
+            bot.take_turn()
+
+        assert excinfo.value.retryable is False
+        assert bot.calls == 1
+        assert sleeps == []
+        assert game.current_player == 2
+
+    def test_unparseable_replies_count_toward_the_limit(self, game, sleeps):
+        """Prose, truncated or non-object JSON used to reset the streak, so the bot passed forever."""
+        _start_player2_turn(game)
+        replies = [
+            "I will build a warrior.",  # no JSON at all
+            '{"actions": [{"type": "MOVE", "unit_id": 0, "to": [1',  # cut off at max_tokens
+            '["END_TURN"]',  # JSON, but not an object with an actions list
+        ]
+        bot = ScriptedBot(game, player=2, api_key="k", script=replies)
+
+        for _ in range(2):
+            bot.take_turn()
+            assert game.current_player == 1  # a single bad reply still passes the turn
+            game.end_turn()
+        with pytest.raises(llm_bot.LLMBotError, match="3 turns in a row"):
+            bot.take_turn()
+
+        assert bot.calls == 3  # the requests succeeded, so nothing was retried
+        assert sleeps == []
+        assert bot.get_capabilities_fired()["llm_unparseable_reply"] == 3
+
+    def test_parsed_reply_resets_the_streak_even_if_every_action_is_illegal(self, game):
+        _start_player2_turn(game)
+        illegal_only = json.dumps({"actions": [{"type": "SEIZE", "unit_id": 0}]})  # P2 has no units
+        script = ["no json", "no json", illegal_only, "no json", "no json"]
+        bot = ScriptedBot(game, player=2, api_key="k", script=script)
+
+        for _ in range(5):
+            bot.take_turn()
+            game.end_turn()
+
+        assert bot.consecutive_failed_turns == 2
+        assert bot.illegal_action_count == 1
+
+    def test_empty_actions_list_is_a_usable_reply(self, game):
+        _start_player2_turn(game)
+        bot = ScriptedBot(game, player=2, api_key="k", script=['{"actions": []}'] * 5)
+        for _ in range(5):
+            bot.take_turn()
+            game.end_turn()
+        assert bot.consecutive_failed_turns == 0
 
     def test_retry_after_sources(self):
         assert llm_bot._retry_after_seconds(FakeHTTPError(429, {"retry-after": "12"})) == 12.0
@@ -707,3 +920,108 @@ class TestActionLegality:
         assert bot.illegal_action_count == 3
         assert stats["llm_illegal_other"] == 2
         assert stats["llm_illegal_seize"] == 1
+
+
+# ---------------------------------------------------------------------------
+# aibots-4: a tournament surfaces a broken LLM bot instead of scoring it
+# ---------------------------------------------------------------------------
+
+
+def _run_tournament(tmp_path, llm_descriptor, *, max_turns: int = 4, save_replays: bool = False):
+    """SimpleBot vs ``llm_descriptor``, one game per side on the starter map."""
+    from reinforcetactics.tournament import BotDescriptor, MapConfig, TournamentConfig, TournamentRunner
+
+    config = TournamentConfig(
+        name="llm_errors",
+        maps=[MapConfig(path="maps/1v1/starter.csv", max_turns=max_turns)],
+        games_per_side=1,
+        max_turns=max_turns,
+        save_replays=save_replays,
+        replay_dir=str(tmp_path / "replays"),
+        output_dir=str(tmp_path / "out"),
+        llm_api_delay=0,
+    )
+    return TournamentRunner(config).run([BotDescriptor.simple_bot("SimpleBot"), llm_descriptor])
+
+
+def _claude_descriptor(model: str = "claude-haiku-4-5-20251001", **kwargs):
+    from reinforcetactics.tournament import BotDescriptor
+
+    return BotDescriptor.llm_bot("Claude", "anthropic", model, api_key="sk-ant-test", **kwargs)
+
+
+class TestTournamentErrors:
+    @staticmethod
+    def _game(game_id, bot1, bot2, winner, error=None):
+        from reinforcetactics.tournament import GameResult
+
+        winner_name = "Error" if error else {0: "Draw", 1: bot1, 2: bot2}[winner]
+        return GameResult(game_id, bot1, bot2, winner, winner_name, turns=10, map_name="m.csv", error=error)
+
+    def test_errored_game_is_not_scored_as_a_draw(self):
+        """The runner reports errors as winner 0, which used to count as a draw with an Elo update."""
+        from reinforcetactics.tournament import TournamentResults
+
+        finished = self._game(2, "SimpleBot", "Claude", winner=1)
+        results = TournamentResults()
+        results.add_game_result(self._game(1, "Claude", "SimpleBot", winner=0, error="LLMBotError: HTTP 401"))
+        results.add_game_result(finished)
+        reference = TournamentResults()
+        reference.add_game_result(finished)
+
+        standings = {s.bot_name: s for s in results.get_standings()}
+        assert (standings["Claude"].wins, standings["Claude"].losses, standings["Claude"].draws) == (0, 1, 0)
+        assert (standings["SimpleBot"].wins, standings["SimpleBot"].losses, standings["SimpleBot"].draws) == (1, 0, 0)
+        assert standings["Claude"].errors == standings["SimpleBot"].errors == 1
+        assert standings["Claude"].win_rate == 0.0 and standings["Claude"].total_games == 1
+        assert [m.draws for m in results.get_matchups()] == [0]
+        for bot in ("Claude", "SimpleBot"):
+            assert results.elo_system.get_rating(bot) == reference.elo_system.get_rating(bot)
+        data = results.to_dict()
+        assert data["total_games"] == 2 and data["errored_games"] == 1
+        assert {s["bot"]: s["errors"] for s in data["standings"]} == {"Claude": 1, "SimpleBot": 1}
+
+    def test_bot_with_only_errored_games_is_still_listed(self):
+        from reinforcetactics.tournament import TournamentResults
+
+        results = TournamentResults()
+        results.add_game_result(self._game(1, "Claude", "SimpleBot", winner=0, error="boom"))
+
+        standings = {s.bot_name: s for s in results.get_standings()}
+        assert set(standings) == {"Claude", "SimpleBot"}
+        assert standings["Claude"].errors == 1 and standings["Claude"].total_games == 0
+
+    def test_llm_bot_error_mid_game_is_recorded_as_an_error(self, tmp_path, fake_anthropic, sleeps):
+        """A rejected API key fails fast; the games show the error rather than two draws."""
+        fake_anthropic.default_response = FakeHTTPError(401)
+
+        results = _run_tournament(tmp_path, _claude_descriptor())
+
+        assert len(results.game_results) == 2
+        assert all(g.error and "authentication" in g.error for g in results.game_results)
+        assert len(fake_anthropic.calls) == 2  # one request per game, not retried
+        assert sleeps == []
+        standings = {s.bot_name: s for s in results.get_standings()}
+        assert standings["Claude"].errors == 2 and standings["Claude"].total_games == 0
+        assert results.elo_system.get_rating("Claude") == results.elo_system.get_rating("SimpleBot")
+
+    def test_missing_sdk_does_not_abort_a_sequential_tournament(self, tmp_path, monkeypatch):
+        """Bot construction ran outside the runner's try, so this ImportError ended the tournament."""
+        monkeypatch.setitem(sys.modules, "anthropic", None)
+
+        results = _run_tournament(tmp_path, _claude_descriptor())
+
+        assert len(results.game_results) == 2
+        assert all(g.error and "not installed" in g.error for g in results.game_results)
+        assert {s.bot_name: s.errors for s in results.get_standings()} == {"SimpleBot": 2, "Claude": 2}
+
+    def test_replay_records_the_temperature_actually_used(self, tmp_path, fake_anthropic):
+        """Opus 4.7 rejects temperature, so ClaudeBot drops it; the replay said 0.5 anyway."""
+        _run_tournament(tmp_path, _claude_descriptor("claude-opus-4-7", temperature=0.5), save_replays=True)
+
+        replays = sorted((tmp_path / "replays").rglob("*.json"))
+        assert len(replays) == 2
+        for path in replays:
+            configs = json.loads(path.read_text(encoding="utf-8"))["game_info"]["player_configs"]
+            assert [c["temperature"] for c in configs if c["type"] == "llm"] == [None]
+        assert not {"temperature"} & set(fake_anthropic.calls[-1].get("extra_body") or {})

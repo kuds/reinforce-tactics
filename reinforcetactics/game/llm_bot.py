@@ -14,7 +14,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from reinforcetactics import __version__
 from reinforcetactics.constants import UNIT_DATA
@@ -92,9 +92,25 @@ SYSTEM_PROMPT = DEFAULT_PROMPT
 # Seconds before one LLM request is abandoned (and retried as a timeout).
 # The SDK defaults (600 s for OpenAI/Anthropic, none for google-genai) let a
 # single stuck request freeze a GUI game or a tournament worker for ten
-# minutes or more. Five minutes is still far above a normal turn, even for a
-# reasoning model writing a 16K-token reply.
+# minutes or more. Five minutes is far above a normal turn; with the default
+# request_timeout="auto" it is raised for large max_tokens (see
+# default_request_timeout).
 DEFAULT_REQUEST_TIMEOUT_S = 300.0
+
+# Seconds allowed per requested output token when sizing the "auto" timeout.
+# This is the Anthropic SDK's own estimate for a non-streamed request (128K
+# tokens an hour, ~36 tokens/s), which is slow for current models: a reply
+# that uses all of max_tokens should finish well inside the timeout rather
+# than be cut off, retried and billed again.
+_TIMEOUT_S_PER_OUTPUT_TOKEN = 3600 / 128_000
+
+
+def default_request_timeout(max_tokens: int | None) -> float:
+    """The "auto" request timeout: DEFAULT_REQUEST_TIMEOUT_S, or longer when
+    ``max_tokens`` is large enough that a full-length reply could need more
+    (16K tokens -> 450 s; 32K -> 900 s)."""
+    return max(DEFAULT_REQUEST_TIMEOUT_S, (max_tokens or 0) * _TIMEOUT_S_PER_OUTPUT_TOKEN)
+
 
 # Turns in a row the LLM may fail to answer (after retries) before the bot
 # raises LLMBotError. One failed turn is treated as a blip and passed; a
@@ -152,6 +168,24 @@ def claude_model_accepts_sampling_params(model: str) -> bool:
     return version < _CLAUDE_NO_SAMPLING_PARAMS_FROM
 
 
+# OpenAI reasoning models that reject a non-default temperature with a 400
+# ("Unsupported value: 'temperature' does not support 0.5 with this model"):
+# the o-series, the original GPT-5 family (gpt-5 / -mini / -nano, which can't
+# turn reasoning off) and the -pro models (reasoning only). GPT-5.1 and later
+# accept temperature at their default reasoning effort of "none", which
+# OpenAIBot never changes, so e.g. gpt-5.2 keeps it.
+_OPENAI_NO_TEMPERATURE_RE = re.compile(
+    r"^(?:o\d"  # o1, o3, o4-mini, o3-pro, ...
+    r"|gpt-5(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$"  # gpt-5, gpt-5-mini-2025-08-07, ...
+    r"|gpt-5(?:\.\d+)?-pro)"  # gpt-5-pro, gpt-5.2-pro, ...
+)
+
+
+def openai_model_accepts_temperature(model: str) -> bool:
+    """Whether OpenAI ``model`` accepts a non-default temperature without a 400."""
+    return _OPENAI_NO_TEMPERATURE_RE.match(model) is None
+
+
 class LLMBotError(RuntimeError):
     """An LLM bot can't keep playing, and passing more turns would hide it.
 
@@ -159,14 +193,18 @@ class LLMBotError(RuntimeError):
 
     * at once, for a failure no retry can fix: the provider SDK is missing,
       the API key is rejected, the key lacks permission, the model doesn't
-      exist, or the request is rejected as malformed (``retryable=False``);
+      exist, the request is rejected as malformed, or the SDK call itself
+      fails locally (e.g. a TypeError from an SDK version that doesn't take
+      an argument) (``retryable=False``);
     * after ``max_consecutive_failed_turns`` turns in a row where the LLM
-      gave no usable response, e.g. every retry of a rate limit, outage or
-      timeout was used up (``retryable=True``).
+      gave no usable response: every retry of a rate limit, outage or
+      timeout was used up, or the reply held no parseable actions list
+      (``retryable=True``).
 
     The turn in progress is *not* ended, so the caller decides what happens
-    to the game. The tournament runner records it as an errored game rather
-    than a loss for the model.
+    to the game. The tournament runner ends the game with an error result,
+    which TournamentResults leaves out of wins/losses/draws and Elo (it is
+    counted under ``errors``) instead of scoring it as a loss or a draw.
     """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
@@ -255,8 +293,9 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
 def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
     """Sort a failed LLM request into retryable or not.
 
-    Not retryable: a missing SDK and 4xx responses other than 408/409/429
-    (bad key, missing permission, unknown model, malformed request). The
+    Not retryable: a missing SDK, 4xx responses other than 408/409/429 (bad
+    key, missing permission, unknown model, malformed request), and local
+    TypeError/AttributeError/ValueError from the SDK call (see below). The
     same request would fail the same way, so retrying only burns time and
     passes turns. Retryable: 408/409/429, 5xx, timeouts, connection errors,
     and anything unrecognised (the pre-classification behaviour; a streak of
@@ -281,6 +320,16 @@ def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
         return _LLMErrorInfo(True, "timeout")
     if isinstance(exc, ConnectionError) or any("Connection" in name for name in class_names):
         return _LLMErrorInfo(True, "connection error")
+    # With no HTTP status, these come from building or sending the request
+    # in-process: a keyword the installed SDK doesn't take (anthropic 1.x
+    # raises TypeError for temperature=), a client attribute an old SDK
+    # lacks, a config value the SDK's validation rejects. Nothing reached the
+    # server, and every retry fails identically. A reply the SDK couldn't
+    # decode (JSONDecodeError, google-genai's UnknownApiResponseError, both
+    # ValueErrors) can be a garbled one-off, so it stays retryable.
+    decode_error = isinstance(exc, json.JSONDecodeError | UnicodeError) or any("Response" in name for name in class_names)
+    if isinstance(exc, TypeError | AttributeError | ValueError) and not decode_error:
+        return _LLMErrorInfo(False, f"local {type(exc).__name__} (SDK/config mismatch?)")
     return _LLMErrorInfo(True, f"unexpected {type(exc).__name__}")
 
 
@@ -337,7 +386,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         temperature: float | None = None,
         system_prompt: str | None = None,
         two_phase_planning: bool = False,
-        request_timeout: float | None = DEFAULT_REQUEST_TIMEOUT_S,
+        request_timeout: float | Literal["auto"] | None = "auto",
         max_consecutive_failed_turns: int | None = DEFAULT_MAX_CONSECUTIVE_FAILED_TURNS,
     ):
         """
@@ -372,8 +421,10 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
                 When True, the bot first generates a strategic plan, then executes it.
                 This encourages deeper strategic thinking about action sequences.
                 Note: This doubles the number of API calls per turn.
-            request_timeout: Seconds before a single API request is abandoned
-                (default DEFAULT_REQUEST_TIMEOUT_S). None uses the SDK default.
+            request_timeout: Seconds before a single API request is abandoned.
+                "auto" (default) is default_request_timeout(max_tokens):
+                DEFAULT_REQUEST_TIMEOUT_S, raised for large max_tokens. None
+                uses the SDK default.
             max_consecutive_failed_turns: Turns in a row without a usable LLM
                 response before take_turn() raises LLMBotError instead of
                 passing another turn (default 3). None never raises.
@@ -395,7 +446,11 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.two_phase_planning = two_phase_planning
-        self.request_timeout = request_timeout
+        if isinstance(request_timeout, str) and request_timeout != "auto":
+            raise ValueError(f'request_timeout must be seconds, None or "auto", not {request_timeout!r}')
+        self.request_timeout: float | None = (
+            default_request_timeout(max_tokens) if isinstance(request_timeout, str) else request_timeout
+        )
         self.max_consecutive_failed_turns = max_consecutive_failed_turns
         self.consecutive_failed_turns = 0
 
@@ -695,8 +750,9 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
 
         Actions that aren't in ``get_legal_actions`` at the moment they would
         run are skipped and counted (see ``illegal_action_count``). If the LLM
-        gives no usable response after retries, the turn ends without
-        actions, up to ``max_consecutive_failed_turns`` turns in a row.
+        gives no usable response (none after retries, or one with no
+        parseable actions list), the turn ends without actions, up to
+        ``max_consecutive_failed_turns`` turns in a row.
 
         Raises:
             LLMBotError: On a non-retryable API failure (missing SDK, bad key,
@@ -734,7 +790,6 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             self._record_failed_turn()
             self.game_state.end_turn()
             return
-        self.consecutive_failed_turns = 0
 
         # Store conversation in history if stateful mode is enabled
         if self.stateful:
@@ -751,8 +806,17 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             stop_reason=self._last_stop_reason,
         )
 
-        # Parse and execute actions
-        self._execute_actions(response_text)
+        # Parse and execute actions. A reply with no parseable actions list
+        # (prose only, JSON cut off at max_tokens, a refusal) is as useless as
+        # no reply, and more likely without a JSON-forcing prefill, so it
+        # counts toward the failed-turn limit too; otherwise a model that
+        # never returns usable JSON would pass turns forever. Only a parsed
+        # reply ends the streak, even if all its actions were illegal
+        # (those are counted separately).
+        if self._execute_actions(response_text):
+            self.consecutive_failed_turns = 0
+        else:
+            self._record_failed_turn()
 
         # End turn (advance game state to next player, collect income, etc.)
         # Skip if game is already over (e.g., due to resignation)
@@ -760,7 +824,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             self.game_state.end_turn()
 
     def _record_failed_turn(self) -> None:
-        """Count a turn the LLM didn't answer; raise once the streak hits the limit."""
+        """Count a turn without a usable reply; raise once the streak hits the limit."""
         self.consecutive_failed_turns += 1
         self._record("llm_failed_turn")
         limit = self.max_consecutive_failed_turns
@@ -1276,7 +1340,7 @@ Only include actions that are legal based on the legal_actions provided.
 You can take multiple actions in one turn.
 Use RESIGN only as a last resort when victory is impossible."""
 
-    def _execute_actions(self, response_text: str):
+    def _execute_actions(self, response_text: str) -> bool:
         """Parse the LLM response and execute its actions in order.
 
         Each action is checked against ``get_legal_actions`` as the state is
@@ -1284,26 +1348,33 @@ Use RESIGN only as a last resort when victory is impossible."""
         listed, so an LLM that repeats or invents actions can't do what the
         rules forbid: seize twice in a turn, attack its own units, or act
         again with a spent unit.
+
+        Returns:
+            True if the reply held an ``actions`` list (even an empty one, or
+            one whose actions were all skipped); False if no such list could
+            be parsed from it, which take_turn counts as a failed turn.
         """
         try:
-            # Try to parse JSON from response
             response_json = self._extract_json(response_text)
+        except Exception as e:  # e.g. RecursionError on absurdly nested JSON
+            logger.error("Error parsing LLM response: %s", e)
+            response_json = None
+        if not isinstance(response_json, dict) or not isinstance(response_json.get("actions"), list):
+            logger.warning(
+                "Invalid response format: no 'actions' list found (stop reason: %s)",
+                self._last_stop_reason or "n/a",
+            )
+            self._record("llm_unparseable_reply")
+            return False
+        actions = response_json["actions"]
 
-            if not response_json or "actions" not in response_json:
-                logger.error("Invalid response format. No actions found.")
-                return
-
+        try:
             # Log reasoning if provided
             if "reasoning" in response_json:
                 logger.info("Bot reasoning: %s", response_json["reasoning"])
 
             # Build unit ID to unit object mapping
             unit_map = self._get_unit_by_id()
-
-            actions = response_json["actions"]
-            if not isinstance(actions, list):
-                logger.error("Actions must be a list")
-                return
 
             # Execute each action
             for index, action in enumerate(actions):
@@ -1340,7 +1411,7 @@ Use RESIGN only as a last resort when victory is impossible."""
                         break
                     elif action_type == "RESIGN":
                         self._execute_resign()
-                        return  # Exit immediately after resignation
+                        return True  # Exit immediately after resignation
                     else:
                         self._reject_action(action, f"unknown action type {action_type!r}")
                     if executed:
@@ -1350,7 +1421,8 @@ Use RESIGN only as a last resort when victory is impossible."""
                     continue
 
         except Exception as e:
-            logger.error("Error parsing/executing LLM response: %s", e)
+            logger.error("Error executing LLM response: %s", e)
+        return True
 
     def _extract_json(self, text: str) -> dict | None:
         """Extract JSON from response text, handling markdown code blocks."""
@@ -1658,11 +1730,30 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
     Cost tiers:
     - Budget: gpt-5-nano, gpt-5-mini (~$0.15-0.50/1M input tokens)
     - Premium: gpt-5.2 (~$10-15/1M input tokens)
+
+    The original GPT-5 models (gpt-5 / -mini / -nano), the -pro models and
+    the o-series reject a non-default temperature with a 400, so
+    ``temperature`` is ignored (with a warning) for them.
     """
 
     _env_var_name = "OPENAI_API_KEY"
     _default_model_name = "gpt-5-mini-2025-08-07"
     _supported_model_list = OPENAI_MODELS
+
+    def __init__(self, *args, **kwargs):
+        """Initialize OpenAIBot, dropping a temperature the model would reject."""
+        super().__init__(*args, **kwargs)
+        # A 400 is not retried, so sending it would stop the bot on its first
+        # turn (LLMBotError); dropping it only changes sampling.
+        if self.temperature is not None and not openai_model_accepts_temperature(self.model):
+            logger.warning(
+                "Model '%s' only supports the default temperature; ignoring temperature=%s.",
+                self.model,
+                self.temperature,
+            )
+            # Cleared rather than just not sent, so conversation logs, the
+            # GUI's player config and tournament replays record the value used.
+            self.temperature = None
 
     def _get_llm_sdk_version(self) -> str:
         """Get the OpenAI SDK version."""
@@ -1698,7 +1789,7 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
         }
         if self.max_tokens is not None:
             request_kwargs["max_completion_tokens"] = self.max_tokens
-        if self.temperature is not None:
+        if self.temperature is not None and openai_model_accepts_temperature(self.model):
             request_kwargs["temperature"] = self.temperature
 
         response = self._client.chat.completions.create(**request_kwargs)
@@ -1737,7 +1828,9 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
       rejected with a 400 by Opus 4.6+, Sonnet 4.6+ and every 5.x model.
       JSON output comes from the system-prompt instruction instead.
     - Opus 4.7, Opus 4.8 and every 5.x model reject temperature/top_p/top_k,
-      so ``temperature`` is ignored (with a warning) for them.
+      so ``temperature`` is ignored (with a warning) for them. Older models
+      get it through ``extra_body``: the anthropic 1.x SDK has no
+      ``temperature=`` keyword.
     """
 
     _env_var_name = "ANTHROPIC_API_KEY"
@@ -1755,8 +1848,8 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
                 self.model,
                 self.temperature,
             )
-            # Cleared rather than just not sent, so conversation logs and
-            # replays record the temperature actually used.
+            # Cleared rather than just not sent, so conversation logs, the
+            # GUI's player config and tournament replays record the value used.
             self.temperature = None
 
     def _get_llm_sdk_version(self) -> str:
@@ -1806,7 +1899,12 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
         if system_message:
             request_kwargs["system"] = system_message
         if self.temperature is not None and claude_model_accepts_sampling_params(self.model):
-            request_kwargs["temperature"] = self.temperature
+            # Through extra_body, not temperature=: anthropic 1.x dropped the
+            # sampling keywords from messages.create (passing one is a
+            # TypeError before any request is sent), while the API still
+            # honours them on these models. Both 0.x and 1.x SDKs merge
+            # extra_body into the request JSON as-is.
+            request_kwargs["extra_body"] = {"temperature": self.temperature}
 
         response = self._client.messages.create(**request_kwargs)
 

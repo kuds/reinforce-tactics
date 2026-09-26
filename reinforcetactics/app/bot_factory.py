@@ -111,7 +111,7 @@ def create_bots_from_config(game, player_configs, settings):
     Player name sources:
     - Human players: "Human"
     - SimpleBot/MediumBot/AdvancedBot: Class name (e.g., "SimpleBot")
-    - LLM bots: Model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+    - LLM bots: Model name (e.g., "gpt-5-mini-2025-08-07", "claude-sonnet-4-6")
     - ModelBot: Base filename from model_path (e.g., "agent_v1")
 
     Args:

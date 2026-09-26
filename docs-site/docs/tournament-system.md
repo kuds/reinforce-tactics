@@ -127,6 +127,7 @@ Automatically included if:
 - GPT-5: `gpt-5-mini-2025-08-07` (recommended for cost-effectiveness)
 - GPT-4o family: `gpt-4o`, `gpt-4o-mini`
 - O-series: `o1`, `o1-mini`, `o3-mini`
+- `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, the `-pro` models and the o-series only accept the default temperature, so OpenAIBot ignores `temperature` for them
 
 **Anthropic Claude (Default: claude-haiku-4-5-20251001)**
 - Claude 5.x: `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5`
@@ -152,6 +153,10 @@ Configure API keys in `settings.json`:
 ```
 
 You can also specify custom models by setting environment variables or modifying bot initialization code.
+
+#### When an LLM bot can't play
+
+Rate limits, overloads, timeouts and connection errors are retried with backoff; a turn whose retries run out is passed. An LLM bot raises `LLMBotError` instead of passing turns when the failure can't fix itself (missing SDK, rejected API key, unknown model, malformed request) or after 3 turns in a row without a usable reply (including replies with no parseable `actions` list). The tournament then ends that game as an error: it is reported with an `error` message in the results JSON, counted under `errors` in the standings, and left out of wins, losses, draws and Elo.
 
 ### Model Bots
 Automatically discovered from the `models/` directory:
