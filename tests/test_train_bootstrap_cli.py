@@ -146,6 +146,34 @@ def test_sigterm_becomes_exit_143_after_the_upload(run_main, train_bootstrap, mo
     assert uploads == [output_dir]
 
 
+def test_sigterm_during_the_final_upload_lets_it_finish(run_main, train_bootstrap, monkeypatch):
+    """A cancel that lands while a finished run uploads must not cut the upload short."""
+    run, uploads, output_dir = run_main
+
+    def upload_interrupted_by_cancel(output_dir, args):
+        signal.raise_signal(signal.SIGTERM)
+        uploads.append(output_dir)
+
+    monkeypatch.setattr(train_bootstrap, "_maybe_upload", upload_interrupted_by_cancel)
+    assert run(lambda cfg, output_dir: {"history": [], "final_model_path": None}) == 0
+    assert uploads == [output_dir]
+
+
+def test_sigterm_handler_does_not_write_through_sys_stdout(train_bootstrap, monkeypatch, sigterm_guard):
+    """The signal can land inside a print; re-entering stdout then raises RuntimeError, not SystemExit."""
+
+    class _StdoutMidWrite:
+        def write(self, text):
+            raise RuntimeError("reentrant call inside <_io.BufferedWriter name='<stdout>'>")
+
+        flush = write
+
+    monkeypatch.setattr(sys, "stdout", _StdoutMidWrite())
+    with pytest.raises(SystemExit) as excinfo:
+        train_bootstrap._exit_on_sigterm(signal.SIGTERM, None)
+    assert excinfo.value.code == 143
+
+
 # The child replaces the curriculum with a stand-in that writes a file and then
 # waits to be terminated, and replaces upload_tree (called by the real
 # _maybe_upload) with one that records what it would have uploaded.
@@ -184,7 +212,7 @@ sys.exit(train_bootstrap.main(argv))
 def test_real_sigterm_uploads_the_run_and_exits_143(tmp_path):
     argv = _argv(tmp_path / "run")
     argv[argv.index("--no-gcs")] = "--gcs-output=gs://bucket/jobs/job1"
-    env = {k: v for k, v in os.environ.items() if k not in ("GCS_OUTPUT_URI", "AIP_MODEL_DIR")}
+    env = {k: v for k, v in os.environ.items() if k not in ("GCS_OUTPUT_URI", "AIP_MODEL_DIR", "GCS_WRAPPER_SYNC")}
     env.update(PYTHONPATH=str(REPO_ROOT), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", MPLBACKEND="Agg")
     proc = subprocess.Popen(
         [sys.executable, "-c", _CHILD, str(SCRIPT), str(tmp_path), *argv],

@@ -1,17 +1,21 @@
 # Files `gcloud builds submit` (scripts/cloud/build_image.sh) leaves out of the
 # source it uploads to Cloud Build.
 #
-# Without this file gcloud falls back to the root .gitignore, which neither
-# ignores benchmarks/ (so every local bootstrap run's checkpoints and videos
-# rode along in each upload) nor sees docker/tournament/.gitignore (so an API
-# key .env there was uploaded to the Cloud Build bucket).
+# With no .gcloudignore, gcloud ignores what the root .gitignore ignores. Once
+# this file exists gcloud reads it instead, so the directive below pulls the
+# root .gitignore back in: settings.json (LLM API keys) at any depth, .env
+# files, the underscore-prefixed agent scratch files and local run outputs stay
+# out of the upload as they did before. gcloud does not read nested
+# .gitignore files such as docker/tournament/.gitignore, hence the rules after
+# it.
+#!include:.gitignore
 #
-# This mirrors .dockerignore: nothing excluded there reaches the image, so
-# excluding it here too cannot change what gets built. .gitignore syntax: a
-# leading "/" anchors a pattern to the repo root, which is how every
-# .dockerignore pattern is matched. Dockerfile and .dockerignore must stay in
-# the upload; the Docker build step in Cloud Build needs both.
-# tests/test_build_ignores.py checks these rules.
+# The rest mirrors .dockerignore: nothing excluded there reaches the image, so
+# excluding it here too cannot change what gets built. A leading "/" anchors a
+# pattern to the repo root, which is how every .dockerignore pattern is
+# matched; a pattern without one matches at any depth. Dockerfile and
+# .dockerignore must stay in the upload; the Docker build step in Cloud Build
+# needs both. tests/test_build_ignores.py checks these rules.
 .gcloudignore
 .git
 /.github/
@@ -36,12 +40,16 @@ __pycache__/
 /benchmarks/
 /docker/tournament/output/
 
-# Secrets (API key .env files, GCP credential JSON)
+# Secrets (API key .env files, GCP credential JSON, the settings menu's
+# settings.json). Repeated from .gitignore so the upload stays clean even if
+# that file changes.
 .env
 .env.*
 !.env.example
 *credentials*.json
 *service-account*.json
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+settings.json
 
 # Test/coverage and editor cruft
 /tests/
@@ -53,4 +61,3 @@ __pycache__/
 /*.egg-info/
 /dist/
 /build/
-/settings.json

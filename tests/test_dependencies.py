@@ -101,16 +101,27 @@ def _catches_import_error(handler: ast.ExceptHandler) -> bool:
     return False
 
 
+# Calls that end the program, as a statement of their own in a handler.
+_EXIT_CALLS = frozenset({"sys.exit", "exit", "quit", "os._exit"})
+
+
+def _gives_up(stmt: ast.stmt) -> bool:
+    """``raise ...`` or an exit call: the handler reports the missing package and stops."""
+    if isinstance(stmt, ast.Raise):
+        return True
+    return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and ast.unparse(stmt.value.func) in _EXIT_CALLS
+
+
 def _has_fallback(try_node: ast.Try | ast.TryStar) -> bool:
     """True when some handler catches a failed import and carries on.
 
     A handler that re-raises (``except ImportError: raise ImportError("pip
-    install ...")``) is a nicer error message, not a fallback: the code path
-    still needs the package, so its import stays required.
+    install ...")``) or exits (``print("pip install ..."); sys.exit(1)``) is a
+    nicer error message, not a fallback: the code path still needs the
+    package, so its import stays required.
     """
     return any(
-        _catches_import_error(handler) and not any(isinstance(stmt, ast.Raise) for stmt in handler.body)
-        for handler in try_node.handlers
+        _catches_import_error(handler) and not any(_gives_up(stmt) for stmt in handler.body) for handler in try_node.handlers
     )
 
 
@@ -302,6 +313,13 @@ def test_scanner_keeps_reraised_import_required():
         "try:\n    import sb3_contrib\nexcept ImportError as exc:\n    raise ImportError('pip install sb3-contrib') from exc\n"
     )
     assert [(s.module, s.optional) for s in _scan(source)] == [("sb3_contrib", False)]
+
+
+@pytest.mark.parametrize("exit_call", ["sys.exit(1)", "exit(1)", "quit()", "os._exit(1)", "raise SystemExit(1)"])
+def test_scanner_keeps_import_required_when_the_handler_exits(exit_call):
+    """scripts/generate_unit_gifs.py's shape: print an install hint, then exit."""
+    source = f"try:\n    from PIL import Image\nexcept ImportError:\n    print('pip install Pillow')\n    {exit_call}\n"
+    assert [(s.module, s.optional) for s in _scan(source)] == [("PIL.Image", False)]
 
 
 def test_scanner_does_not_guard_functions_defined_inside_try():

@@ -18,8 +18,14 @@ Environment variables:
     GCS_OUTPUT_URI     gs:// base for outputs (overrides AIP_MODEL_DIR).
     GCS_SYNC_INTERVAL  Seconds between periodic syncs (default 300; <=0 disables).
     GCS_SYNC_DIRS      Extra directories to sync, comma-separated. ``dir`` goes to
-                       ``<base>/dir/``; ``dir=prefix`` goes to ``<base>/prefix/``.
+                       ``<base>/dir/``; ``dir=prefix`` goes to ``<base>/prefix/``;
+                       ``dir=`` puts the directory's contents straight under
+                       ``<base>/``. A file under two entries goes to both places.
     GCS_CREDENTIALS    Optional path to a service-account JSON file.
+
+The child gets ``GCS_WRAPPER_SYNC`` describing what the final sync uploads, so
+``train_bootstrap.py`` can leave its run directory to that sync instead of
+re-uploading every file of it (``reinforcetactics.cloud.storage.synced_by_wrapper``).
 
 Usage:
     python3 scripts/cloud/vertex_train.py python3 main.py --mode train --timesteps 1000000
@@ -27,11 +33,13 @@ Usage:
 
 import logging
 import os
+import posixpath
 import signal
 import subprocess
 import sys
 import threading
 from collections.abc import Mapping
+from pathlib import Path
 from types import FrameType
 
 # Make the package importable when the image is run from the repo root.
@@ -39,8 +47,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from reinforcetactics.cloud.storage import (  # noqa: E402
     DEFAULT_OUTPUT_DIRS,
+    WRAPPER_SYNC_ENV,
     resolve_output_base,
     sync_directories,
+    wrapper_sync_env,
 )
 
 logger = logging.getLogger("vertex_train")
@@ -63,7 +73,9 @@ def resolve_sync_dirs(env: Mapping[str, str] | None = None) -> dict[str, str]:
     The defaults are ``DEFAULT_OUTPUT_DIRS`` (each to a same-named folder) and
     ``BOOTSTRAP_RUNS_DIR`` (to the base itself). ``GCS_SYNC_DIRS`` adds more,
     for runs launched with a custom output directory: a comma-separated list
-    of ``dir`` (uploaded to ``<base>/dir/``) or ``dir=prefix`` entries.
+    of ``dir`` (uploaded to ``<base>/dir/``), ``dir=prefix`` (to
+    ``<base>/prefix/``) or ``dir=`` (straight under ``<base>/``) entries. An
+    entry naming a default directory replaces its prefix.
     """
     resolved = os.environ if env is None else env
     dirs = {name: name for name in DEFAULT_OUTPUT_DIRS}
@@ -74,8 +86,39 @@ def resolve_sync_dirs(env: Mapping[str, str] | None = None) -> dict[str, str]:
         if not local:
             continue
         local = os.path.normpath(local)
-        dirs[local] = (remote if sep else local).strip().replace(os.sep, "/").strip("/")
+        # normpath folds "a/./b" and "a/../b". What is left of "." (from
+        # GCS_SYNC_DIRS=. or dir=.) means the base itself: kept as ".", it
+        # became a literal path segment in every object name (jobs/<name>/./...).
+        prefix = posixpath.normpath((remote if sep else local).strip().replace(os.sep, "/")).strip("/")
+        if prefix == ".":
+            prefix = ""
+        if prefix == ".." or prefix.startswith("../"):
+            logger.warning("Ignoring GCS_SYNC_DIRS entry %r: prefix %r points above the output base", entry, prefix)
+            continue
+        dirs[local] = prefix
+    _warn_about_overlaps(dirs)
     return dirs
+
+
+def _warn_about_overlaps(dirs: Mapping[str, str]) -> None:
+    """Log each synced directory that sits inside another synced directory.
+
+    Both entries upload the shared files, each to its own prefix, so they are
+    stored twice (GCS_SYNC_DIRS=benchmarks also puts every bootstrap run under
+    <base>/benchmarks/bootstrap/). Allowed, since the docs promise ``dir`` goes
+    to ``<base>/dir/``, but rarely what was meant.
+    """
+    absolute = {local: Path(os.path.abspath(local)) for local in dirs}
+    for inner, inner_path in absolute.items():
+        for outer, outer_path in absolute.items():
+            if inner != outer and inner_path.is_relative_to(outer_path):
+                logger.warning(
+                    "Synced directory %s is inside %s; its files are uploaded under both %r and %r",
+                    inner,
+                    outer,
+                    dirs[inner],
+                    dirs[outer],
+                )
 
 
 def _default_command() -> list[str]:
@@ -149,8 +192,17 @@ def main() -> int:
     else:
         logger.info("No GCS_OUTPUT_URI / AIP_MODEL_DIR set — running locally, outputs will not be uploaded.")
 
+    # Tell the child what the final sync below will upload, so train_bootstrap
+    # can leave its run directory to it rather than re-upload every file of it
+    # (the periodic syncs already stored most) inside Vertex's shutdown grace
+    # period. Without a sync, make sure the child sees no such promise, even
+    # one inherited from an outer process.
+    child_env = {key: value for key, value in os.environ.items() if key != WRAPPER_SYNC_ENV}
+    if base_uri:
+        child_env[WRAPPER_SYNC_ENV] = wrapper_sync_env(base_uri, sync_dirs)
+
     logger.info("Running: %s", " ".join(command))
-    proc = subprocess.Popen(command)
+    proc = subprocess.Popen(command, env=child_env)
 
     # Forward termination signals (Vertex sends SIGTERM on cancel/preemption)
     # to the training process so it can checkpoint before we do a final sync.

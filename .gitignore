@@ -56,6 +56,9 @@ build/
 !.env.example
 *credentials*.json
 *service-account*.json
+# A service-account key as the Cloud Console names the download:
+# <project-id>-<first 12 hex digits of the key id>.json.
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
 
 # Transient scratch files from analysis/scan agents (Drive crawls,
 # decoded payloads, working notes). Underscore-prefixed by convention;

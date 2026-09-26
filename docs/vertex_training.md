@@ -118,12 +118,18 @@ BUCKET=YOUR_BUCKET ./scripts/cloud/submit_vertex_job.sh \
 The script writes everything under one run directory
 (`benchmarks/bootstrap/<timestamp>/` by default) — `charts/`, `videos/`,
 `checkpoints/`, the config snapshot, `bootstrap_results.csv`, `final_model.zip` —
-and uploads that whole tree to `gs://BUCKET/jobs/<JOB_NAME>/<timestamp>/` at the
-end: on success, on a stall, on an error, and on the `SIGTERM` Vertex sends when
-a job is cancelled or preempted. While the run is in progress, the entrypoint's
-periodic sync mirrors `benchmarks/bootstrap/` to that same location. A custom
-`--output-dir` outside the synced directories needs `SYNC_DIRS` (see the table
-below), or only the final upload covers it.
+and that whole tree ends up in `gs://BUCKET/jobs/<JOB_NAME>/<timestamp>/`: on
+success, on a stall, on an error, and on the `SIGTERM` Vertex sends when a job
+is cancelled or preempted. While the run is in progress, the entrypoint's
+periodic sync mirrors `benchmarks/bootstrap/` to that location, and its final
+sync after the script exits uploads whatever changed since, so the script
+leaves the upload to it rather than re-sending every checkpoint inside the
+shutdown grace period. Run outside the entrypoint, or with a `--gcs-output` or
+`--output-dir` the entrypoint does not sync to that same place, the script
+uploads the tree itself on the way out. Checkpoints are written to a
+`.partial` file and renamed into place, so a run stopped mid-save never
+replaces a good `best_model.zip` (locally or in the bucket) with a truncated
+one.
 
 Useful flags: `--skip-videos`, `--skip-plots`, `--sanity-episodes N`,
 `--set dotted.key=value` (config overrides), `--gcs-output gs://...`
@@ -147,7 +153,11 @@ up as a success; the entrypoint passes the code through unchanged.
 | `2` | Command-line usage error (argparse) | None; the run never started |
 | `3` | **Stalled**: a stage used its `max_timesteps` budget without reaching its promotion win rate | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
 | `130` | Interrupted with Ctrl-C (`SIGINT`) | Uploaded |
-| `143` | Terminated by `SIGTERM` (Vertex cancel/preemption, `docker stop`) | Uploaded before exit, within the grace period |
+| `143` | Terminated by `SIGTERM` (Vertex cancel/preemption, `docker stop`) | Uploaded on the way out, within the grace period |
+
+A `SIGTERM` that arrives once the run has ended, while its upload is in
+progress, is ignored so the upload can finish; the exit code then still reports
+how the run ended.
 
 ### Configuration (environment variables)
 
@@ -163,7 +173,7 @@ up as a success; the entrypoint passes the code through unchanged.
 | `ACCELERATOR_COUNT` | `1` | GPUs per replica (`0` = CPU-only) |
 | `REPLICA_COUNT` | `1` | Worker replicas |
 | `SYNC_INTERVAL` | `300` | Seconds between GCS syncs (`0` = only on exit) |
-| `SYNC_DIRS` | *(unset)* | Extra local dirs to sync, comma-separated: `dir` goes to `gs://.../jobs/<name>/dir/`, `dir=prefix` to `.../prefix/` (sets `GCS_SYNC_DIRS` in the container) |
+| `SYNC_DIRS` | *(unset)* | Extra local dirs to sync, comma-separated: `dir` goes to `gs://.../jobs/<name>/dir/`, `dir=prefix` to `.../prefix/`, and `dir=` straight into `gs://.../jobs/<name>/`. A file under two entries (e.g. `benchmarks` and the default `benchmarks/bootstrap`) is uploaded to both places, and a warning is logged. Sets `GCS_SYNC_DIRS` in the container |
 | `SERVICE_ACCOUNT` | *(unset)* | Run the job as this service account |
 | `WANDB_API_KEY` | *(unset)* | Passed through to the container when set |
 
@@ -204,16 +214,19 @@ The wrapper:
 1. Resolves the GCS destination from `GCS_OUTPUT_URI` (set by the submit script),
    falling back to Vertex's `AIP_MODEL_DIR`. With neither set it just runs
    locally — the same image works on your laptop.
-2. Runs the training command as a child process.
+2. Runs the training command as a child process, with `GCS_WRAPPER_SYNC` in its
+   environment describing what the final sync will upload.
 3. Every `GCS_SYNC_INTERVAL` seconds, uploads `models/`, `checkpoints/`,
    `tensorboard/`, and `logs/` to `gs://.../jobs/<name>/<dir>/`, each run
    directory under `benchmarks/bootstrap/` to `gs://.../jobs/<name>/<run>/` (the
-   same place `train_bootstrap.py`'s own final upload writes it), and any
-   `GCS_SYNC_DIRS` entries. Unchanged files are skipped.
+   same place `train_bootstrap.py` uploads it to when run on its own), and any
+   `GCS_SYNC_DIRS` entries. Unchanged files, and `*.partial` files still being
+   written, are skipped.
 4. Forwards `SIGTERM`/`SIGINT` (Vertex sends `SIGTERM` on cancel/preemption) to
    the trainer so it can checkpoint, then performs a **final sync** before exit.
-   `train_bootstrap.py` turns the `SIGTERM` into a clean exit (code 143) that
-   uploads its run directory first.
+   `train_bootstrap.py` turns the `SIGTERM` into a clean exit (code 143); seeing
+   `GCS_WRAPPER_SYNC` cover its run directory, it leaves the upload to this final
+   sync, which only sends what changed since the last periodic one.
 5. Exits with the trainer's exit code, or `128 + N` when the trainer was killed by
    signal `N`.
 

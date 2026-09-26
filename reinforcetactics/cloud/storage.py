@@ -11,6 +11,7 @@ created lazily so the rest of the package (and the test suite) can import this
 module without the optional dependency installed.
 """
 
+import json
 import logging
 import os
 from collections.abc import Iterable, Mapping, MutableMapping
@@ -23,9 +24,23 @@ logger = logging.getLogger(__name__)
 # git-ignored at the repo root; see ``.gitignore``.
 DEFAULT_OUTPUT_DIRS: tuple[str, ...] = ("models", "checkpoints", "tensorboard", "logs")
 
-# A manifest maps a local file path to its (mtime, size) signature so repeated
-# syncs can skip files that have not changed since the last upload.
-Manifest = MutableMapping[str, tuple[float, int]]
+# A manifest maps (local file path, destination object name) to the file's
+# (mtime, size) signature when it was last uploaded there, so repeated syncs
+# can skip files that have not changed since. The destination is part of the
+# key because one local file can be due at two destinations (overlapping
+# synced directories); keyed by the local path alone, the first upload marked
+# the second as done and it never happened.
+Manifest = MutableMapping[tuple[str, str], tuple[float, int]]
+
+# Suffix of a file that is still being written and gets renamed into place
+# once complete (``reinforcetactics.rl.callbacks.save_model_atomically``).
+# Uploads skip these: a sync that runs mid-write would store a truncated copy.
+PARTIAL_SUFFIX = ".partial"
+
+# Environment variable through which scripts/cloud/vertex_train.py tells the
+# training command it wraps which local directories its final sync uploads,
+# and where to (``wrapper_sync_env`` writes it, ``synced_by_wrapper`` reads it).
+WRAPPER_SYNC_ENV = "GCS_WRAPPER_SYNC"
 
 
 def parse_gcs_uri(uri: str) -> tuple[str, str]:
@@ -141,8 +156,10 @@ class GCSUploader:
         """Recursively upload files under ``local_dir``; return the count uploaded.
 
         When ``manifest`` is provided, files whose ``(mtime, size)`` signature is
-        unchanged since the last upload are skipped — so a periodic sync does not
-        re-upload gigabytes of unchanged checkpoints every cycle.
+        unchanged since their last upload to the same destination are skipped —
+        so a periodic sync does not re-upload gigabytes of unchanged checkpoints
+        every cycle. Files still being written (``PARTIAL_SUFFIX``) are never
+        uploaded.
         """
         local_path = Path(local_dir)
         if not local_path.is_dir():
@@ -150,19 +167,20 @@ class GCSUploader:
 
         uploaded = 0
         for file_path in sorted(local_path.rglob("*")):
-            if not file_path.is_file():
-                continue
-
-            signature = _file_signature(file_path)
-            if manifest is not None and signature is not None and manifest.get(str(file_path)) == signature:
+            if not file_path.is_file() or file_path.name.endswith(PARTIAL_SUFFIX):
                 continue
 
             relative = file_path.relative_to(local_path).as_posix()
             remote_path = f"{remote_prefix}/{relative}" if remote_prefix else relative
+            key = (str(file_path), f"gs://{self.bucket_name}/{self.prefix}{remote_path}")
+            signature = _file_signature(file_path)
+            if manifest is not None and signature is not None and manifest.get(key) == signature:
+                continue
+
             if self.upload_file(str(file_path), remote_path):
                 uploaded += 1
                 if manifest is not None and signature is not None:
-                    manifest[str(file_path)] = signature
+                    manifest[key] = signature
         return uploaded
 
 
@@ -216,7 +234,8 @@ def sync_directories(
     mapping of directory name to the number of files uploaded. A no-op (empty
     dict) when ``base_uri`` is falsy or the ``google-cloud-storage`` dependency
     is missing — callers can treat this as "ran locally, nothing synced". Pass
-    a shared ``manifest`` across repeated calls to skip unchanged files.
+    a shared ``manifest`` across repeated calls to skip unchanged files; a file
+    under two overlapping entries is uploaded to both destinations.
     """
     uploader = _make_uploader(base_uri, credentials_file, client)
     if uploader is None:
@@ -254,3 +273,51 @@ def upload_tree(
     if uploader is None:
         return 0
     return uploader.upload_directory(local_dir)
+
+
+def wrapper_sync_env(base_uri: str, sync_dirs: Mapping[str, str], root: str = ".") -> str:
+    """Encode a wrapper's sync targets as the value of ``WRAPPER_SYNC_ENV``.
+
+    ``sync_dirs`` maps local directories (relative to ``root``) to remote
+    prefixes under ``base_uri``, the way ``sync_directories``' ``dirs`` and
+    ``remote_prefixes`` do. Local paths are resolved so the child can compare
+    them whatever its working directory.
+    """
+    dirs = {os.path.realpath(os.path.join(root, local)): prefix for local, prefix in sync_dirs.items()}
+    return json.dumps({"base": base_uri.rstrip("/"), "dirs": dirs})
+
+
+def synced_by_wrapper(local_dir: str | os.PathLike[str], dest_uri: str, env: Mapping[str, str] | None = None) -> bool:
+    """Whether the wrapping entrypoint's final sync uploads ``local_dir`` to ``dest_uri``.
+
+    True only when ``WRAPPER_SYNC_ENV`` is set and one of its directories
+    contains ``local_dir`` such that every file lands on the object
+    ``upload_tree(local_dir, dest_uri)`` would write. The caller can then
+    leave the upload to the wrapper, whose final sync runs once the child has
+    exited and skips what its periodic syncs already stored; ``upload_tree``
+    would re-upload the whole tree first, inside the same shutdown grace
+    period.
+    """
+    resolved = os.environ if env is None else env
+    raw = resolved.get(WRAPPER_SYNC_ENV)
+    if not raw:
+        return False
+    try:
+        spec = json.loads(raw)
+        base = str(spec["base"]).rstrip("/")
+        dirs = {str(local): str(prefix) for local, prefix in spec["dirs"].items()}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        logger.warning("Ignoring malformed %s: %r", WRAPPER_SYNC_ENV, raw)
+        return False
+
+    target = Path(os.path.realpath(local_dir))
+    dest = dest_uri.rstrip("/")
+    for local, prefix in dirs.items():
+        try:
+            relative = target.relative_to(local).as_posix()
+        except ValueError:
+            continue
+        parts = (base, prefix.strip("/"), "" if relative == "." else relative)
+        if "/".join(part for part in parts if part) == dest:
+            return True
+    return False
