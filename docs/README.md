@@ -15,6 +15,8 @@ part of the published user manual.
 | [`ROADMAP.md`](ROADMAP.md) | Contributors | Planned features, milestones, and open work |
 | [`vertex_training.md`](vertex_training.md) | Contributors | Run training on Google Cloud via Vertex AI custom jobs (Docker + GCS) |
 | [`MAP_EDITOR.md`](MAP_EDITOR.md) | Contributors | How the in-game map editor works internally |
+| [`REVIEW_full_2026-09-26.md`](REVIEW_full_2026-09-26.md) | Contributors | Full codebase review (Sep 2026): prioritized fixes and development roadmap across engine, bots, RL pipeline, pygame UI and animations |
+| [`REVIEW_full_2026-09-26_findings.md`](REVIEW_full_2026-09-26_findings.md) | Contributors | Appendix to the above: all 351 verified findings with locations and fixes |
 | [`REVIEW_maintainability.md`](REVIEW_maintainability.md) | Contributors | Code-quality review: duplication, bugs, refactor priorities |
 | [`REVIEW_advancedbot.md`](REVIEW_advancedbot.md) | Contributors | Code review of the advanced rule-based bot |
 | [`feudal_rl_review.md`](feudal_rl_review.md) | Contributors | Code review of the feudal RL implementation |
