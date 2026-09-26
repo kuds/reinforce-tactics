@@ -349,3 +349,57 @@ class TestMixedBotEnvIntegration:
         )
         env.reset(seed=0)
         assert isinstance(env.opponent._inner, AdvancedBot)
+
+
+class _NoDrawRng:
+    """An rng that fails the test if MixedBot flips its coin."""
+
+    def random(self):
+        raise AssertionError("MixedBot drew from its rng before validating")
+
+
+class TestMixedBotValidatesBeforeTheCoinFlip:
+    """Review rulebots-11: both sides and ``p_hard`` are checked up front.
+
+    Only the side the coin picked used to be validated, so a typo on the
+    other side passed construction and crashed a curriculum run at the
+    random later reset that first picked it; ``p_hard`` was never checked.
+    """
+
+    def test_unknown_hard_raises_even_when_the_coin_would_pick_easy(self, map_data):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="unknown bot type 'bogus'"):
+            MixedBot(gs, player=2, easy="simple", hard="bogus", p_hard=0.0, rng=random.Random(0))
+
+    def test_unknown_easy_raises_even_when_the_coin_would_pick_hard(self, map_data):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="unknown bot type 'bogus'"):
+            MixedBot(gs, player=2, easy="bogus", hard="medium", p_hard=1.0, rng=random.Random(0))
+
+    @pytest.mark.parametrize("p_hard", [-0.01, 1.5, float("nan"), "0.5", True])
+    def test_p_hard_must_be_a_probability(self, map_data, p_hard):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="p_hard"):
+            MixedBot(gs, player=2, p_hard=p_hard, rng=random.Random(0))
+
+    def test_bad_kwargs_for_the_side_not_picked_raise(self, map_data):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError, match="hard_kwargs"):
+            MixedBot(gs, player=2, easy="random", hard="medium", p_hard=0.0, hard_kwargs={"max_actions": 5})
+
+    def test_validation_happens_before_any_rng_draw(self, map_data):
+        gs = _new_game_state(map_data)
+        with pytest.raises(ValueError):
+            MixedBot(gs, player=2, easy="simple", hard="bogus", p_hard=0.5, rng=_NoDrawRng())
+        with pytest.raises(ValueError):
+            MixedBot(gs, player=2, p_hard=2.0, rng=_NoDrawRng())
+
+    def test_boundaries_are_valid(self, map_data):
+        gs = _new_game_state(map_data)
+        assert not MixedBot(gs, player=2, p_hard=0, rng=random.Random(0)).use_hard
+        assert MixedBot(gs, player=2, p_hard=1, rng=random.Random(0)).use_hard
+
+    def test_validate_config_needs_no_game(self):
+        MixedBot.validate_config(easy="balanced_random", hard="master", p_hard=0.3)
+        with pytest.raises(ValueError):
+            MixedBot.validate_config(easy="noop")

@@ -3,6 +3,7 @@ AI bots for computer opponents with support for all unit types.
 """
 
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from reinforcetactics.game.bot_base import BaseBot, BotUnitMixin
@@ -1287,23 +1288,16 @@ class MixedBot(BotUnitMixin, BaseBot):
         easy_kwargs: dict[str, Any] | None = None,
         hard_kwargs: dict[str, Any] | None = None,
     ):
+        # Validate *both* sides before the coin flip (review rulebots-11):
+        # checking only the side the flip picked let a typo in the other one
+        # pass construction and crash a curriculum run at whichever later
+        # reset first picked it.
+        self.validate_config(easy=easy, hard=hard, p_hard=p_hard, easy_kwargs=easy_kwargs, hard_kwargs=hard_kwargs)
         self.game_state = game_state
         self.bot_player = player
         self.easy = easy
         self.hard = hard
         self.p_hard = p_hard
-        # Reject reserved keys up front -- pre-PR these would crash with
-        # an opaque "got multiple values for keyword argument 'rng'" only
-        # on the episodes whose coin flip picks the side carrying the
-        # collision, hiding the misconfig until mid-curriculum.
-        for label, kw in (("easy_kwargs", easy_kwargs), ("hard_kwargs", hard_kwargs)):
-            if kw:
-                conflicts = self._RESERVED_INNER_KWARGS & set(kw)
-                if conflicts:
-                    raise ValueError(
-                        f"MixedBot {label} cannot contain reserved keys {sorted(conflicts)}; "
-                        f"MixedBot supplies these to the inner bot itself."
-                    )
         # Both ``random`` and ``random.Random()`` instances expose ``.random``.
         self._rng = rng if rng is not None else random
         self.use_hard = self._rng.random() < p_hard
@@ -1318,6 +1312,54 @@ class MixedBot(BotUnitMixin, BaseBot):
         # because the coin flip happens once at construction and the
         # inner then takes over for the rest of the episode.
         self._inner = self._build_inner(chosen, game_state, player, rng=self._rng, **chosen_kwargs)
+
+    @classmethod
+    def validate_config(
+        cls,
+        easy: str = "simple",
+        hard: str = "medium",
+        p_hard: float = 0.5,
+        easy_kwargs: dict[str, Any] | None = None,
+        hard_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Check a MixedBot configuration without building it or drawing from any rng.
+
+        Both inner bot names must be in ``_BOT_NAMES``, ``p_hard`` a number
+        in ``[0, 1]``, and ``easy_kwargs`` / ``hard_kwargs`` mappings (or
+        None) without the reserved keys MixedBot supplies itself, holding
+        only keys the matching inner bot's constructor takes. Used by
+        ``__init__`` and by config validation (through
+        ``bot_registry.validate_scripted_kwargs``).
+
+        Raises:
+            ValueError: A bad name, ``p_hard`` or key.
+            TypeError: A ``*_kwargs`` that is not a mapping.
+        """
+        for label, name in (("easy", easy), ("hard", hard)):
+            if name not in cls._BOT_NAMES:
+                raise ValueError(f"MixedBot {label}: unknown bot type {name!r}; expected one of: {', '.join(cls._BOT_NAMES)}")
+        if isinstance(p_hard, bool) or not isinstance(p_hard, (int, float)) or not 0.0 <= float(p_hard) <= 1.0:
+            raise ValueError(f"MixedBot p_hard must be a number in [0, 1], got {p_hard!r}")
+        # Deferred import: the registry imports this module.
+        from reinforcetactics.game.bot_registry import validate_scripted_kwargs
+
+        for label, name, kw in (("easy_kwargs", easy, easy_kwargs), ("hard_kwargs", hard, hard_kwargs)):
+            if kw is None:
+                continue
+            if not isinstance(kw, Mapping):
+                raise TypeError(f"MixedBot {label} must be a mapping, got {type(kw).__name__}")
+            # Reserved keys would crash with an opaque "got multiple values
+            # for keyword argument 'rng'" (or swap in another game_state).
+            conflicts = cls._RESERVED_INNER_KWARGS & set(kw)
+            if conflicts:
+                raise ValueError(
+                    f"MixedBot {label} cannot contain reserved keys {sorted(conflicts)}; "
+                    f"MixedBot supplies these to the inner bot itself."
+                )
+            try:
+                validate_scripted_kwargs(name, kw)
+            except ValueError as exc:
+                raise ValueError(f"MixedBot {label}: {exc}") from exc
 
     @classmethod
     def _build_inner(cls, name: str, game_state, player: int, rng=None, **kwargs):
