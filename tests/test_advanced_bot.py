@@ -136,6 +136,63 @@ class TestAdvancedBotSpecialAbilities:
             assert cleric is not None
 
 
+class TestAdvancedBotParalyze:
+    """One paralyze heuristic, and telemetry that counts only paralyzes the engine accepted (review rulebots-19)."""
+
+    def test_mage_paralyzes_the_capturer_once_and_records_it(self, simple_game):
+        simple_game.current_player = 2
+        tower = simple_game.grid.get_tile(6, 6)  # a neutral tower the enemy is taking
+        tower.player = None
+        tower.health = tower.max_health - 5
+        mage = simple_game.place_unit("M", 6, 4, 2)
+        capturer = simple_game.place_unit("W", 6, 6, 1)
+        bystander = simple_game.place_unit("K", 5, 4, 1)  # pricier, adjacent, not capturing
+        bot = AdvancedBot(simple_game, player=2)
+
+        assert bot.try_use_special_ability(mage) is True
+
+        assert capturer.is_paralyzed() and not bystander.is_paralyzed()
+        assert [a["type"] for a in simple_game.action_history] == ["paralyze"]
+        assert bot.get_capabilities_fired() == {"mage_paralyze": 1}
+
+    def test_mage_on_cooldown_records_nothing(self, simple_game):
+        simple_game.current_player = 2
+        mage = simple_game.place_unit("M", 6, 4, 2)
+        simple_game.place_unit("W", 6, 5, 1)
+        mage.paralyze_cooldown = 2
+        bot = AdvancedBot(simple_game, player=2)
+
+        assert bot.try_use_special_ability(mage) is False
+        assert simple_game.action_history == []
+        assert bot.get_capabilities_fired() == {}
+
+
+class TestAdvancedBotFogOfWar:
+    """Bots attack only enemies fog of war lets the unit attack (the engine refuses the rest)."""
+
+    def test_no_attack_on_an_enemy_the_unit_did_not_see_when_its_action_began(self):
+        grid = np.full((8, 8), "p", dtype=object)
+        grid[0, 0], grid[7, 7] = "h_1", "h_2"
+        game = GameState(grid, num_players=2, fog_of_war=True)
+        game.current_player = 2
+        archer = game.place_unit("A", 4, 4, 2)
+        enemy = game.place_unit("W", 4, 2, 1)
+        # Its side saw no enemy when the archer's action began (the snapshot
+        # the engine takes before a move, or the GUI when it is selected).
+        archer.visible_enemies_at_action_start = set()
+        attempts = []
+        attack = game.attack
+        game.attack = lambda *args: attempts.append(args) or attack(*args)
+        bot = AdvancedBot(game, player=2)
+
+        assert bot.in_attack_reach(archer, enemy) is False
+        assert bot.try_ranged_attack(archer) is False
+        bot.act_with_unit_enhanced(archer)
+
+        assert attempts == []
+        assert enemy.health == enemy.max_health
+
+
 class TestAdvancedBotRangedCombat:
     """Test AdvancedBot ranged combat."""
 

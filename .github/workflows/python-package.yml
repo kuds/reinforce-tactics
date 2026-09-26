@@ -86,3 +86,12 @@ jobs:
         RT_CHECK_CACHE: "1"
       run: |
         pytest
+    - name: Test the slow matrices
+      # Tests marked slow (the scripted bots' whole-game legality matrix),
+      # which the default run above deselects. Coverage adds several times
+      # their runtime and is measured by the step above.
+      env:
+        SDL_VIDEODRIVER: dummy
+        RT_CHECK_CACHE: "1"
+      run: |
+        pytest -m slow --no-cov

@@ -19,8 +19,12 @@ Provides:
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
+from reinforcetactics.core.actions import ACTOR_KEYS
+from reinforcetactics.core.legal_actions import find_paths
 from reinforcetactics.core.mechanics import same_side
 from reinforcetactics.rules import ABILITY_RANGES, UNIT_DATA
 
@@ -107,6 +111,46 @@ class BaseBot(ABC):
         return dict(getattr(self, "capabilities_fired", {}) or {})
 
 
+class TurnContext:
+    """What one bot turn plans with, computed once instead of per unit, target and priority (review rulebots-9).
+
+    A scripted tier's ``take_turn`` plays inside ``BotUnitMixin.planning_turn``,
+    which holds one of these; a bot driven any other way (tests, tools)
+    has none and plans from a fresh look at the game every time. Two
+    lifetimes:
+
+    * The turn: the map's structures (a tile never changes type).
+      Ownership and health are always read live from the tiles.
+    * Until the engine accepts the bot's next action (``memo``): move
+      destinations, the living enemies, the contested structures, the
+      bot's own HQ (in a free-for-all a bot that takes an HQ keeps it, so
+      its own can change during its turn). An
+      accepted action is recorded in ``action_history`` and a refused one
+      changes nothing, so the history's length stamps the state they were
+      computed on: nothing is ever served that a fresh computation would
+      not return, so caching changes no decision. (``end_unit_turn`` is not
+      recorded, but it only changes whether a unit may still move, which
+      ``get_reachable`` checks live; planners that move a unit
+      hypothetically, ``unit.x = ...``, put it back before asking for any.)
+    """
+
+    def __init__(self, game_state: Any) -> None:
+        self.game_state = game_state
+        self.structures = [tile for row in game_state.grid.tiles for tile in row if tile.is_capturable()]
+        self._stamp = -1
+        self._memo: dict[Any, Any] = {}
+
+    def memo(self, key: Any, compute: Callable[[], Any]) -> Any:
+        """``compute()``, remembered under ``key`` until the engine accepts another action."""
+        stamp = len(self.game_state.action_history)
+        if stamp != self._stamp:
+            self._stamp = stamp
+            self._memo.clear()
+        if key not in self._memo:
+            self._memo[key] = compute()
+        return self._memo[key]
+
+
 class BotUnitMixin:
     """Shared helpers for bots that reason about enabled unit types,
     distances, heal tiles, capture progress, and common ability flows.
@@ -140,6 +184,31 @@ class BotUnitMixin:
     # strategic quality is preserved while episode-level diversity is
     # restored.
     _rng: Any = None
+
+    # The current turn's planning context (see TurnContext); None outside
+    # ``planning_turn``.
+    _turn: TurnContext | None = None
+
+    @contextmanager
+    def planning_turn(self) -> Iterator[None]:
+        """Plan this turn with a ``TurnContext``; the tiers' ``take_turn`` plays inside it."""
+        self._turn = TurnContext(self.game_state)
+        try:
+            yield
+        finally:
+            self._turn = None
+
+    def _memo(self, key: Any, compute: Callable[[], Any]) -> Any:
+        """``compute()``, remembered by the turn's context until the next accepted action (fresh without one)."""
+        turn = self._turn
+        return compute() if turn is None else turn.memo(key, compute)
+
+    def capturable_structures(self) -> list[Any]:
+        """Every capturable tile on the map, row by row (the turn's list: read-only)."""
+        turn = self._turn
+        if turn is not None:
+            return turn.structures
+        return [tile for row in self.game_state.grid.tiles for tile in row if tile.is_capturable()]
 
     def _maybe_shuffle(self, items: list[Any]) -> list[Any]:
         """Shuffle ``items`` in place when ``self._rng`` is set.
@@ -245,10 +314,22 @@ class BotUnitMixin:
         return abs(x1 - x2) + abs(y1 - y2)
 
     def get_reachable(self, unit):
-        """Get all reachable positions for a unit on the current grid."""
-        # The engine's search: one blocker set per call instead of a scan of
-        # every unit per tile, and the game's terrain move costs (core-20/25).
-        return self.game_state.get_reachable_positions(unit)
+        """Tiles ``unit`` may legally end a move on now (``GameState.get_move_destinations``).
+
+        Empty when the unit is out of play (a counter-attack killed it earlier
+        in the turn), paralyzed, or has spent its move, so every tile listed
+        is a move the engine accepts. This used to be every tile a path can
+        cross, friends' tiles included, whether or not the unit could still
+        move: over half of SimpleBot's moves were refused and its
+        armies jammed behind their own units (review rulebots-1). Every bot
+        caller wants destinations; path semantics (tiles a unit can pass
+        through) are ``GameState.get_reachable_positions``, which MasterBot's
+        threat map asks for its enemies directly.
+        """
+        if not unit.can_move or unit.is_paralyzed() or unit not in self.game_state.units:
+            return []
+        # A copy: callers shuffle and extend what they get.
+        return list(self._memo(("reach", id(unit)), lambda: self.game_state.get_move_destinations(unit)))
 
     # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
     # HQ/building=+2 at the start of the owner's next turn.
@@ -288,9 +369,47 @@ class BotUnitMixin:
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
         if tile is None or not tile.is_capturable():
             return False
-        if tile.player == self.bot_player:
+        # A teammate's structure is not ours to seize (the engine refuses it).
+        if self._is_friendly(tile.player):
             return False
         return tile.health < tile.max_health
+
+    def _capture_assignments(self) -> set[tuple[int, int]]:
+        """Per-turn set of structure positions already claimed by another
+        unit's capture priority. Reset by the tiers' take_turn; lazily
+        created for callers that act without one."""
+        claimed: set[tuple[int, int]] | None = getattr(self, "_capture_assigned", None)
+        if claimed is None:
+            claimed = set()
+            self._capture_assigned = claimed
+        return claimed
+
+    def _capture_claimers(self) -> dict[tuple[int, int], Any]:
+        """Who claimed each position in ``_capture_assignments`` (reset with it by the tiers' take_turn)."""
+        claimers: dict[tuple[int, int], Any] | None = getattr(self, "_capture_claimed_by", None)
+        if claimers is None:
+            claimers = {}
+            self._capture_claimed_by = claimers
+        return claimers
+
+    def _claim_capture(self, unit, pos: tuple[int, int]) -> None:
+        """Claim the structure at ``pos`` for ``unit``: no sibling picks it as its capture target this turn."""
+        self._capture_assignments().add(pos)
+        self._capture_claimers()[pos] = unit
+
+    def _release_captures(self, unit) -> None:
+        """Drop ``unit``'s claims as haste gives it a new action, in which it picks its target again.
+
+        Its own claim otherwise kept it from the structure it had just
+        marched towards: a hasted unit spent its second move walking to
+        another target, so haste never brought a distant structure within
+        one turn's reach.
+        """
+        claimers = self._capture_claimers()
+        claimed = self._capture_assignments()
+        for pos in [pos for pos, claimer in claimers.items() if claimer is unit]:
+            del claimers[pos]
+            claimed.discard(pos)
 
     def continue_active_seizes(self, units) -> None:
         """Seize-in-place for any unit that is mid-capture, before the
@@ -298,41 +417,174 @@ class BotUnitMixin:
         to drag them off. Mirrors the first check in act_with_unit /
         act_with_unit_enhanced; consolidating it here keeps the per-unit
         logic and the multi-unit logic agreeing on what counts as committed
-        capture progress.
+        capture progress. The seized tile is claimed, so no sibling picks
+        it as its own capture target this turn.
         """
         for unit in units:
             if self.game_state.game_over:
                 return
-            if not (unit.can_move or unit.can_attack):
-                continue
-            if self.is_actively_capturing(unit):
-                self.game_state.seize(unit)
+            if self.is_actively_capturing(unit) and self.try_seize(unit):
+                self._claim_capture(unit, (unit.x, unit.y))
+
+    # ------------------------------------------------------------------
+    # Acting through the engine (review rulebots-1/6/8/19)
+    #
+    # The engine refuses an illegal action and returns a falsy result
+    # (``move_unit`` False, ``attack`` damage 0, ...). The bots used to plan
+    # with their own reach and range checks and ignore those results, so
+    # most of their moves and up to half their attacks were refused: a unit
+    # stayed put while the bot carried on as if it had moved, claimed
+    # captures it never reached, recursed on units with nothing left to do
+    # and counted abilities that never happened. These helpers ask the
+    # engine's own rules first, so a bot only sends actions the engine
+    # accepts, and say whether the action happened.
+    # ------------------------------------------------------------------
+    def live_enemies(self) -> list[Any]:
+        """Living units of the other teams, in ``game_state.units`` order."""
+        return list(
+            self._memo("enemies", lambda: [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0])
+        )
+
+    def in_attack_reach(self, unit, enemy) -> bool:
+        """Whether ``unit`` could attack ``enemy`` from where it stands.
+
+        The engine's attack rule without its turn and action-slot gates, so
+        planners can also ask it for a tile ``unit`` could move to (by
+        setting ``unit.x``/``unit.y`` there for the question): a living enemy
+        in reach and, under fog of war, one the unit may attack
+        (``GameState.is_enemy_attackable_by_unit``). A unit that has not
+        moved yet takes its attack snapshot from what its side sees when it
+        moves, so an enemy hidden now stays out of reach after the move:
+        moving to discover an enemy does not let the unit hit it.
+        """
+        gs = self.game_state
+        return (
+            self._is_enemy(enemy.player)
+            and enemy.health > 0
+            and gs.mechanics.can_reach(unit, enemy.x, enemy.y, gs.grid)
+            and gs.is_enemy_attackable_by_unit(unit, enemy)
+        )
+
+    def attackable_enemies(self, unit, enemies=None) -> list[Any]:
+        """The enemies (default: every living one) ``unit`` could attack from where it stands."""
+        if enemies is None:
+            enemies = self.live_enemies()
+        return [e for e in enemies if self.in_attack_reach(unit, e)]
+
+    def try_move(self, unit, x: int, y: int) -> bool:
+        """Move ``unit`` to ``(x, y)`` if it is one of its legal destinations; True if it moved.
+
+        Under fog of war a hidden unit on the path can cut the move short
+        (the engine's ambush rule); that still counts as a move, so callers
+        read ``unit.x``/``unit.y`` for where it ended up.
+        """
+        if self.game_state.game_over or (x, y) not in self.get_reachable(unit):
+            return False
+        return bool(self.game_state.move_unit(unit, x, y))
+
+    def try_action(self, kind: str, actor, target) -> bool:
+        """Carry out the targeted action ``kind`` (``attack`` or an ability) if the engine allows it.
+
+        ``GameState.is_legal`` answers with the rule the action method
+        validates by (range, side, cooldown, fog of war, the actor's turn
+        and unspent action), so nothing is sent that the engine would
+        refuse. True if the action happened.
+        """
+        action = {ACTOR_KEYS[kind]: actor, "target": target}
+        if not self.game_state.is_legal(kind, action):
+            return False
+        return self.game_state.apply_action(kind, action).accepted
+
+    def try_seize(self, unit) -> bool:
+        """Seize the structure ``unit`` stands on if the engine allows it; True if it did."""
+        action = {"unit": unit}
+        if not self.game_state.is_legal("seize", action):
+            return False
+        return self.game_state.apply_action("seize", action).accepted
+
+    def finish_unit_action(self, unit, act: Callable[..., Any], depth: int) -> None:
+        """End ``unit``'s action; if the engine grants it another, act again with ``act(unit, depth + 1)``.
+
+        The one continuation for the per-unit act methods, called once the
+        unit has acted or has nothing more to do this action (review
+        rulebots-6/8). ``GameState.end_unit_turn`` knows whether a next
+        action exists: right after an action that haste refreshed
+        (``haste_refreshed``) it keeps the extra action, and a hasted unit
+        that ends its action without acting spends its haste on a fresh one
+        (the GUI's Wait); any other unit is done for the turn. Re-entering on
+        ``can_move or can_attack`` instead fired after every move
+        (``can_attack`` stays set until the unit acts), so the bot re-ran its
+        whole decision for a unit that could only be refused, and it fired
+        for an attacker a counter-attack had just killed. The new action
+        picks its capture target afresh (``_release_captures``).
+        """
+        gs = self.game_state
+        if gs.game_over or unit not in gs.units:
+            return
+        if gs.end_unit_turn(unit):
+            self._release_captures(unit)
+            act(unit, depth + 1)
 
     def find_best_move_position(self, unit, target_x, target_y):
-        """Find the best position to move towards a target."""
+        """The destination nearest ``(target_x, target_y)``, or None when ``unit`` should keep its tile.
+
+        Staying put is the benchmark when units are in the way: a unit
+        whose nearer tiles are all held (by friends crowding a structure,
+        or by an enemy standing on it) keeps its tile rather than stepping
+        sideways or back. Since ``get_reachable`` returns only legal
+        destinations (friends' tiles and the unit's own excluded),
+        comparing against nothing sent such a unit away from its target:
+        over a fifth of SimpleBot's moves ended farther from it than they
+        began. Before that, the nearest candidate there was usually a
+        friend's tile, which the engine refused, so the unit stayed: this
+        keeps that outcome without the refused move.
+
+        Terrain is the exception (``_walled_off_from``). When nothing
+        within this turn's move is nearer even with every unit ignored,
+        terrain (water, or costly ground under terrain move costs) stands
+        between the unit and a target more than a tile away, and the way
+        round starts with a step sideways or back. Holding there froze the
+        unit for the rest of the game, since the target stays its nearest.
+        It takes the nearest destination instead, as it did before this
+        benchmark, and the shuffled tiebreak walks a seeded bot round the
+        obstacle. Every caller treats None as "no move".
+        """
         reachable = self.get_reachable(unit)
 
         if not reachable:
             return None
 
         # Shuffle so equidistant reachable tiles tiebreak randomly under
-        # stochastic mode -- the strict ``<`` below otherwise hard-prefers
-        # the first-visited candidate, which is the most-hit decision site
-        # in the bot (every move-toward-target call). Without this, two
+        # stochastic mode -- ``min`` otherwise hard-prefers the
+        # first-visited candidate, which is the most-hit decision site in
+        # the bot (every move-toward-target call). Without this, two
         # equally-good landing tiles produce identical games every run.
         reachable_list = list(reachable)
         self._maybe_shuffle(reachable_list)
 
-        best_pos = None
-        best_distance = float("inf")
+        def distance(pos):
+            return self.manhattan_distance(pos[0], pos[1], target_x, target_y)
 
-        for pos in reachable_list:
-            distance = self.manhattan_distance(pos[0], pos[1], target_x, target_y)
-            if distance < best_distance:
-                best_distance = distance
-                best_pos = pos
+        nearest = min(reachable_list, key=distance)
+        here = self.manhattan_distance(unit.x, unit.y, target_x, target_y)
+        if distance(nearest) < here or self._walled_off_from(unit, target_x, target_y, here):
+            return nearest
+        return None
 
-        return best_pos
+    def _walled_off_from(self, unit, target_x, target_y, here: int) -> bool:
+        """Whether terrain alone keeps ``unit`` from getting nearer ``(target_x, target_y)`` this turn.
+
+        True when the target is more than a tile away (``here``, the
+        unit's distance to it) and no tile the unit could reach this turn
+        with every unit ignored is strictly nearer: a local minimum of the
+        distance that the terrain makes. Otherwise units are what stand in
+        the way, and ``find_best_move_position`` holds. Next to the target
+        there is nothing to walk round.
+        """
+        if here <= 1:
+            return False
+        terrain_reach = find_paths(self.game_state, unit, blocked=set())
+        return not any(self.manhattan_distance(x, y, target_x, target_y) < here for x, y in terrain_reach)
 
     def _is_capturing_us(self, enemy) -> bool:
         """True if ``enemy`` stands on a capturable tile we want back."""
@@ -345,16 +597,15 @@ class BotUnitMixin:
     def try_cleric_abilities(self, unit) -> bool:
         """Cure paralyzed allies, then heal damaged ones.
 
-        Returns True if an ability was used (the caller is responsible for
-        any haste re-entry). Heal priority: most-damaged frontline (W/B/K)
+        Returns True if an ability was used (the caller ends the unit's
+        action, see ``finish_unit_action``). Heal priority: most-damaged frontline (W/B/K)
         first, falling back to the lowest-HP healable ally.
         """
         if unit.type != "C" or not unit.can_attack:
             return False
 
         curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units, self._teams())
-        if curable:
-            self.game_state.cure(unit, curable[0])
+        if curable and self.try_action("cure", unit, curable[0]):
             self._record("cleric_cure")
             return True
 
@@ -368,7 +619,8 @@ class BotUnitMixin:
         pool = list(frontline or healable)
         self._maybe_shuffle(pool)
         target = min(pool, key=lambda a: a.health)
-        self.game_state.heal(unit, target)
+        if not self.try_action("heal", unit, target):
+            return False
         self._record("cleric_heal")
         return True
 
@@ -382,11 +634,18 @@ class BotUnitMixin:
         if unit.type != "M" or not unit.can_attack or not unit.can_use_paralyze():
             return False
 
-        enemies = [e for e in self.game_state.units if self._is_enemy(e.player) and e.health > 0 and not e.is_paralyzed()]
+        enemies = [e for e in self.live_enemies() if not e.is_paralyzed()]
         if not enemies:
             return False
 
-        in_range = self.game_state.mechanics.units_in_range(unit, enemies, *ABILITY_RANGES["paralyze"])
+        # Only enemies the engine lets this Mage paralyze: under fog of war
+        # that excludes an enemy its side could not see when its action
+        # began, which the range check alone let through.
+        in_range = [
+            e
+            for e in self.game_state.mechanics.units_in_range(unit, enemies, *ABILITY_RANGES["paralyze"])
+            if self.game_state.is_legal("paralyze", {"paralyzer": unit, "target": e})
+        ]
         if not in_range:
             return False
 
@@ -401,7 +660,8 @@ class BotUnitMixin:
             # Equal-cost enemies tiebreak randomly under stochastic mode.
             self._maybe_shuffle(capturing)
             target = max(capturing, key=_unit_cost)
-            self.game_state.paralyze(unit, target)
+            if not self.try_action("paralyze", unit, target):
+                return False
             self._record("mage_paralyze")
             return True
 
@@ -418,6 +678,7 @@ class BotUnitMixin:
 
         self._maybe_shuffle(worth_paralyzing)
         target = max(worth_paralyzing, key=_unit_cost)
-        self.game_state.paralyze(unit, target)
+        if not self.try_action("paralyze", unit, target):
+            return False
         self._record("mage_paralyze")
         return True

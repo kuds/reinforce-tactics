@@ -213,6 +213,19 @@ Also: `reinforcetactics/game/bot_base.py:295`, `reinforcetactics/game/bot.py:551
 
 - **Impact.** SimpleBot, the main curriculum opponent, jams its army behind its own units: SimpleBot mirrors ended in max_turns_draw in 19 of 20 games across 5 maps. Filtering occupied destinations (scratch monkeypatch) turned 4 of those 20 into HQ captures. This is also the root cause of the illegal attacks (knight charge) and the capture-claim inflation findings below. The retreat, capture and interrupt paths all waste actions the same way.
 - **Fix.** Make get_reachable return only legal destinations: `if not unit.can_move: return []`, then drop tiles failing can_move_to_position(..., is_destination=True). This matches get_legal_actions at game_state.py:1351. If a caller truly needs path semantics, add a separate get_pass_through_reachable. Also have pick_capture_target skip structures occupied by an ally, and have continue_active_seizes add seized tiles to _capture_assigned.
+- **Status: fixed in the rule-bot legality package (with `rulebots-6`, `-8`, `-14` and `-19`). Consequences accepted pending the §8 week-4 curriculum re-baseline, which must come before any curriculum run on this code.**
+  - The tier ladder no longer rises on the curriculum maps. The figures below are seeded head-to-heads: 25 seeds × both seats, 75 turns, fog off. Each is W/D/L for the first tier, measured at 302893d and then on the package.
+
+    | Pairing | Map | 302893d | Package |
+    |---|---|---|---|
+    | AdvancedBot vs MediumBot | beginner | 17/0/33 | 5/0/45 |
+    | MasterBot vs MediumBot | beginner | 17/0/33 | 6/0/44 |
+    | MasterBot vs MediumBot | intermediate | 11/0/39 | 0/0/50 |
+    | MediumBot vs SimpleBot | skirmish | 32/2/16 | 28/1/21 |
+    | AdvancedBot vs MediumBot | skirmish | 21/0/29 | 22/0/28 |
+
+    `configs/ppo/bootstrap.yaml`'s `beginner_mixed_med_adv_50` and `beginner_advanced` stages assume AdvancedBot is harder than MediumBot on beginner, and so do the `bootstrap_sweep/` variants that copy them. Re-check the stage order there, not only the thresholds.
+  - MasterBot is weaker on skirmish. Against 302893d's MasterBot it wins 176 and loses 264 of 440 seeded 120-turn games (seeds 30–249, both seats).
 
 ### `rulebots-2` — Knight charge / Rogue flank attack without checking the move succeeded; the engine applies illegal out-of-range melee attacks
 

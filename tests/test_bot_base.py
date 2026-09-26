@@ -10,7 +10,13 @@ Covers:
   * ``BotUnitMixin.has_units_with_ability`` returns False for unknown
     abilities (forward-compatible default).
   * ``BaseBot`` is abstract -- instantiation requires ``take_turn``.
+  * The mixin's engine-facing helpers (reach, captures, the per-unit
+    continuation, ``try_action``) lead only to accepted actions, and the
+    per-turn planning cache changes no decision.
 """
+
+import random
+from contextlib import contextmanager
 
 import numpy as np
 import pytest
@@ -34,6 +40,7 @@ from reinforcetactics.game.bot_base import (
     BaseBot,
     BotUnitMixin,
 )
+from reinforcetactics.game.bot_registry import build_scripted
 from reinforcetactics.game.model_bot import ModelBot
 from reinforcetactics.utils.file_io import FileIO
 
@@ -135,3 +142,476 @@ class TestAbilityTable:
         bot = NoopBot(game_state)
         assert bot.has_units_with_ability("teleport") is False
         assert bot.has_units_with_ability("") is False
+
+
+def _open_game(towers=()):
+    """A 7x7 grass map with both HQs in the corners and neutral towers at ``towers``; player 1 to move."""
+    grid = np.full((7, 7), "p", dtype=object)
+    grid[0, 0], grid[6, 6] = "h_1", "h_2"
+    for x, y in towers:
+        grid[y, x] = "t"
+    return GameState(grid, num_players=2)
+
+
+def _walled_tower_game():
+    """A 9x9 grass map: a neutral tower at (4, 1) behind ocean at (3..5, 2); HQs in the bottom corners, no gold."""
+    grid = np.full((9, 9), "p", dtype=object)
+    grid[8, 0], grid[8, 8] = "h_1", "h_2"
+    grid[1, 4] = "t"
+    grid[2, 3] = grid[2, 4] = grid[2, 5] = "o"
+    game = GameState(grid, num_players=2, max_turns=30, seed=1)
+    game.player_gold[1] = game.player_gold[2] = 0
+    return game
+
+
+class TestActingThroughTheEngine:
+    """The mixin's reach, capture and continuation helpers lead only to actions the engine accepts (review rulebots-1/6)."""
+
+    def test_get_reachable_is_the_engines_move_destinations(self):
+        game = _open_game()
+        walker = game.place_unit("W", 3, 3, 1)
+        game.place_unit("W", 3, 2, 1)  # a friend: passable, but no move may end there
+        bot = SimpleBot(game, player=1)
+
+        reachable = bot.get_reachable(walker)
+
+        assert reachable == game.get_move_destinations(walker)
+        assert (3, 2) not in reachable and (3, 1) in reachable
+        assert all(game.is_legal("move", {"unit": walker, "to_x": x, "to_y": y}) for x, y in reachable)
+
+    def test_get_reachable_is_empty_once_the_unit_cannot_move(self):
+        game = _open_game()
+        moved, dead = game.place_unit("W", 3, 3, 1), game.place_unit("W", 1, 1, 1)
+        bot = SimpleBot(game, player=1)
+        assert game.move_unit(moved, 3, 4)
+        game.units.remove(dead)  # as a counter-attack removes a unit
+
+        assert bot.get_reachable(moved) == [] and bot.get_reachable(dead) == []
+        assert bot.find_best_move_position(moved, 0, 0) is None
+
+    def test_a_unit_whose_nearer_tiles_are_all_held_keeps_its_tile(self):
+        """No step sideways or back: staying put is what a move must beat.
+
+        Friends hold the enemy tower's other neighbours and an enemy stands
+        on it. With only legal destinations to choose from, the nearest one
+        was a step away from the tower, and SimpleBot took it.
+        """
+        grid = np.full((7, 7), "p", dtype=object)
+        grid[0, 0], grid[6, 6], grid[3, 3] = "h_1", "h_2", "t_2"
+        game = GameState(grid, num_players=2)
+        unit = game.place_unit("W", 2, 3, 1)
+        for x, y in [(3, 2), (3, 4), (4, 3)]:
+            game.place_unit("W", x, y, 1)
+        game.place_unit("W", 3, 3, 2)
+        bot = SimpleBot(game, player=1, rng=random.Random(0))
+
+        assert bot.find_best_move_position(unit, 3, 3) is None
+        bot.act_with_unit(unit)
+
+        assert (unit.x, unit.y) == (2, 3)
+        assert [a["type"] for a in game.action_history if a["type"] == "move"] == []
+
+    def test_find_best_move_position_takes_the_nearest_tile_nearer_than_the_units_own(self):
+        game = _open_game()
+        unit = game.place_unit("W", 0, 3, 1)
+        game.place_unit("W", 1, 3, 1)  # a friend in the way: pass through it
+        bot = SimpleBot(game, player=1)
+
+        assert bot.find_best_move_position(unit, 6, 3) == (unit.movement_range, 3)
+
+    def test_a_unit_held_back_by_friends_at_a_distance_keeps_its_tile(self):
+        """Units, not terrain, are in the way, so it holds rather than stepping back.
+
+        A one-tile corridor: friends fill every tile nearer the tower that
+        the Warrior could reach, and its only legal destination is behind it.
+        """
+        grid = np.full((7, 7), "o", dtype=object)
+        grid[3, :] = "p"
+        grid[3, 0], grid[3, 5], grid[3, 6] = "h_1", "t", "h_2"
+        game = GameState(grid, num_players=2)
+        unit = game.place_unit("W", 1, 3, 1)
+        for x in (2, 3, 4):
+            game.place_unit("W", x, 3, 1)
+        bot = SimpleBot(game, player=1, rng=random.Random(0))
+
+        assert bot.get_reachable(unit) == [(0, 3)]
+        assert bot.find_best_move_position(unit, 5, 3) is None
+
+    def test_a_unit_walled_off_from_its_target_steps_round_the_wall(self):
+        """Nothing within its move is nearer the tower even with units ignored: holding kept it there all game."""
+        game = _walled_tower_game()
+        unit = game.place_unit("W", 4, 3, 1)  # ocean at (3..5, 2) between it and the tower at (4, 1)
+        bot = SimpleBot(game, player=1)
+
+        assert bot.find_best_move_position(unit, 4, 1) in bot.get_reachable(unit)
+
+    @pytest.mark.parametrize("bot_cls", [SimpleBot, MediumBot, AdvancedBot, MasterBot])
+    def test_a_structure_behind_a_short_wall_is_reached(self, bot_cls):
+        """A Warrior heading for a tower behind a wall gets round it and starts seizing it.
+
+        Every tier moves towards it through ``find_best_move_position``; with
+        a strictly-nearer rule and no terrain exception each stopped at the
+        wall, at (4, 3), for the rest of the game.
+        """
+        for seed in range(3):
+            game = _walled_tower_game()
+            game.place_unit("W", 4, 5, 1)
+            tower = game.grid.get_tile(4, 1)
+            bot = bot_cls(game, player=1, rng=random.Random(seed))
+            for _ in range(12):
+                bot.take_turn()
+                game.end_turn()  # player 2 has no units and passes
+                if tower.health < tower.max_health:
+                    break
+            assert tower.health < tower.max_health, f"seed {seed}: the Warrior never got round the wall"
+
+    def test_pick_capture_target_skips_a_structure_a_friend_stands_on(self):
+        game = _open_game(towers=[(3, 2), (3, 5)])  # (3, 2) is nearer, but a friend holds it
+        unit = game.place_unit("W", 3, 3, 1)
+        game.place_unit("W", 3, 2, 1)
+        bot = MediumBot(game, player=1)
+
+        target = bot.pick_capture_target(unit)
+
+        assert (target.x, target.y) == (3, 5)
+
+    def test_continue_active_seizes_claims_the_seized_tile(self):
+        game = _open_game(towers=[(3, 2)])
+        tower = game.grid.get_tile(3, 2)
+        tower.health = tower.max_health - 1  # capture in progress
+        unit = game.place_unit("W", 3, 2, 1)
+        bot = MediumBot(game, player=1)
+
+        bot.continue_active_seizes([unit])
+
+        assert bot._capture_assignments() == {(3, 2)}
+        assert game.action_history[-1]["type"] == "seize"
+
+    def test_a_unit_that_cannot_move_claims_nothing(self):
+        """Claiming before moving let a stuck unit keep structures from its siblings."""
+        game = _open_game(towers=[(3, 0)])
+        unit = game.place_unit("W", 3, 3, 1)
+        unit.can_move = False
+        bot = MediumBot(game, player=1)
+
+        bot.act_with_unit(unit)
+
+        assert bot._capture_assignments() == set()
+        assert (unit.x, unit.y) == (3, 3) and not unit.can_attack
+
+    def test_a_new_action_releases_only_the_units_own_claims(self):
+        game = _open_game()
+        first, second = game.place_unit("W", 1, 1, 1), game.place_unit("W", 2, 2, 1)
+        bot = MediumBot(game, player=1)
+        bot._claim_capture(first, (3, 0))
+        bot._claim_capture(second, (5, 6))
+
+        bot._release_captures(first)
+
+        assert bot._capture_assignments() == {(5, 6)}
+
+    @pytest.mark.parametrize("tier", ["medium", "advanced", "master"])
+    def test_haste_carries_a_march_onto_the_structure_it_claimed(self, tier):
+        """The hasted action may pick the structure the unit's first action marched towards.
+
+        The unit's own claim used to hide it, so the second move walked off
+        towards another structure and haste never brought a distant one
+        within a turn's reach.
+        """
+        grid = np.full((9, 15), "p", dtype=object)
+        grid[0, 0], grid[8, 14] = "h_1", "h_2"
+        grid[2, 11], grid[8, 0] = "t", "t"  # 7 tiles away (two Barbarian moves), and far off
+        game = GameState(grid, num_players=2)
+        game.player_gold[1] = 0
+        barbarian = game.place_unit("B", 4, 2, 1)
+        sorcerer = game.place_unit("S", 4, 3, 1)
+        game.place_unit("W", 14, 7, 2)
+        assert game.haste(sorcerer, barbarian)
+        bot = build_scripted(tier, game, player=1)
+
+        bot.take_turn()
+
+        tower = game.grid.get_tile(11, 2)
+        assert (barbarian.x, barbarian.y) == (11, 2)
+        assert tower.health < tower.max_health
+
+    @pytest.mark.parametrize(
+        "bot_cls,act_name",
+        [(SimpleBot, "act_with_unit"), (MediumBot, "act_with_unit"), (AdvancedBot, "act_with_unit_enhanced")],
+    )
+    def test_a_move_without_an_action_ends_the_units_turn(self, bot_cls, act_name):
+        """No re-entry on the ``can_attack`` a move leaves: only haste gives a unit another action.
+
+        AdvancedBot's multi-turn capture march used to re-run the whole
+        decision for the marched unit, every move branch of which the engine
+        then refused.
+        """
+        game = _open_game(towers=[(0, 6), (1, 6), (5, 6)])  # neutral, out of reach: a march
+        unit = game.place_unit("W", 3, 0, 1)
+        bot = bot_cls(game, player=1)
+        bot.phase = AdvancedBot.PHASE_EXPAND
+        depths = []
+        act = getattr(bot, act_name)
+
+        def recording_act(u, _depth=0):
+            depths.append(_depth)
+            act(u, _depth)
+
+        setattr(bot, act_name, recording_act)
+
+        recording_act(unit)
+
+        assert depths == [0]
+        assert (unit.x, unit.y) != (3, 0)
+        assert not (unit.can_move or unit.can_attack)
+
+    @pytest.mark.parametrize(
+        "bot_cls,entry",
+        [
+            (SimpleBot, "act_with_unit"),
+            (SimpleBot, "move_and_act_units"),
+            (MediumBot, "act_with_unit"),
+            (MediumBot, "move_and_act_units"),
+            (AdvancedBot, "act_with_unit_enhanced"),
+            (AdvancedBot, "move_and_act_units_enhanced"),
+            (MasterBot, "act_with_unit_enhanced"),
+            (MasterBot, "move_and_act_units_enhanced"),
+        ],
+    )
+    def test_haste_gives_exactly_one_more_action(self, bot_cls, entry):
+        game = _open_game()
+        warrior = game.place_unit("W", 3, 3, 1)
+        game.place_unit("W", 3, 4, 2).health = 30  # survives two hits
+        warrior.is_hasted = True
+        bot = bot_cls(game, player=1)
+
+        act = getattr(bot, entry)
+        if entry.startswith("act_with_unit"):
+            act(warrior)
+        else:
+            act()
+
+        assert [a["type"] for a in game.action_history].count("attack") == 2
+        assert not (warrior.can_move or warrior.can_attack or warrior.is_hasted)
+
+    @pytest.mark.parametrize("bot_cls", [AdvancedBot, MasterBot])
+    def test_a_hasted_knight_acts_again_after_its_charge(self, bot_cls):
+        """The charge branch continues a hasted unit instead of returning."""
+        game = _open_game()
+        knight = game.place_unit("K", 0, 3, 1)
+        game.place_unit("W", 4, 3, 2).health = 60  # survives the charge and the second hit
+        knight.is_hasted = True
+        bot = bot_cls(game, player=1)
+
+        bot.act_with_unit_enhanced(knight)
+
+        assert bot.get_capabilities_fired().get("knight_charge") == 1
+        assert [a["type"] for a in game.action_history].count("attack") == 2
+        assert not (knight.can_move or knight.can_attack or knight.is_hasted)
+
+    def test_try_action_asks_the_engine_first(self, monkeypatch):
+        game = _open_game()
+        mage = game.place_unit("M", 3, 3, 1)
+        far = game.place_unit("W", 6, 3, 2)
+        bot = SimpleBot(game, player=1)
+        sent = []
+        monkeypatch.setattr(game, "paralyze", lambda *args: sent.append(args) or False)
+
+        assert bot.try_action("paralyze", mage, far) is False
+        assert bot.try_mage_paralyze(mage) is False
+        assert sent == []  # nothing out of range reached the engine
+        assert "mage_paralyze" not in bot.get_capabilities_fired()
+
+
+# Fog-of-war scenarios for TestFogOfWarTargets: player 1's units next to (or
+# within a move of) player 2's, on a 7x7 grass map. Each entry is
+# (unit type, x, y, player, health or None for full), and each scenario
+# leads the tiers to attack or paralyze by a different path.
+FOG_SCENARIOS = {
+    # Value trade in reach (MediumBot priority 2, AdvancedBot priority 7).
+    "adjacent": [("W", 3, 3, 1, None), ("W", 3, 4, 2, 30)],
+    # One hit kills: coordinated focus fire.
+    "killable": [("W", 3, 3, 1, None), ("W", 2, 4, 1, None), ("W", 3, 4, 2, 1)],
+    # An enemy seizing a neutral tower: the interrupt priority, after a move.
+    "capturing": [("W", 3, 1, 1, None), ("W", 3, 4, 2, 30)],
+    # A Knight three tiles out: the charge.
+    "charge": [("K", 0, 3, 1, None), ("W", 4, 3, 2, 30)],
+    # A Rogue beside an enemy a friend is next to: the flank, in place and after a move.
+    "flank": [("W", 3, 3, 1, None), ("R", 2, 4, 1, None), ("W", 3, 4, 2, 30)],
+    "flank_move": [("W", 3, 3, 1, None), ("R", 0, 5, 1, None), ("W", 3, 4, 2, 30)],
+    # A Mage two tiles from an enemy a hit would not kill: paralyze.
+    "mage": [("M", 3, 1, 1, None), ("W", 3, 3, 2, 30)],
+    # An Archer in range: the ranged attack.
+    "archer": [("A", 3, 1, 1, None), ("W", 3, 3, 2, None)],
+}
+# The capability each scenario's own path records (AdvancedBot and MasterBot).
+FOG_SCENARIO_CAPABILITY = {
+    "charge": "knight_charge",
+    "flank": "rogue_flank",
+    "flank_move": "rogue_flank",
+    "mage": "mage_paralyze",
+}
+# No attack path of that tier leads there: SimpleBot walks at the tower rather
+# than the enemy on it, and MediumBot's own units only attack what they can
+# already reach.
+FOG_SCENARIO_NO_ATTACK = {("simple", "capturing"), ("medium", "charge")}
+
+
+def _fog_game(scenario):
+    grid = np.full((7, 7), "p", dtype=object)
+    grid[0, 0], grid[6, 6] = "h_1", "h_2"
+    if scenario == "capturing":
+        grid[4, 3] = "t"
+    game = GameState(grid, num_players=2, fog_of_war=True)
+    game.player_gold[1] = 0
+    for unit_type, x, y, player, health in FOG_SCENARIOS[scenario]:
+        unit = game.place_unit(unit_type, x, y, player)
+        if health is not None:
+            unit.health = health
+    # A friend on the enemy HQ: no structure draws the others off to capture.
+    game.place_unit("W", 6, 6, 1)
+    if scenario == "capturing":
+        game.grid.get_tile(3, 4).health -= 10
+    return game
+
+
+class TestFogOfWarTargets:
+    """Under fog of war a unit attacks or paralyzes only enemies its side saw when its action began.
+
+    The rare fog conflicts of whole games left most of the bots' attack
+    paths untested: each scenario here reaches one of them, and hides
+    every enemy from player 1's attack snapshots (``visible_enemies_at_action_start``,
+    what its side saw when each unit's action began), so the engine would
+    refuse any attack or paralyze. The same scenario with the snapshots
+    left alone must lead to one, or it tests nothing.
+    """
+
+    @pytest.mark.parametrize("scenario", FOG_SCENARIOS)
+    @pytest.mark.parametrize("tier", ["simple", "medium", "advanced", "master"])
+    def test_a_unit_attacks_only_enemies_its_snapshot_holds(self, tier, scenario):
+        for hidden in (False, True):
+            game = _fog_game(scenario)
+            if hidden:
+                for unit in game.units:
+                    if unit.player == 1:
+                        game.fog._set_attack_snapshot(unit, set())
+            sent = []
+            for name in ("attack", "paralyze"):
+                method = getattr(game, name)
+                setattr(game, name, lambda *args, _method=method, _name=name: sent.append(_name) or _method(*args))
+            bot = build_scripted(tier, game, player=1)
+
+            bot.take_turn()
+
+            if hidden:
+                assert sent == [], f"{tier} sent {sent} at enemies hidden from the snapshot"
+            elif (tier, scenario) not in FOG_SCENARIO_NO_ATTACK:
+                assert sent, f"{tier} sent nothing in {scenario}: the scenario does not reach an attack"
+                if tier in ("advanced", "master") and scenario in FOG_SCENARIO_CAPABILITY:
+                    assert FOG_SCENARIO_CAPABILITY[scenario] in bot.get_capabilities_fired()
+
+
+class TestTurnContext:
+    """The per-turn planning cache (review rulebots-9) must never change a decision."""
+
+    def test_reach_is_searched_again_once_an_action_is_accepted(self):
+        game = _open_game()
+        walker, mover = game.place_unit("W", 3, 3, 1), game.place_unit("W", 5, 3, 1)
+        bot = SimpleBot(game, player=1)
+
+        with bot.planning_turn():
+            assert (4, 3) in bot.get_reachable(walker)
+            assert bot.try_move(mover, 4, 3)
+            assert (4, 3) not in bot.get_reachable(walker)
+            assert bot.get_reachable(walker) == game.get_move_destinations(walker)
+            assert bot.capturable_structures() is bot.capturable_structures()  # one list for the turn
+        assert bot._turn is None
+
+    def test_the_bots_own_hq_is_read_again_once_it_takes_another(self):
+        """In a free-for-all a bot keeps an HQ it takes, so its own HQ can change during its turn.
+
+        find_our_hq returns the first in row order, as a fresh scan does;
+        the turn used to keep the one it held at the start.
+        """
+        grid = np.full((7, 7), "p", dtype=object)
+        grid[6, 0], grid[0, 6], grid[6, 6] = "h_1", "h_2", "h_3"  # player 2's HQ comes first in row order
+        game = GameState(grid, num_players=3)
+        game.grid.get_tile(6, 0).health = 1  # one seize from falling
+        seizer = game.place_unit("W", 6, 0, 1)
+        game.place_unit("W", 3, 3, 2)
+        game.place_unit("W", 5, 5, 3)
+        bot = MediumBot(game, player=1)
+
+        with bot.planning_turn():
+            assert bot.find_our_hq() == (0, 6)
+            assert bot.try_seize(seizer)
+            assert game.grid.get_tile(6, 0).player == 1 and not game.game_over
+            assert bot.find_our_hq() == (6, 0)
+
+    @pytest.mark.parametrize("tier", ["simple", "medium", "advanced", "master"])
+    @pytest.mark.parametrize("fog", [False, True])
+    def test_seeded_games_are_the_same_with_and_without_it(self, tier, fog, monkeypatch):
+        def play():
+            game = GameState(FileIO.load_map("maps/1v1/crossroads.csv"), num_players=2, max_turns=14, fog_of_war=fog, seed=5)
+            bots = {p: build_scripted(tier, game, player=p, rng=random.Random(50 + p)) for p in (1, 2)}
+            while not game.game_over:
+                bots[game.current_player].take_turn()
+            return [{k: v for k, v in a.items() if k != "timestamp"} for a in game.action_history]
+
+        cached = play()
+
+        @contextmanager
+        def no_context(self):
+            yield
+
+        monkeypatch.setattr(BotUnitMixin, "planning_turn", no_context)
+        assert play() == cached
+        assert any(a["type"] == "attack" for a in cached)
+
+
+class TestPurchasesListOnlyCreates:
+    """The purchase loops ask for the purchases alone, not every legal action (review rulebots-9).
+
+    ``get_legal_actions`` also searches every unit's moves, and the loops
+    asked for it once per unit bought: about 40% of SimpleBot's turn.
+    """
+
+    def test_get_create_actions_is_the_create_list_of_get_legal_actions(self):
+        game = GameState(FileIO.load_map("maps/1v1/skirmish.csv"), num_players=2, max_turns=10, seed=2)
+        bots = {p: build_scripted("simple", game, player=p, rng=random.Random(p)) for p in (1, 2)}
+        offered = 0
+        while not game.game_over:
+            for player in (1, 2):
+                held = game.player_gold[player]
+                for gold in (0, 250, held):
+                    game.player_gold[player] = gold
+                    game._invalidate_cache()
+                    creates = game.get_create_actions(player)
+                    assert creates == game.get_legal_actions(player)["create_unit"]
+                    offered += len(creates)
+                game.player_gold[player] = held
+                game._invalidate_cache()
+            bots[game.current_player].take_turn()
+        assert offered > 0
+
+    @pytest.mark.parametrize(
+        "bot_cls,method",
+        [
+            (SimpleBot, "purchase_units"),
+            (MediumBot, "purchase_units"),
+            (AdvancedBot, "purchase_units_enhanced"),
+            (MasterBot, "purchase_units_enhanced"),
+        ],
+    )
+    def test_a_purchase_loop_enumerates_no_moves(self, bot_cls, method, monkeypatch):
+        game = GameState(FileIO.load_map("maps/1v1/beginner.csv"), num_players=2)
+        game.player_gold[1] = 1000
+        bot = bot_cls(game, player=1)
+
+        def full_enumeration(*args, **kwargs):
+            raise AssertionError("a purchase loop enumerated every legal action")
+
+        monkeypatch.setattr(game, "get_legal_actions", full_enumeration)
+        getattr(bot, method)()
+
+        assert any(a["type"] == "create_unit" for a in game.action_history)

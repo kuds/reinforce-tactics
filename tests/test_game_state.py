@@ -281,6 +281,22 @@ class TestUnitEliminationWinCondition:
         assert simple_game.game_over is True
         assert simple_game.winner == 2
 
+    def test_attacker_killed_by_the_counter_has_no_action_left(self, simple_game):
+        """A unit out of play reads as done, so a caller still holding it can't act with it (review rulebots-8)."""
+        attacker = simple_game.place_unit("C", 5, 5, player=1)
+        simple_game.place_unit("W", 0, 5, player=1)  # keeps player 1 in the game
+        defender = simple_game.place_unit("W", 6, 5, player=2)
+        attacker.health = 5
+        attacker.is_hasted = True  # a pending haste must not re-arm it either
+
+        result = simple_game.attack(attacker, defender)
+
+        assert result["attacker_alive"] is False and attacker not in simple_game.units
+        assert not simple_game.game_over
+        assert not (attacker.can_move or attacker.can_attack or attacker.is_hasted or attacker.haste_refreshed)
+        assert simple_game.end_unit_turn(attacker) is False
+        assert not (attacker.can_move or attacker.can_attack)
+
     def test_game_continues_when_player_has_remaining_units(self, simple_game):
         """Test game does NOT end when a unit is killed but player still has units."""
         # Give player 2 enough gold for two units

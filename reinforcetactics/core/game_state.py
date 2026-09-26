@@ -1108,6 +1108,15 @@ class GameState:
             defeated_player = attacker.player
             if attacker in self.units:
                 self.units.remove(attacker)
+            # The counter-attack killed it: out of play, it has no action
+            # left, so a caller still holding it reads it as done. Its flags
+            # were left set (the action below is only spent for a survivor),
+            # and the rule bots re-ran their whole decision on the corpse
+            # until their recursion cap, every action refused (review
+            # rulebots-8). A pending haste goes too, so ``end_unit_turn``
+            # can't re-arm it either.
+            attacker.can_move = attacker.can_attack = False
+            attacker.is_hasted = attacker.haste_refreshed = False
             self._invalidate_cache()
             self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
@@ -1854,6 +1863,18 @@ class GameState:
     def _compute_legal_actions(self, player: int) -> dict[str, list[Any]]:
         """Enumerate ``player``'s legal actions from the current state (uncached; ``enumerate_legal_actions``)."""
         return legal_actions.enumerate_legal_actions(self, player)
+
+    def get_create_actions(self, player: int | None = None) -> list[dict[str, Any]]:
+        """``get_legal_actions(player)["create_unit"]`` without enumerating the other kinds.
+
+        The same entries in the same order, computed fresh (it neither reads
+        nor fills the cache): a purchase loop, which changes the state with
+        every unit it buys, needs only these and would otherwise search
+        every unit's moves once per purchase.
+        """
+        if player is None:
+            player = self.current_player
+        return legal_actions.enumerate_create_actions(self, player)
 
     # How clone_for_search treats each attribute (review core-18). Shared:
     # fixed for the whole game (configuration, terrain source, stateless
