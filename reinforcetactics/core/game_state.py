@@ -12,13 +12,14 @@ import logging
 import os
 import random
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from reinforcetactics.core.actions import ACTION_KINDS, ACTOR_KEYS, ActionResult
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics, same_side
 from reinforcetactics.core.terrain_rules import TERRAIN_RULE_KEYS, TerrainRules
@@ -1192,7 +1193,27 @@ class GameState:
         tile = self.grid.get_tile(unit.x, unit.y)
         return tile is not None and tile.is_capturable() and not self.are_allies(tile.player, unit.player)
 
-    def _may_act(self, action: str, unit: Unit, target: Unit | None = None, rule: Callable[[], bool] | None = None) -> bool:
+    # The target rule of each targeted action (``attack`` and the abilities),
+    # by its ``get_legal_actions`` key: what ``_may_target`` checks, so the
+    # action methods and ``is_legal`` read the same one.
+    _TARGET_RULES: dict[str, Callable[[GameState, Unit, Unit], bool]] = {
+        "attack": _can_attack_target,
+        "paralyze": _can_paralyze_target,
+        "heal": _can_heal_target,
+        "cure": _can_cure_target,
+        "haste": _can_haste_target,
+        "defence_buff": _can_defence_buff_target,
+        "attack_buff": _can_attack_buff_target,
+    }
+
+    def _may_act(
+        self,
+        action: str,
+        unit: Unit,
+        target: Unit | None = None,
+        rule: Callable[[], bool] | None = None,
+        log: bool = True,
+    ) -> bool:
         """Validate one unit action before it is applied; log why when it is not.
 
         Rejects when the game is over; when ``unit`` (or ``target``) is no
@@ -1201,7 +1222,8 @@ class GameState:
         unit's player's turn; when the unit is dead or paralyzed; when the
         action slot it needs is spent (``can_move`` for a move,
         ``can_attack`` for attacks, abilities and seizing); or when
-        ``rule`` (the action's target/range predicate) fails.
+        ``rule`` (the action's target/range predicate) fails. ``log=False``
+        is for ``is_legal``, which asks without attempting anything.
         """
         if self.game_over:
             reason = "the game is over"
@@ -1217,7 +1239,75 @@ class GameState:
             reason = "the target is out of range, on the wrong side, or a precondition fails"
         else:
             return True
-        logger.debug("Rejected %s by player %d %s at (%d, %d): %s", action, unit.player, unit.type, unit.x, unit.y, reason)
+        if log:
+            logger.debug("Rejected %s by player %d %s at (%d, %d): %s", action, unit.player, unit.type, unit.x, unit.y, reason)
+        return False
+
+    def _may_target(self, action: str, actor: Unit, target: Unit, log: bool = True) -> bool:
+        """``_may_act`` for the targeted action ``action`` (a ``_TARGET_RULES`` key) from ``actor`` on ``target``."""
+        rule = self._TARGET_RULES[action]
+        return self._may_act(action, actor, target, lambda: rule(self, actor, target), log=log)
+
+    def _may_seize(self, unit: Unit, log: bool = True) -> bool:
+        """``_may_act`` for ``unit`` seizing the structure it stands on."""
+        return self._may_act("seize", unit, rule=lambda: self._can_seize(unit), log=log)
+
+    def _move_steps(
+        self,
+        unit: Unit,
+        to_x: int,
+        to_y: int,
+        came_from: dict[tuple[int, int], tuple[int, int]] | None = None,
+        log: bool = True,
+    ) -> int | None:
+        """Tiles ``unit`` steps to end a legal move on ``(to_x, to_y)``; None if it may not move there.
+
+        The move rule: ``_may_act``, and a destination among the tiles
+        ``get_move_destinations`` (and so ``get_legal_actions``) offers,
+        planned around the units the player knows of. ``came_from``
+        receives the path search tree (``move_unit`` walks it for the
+        ambush rule).
+        """
+        if not self._may_act("move", unit, log=log):
+            return None
+        steps = self._move_paths(unit, came_from=came_from).get((to_x, to_y))
+        if steps is None and log:
+            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
+        return steps
+
+    def _may_create(self, unit_type: str, x: int, y: int, player: int, log: bool = True) -> bool:
+        """Validate a ``create_unit`` before it is applied; log why when it is not.
+
+        The game must be running, ``player`` must be the current player and
+        still in the game, ``unit_type`` enabled, the player under the unit
+        cap and able to afford it, and ``(x, y)`` an empty Building the
+        player owns -- the same rules ``get_legal_actions`` offers creates
+        by. ``log=False`` is for ``is_legal``.
+        """
+        level = logging.DEBUG
+        if self.game_over:
+            reason = "the game is over"
+        elif player != self.current_player:
+            reason = f"it is player {self.current_player}'s turn"
+        elif player in self.eliminated_players:
+            reason = "the player is eliminated"
+        elif unit_type not in self.unit_data:
+            reason, level = "unknown unit type", logging.WARNING
+        elif unit_type not in self.enabled_units:
+            reason = "the unit type is not enabled in this game"
+        # The per-player unit cap. Mirrored in get_legal_actions so the RL
+        # action mask hides create_unit at the cap rather than the agent
+        # issuing a rejected action and eating the invalid_action penalty.
+        elif not self._under_unit_cap(player):
+            reason = f"the player is at the unit cap ({self.max_units_per_player})"
+        elif not self._is_free_spawn_tile(player, x, y):
+            reason = "not an empty building the player owns"
+        elif not self._can_afford(player, unit_type):
+            reason = f"insufficient gold ({self.player_gold[player]} < {self.unit_data[unit_type]['cost']})"
+        else:
+            return True
+        if log:
+            logger.log(level, "Cannot create %s at (%s, %s) for player %s: %s", unit_type, x, y, player, reason)
         return False
 
     def _consume_action(self, unit: Unit) -> None:
@@ -1314,9 +1404,9 @@ class GameState:
         Rejected (returns None, changes and records nothing) unless the game
         is running, ``player`` is the current player, ``unit_type`` is
         enabled, the player is under the unit cap and can afford it, and
-        ``(x, y)`` is an empty Building the player owns -- the same rules
-        ``get_legal_actions`` offers creates by. For test or scenario setup
-        use :meth:`place_unit`.
+        ``(x, y)`` is an empty Building the player owns (``_may_create``) --
+        the same rules ``get_legal_actions`` offers creates by. For test or
+        scenario setup use :meth:`place_unit`.
 
         Args:
             unit_type: 'W', 'M', 'C', 'B', or 'A'
@@ -1330,45 +1420,11 @@ class GameState:
         if player is None:
             player = self.current_player
 
-        if self.game_over:
-            logger.debug("Cannot create unit: the game is over")
-            return None
-
-        if player != self.current_player:
-            logger.debug(f"Cannot create unit for player {player}: it is player {self.current_player}'s turn")
-            return None
-
-        if player in self.eliminated_players:
-            logger.debug(f"Cannot create unit for player {player}: eliminated")
-            return None
-
-        if unit_type not in self.unit_data:
-            logger.warning(f"Unknown unit type: {unit_type}")
-            return None
-
-        if unit_type not in self.enabled_units:
-            logger.debug(f"Cannot create unit: {unit_type} is not enabled in this game")
-            return None
-
-        # Enforce the per-player unit cap. Mirrored in get_legal_actions so
-        # the RL action mask hides create_unit at the cap rather than the
-        # agent issuing a rejected action and eating the invalid_action
-        # penalty.
-        if not self._under_unit_cap(player):
-            logger.debug(f"Cannot create unit: player {player} at unit cap ({self.max_units_per_player})")
-            return None
-
-        if not self._is_free_spawn_tile(player, x, y):
-            logger.debug(f"Cannot create unit at ({x}, {y}): not an empty building owned by player {player}")
-            return None
-
-        cost = self.unit_data[unit_type]["cost"]
-        if not self._can_afford(player, unit_type):
-            logger.debug(f"Cannot create unit: insufficient gold ({self.player_gold[player]} < {cost})")
+        if not self._may_create(unit_type, x, y, player):
             return None
 
         # Create the unit
-        self.player_gold[player] -= cost
+        self.player_gold[player] -= self.unit_data[unit_type]["cost"]
         unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
         unit.unit_id = self._next_unit_id
         self._next_unit_id += 1
@@ -1410,20 +1466,17 @@ class GameState:
         """
         from_x, from_y = unit.x, unit.y
 
-        # Actor gate (see _may_act). Among other things it rejects duplicate
-        # moves -- bot/RL/LLM call sites don't all gate on ``unit.can_move``
-        # before calling, and ``get_reachable_positions`` ignores it, so a
-        # unit could otherwise move more than once per turn -- and stale
-        # references: a unit can die mid-loop from a counter-attack while the
-        # bot still holds it, and moving it would log an event the replay
-        # player (which only sees self.units) can't reproduce (PR #360 audit).
-        if not self._may_act("move", unit):
-            return False
-
+        # The move rule (see _move_steps). Its actor gate (_may_act) rejects,
+        # among other things, duplicate moves -- bot/RL/LLM call sites don't
+        # all gate on ``unit.can_move`` before calling, and
+        # ``get_reachable_positions`` ignores it, so a unit could otherwise
+        # move more than once per turn -- and stale references: a unit can
+        # die mid-loop from a counter-attack while the bot still holds it,
+        # and moving it would log an event the replay player (which only
+        # sees self.units) can't reproduce (PR #360 audit).
         came_from: dict[tuple[int, int], tuple[int, int]] = {}
-        steps = self._move_paths(unit, came_from=came_from).get((to_x, to_y))
+        steps = self._move_steps(unit, to_x, to_y, came_from)
         if steps is None:
-            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
             return False
 
         # FOW: Snapshot pre-move enemy visibility so the unit cannot attack
@@ -1505,7 +1558,7 @@ class GameState:
         """
         # Rejections return the same shape as a clean attack so callers
         # that index into the result dict don't KeyError.
-        if not self._may_act("attack", attacker, target, lambda: self._can_attack_target(attacker, target)):
+        if not self._may_target("attack", attacker, target):
             return self._noop_attack_result()
 
         result = self.mechanics.attack_unit(
@@ -1577,7 +1630,6 @@ class GameState:
         action: str,
         actor: Unit,
         target: Unit,
-        can_target: Callable[[Unit, Unit], bool],
         apply: Callable[[], Any],
         rejected: Any,
         actor_pos_field: str,
@@ -1586,7 +1638,7 @@ class GameState:
     ) -> Any:
         """The shared body of the targeted abilities (paralyze, heal, cure, haste, the buffs).
 
-        Validates with ``_may_act`` and ``can_target`` (the ability's
+        Validates with ``_may_target`` (``_may_act`` and the ability's
         ``_can_*_target`` predicate, the one its legal actions are listed
         with), returning ``rejected`` and changing nothing when that fails.
         Otherwise applies the mechanics call ``apply``; if it took effect,
@@ -1600,7 +1652,7 @@ class GameState:
         Returns:
             ``apply``'s result, or ``rejected``.
         """
-        if not self._may_act(action, actor, target, lambda: can_target(actor, target)):
+        if not self._may_target(action, actor, target):
             return rejected
         result = apply()
         # heal_unit returns the HP it restored (-1 if refused), the others a
@@ -1627,7 +1679,6 @@ class GameState:
             "paralyze",
             paralyzer,
             target,
-            self._can_paralyze_target,
             lambda: self.mechanics.paralyze_unit(paralyzer, target, self.teams),
             rejected=False,
             actor_pos_field="paralyzer_pos",
@@ -1639,7 +1690,6 @@ class GameState:
             "heal",
             healer,
             target,
-            self._can_heal_target,
             lambda: self.mechanics.heal_unit(healer, target, self.teams),
             rejected=0,
             actor_pos_field="healer_pos",
@@ -1656,7 +1706,6 @@ class GameState:
             "cure",
             curer,
             target,
-            self._can_cure_target,
             lambda: self.mechanics.cure_unit(curer, target, self.teams),
             rejected=False,
             actor_pos_field="curer_pos",
@@ -1699,7 +1748,6 @@ class GameState:
             "haste",
             sorcerer,
             target,
-            self._can_haste_target,
             lambda: self.mechanics.haste_unit(sorcerer, target),
             rejected=False,
             actor_pos_field="sorcerer_pos",
@@ -1723,7 +1771,6 @@ class GameState:
             "defence_buff",
             sorcerer,
             target,
-            self._can_defence_buff_target,
             lambda: self.mechanics.defence_buff_unit(sorcerer, target, self.teams),
             rejected=False,
             actor_pos_field="sorcerer_pos",
@@ -1746,7 +1793,6 @@ class GameState:
             "attack_buff",
             sorcerer,
             target,
-            self._can_attack_buff_target,
             lambda: self.mechanics.attack_buff_unit(sorcerer, target, self.teams),
             rejected=False,
             actor_pos_field="sorcerer_pos",
@@ -1763,7 +1809,7 @@ class GameState:
         SEIZEs from an LLM took a 50-HP HQ in one turn (review aibots-1).
         """
         tile = self.grid.get_tile(unit.x, unit.y)
-        if not self._may_act("seize", unit, rule=lambda: self._can_seize(unit)):
+        if not self._may_seize(unit):
             return {"captured": False, "game_over": False, "structure_type": tile.type if tile else None}
         previous_owner = tile.player
         result = self.mechanics.seize_structure(unit, tile, self.teams)
@@ -2188,6 +2234,106 @@ class GameState:
 
         self._invalidate_cache()
         return True
+
+    # ------------------------------------------------------------------
+    # Actions by name
+    # ------------------------------------------------------------------
+    # The entry point for code that picks actions the way get_legal_actions
+    # lists them (bots, MCTS, the gym env, the LLM bots, the GUI): a kind
+    # (a get_legal_actions key, see ``core.actions.ACTION_KINDS``) and a
+    # payload (one of that key's entries). Each of them used to keep its own
+    # table from that shape to an action method, and from the method's
+    # return value to "did it happen" (review core-14).
+
+    def apply_action(self, kind: str, action: Mapping[str, Any]) -> ActionResult:
+        """Carry out the action ``kind`` that ``action`` describes, through its action method.
+
+        ``action`` has the shape of a ``get_legal_actions()[kind]`` entry:
+        ``{"unit_type", "x", "y"}`` for ``create_unit`` (with an optional
+        ``"player"``, the current player by default, as ``create_unit``
+        takes), ``{"unit", "to_x", "to_y"}`` for ``move``, ``{"unit"}`` for
+        ``seize``, ``{}`` for ``end_turn``, and the acting unit (under
+        ``ACTOR_KEYS[kind]``) and ``"target"`` for the others. Other keys (an
+        entry's ``from_x``/``from_y`` or ``tile``) are ignored. The method
+        (``create_unit``, ``move_unit``, ``seize``, ``end_turn``, or the one
+        named ``kind``) is looked up on the instance, so the action is
+        validated and recorded exactly as by a direct call, and a wrapper
+        installed on the instance (the imitation recorder's) sees it too.
+
+        Returns:
+            The method's return value, and whether the engine carried the
+            action out: always what ``is_legal(kind, action)`` answered just
+            before. A refused action changes nothing.
+
+        Raises:
+            ValueError: ``kind`` is not one of ``ACTION_KINDS``.
+        """
+        if kind == "create_unit":
+            unit = self.create_unit(action["unit_type"], action["x"], action["y"], player=action.get("player"))
+            return ActionResult(kind, unit is not None, unit)
+        if kind == "move":
+            moved = self.move_unit(action["unit"], action["to_x"], action["to_y"])
+            return ActionResult(kind, bool(moved), moved)
+        if kind == "seize":
+            result = self.seize(action["unit"])
+            return ActionResult(kind, "damage" in result, result)
+        if kind == "end_turn":
+            # end_turn returns the same empty breakdown for a game it ends on
+            # max_turns and for one already over, which it leaves alone; so
+            # whether it did anything is decided before the call.
+            running = not self.game_over
+            return ActionResult(kind, running, self.end_turn())
+        if kind in self._TARGET_RULES:
+            result = getattr(self, kind)(action[ACTOR_KEYS[kind]], action["target"])
+            if kind == "attack":
+                # An executed attack always deals at least 1 damage.
+                return ActionResult(kind, result["damage"] > 0, result)
+            # heal returns the HP it restored, the others a bool (see _use_ability).
+            return ActionResult(kind, result > 0, result)
+        raise ValueError(f"Unknown action kind {kind!r}; expected one of {', '.join(ACTION_KINDS)}")
+
+    def is_legal(self, kind: str, action: Mapping[str, Any]) -> bool:
+        """Whether ``apply_action(kind, action)`` would carry the action out now; changes nothing.
+
+        Asks the rule the action method validates with (``_may_create``,
+        ``_move_steps``, ``_may_target``, ``_may_seize``; ``end_turn`` only
+        needs the game to be running), so ``apply_action(kind,
+        action).accepted`` always equals it, and it holds for every entry
+        of ``get_legal_actions()[kind]`` (``{}`` for ``end_turn``) while the
+        game runs. Unlike ``get_legal_actions`` it answers for the current
+        player only, as the action methods do: another player's action, and
+        any action once the game is over, is not legal. It enumerates
+        nothing (a move costs one path search), logs no refusal, and
+        neither reads nor fills the legal-action cache.
+
+        Under fog of war an attack or paralyze needs a target the attacker
+        could see when its action started (``is_enemy_attackable_by_unit``):
+        its snapshot if it has one, else what its player sees now. This
+        answers from the snapshot as it stands and never takes one.
+        ``attack`` and the abilities don't take one either, and
+        ``move_unit`` takes it only once the move is accepted, so this is
+        exactly what the method would decide. Taking one here would freeze
+        the unit's targets at the moment of asking: an enemy another unit
+        then uncovers would be attackable by ``get_legal_actions`` and the
+        methods, but not by this.
+
+        Raises:
+            ValueError: ``kind`` is not one of ``ACTION_KINDS``.
+        """
+        if kind == "create_unit":
+            player = action.get("player")
+            if player is None:
+                player = self.current_player
+            return self._may_create(action["unit_type"], action["x"], action["y"], player, log=False)
+        if kind == "move":
+            return self._move_steps(action["unit"], action["to_x"], action["to_y"], log=False) is not None
+        if kind == "seize":
+            return self._may_seize(action["unit"], log=False)
+        if kind == "end_turn":
+            return not self.game_over
+        if kind in self._TARGET_RULES:
+            return self._may_target(kind, action[ACTOR_KEYS[kind]], action["target"], log=False)
+        raise ValueError(f"Unknown action kind {kind!r}; expected one of {', '.join(ACTION_KINDS)}")
 
     def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
         """

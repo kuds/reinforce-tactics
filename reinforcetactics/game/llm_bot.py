@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from reinforcetactics import __version__
+from reinforcetactics.core.actions import ACTOR_KEYS
 from reinforcetactics.game.bot_base import BaseBot
 from reinforcetactics.game.llm_prompts import (
     DEFAULT_PROMPT,
@@ -439,15 +440,14 @@ def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
     return _LLMErrorInfo(True, f"unexpected {type(exc).__name__}")
 
 
-# LLM action type -> (key in get_legal_actions(), key naming the acting unit
-# in each of that key's entries).
-_UNIT_ACTION_LEGAL_KEYS: dict[str, tuple[str, str]] = {
-    "MOVE": ("move", "unit"),
-    "ATTACK": ("attack", "attacker"),
-    "PARALYZE": ("paralyze", "paralyzer"),
-    "HEAL": ("heal", "healer"),
-    "CURE": ("cure", "curer"),
-    "SEIZE": ("seize", "unit"),
+# LLM unit action type -> the engine's action kind (its get_legal_actions key).
+_UNIT_ACTION_KINDS: dict[str, str] = {
+    "MOVE": "move",
+    "ATTACK": "attack",
+    "PARALYZE": "paralyze",
+    "HEAL": "heal",
+    "CURE": "cure",
+    "SEIZE": "seize",
 }
 
 # Why get_legal_actions may not list an action, per type: logged when the
@@ -1707,27 +1707,25 @@ Use RESIGN only as a last resort when victory is impossible."""
     def _is_legal_unit_action(self, action_type: str, unit: Any, target_xy: tuple[int, int] | None = None) -> bool:
         """Whether ``unit`` may do ``action_type`` (at ``target_xy``) right now.
 
-        Re-queries get_legal_actions on every call. Each executed action
-        invalidates the engine's cache, so this sees the state after the
-        LLM's earlier actions this turn: a unit that has attacked or seized is
-        no longer listed. Matching on the acting unit object and the target
-        square is what rejects a repeated SEIZE, friendly fire (``attack``
-        lists only enemies), attacks on units hidden by fog of war, and any
-        second action by a spent unit.
+        Asks the engine (``GameState.is_legal``, the rule the action methods
+        validate with and ``get_legal_actions`` lists by) about the state
+        after the LLM's earlier actions this turn: a unit that has attacked
+        or seized may not act again. That, with the target named by its
+        square, is what rejects a repeated SEIZE, friendly fire, attacks on
+        units hidden by fog of war, and any second action by a spent unit.
+        ``target_xy`` is the destination of a MOVE and the target's square
+        for the other types but SEIZE, which has none.
         """
-        legal_key, actor_key = _UNIT_ACTION_LEGAL_KEYS[action_type]
-        for entry in self.game_state.get_legal_actions(self.bot_player).get(legal_key, []):
-            if entry[actor_key] is not unit:
-                continue
-            if target_xy is None:
-                return True
-            if legal_key == "move":
-                entry_xy = (entry["to_x"], entry["to_y"])
-            else:
-                entry_xy = (entry["target"].x, entry["target"].y)
-            if entry_xy == target_xy:
-                return True
-        return False
+        kind = _UNIT_ACTION_KINDS[action_type]
+        payload: dict[str, Any] = {ACTOR_KEYS[kind]: unit}
+        if kind == "move" and target_xy is not None:
+            payload["to_x"], payload["to_y"] = target_xy
+        elif target_xy is not None:
+            target = self.game_state.get_unit_at_position(*target_xy)
+            if target is None:
+                return False
+            payload["target"] = target
+        return self.game_state.is_legal(kind, payload)
 
     def _execute_create_unit(self, action: dict[str, Any]) -> bool:
         """Execute a CREATE_UNIT action."""
@@ -1740,17 +1738,14 @@ Use RESIGN only as a last resort when victory is impossible."""
 
         x, y = position
 
-        # Validate this is a legal action
-        legal_actions = self.game_state.get_legal_actions(self.bot_player)
-        is_legal = any(
-            a["unit_type"] == unit_type and a["x"] == x and a["y"] == y for a in legal_actions.get("create_unit", [])
-        )
-
-        if not is_legal:
+        # Validate this is a legal action (a non-string unit_type from the
+        # LLM is simply not one)
+        create = {"unit_type": unit_type, "x": x, "y": y, "player": self.bot_player}
+        if not isinstance(unit_type, str) or not self.game_state.is_legal("create_unit", create):
             self._reject_action(action, f"not in legal_actions.create_unit: {_ILLEGAL_ACTION_HINTS['CREATE_UNIT']}")
             return False
 
-        if self.game_state.create_unit(unit_type, x, y, self.bot_player) is None:
+        if not self.game_state.apply_action("create_unit", create).accepted:
             logger.warning("Engine refused CREATE_UNIT %s", action)
             return False
         logger.info("Created %s at (%s, %s)", unit_type, x, y)
@@ -1805,7 +1800,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             return None
 
         if not self._is_legal_unit_action(action_type, unit, target_pos):
-            legal_key = _UNIT_ACTION_LEGAL_KEYS[action_type][0]
+            legal_key = _UNIT_ACTION_KINDS[action_type]
             self._reject_action(action, f"not in legal_actions.{legal_key}: {_ILLEGAL_ACTION_HINTS[action_type]}")
             return None
 

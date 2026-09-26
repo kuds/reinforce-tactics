@@ -190,33 +190,7 @@ def _resolve_action_refs(game_state, action_key: str, action_data: dict) -> dict
 
 def _execute_action_on_state(game_state, action_key: str, action_data: dict) -> None:
     """Execute a structured action on a game state (mutates in place)."""
-    if action_key == "create_unit":
-        game_state.create_unit(
-            action_data["unit_type"],
-            action_data["x"],
-            action_data["y"],
-            player=game_state.current_player,
-        )
-    elif action_key == "move":
-        game_state.move_unit(action_data["unit"], action_data["to_x"], action_data["to_y"])
-    elif action_key == "attack":
-        game_state.attack(action_data["attacker"], action_data["target"])
-    elif action_key == "seize":
-        game_state.seize(action_data["unit"])
-    elif action_key == "heal":
-        game_state.heal(action_data["healer"], action_data["target"])
-    elif action_key == "cure":
-        game_state.cure(action_data["curer"], action_data["target"])
-    elif action_key == "end_turn":
-        game_state.end_turn()
-    elif action_key == "paralyze":
-        game_state.paralyze(action_data["paralyzer"], action_data["target"])
-    elif action_key == "haste":
-        game_state.haste(action_data["sorcerer"], action_data["target"])
-    elif action_key == "defence_buff":
-        game_state.defence_buff(action_data["sorcerer"], action_data["target"])
-    elif action_key == "attack_buff":
-        game_state.attack_buff(action_data["sorcerer"], action_data["target"])
+    game_state.apply_action(action_key, action_data)
 
 
 def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_action_types: int = 10):

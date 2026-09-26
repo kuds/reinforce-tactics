@@ -4,32 +4,20 @@ Action Executor for Reinforce Tactics.
 This module handles unit action execution from the unit action menu.
 """
 
-# Targeted actions: GameState method, past-tense verb for the console log.
-# The engine refuses an illegal action without changing anything (review
-# §1.2); each entry's result is read by ``_accepted`` below.
+from reinforcetactics.core.actions import ACTOR_KEYS
+
+# Targeted actions (get_legal_actions kinds): past-tense verb for the console
+# log. The engine refuses an illegal action without changing anything
+# (review §1.2) and apply_action reports whether it did.
 TARGETED_ACTIONS = {
-    "attack": ("attack", "attacked"),
-    "paralyze": ("paralyze", "paralyzed"),
-    "heal": ("heal", "healed"),
-    "cure": ("cure", "cured"),
-    "haste": ("haste", "hasted"),
-    "defence_buff": ("defence_buff", "granted defence buff to"),
-    "attack_buff": ("attack_buff", "granted attack buff to"),
+    "attack": "attacked",
+    "paralyze": "paralyzed",
+    "heal": "healed",
+    "cure": "cured",
+    "haste": "hasted",
+    "defence_buff": "granted defence buff to",
+    "attack_buff": "granted attack buff to",
 }
-
-
-def _accepted(kind, result):
-    """Whether the engine carried out ``kind``, judged from its return value.
-
-    attack returns its result dict with ``damage`` 0 when refused (an executed
-    attack always deals at least 1); heal returns the HP healed (0 when
-    refused); the other abilities return a bool.
-    """
-    if kind == "attack":
-        return result["damage"] > 0
-    if kind == "heal":
-        return result > 0
-    return bool(result)
 
 
 def apply_targeted_action(game, kind, unit, target):
@@ -39,9 +27,8 @@ def apply_targeted_action(game, kind, unit, target):
         True if the engine carried it out. On False nothing changed, and the
         caller must not end the unit's turn: the refused action did not use it.
     """
-    method, verb = TARGETED_ACTIONS[kind]
-    result = getattr(game, method)(unit, target)
-    if _accepted(kind, result):
+    verb = TARGETED_ACTIONS[kind]
+    if game.apply_action(kind, {ACTOR_KEYS[kind]: unit, "target": target}).accepted:
         print(f"{unit.type} {verb} {target.type}")
         return True
     print(f"{unit.type} can't {kind.replace('_', ' ')} {target.type} right now (not a legal action)")
@@ -115,14 +102,14 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         return (False, None, None)
 
     if action["type"] == "capture":
-        result = game.seize(unit)
-        if "damage" not in result:
+        seized = game.apply_action("seize", {"unit": unit})
+        if not seized.accepted:
             # Refused by the engine (see GameState.seize): nothing happened,
             # so the unit keeps its action.
             print(f"{unit.type} can't capture here right now (not a legal action)")
             selected_unit_ref[0] = unit
             return (False, None, unit)
-        if result["captured"]:
+        if seized.result["captured"]:
             print(f"{unit.type} captured structure!")
         # The engine already spent the action, or refreshed a hasted unit;
         # end_unit_turn closes the former and keeps the latter's extra action.
