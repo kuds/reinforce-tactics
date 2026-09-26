@@ -532,8 +532,8 @@ class BotUnitMixin:
     def try_cleric_abilities(self, unit) -> bool:
         """Cure paralyzed allies, then heal damaged ones.
 
-        Returns True if an ability was used (the caller is responsible for
-        any haste re-entry). Heal priority: most-damaged frontline (W/B/K)
+        Returns True if an ability was used (the caller ends the unit's
+        action, see ``finish_unit_action``). Heal priority: most-damaged frontline (W/B/K)
         first, falling back to the lowest-HP healable ally.
         """
         if unit.type != "C" or not unit.can_attack:

@@ -2302,11 +2302,10 @@ class MasterBot(AdvancedBot):
 
     4. Haste followthrough (``move_and_act_units_enhanced`` post-pass +
        expanded ``_try_sorcerer_abilities``). The engine refreshes a hasted
-       unit when its first action is spent (``GameState._consume_action``),
-       but the base flow's early-return branches (charge, flank, some
-       attacks) don't act with it again, and a unit hasted after it acted
-       is not revisited. Master re-runs ``act_with_unit_enhanced`` after
-       the main pass on allies whose haste refresh is still unused
+       unit when its first action is spent (``GameState._consume_action``)
+       and the per-unit flow acts with it again (``finish_unit_action``).
+       As a safety net, Master re-runs ``act_with_unit_enhanced`` after the
+       main pass on any ally whose haste refresh is still unused
        (``haste_refreshed``) or whose haste is still pending, enabling:
         - **Double capture**: warrior seizes structure A, then the haste
           refresh moves it to and seizes structure B in the same turn.
@@ -2563,14 +2562,13 @@ class MasterBot(AdvancedBot):
     #
     # The engine refreshes a hasted unit as its first action is spent
     # (GameState._consume_action) and marks it ``haste_refreshed`` until it
-    # moves or acts again. The base flow's early-return branches (charge,
-    # flank ...) don't act with it again, and a unit hasted after it
-    # already acted is never revisited, so without this pass the extra
-    # action is lost when the turn ends.
+    # moves or acts again; the per-unit flow then acts with it again
+    # (``finish_unit_action``). Any refresh or pending haste the main pass
+    # still left unused would be lost when the turn ends.
     #
     # We mop that up by re-running ``act_with_unit_enhanced`` on every ally
     # with an unused refresh (or a haste still pending) after the main
-    # pass. This enables two patterns that are otherwise impossible:
+    # pass. Haste enables two patterns that are otherwise impossible:
     #   - **Double capture**: Warrior moves+seizes structure A on action
     #     1; post-pass refreshes flags; action 2 moves+seizes structure B.
     #   - **Cross-map mobility**: Barbarian (movement=5) hasted -> two
