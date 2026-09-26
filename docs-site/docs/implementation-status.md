@@ -19,6 +19,8 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 - [x] `reinforcetactics/core/game_state.py` - Complete game state manager
 - [x] `reinforcetactics/core/engine_config.py` - `EngineConfig`: a game's `engine_overrides`, validated and resolved over `rules.py`
 - [x] `reinforcetactics/core/serialization.py` - Saves and replays (`to_dict`/`from_dict`, save and replay files)
+- [x] `reinforcetactics/core/legal_actions.py` - The legality rules and `enumerate_legal_actions` (what `get_legal_actions` lists and the action methods accept)
+- [x] `reinforcetactics/core/fog.py` - `FogOfWar` (`GameState.fog`): each player's visibility maps, fog-of-war knowledge, attack snapshots, the ambush rule and `cancel_move`'s restore
 - [x] `reinforcetactics/core/visibility.py` - Fog of war visibility system
 
 ### Game Mechanics

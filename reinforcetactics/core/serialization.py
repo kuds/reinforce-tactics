@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from reinforcetactics.core.unit import Unit
-from reinforcetactics.core.visibility import VisibilityMap
 
 if TYPE_CHECKING:
     from reinforcetactics.core.game_state import GameState
@@ -133,7 +132,7 @@ def game_to_dict(game: GameState) -> dict[str, Any]:
         # sight and forgot every structure (critic-integration-11).
         # Keyed by str(player) so the dict is the same before and after
         # a JSON round trip.
-        "fog_of_war_state": {str(p): vis_map.to_dict() for p, vis_map in game.visibility_maps.items()},
+        "fog_of_war_state": game.fog.to_dict(),
         # Persist the engine-constant overlay so a reloaded game runs under
         # the same balance (damage_model, structure HP, economy, unit cap)
         # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
@@ -421,7 +420,7 @@ def game_from_dict(cls: type[GameState], save_data: dict[str, Any], map_data=Non
     game.eliminated_players = {int(p) for p in save_data.get("eliminated_players", [])}
 
     # Restore the fog of war method
-    game.fog_of_war_method = fog_of_war_method
+    game.fog.method = fog_of_war_method
 
     try:
         game.game_start_time = datetime.strptime(save_data["timestamp"], "%Y-%m-%d %H-%M-%S")
@@ -470,9 +469,7 @@ def game_from_dict(cls: type[GameState], save_data: dict[str, Any], map_data=Non
     for unit_data in save_data.get("units", []):
         unit = Unit.from_dict(unit_data, stats=game.unit_data[unit_data["type"]])
         if game.fog_of_war and unit_data.get("pre_move_visibility") is not None:
-            unit.pre_move_visibility = VisibilityMap.from_dict(
-                unit_data["pre_move_visibility"], game.grid.width, game.grid.height, unit.player
-            )
+            unit.pre_move_visibility = game.fog.map_from_dict(unit_data["pre_move_visibility"], unit.player)
         game.units.append(unit)
 
     # Restore tile states
@@ -496,15 +493,7 @@ def game_from_dict(cls: type[GameState], save_data: dict[str, Any], map_data=Non
     # The maps __init__ computed describe the fresh map, not this game.
     # A version 1 save has no such state, so its fog is rebuilt from the
     # current board (anything explored before the save is lost).
-    if game.fog_of_war:
-        saved_fog = save_data.get("fog_of_war_state") or {}
-        if all(str(p) in saved_fog for p in range(1, game.num_players + 1)):
-            game.visibility_maps = {
-                p: VisibilityMap.from_dict(saved_fog[str(p)], game.grid.width, game.grid.height, p)
-                for p in range(1, game.num_players + 1)
-            }
-        else:
-            game._init_visibility()
+    game.fog.restore(save_data.get("fog_of_war_state"))
 
     game._invalidate_cache()
     return game

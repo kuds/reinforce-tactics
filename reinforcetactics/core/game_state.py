@@ -16,21 +16,17 @@ from typing import Any
 
 import numpy as np
 
-from reinforcetactics.core import serialization
+from reinforcetactics.core import legal_actions, serialization
 from reinforcetactics.core.actions import ACTION_KINDS, ACTOR_KEYS, ActionResult
 from reinforcetactics.core.engine_config import ENGINE_OVERRIDE_KEYS, EngineConfig
+from reinforcetactics.core.fog import FogOfWar
 from reinforcetactics.core.grid import TileGrid
+from reinforcetactics.core.legal_actions import TARGET_RULES
 from reinforcetactics.core.mechanics import GameMechanics, same_side
 from reinforcetactics.core.serialization import SAVE_FORMAT_VERSION as SAVE_FORMAT_VERSION  # re-exported
 from reinforcetactics.core.terrain_rules import TerrainRules
 from reinforcetactics.core.unit import Unit
-from reinforcetactics.core.visibility import (
-    UNEXPLORED,
-    VISIBLE,
-    StructureSnapshot,
-    VisibilityMap,
-    get_visible_units,
-)
+from reinforcetactics.core.visibility import UNEXPLORED, VISIBLE, StructureSnapshot, VisibilityMap
 from reinforcetactics.rules import ALL_UNIT_TYPES, TileType
 
 # Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
@@ -353,14 +349,10 @@ class GameState:
         self.rng: Any
         self.seed, self.rng = self._resolve_rng(rng, seed)
 
-        # Fog of war settings
-        self.fog_of_war: bool = fog_of_war
-        # FOW method for future compatibility when different algorithms are added
-        # Current options: 'simple_radius' (Option A from proposal)
-        # Future options: 'line_of_sight', 'hybrid'
-        self.fog_of_war_method: str = "simple_radius" if fog_of_war else "none"
-        # Built (and first computed) by _init_visibility at the end of __init__
-        self.visibility_maps: dict[int, VisibilityMap] = {}
+        # Fog of war: each player's visibility map and the rules that read
+        # them (core/fog.py). Its maps are built and first computed at the
+        # end of __init__, once the whole state exists.
+        self.fog: FogOfWar = FogOfWar(self, fog_of_war)
 
         # Enabled unit types (defaults to all if not specified)
         self.enabled_units: list[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
@@ -392,7 +384,7 @@ class GameState:
         # Every player starts with a computed fog-of-war view. Callers used to
         # have to call update_visibility() after construction, and a game
         # built without it showed nothing at all until the first move.
-        self._init_visibility()
+        self.fog.reset()
         # Turn 0 for Player 1 (see begin_first_turn). Last, so the
         # whole state exists; the default leaves turn 0 as it always was.
         if self.begin_first_turn:
@@ -557,210 +549,79 @@ class GameState:
         elif not self._player_owns_hq(previous_owner):
             self._eliminate_player(previous_owner, "hq_capture", by_player=capturer)
 
-    def _init_visibility(self) -> None:
-        """Build every player's fog-of-war map from scratch and compute it.
+    # ------------------------------------------------------------------
+    # Fog of war (the code is in core/fog.py)
+    # ------------------------------------------------------------------
+    # ``self.fog`` owns the visibility maps and the fog-of-war rules; these
+    # keep the names the renderer, the observation builder, the LLM bot,
+    # the gym env, the tests and the notebooks have always called.
 
-        Each player starts knowing where every HQ is and who owns it: the
-        HQs are recorded in the last-seen memory at the current turn (and
-        their tiles count as explored), so observations, the renderer and
-        LLM prompts all show them, as the rules say ("enemy HQ is always
-        known"). Their later HP and owner are only learnt by seeing them.
-        """
-        self.visibility_maps = {}
-        if not self.fog_of_war:
-            return
-        hq_tiles = [
-            self.grid.tiles[y][x]
-            for x, y in self.grid.structure_positions
-            if self.grid.tiles[y][x].type == TileType.HEADQUARTERS.value
-        ]
-        for player in range(1, self.num_players + 1):
-            vis_map = VisibilityMap(self.grid.width, self.grid.height, player)
-            for tile in hq_tiles:
-                vis_map.remember_structure(tile, self.turn_number)
-            self.visibility_maps[player] = vis_map
-        self.update_visibility()
+    @property
+    def fog_of_war(self) -> bool:
+        """Whether the game is played under fog of war (``fog.enabled``)."""
+        return self.fog.enabled
+
+    @property
+    def fog_of_war_method(self) -> str:
+        """The visibility algorithm: ``"simple_radius"`` under fog of war, else ``"none"`` (``fog.method``)."""
+        return self.fog.method
+
+    @property
+    def visibility_maps(self) -> dict[int, VisibilityMap]:
+        """Each player's ``VisibilityMap`` (``fog.maps``; empty without fog of war)."""
+        return self.fog.maps
 
     def update_visibility(self, player: int | None = None) -> None:
-        """
-        Update visibility maps for fog of war.
+        """Recompute ``player``'s fog-of-war view, every player's when None (``FogOfWar.update``).
 
         The engine calls this itself whenever a player's vision can change
         (construction and load, moves, unit creation and placement, captures,
         deaths, turn changes), so callers never need to.
-
-        Args:
-            player: Specific player to update, or None to update all players
         """
-        if not self.fog_of_war:
-            return
-
-        # Legality under fog of war reads visibility (attackable targets, and
-        # the units a player's pathfinding may treat as obstacles), so a
-        # visibility change is a legality change.
-        self._invalidate_cache()
-
-        if player is not None:
-            if player in self.visibility_maps:
-                self.visibility_maps[player].update(self)
-                self.visibility_maps[player].clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
-        else:
-            for vis_map in self.visibility_maps.values():
-                vis_map.update(self)
-                vis_map.clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
+        self.fog.update(player)
 
     def get_visible_units_for_player(self, player: int, include_own: bool = True) -> list[Unit]:
-        """
-        Get units visible to a specific player.
-
-        Args:
-            player: Player to get visible units for
-            include_own: Whether to include the player's own units
-
-        Returns:
-            List of visible units
-        """
-        return get_visible_units(self, player, include_own)
+        """The units ``player`` can see, its own too unless ``include_own`` is False (``FogOfWar.visible_units``)."""
+        return self.fog.visible_units(player, include_own)
 
     def is_position_visible(self, x: int, y: int, player: int) -> bool:
-        """
-        Check if a position is visible to a player.
-
-        Args:
-            x: X coordinate
-            y: Y coordinate
-            player: Player to check visibility for
-
-        Returns:
-            True if position is visible (or if fog of war is disabled)
-        """
-        if not self.fog_of_war:
-            return True
-
-        vis_map = self.visibility_maps.get(player)
-        if vis_map is None:
-            return True
-
-        return vis_map.is_visible(x, y)
+        """Whether ``(x, y)`` is in ``player``'s sight (always without fog of war; ``FogOfWar.is_visible``)."""
+        return self.fog.is_visible(x, y, player)
 
     def is_position_explored(self, x: int, y: int, player: int) -> bool:
-        """
-        Check if a position has been explored by a player.
-
-        Args:
-            x: X coordinate
-            y: Y coordinate
-            player: Player to check exploration for
-
-        Returns:
-            True if position is explored (or if fog of war is disabled)
-        """
-        if not self.fog_of_war:
-            return True
-
-        vis_map = self.visibility_maps.get(player)
-        if vis_map is None:
-            return True
-
-        return vis_map.is_explored(x, y)
+        """Whether ``player`` has explored ``(x, y)`` (always without fog of war; ``FogOfWar.is_explored``)."""
+        return self.fog.is_explored(x, y, player)
 
     def known_structure(self, player: int, x: int, y: int) -> StructureSnapshot | None:
-        """What ``player`` knows about the structure at ``(x, y)``.
+        """What ``player`` knows about the structure at ``(x, y)``: live in sight, else as last seen.
 
-        The one view of structures under fog of war: ``to_numpy(for_player)``,
-        the renderer and the LLM prompt all read it, so none of them can show
-        a player more than it knows (review core-5, critic-integration-3,
-        pygame-12).
-
-        Returns:
-            None when there is no structure at ``(x, y)`` or ``player`` has
-            never seen it. Otherwise a snapshot with ``owner``, ``health``
-            and ``turn_seen``: the live state (``turn_seen`` = this turn)
-            without fog of war or while ``player`` can see the tile, else
-            the state when ``player`` last saw it. Every HQ is known from
-            the start of the game (see ``_init_visibility``).
+        The one view of structures under fog of war (``FogOfWar.known_structure``);
+        None when there is none there or ``player`` has never seen it.
         """
-        tile = self.grid.get_tile(x, y)
-        if tile is None or not tile.is_capturable():
-            return None
-        vis_map = self.visibility_maps.get(player) if self.fog_of_war else None
-        if vis_map is None or vis_map.is_visible(x, y):
-            return StructureSnapshot(
-                tile_type=tile.type, owner=tile.player, health=tile.health, position=(x, y), turn_seen=self.turn_number
-            )
-        return vis_map.get_last_seen_structure(x, y)
+        return self.fog.known_structure(player, x, y)
 
     def pathing_units(self, player: int) -> list[Unit]:
-        """The units ``player``'s pathfinding treats as present: its blocking view.
+        """The units ``player``'s pathfinding treats as present (``FogOfWar.pathing_units``).
 
-        Without fog of war that is every unit. Under fog of war it is the
-        player's own units plus the units on tiles it can see. Letting a
-        hidden enemy block paths and destinations would reveal it through
-        the move mask (review core-5), so pathfinding plans around the units
-        the player knows of and ``move_unit`` resolves a collision with a
-        hidden unit when the move is carried out (the ambush rule, see
-        ``_resolve_ambush``). Public so the GUI's movement overlay plans with
-        the same view and shows exactly the tiles the engine allows.
+        Every unit without fog of war; under it, the player's own and its
+        teammates' units and the units it can see. Public so the GUI's
+        movement overlay plans with the same view and shows exactly the
+        tiles the engine allows.
         """
-        if not self.fog_of_war:
-            return self.units
-        # Teammates' units count as known wherever they stand: teams don't
-        # share vision, but a hidden teammate treated as absent would let a
-        # unit end its move on the teammate's tile.
-        return [u for u in self.units if self.are_allies(u.player, player) or self.is_position_visible(u.x, u.y, player)]
+        return self.fog.pathing_units(player)
 
     def capture_visible_enemies_for_unit(self, unit: Unit) -> None:
+        """Snapshot the enemies ``unit`` may attack this action: those its owner sees now.
+
+        Prevents "move to discover, then attack" under fog of war. The GUI
+        calls this when a unit is selected; ``move_unit`` takes it lazily
+        otherwise (``FogOfWar.capture_visible_enemies``).
         """
-        Capture which enemy units are currently visible to a unit's owner.
-
-        This is used for fog of war to prevent "move to discover, then attack"
-        exploitation. Call this when a unit starts its action (is selected).
-
-        Args:
-            unit: The unit starting its action
-        """
-        if not self.fog_of_war:
-            unit.visible_enemies_at_action_start = None
-            return
-
-        # The snapshot is taken once, when the action begins. A unit that has
-        # already moved this action keeps it: re-selecting an ambushed unit in
-        # the GUI (its move can't be cancelled) must not add the ambusher, or
-        # any enemy the move revealed, to its attack targets.
-        if unit.has_moved and unit.visible_enemies_at_action_start is not None:
-            return
-
-        visible_positions = set()
-        for enemy in self.units:
-            if self.are_enemies(enemy.player, unit.player):
-                if self.is_position_visible(enemy.x, enemy.y, unit.player):
-                    visible_positions.add((enemy.x, enemy.y))
-
-        unit.visible_enemies_at_action_start = visible_positions
+        self.fog.capture_visible_enemies(unit)
 
     def is_enemy_attackable_by_unit(self, unit: Unit, enemy: Unit) -> bool:
-        """
-        Check if an enemy is attackable by a unit considering FOW pre-move snapshot.
-
-        In fog of war mode, a unit can only attack enemies that were visible
-        when the unit started its action, not enemies discovered by moving.
-
-        Args:
-            unit: The attacking unit
-            enemy: The potential target
-
-        Returns:
-            True if the enemy can be attacked
-        """
-        if not self.fog_of_war:
-            return True  # No FOW, all visible enemies are attackable
-
-        # If no snapshot was captured, fall back to current visibility
-        if unit.visible_enemies_at_action_start is None:
-            return self.is_position_visible(enemy.x, enemy.y, unit.player)
-
-        # Check if enemy's position was in the pre-move snapshot
-        return (enemy.x, enemy.y) in unit.visible_enemies_at_action_start
+        """Whether fog of war lets ``unit`` attack ``enemy``: seen when its action began (``FogOfWar.is_enemy_attackable``)."""
+        return self.fog.is_enemy_attackable(unit, enemy)
 
     def is_unit_type_enabled(self, unit_type: str) -> bool:
         """Check if a unit type is enabled for this game."""
@@ -816,86 +677,14 @@ class GameState:
         self.action_history.append(action_record)
 
     # ------------------------------------------------------------------
-    # Legality predicates
+    # Validating actions (the rules are in core/legal_actions.py)
     # ------------------------------------------------------------------
-    # Each rule is written once and used twice: ``_compute_legal_actions``
-    # enumerates what a player may do with it, and the action methods below
-    # reject anything else with it. The action methods used to trust their
-    # callers, so any caller that did not pre-filter against the legal list
-    # (multi_discrete policies, LLM bots, the rule bots' knight charge, the
-    # GUI) could spawn units anywhere, attack across the map, act out of
-    # turn or seize an HQ several times in one turn (review core-2). One
-    # definition per rule is what keeps the mask and the engine agreeing: an
-    # offered action the engine rejects traps a deterministic policy, and an
-    # accepted action the mask never offers is an exploit.
-    #
-    # Two gates apply only on execution, not in enumeration: the game must
-    # not be over, and it must be the acting player's turn.
-    # ``get_legal_actions(player)`` still answers for any player at any time
-    # (masks and prompts are built for a player's own turn in practice).
-
-    @staticmethod
-    def _is_ready_unit(unit: Unit, player: int) -> bool:
-        """``unit`` belongs to ``player``, is alive and is not paralyzed."""
-        return unit.player == player and unit.health > 0 and not unit.is_paralyzed()
-
-    def _under_unit_cap(self, player: int) -> bool:
-        return sum(1 for u in self.units if u.player == player) < self.max_units_per_player
-
-    def _is_free_spawn_tile(self, player: int, x: int, y: int) -> bool:
-        """An in-bounds, empty Building owned by ``player`` (HQs and towers never spawn)."""
-        tile = self.grid.get_tile(x, y)
-        return (
-            tile is not None
-            and tile.type == TileType.BUILDING.value
-            and tile.player == player
-            and self.get_unit_at_position(x, y) is None
-        )
-
-    def _can_afford(self, player: int, unit_type: str) -> bool:
-        return self.player_gold[player] >= self.unit_data[unit_type]["cost"]
-
-    def _find_paths(
-        self,
-        unit: Unit,
-        blocked: set[tuple[int, int]] | None = None,
-        came_from: dict[tuple[int, int], tuple[int, int]] | None = None,
-    ) -> dict[tuple[int, int], int]:
-        """Every tile ``unit`` can reach this turn -> tiles stepped, in search order.
-
-        Walkable tiles within its movement (under the game's terrain move
-        costs), passing through friendly units but never enemies; tiles
-        holding a friendly unit are included, as a path may cross them. The
-        blockers are collected once per search (or once per
-        ``get_legal_actions`` call, for all of a player's units: pass
-        ``blocked``), so each tile the search examines costs a set lookup
-        rather than a scan of every unit (review core-20). They come from the
-        units the player knows of (``pathing_units``: all of them without fog
-        of war), so a hidden enemy neither blocks a path nor reveals itself
-        through the move mask (review core-5). ``came_from`` receives the
-        search's path tree (the ambush rule walks it).
-        """
-        if blocked is None:
-            blocked = self.mechanics.movement_blockers(self.pathing_units(unit.player), unit, self.teams)
-        return unit.find_paths(
-            self.grid.width,
-            self.grid.height,
-            self.mechanics.passability(self.grid, blocked),
-            self.terrain_rules.move_cost_fn(self.grid),
-            came_from,
-        )
-
-    def _move_paths(
-        self,
-        unit: Unit,
-        occupied: set[tuple[int, int]] | None = None,
-        blocked: set[tuple[int, int]] | None = None,
-        came_from: dict[tuple[int, int], tuple[int, int]] | None = None,
-    ) -> dict[tuple[int, int], int]:
-        """``_find_paths`` restricted to tiles ``unit`` may end on (no known unit there)."""
-        if occupied is None:
-            occupied = {(u.x, u.y) for u in self.pathing_units(unit.player)}
-        return {pos: steps for pos, steps in self._find_paths(unit, blocked, came_from).items() if pos not in occupied}
+    # Each rule is written once, in core/legal_actions.py, and used twice:
+    # ``enumerate_legal_actions`` offers what a player may do with it, and
+    # the validators below, which the action methods and ``is_legal`` call,
+    # reject anything else with it (review core-2). They add the two gates
+    # that apply only on execution, not in enumeration: the game must not be
+    # over, and it must be the acting player's turn.
 
     def get_reachable_positions(self, unit: Unit) -> list[tuple[int, int]]:
         """Tiles ``unit`` can move through this turn, including ones friends stand on.
@@ -905,7 +694,7 @@ class GameState:
         but under the game's terrain move costs and without scanning every
         unit per tile: for bots, overlays and anything else that plans paths.
         """
-        return list(self._find_paths(unit))
+        return list(legal_actions.find_paths(self, unit))
 
     def get_move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
         """Tiles ``unit`` may legally end a move on (reachable and empty), in search order.
@@ -913,97 +702,7 @@ class GameState:
         Ignores whose turn it is and whether the unit may still move; see
         ``get_legal_actions`` for that.
         """
-        return list(self._move_paths(unit))
-
-    def _resolve_ambush(self, unit: Unit, path: list[tuple[int, int]]) -> tuple[tuple[int, int], Unit | None]:
-        """Walk ``unit`` along its planned ``path`` and return where it really stops.
-
-        The ambush rule (fog of war only). The path (start tile first) was
-        planned around the units the player can see, so a hidden unit may
-        stand on it. The first tile the unit cannot pass (a hidden enemy; a
-        teammate's unit, like its own, is passed through) or end on (a
-        hidden unit on the destination) stops it on the last tile before
-        that one where no unit stands, at worst its start tile.
-
-        Returns:
-            ``(stop_tile, blocker)``; ``blocker`` is None when the path is clear.
-        """
-        last = len(path) - 1
-        for i in range(1, last + 1):
-            x, y = path[i]
-            blocker = self.get_unit_at_position(x, y)
-            if blocker is None:
-                continue
-            if i < last and self.mechanics.can_move_to_position(
-                x, y, self.grid, self.units, moving_unit=unit, teams=self.teams
-            ):
-                continue  # a unit it may pass through
-            for j in range(i - 1, 0, -1):
-                if self.get_unit_at_position(*path[j]) is None:
-                    return path[j], blocker
-            return path[0], blocker
-        return path[last], None
-
-    def _can_attack_target(self, unit: Unit, target: Unit) -> bool:
-        """A living enemy within ``unit``'s reach that fog of war lets it attack.
-
-        Under fog of war the target must have been visible when the unit
-        started its action (``is_enemy_attackable_by_unit``), so moving to
-        discover an enemy does not also let the unit hit it.
-        """
-        return (
-            self.are_enemies(target.player, unit.player)
-            and target.health > 0
-            and self.mechanics.can_reach(unit, target.x, target.y, self.grid)
-            and (not self.fog_of_war or self.is_enemy_attackable_by_unit(unit, target))
-        )
-
-    def _can_paralyze_target(self, unit: Unit, target: Unit) -> bool:
-        """Mage off cooldown, an attackable enemy in paralyze range that is not already paralyzed.
-
-        Re-casting on a paralyzed target would only refresh the status (a
-        near no-op) and inflate the action space, the same reason heal,
-        cure and the buffs skip an ally that already has the effect.
-        """
-        return (
-            unit.can_use_paralyze()
-            and not target.is_paralyzed()
-            and self.mechanics.in_ability_range("paralyze", unit, target)
-            and self._can_attack_target(unit, target)
-        )
-
-    def _can_heal_target(self, unit: Unit, target: Unit) -> bool:
-        return unit.type == "C" and self.mechanics.is_healable_ally(unit, target, self.teams)
-
-    def _can_cure_target(self, unit: Unit, target: Unit) -> bool:
-        return unit.type == "C" and self.mechanics.is_curable_ally(unit, target, self.teams)
-
-    def _can_haste_target(self, unit: Unit, target: Unit) -> bool:
-        return unit.can_use_haste() and self.mechanics.is_hasteable_ally(unit, target)
-
-    def _can_defence_buff_target(self, unit: Unit, target: Unit) -> bool:
-        return unit.can_use_defence_buff() and self.mechanics.is_defence_buffable_ally(unit, target, self.teams)
-
-    def _can_attack_buff_target(self, unit: Unit, target: Unit) -> bool:
-        return unit.can_use_attack_buff() and self.mechanics.is_attack_buffable_ally(unit, target, self.teams)
-
-    def _can_seize(self, unit: Unit) -> bool:
-        """``unit`` stands on a structure neither its player nor a teammate owns."""
-        tile = self.grid.get_tile(unit.x, unit.y)
-        return tile is not None and tile.is_capturable() and not self.are_allies(tile.player, unit.player)
-
-    # The target rule of each targeted action (``attack`` and the abilities),
-    # by its ``get_legal_actions`` key: what ``_may_target`` checks, so the
-    # action methods and ``is_legal`` read the same one.
-    _TARGET_RULES: dict[str, Callable[[GameState, Unit, Unit], bool]] = {
-        "attack": _can_attack_target,
-        "paralyze": _can_paralyze_target,
-        "heal": _can_heal_target,
-        "cure": _can_cure_target,
-        "haste": _can_haste_target,
-        "defence_buff": _can_defence_buff_target,
-        "attack_buff": _can_attack_buff_target,
-    }
+        return list(legal_actions.move_paths(self, unit))
 
     def _may_act(
         self,
@@ -1030,7 +729,7 @@ class GameState:
             reason = "a unit involved is no longer in play"
         elif unit.player != self.current_player:
             reason = f"it is player {self.current_player}'s turn"
-        elif not self._is_ready_unit(unit, unit.player):
+        elif not legal_actions.is_ready_unit(unit, unit.player):
             reason = "the unit is dead or paralyzed"
         elif not (unit.can_move if action == "move" else unit.can_attack):
             reason = "the unit has already spent that action this turn"
@@ -1043,13 +742,13 @@ class GameState:
         return False
 
     def _may_target(self, action: str, actor: Unit, target: Unit, log: bool = True) -> bool:
-        """``_may_act`` for the targeted action ``action`` (a ``_TARGET_RULES`` key) from ``actor`` on ``target``."""
-        rule = self._TARGET_RULES[action]
+        """``_may_act`` for the targeted action ``action`` (a ``TARGET_RULES`` key) from ``actor`` on ``target``."""
+        rule = TARGET_RULES[action]
         return self._may_act(action, actor, target, lambda: rule(self, actor, target), log=log)
 
     def _may_seize(self, unit: Unit, log: bool = True) -> bool:
         """``_may_act`` for ``unit`` seizing the structure it stands on."""
-        return self._may_act("seize", unit, rule=lambda: self._can_seize(unit), log=log)
+        return self._may_act("seize", unit, rule=lambda: legal_actions.can_seize(self, unit), log=log)
 
     def _move_steps(
         self,
@@ -1069,7 +768,7 @@ class GameState:
         """
         if not self._may_act("move", unit, log=log):
             return None
-        steps = self._move_paths(unit, came_from=came_from).get((to_x, to_y))
+        steps = legal_actions.move_paths(self, unit, came_from=came_from).get((to_x, to_y))
         if steps is None and log:
             logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
         return steps
@@ -1097,11 +796,11 @@ class GameState:
         # The per-player unit cap. Mirrored in get_legal_actions so the RL
         # action mask hides create_unit at the cap rather than the agent
         # issuing a rejected action and eating the invalid_action penalty.
-        elif not self._under_unit_cap(player):
+        elif not legal_actions.under_unit_cap(self, player):
             reason = f"the player is at the unit cap ({self.max_units_per_player})"
-        elif not self._is_free_spawn_tile(player, x, y):
+        elif not legal_actions.is_free_spawn_tile(self, player, x, y):
             reason = "not an empty building the player owns"
-        elif not self._can_afford(player, unit_type):
+        elif not legal_actions.can_afford(self, player, unit_type):
             reason = f"insufficient gold ({self.player_gold[player]} < {self.unit_data[unit_type]['cost']})"
         else:
             return True
@@ -1193,7 +892,7 @@ class GameState:
         self.units.append(unit)
         self._invalidate_cache()
         # A placed unit can reveal (or stand in) fog for every player.
-        self.update_visibility()
+        self.fog.update()
         return unit
 
     def create_unit(self, unit_type: str, x: int, y: int, player: int | None = None) -> Unit | None:
@@ -1230,7 +929,7 @@ class GameState:
         self.units.append(unit)
         self._invalidate_cache()
         # The new unit sees from its first moment (review core-12).
-        self.update_visibility(player)
+        self.fog.update(player)
 
         # Record action. unit_id lets the replay player rebuild its
         # id -> Unit map on the fly (v3 schema), so subsequent
@@ -1279,15 +978,12 @@ class GameState:
             return False
 
         # FOW: Snapshot pre-move enemy visibility so the unit cannot attack
-        # enemies it discovers by moving. The UI's input_handler captures this
+        # enemies it discovers by moving (the UI's input_handler captures this
         # at unit-selection time; for RL/LLM/bot code paths that drive
-        # move_unit directly, capture lazily here just before the move.
-        if self.fog_of_war and unit.visible_enemies_at_action_start is None:
-            self.capture_visible_enemies_for_unit(unit)
-        # FOW: remember what the mover's side saw before the move, so a
-        # cancel_move can take back what the move revealed (review core-9).
-        if self.fog_of_war and unit.player in self.visibility_maps:
-            unit.pre_move_visibility = self.visibility_maps[unit.player].copy()
+        # move_unit directly it is captured lazily here), and remember what
+        # the mover's side saw, so a cancel_move can take back what the move
+        # revealed (review core-9).
+        self.fog.before_move(unit)
 
         # FOW ambush rule: without fog of war the path was planned around
         # every unit, so it is always clear.
@@ -1297,7 +993,7 @@ class GameState:
             while path[-1] != (from_x, from_y):
                 path.append(came_from[path[-1]])
             path.reverse()
-            (to_x, to_y), ambusher = self._resolve_ambush(unit, path)
+            (to_x, to_y), ambusher = self.fog.resolve_ambush(unit, path)
             if ambusher is not None:
                 # Tiles actually stepped (for the path-length Knight's Charge).
                 steps = path.index((to_x, to_y))
@@ -1335,7 +1031,7 @@ class GameState:
         self._invalidate_cache()
 
         # Update visibility for the moving player
-        self.update_visibility(unit.player)
+        self.fog.update(unit.player)
 
         return True
 
@@ -1402,7 +1098,7 @@ class GameState:
             self.units.remove(target)
             self._invalidate_cache()
             # A dead unit stops giving its owner vision (review core-12).
-            self.update_visibility(defeated_player)
+            self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
 
         if not result["attacker_alive"]:
@@ -1413,7 +1109,7 @@ class GameState:
             if attacker in self.units:
                 self.units.remove(attacker)
             self._invalidate_cache()
-            self.update_visibility(defeated_player)
+            self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
 
         # Spend the attacker's action (only if still alive; a hasted attacker
@@ -1438,8 +1134,8 @@ class GameState:
         """The shared body of the targeted abilities (paralyze, heal, cure, haste, the buffs).
 
         Validates with ``_may_target`` (``_may_act`` and the ability's
-        ``_can_*_target`` predicate, the one its legal actions are listed
-        with), returning ``rejected`` and changing nothing when that fails.
+        ``legal_actions.TARGET_RULES`` rule, the one its legal actions are
+        listed by), returning ``rejected`` and changing nothing when that fails.
         Otherwise applies the mechanics call ``apply``; if it took effect,
         spends ``actor``'s action (``_consume_action``), runs
         ``after_apply``, records ``action`` with the fields ``actor_pos_field``
@@ -1646,7 +1342,7 @@ class GameState:
         # A captured structure gives its vision to the capturer and takes it
         # from the previous owner (review core-12).
         if result["captured"]:
-            self.update_visibility()
+            self.fog.update()
 
         return result
 
@@ -1880,7 +1576,7 @@ class GameState:
         income_data["healing"] = healing_stats
 
         # Update visibility for the new current player
-        self.update_visibility(player)
+        self.fog.update(player)
 
         self._invalidate_cache()
         return income_data
@@ -2013,23 +1709,9 @@ class GameState:
                 actor_unit_id=unit.unit_id,
             )
 
+        # FOW: the side's view goes back to what it was before the move.
         snapshot, unit.pre_move_visibility = unit.pre_move_visibility, None
-        if self.fog_of_war:
-            if snapshot is not None:
-                self.visibility_maps[unit.player] = snapshot
-            # Any attack snapshot taken since the move (by this unit or
-            # another one yet to move, e.g. one that moved and was cancelled
-            # in turn) may hold enemies only the move revealed; drop them so
-            # they are taken again from the restored view. Units that moved
-            # took theirs before this move, the latest action.
-            for other in self.units:
-                if other.player == unit.player and not other.has_moved:
-                    other.visible_enemies_at_action_start = None
-            # Re-derive what the side sees from where its units stand now
-            # (the unit back on its origin, any later mover where it went).
-            # Without this the tiles it saw from where it moved to stayed
-            # VISIBLE, so known_structure served their live state.
-            self.update_visibility(unit.player)
+        self.fog.undo_move(unit, snapshot)
 
         self._invalidate_cache()
         return True
@@ -2082,7 +1764,7 @@ class GameState:
             # whether it did anything is decided before the call.
             running = not self.game_over
             return ActionResult(kind, running, self.end_turn())
-        if kind in self._TARGET_RULES:
+        if kind in TARGET_RULES:
             result = getattr(self, kind)(action[ACTOR_KEYS[kind]], action["target"])
             if kind == "attack":
                 # An executed attack always deals at least 1 damage.
@@ -2130,13 +1812,17 @@ class GameState:
             return self._may_seize(action["unit"], log=False)
         if kind == "end_turn":
             return not self.game_over
-        if kind in self._TARGET_RULES:
+        if kind in TARGET_RULES:
             return self._may_target(kind, action[ACTOR_KEYS[kind]], action["target"], log=False)
         raise ValueError(f"Unknown action kind {kind!r}; expected one of {', '.join(ACTION_KINDS)}")
 
     def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
-        """
-        Get all legal actions for the current player.
+        """Every action ``player`` (default: the current player) may take now, by kind.
+
+        The enumeration is ``legal_actions.enumerate_legal_actions``; this
+        caches its result per player until the state next changes (every
+        mutator invalidates the cache), because the RL env, the bots and
+        the GUI ask for the same actions many times between changes.
 
         Returns:
             dict: Legal actions organized by type
@@ -2157,106 +1843,17 @@ class GameState:
                     )
             return cached
 
-        legal_actions = self._compute_legal_actions(player)
+        actions = self._compute_legal_actions(player)
 
         # Cache the result
-        self._legal_actions_cache[player] = legal_actions
+        self._legal_actions_cache[player] = actions
         self._legal_actions_cache_valid = True
 
-        return legal_actions
+        return actions
 
     def _compute_legal_actions(self, player: int) -> dict[str, list[Any]]:
-        """Enumerate ``player``'s legal actions from the current state (uncached)."""
-        legal_actions = {
-            "create_unit": [],
-            "move": [],
-            "attack": [],
-            "paralyze": [],
-            "heal": [],
-            "cure": [],
-            "haste": [],
-            "defence_buff": [],
-            "attack_buff": [],
-            "seize": [],
-            "end_turn": True,
-        }
-
-        # Every test below is one of the predicates the action methods
-        # validate with (see "Legality predicates"), so everything offered
-        # here is accepted on the player's turn and nothing else is. The
-        # iteration order (units, reachable tiles, targets) is part of the
-        # flat_discrete action encoding and must not change.
-
-        # Building units (only at Buildings, not HQ)
-        # Only include enabled unit types. Suppressed entirely once the player
-        # is at the unit cap so the action mask matches create_unit's own
-        # enforcement (no offered-then-rejected create actions).
-        if self._under_unit_cap(player):
-            for tile in self.grid.get_capturable_tiles(player):
-                if self._is_free_spawn_tile(player, tile.x, tile.y):
-                    for unit_type in self.enabled_units:
-                        if self._can_afford(player, unit_type):
-                            legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
-
-        # Unit actions. Every move search shares one occupancy set, and one
-        # blocker set: who blocks a unit depends only on its player. Both come
-        # from the units this player knows of (see ``pathing_units``).
-        known_units = self.pathing_units(player)
-        occupied = {(u.x, u.y) for u in known_units}
-        blocked: set[tuple[int, int]] | None = None
-        for unit in self.units:
-            # Guard on health: dead units are normally removed synchronously
-            # by ``attack`` (see self.units.remove), but the helpers below all
-            # filter on ``health > 0`` defensively -- mirror that here so a
-            # corpse left in ``self.units`` by any future deferred-removal path
-            # (AoE, end-of-turn DoT, status damage) can't emit phantom actions.
-            if not self._is_ready_unit(unit, player):
-                continue
-
-            # Movement: reachable tiles that are also free to end on
-            if unit.can_move:
-                if blocked is None:
-                    blocked = self.mechanics.movement_blockers(known_units, unit, self.teams)
-                for pos in self._move_paths(unit, occupied, blocked):
-                    legal_actions["move"].append(
-                        {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
-                    )
-
-            if not unit.can_attack:
-                continue
-
-            # Combat: every enemy in reach (adjacent for melee, 1-2 for
-            # Mages/Sorcerers, 2-3 or 2-4 on a mountain for Archers); Mages
-            # can also paralyze one of them when off cooldown.
-            for enemy in self.units:
-                if self._can_attack_target(unit, enemy):
-                    legal_actions["attack"].append({"attacker": unit, "target": enemy})
-                    if self._can_paralyze_target(unit, enemy):
-                        legal_actions["paralyze"].append({"paralyzer": unit, "target": enemy})
-
-            # Healing / curing (Cleric only) - range 1..CLERIC_HEAL_RANGE
-            if unit.type == "C":
-                for ally in self.mechanics.get_healable_allies(unit, self.units, self.teams):
-                    legal_actions["heal"].append({"healer": unit, "target": ally})
-                for ally in self.mechanics.get_curable_allies(unit, self.units, self.teams):
-                    legal_actions["cure"].append({"curer": unit, "target": ally})
-
-            # Sorcerer abilities, each gated on its own cooldown
-            if unit.can_use_haste():
-                for ally in self.mechanics.get_hasteable_allies(unit, self.units):
-                    legal_actions["haste"].append({"sorcerer": unit, "target": ally})
-            if unit.can_use_defence_buff():
-                for ally in self.mechanics.get_defence_buffable_allies(unit, self.units, self.teams):
-                    legal_actions["defence_buff"].append({"sorcerer": unit, "target": ally})
-            if unit.can_use_attack_buff():
-                for ally in self.mechanics.get_attack_buffable_allies(unit, self.units, self.teams):
-                    legal_actions["attack_buff"].append({"sorcerer": unit, "target": ally})
-
-            # Seizing
-            if self._can_seize(unit):
-                legal_actions["seize"].append({"unit": unit, "tile": self.grid.get_tile(unit.x, unit.y)})
-
-        return legal_actions
+        """Enumerate ``player``'s legal actions from the current state (uncached; ``enumerate_legal_actions``)."""
+        return legal_actions.enumerate_legal_actions(self, player)
 
     # How clone_for_search treats each attribute (review core-18). Shared:
     # fixed for the whole game (configuration, terrain source, stateless
@@ -2299,6 +1896,9 @@ class GameState:
                 setattr(clone, name, self._SEARCH_DROPPED_ATTRS[name]())
             elif name == "grid":
                 clone.grid = self._clone_grid_for_search(value)
+            elif name == "fog":
+                # Deep-copied like any other state, but bound to the clone.
+                clone.fog = value.copy_for(clone)
             elif name == "units":
                 clone.units = [self._clone_unit_for_search(unit) for unit in value]
             else:
@@ -2383,7 +1983,7 @@ class GameState:
         # visible, as is_position_visible has it).
         fog_player: int | None = None
         if self.fog_of_war and for_player is not None:
-            vis_map = self.visibility_maps.get(for_player)
+            vis_map = self.fog.maps.get(for_player)
             if vis_map is not None:
                 visibility_state = vis_map.to_numpy()
                 fog_player = for_player
@@ -2417,7 +2017,7 @@ class GameState:
             for x, y in self.grid.structure_positions:
                 if visibility_state[y, x] == VISIBLE:
                     continue
-                known = self.known_structure(fog_player, x, y)
+                known = self.fog.known_structure(fog_player, x, y)
                 tile = self.grid.tiles[y][x]
                 if known is None:
                     grid_state[y, x, 1:] = 0

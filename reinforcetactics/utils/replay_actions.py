@@ -30,6 +30,7 @@ from collections.abc import Callable
 from typing import Any
 
 from reinforcetactics.core.actions import ACTOR_KEYS
+from reinforcetactics.core.legal_actions import TARGET_RULES
 from reinforcetactics.rules import HASTE_COOLDOWN
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,7 @@ def _apply_legacy_haste_on_paralyzed(game_state, sorcerer, target) -> bool:
         return False
     paralyzed_turns, target.paralyzed_turns = target.paralyzed_turns, 0
     try:
-        allowed = game_state._can_haste_target(sorcerer, target)
+        allowed = TARGET_RULES["haste"](game_state, sorcerer, target)
     finally:
         target.paralyzed_turns = paralyzed_turns
     if (
