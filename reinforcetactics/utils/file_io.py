@@ -49,8 +49,9 @@ class FileIO:
                 - original_map_data: 2D list of the unpadded map data
                 - original_width: width before padding
                 - original_height: height before padding
-                - padding_offset_x: x offset due to padding (0 if no padding or for_ui=False)
-                - padding_offset_y: y offset due to padding (0 if no padding or for_ui=False)
+                - padding_offset_x: where the file's column 0 lands in map_data,
+                  minimum-size padding and water border included (0 if for_ui=False)
+                - padding_offset_y: the same for row 0
                 - map_file: filepath that was loaded
         """
         try:
@@ -82,19 +83,13 @@ class FileIO:
             padding_offset_x = 0
             padding_offset_y = 0
 
-            # Only apply minimum size padding if loading for UI
+            # Minimum-size padding and water border, only when loading for UI
             if for_ui:
                 height, width = map_data.shape
                 if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
                     print(f"⚠️  Map size ({width}x{height}) is smaller than minimum ({MIN_MAP_SIZE}x{MIN_MAP_SIZE})")
                     print("   Padding map to minimum size for UI...")
-                    map_data, padding_offset_x, padding_offset_y = FileIO._pad_map(map_data, MIN_MAP_SIZE, MIN_MAP_SIZE)
-
-            # Add water borders if loading for UI (after ensuring minimum size)
-            if for_ui:
-                map_data = FileIO.add_water_border(map_data, border_size)
-
-            height, width = map_data.shape
+                map_data, padding_offset_x, padding_offset_y = FileIO.pad_for_display(map_data, MIN_MAP_SIZE, border_size)
 
             return {
                 "map_data": map_data,
@@ -117,9 +112,37 @@ class FileIO:
             return None
 
     @staticmethod
+    def pad_for_display(map_data, min_size=MIN_MAP_SIZE, border_size=2):
+        """
+        Frame a map for on-screen display: centre it in at least
+        ``min_size`` x ``min_size`` ocean, then add ``border_size`` rings of
+        ocean around that.
+
+        The one padding routine for every display path: UI games
+        (``load_map(for_ui=True)``), the replay viewer and video export.
+
+        Args:
+            map_data: pandas DataFrame, numpy array or list of rows
+            min_size: Minimum width and height before the border (0 = none)
+            border_size: Number of ocean border layers
+
+        Returns:
+            tuple: (padded DataFrame, offset_x, offset_y), where the offsets
+            are where the map's (0, 0) lands, border included
+        """
+        if not isinstance(map_data, pd.DataFrame):
+            map_data = pd.DataFrame(map_data)
+        padded, offset_x, offset_y = FileIO._pad_map(map_data, min_size, min_size)
+        padded = FileIO.add_water_border(padded, border_size)
+        border = max(border_size, 0)
+        return padded, offset_x + border, offset_y + border
+
+    @staticmethod
     def _pad_map(map_data, min_width, min_height):
         """
         Pad a map to minimum dimensions with ocean tiles.
+
+        A dimension already at or above its minimum is kept as is.
 
         Args:
             map_data: pandas DataFrame with map data
@@ -137,7 +160,7 @@ class FileIO:
 
         if pad_width > 0 or pad_height > 0:
             # Pad with ocean tiles ('o')
-            padded = pd.DataFrame(np.full((min_height, min_width), "o", dtype=object))
+            padded = pd.DataFrame(np.full((current_height + pad_height, current_width + pad_width), "o", dtype=object))
 
             # Copy original data into center
             start_y = pad_height // 2

@@ -833,8 +833,8 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
                     "start_time": timestamp.isoformat(),
                     "map_file": self.game_state.map_file_used,
                     "map_dimensions": {
-                        "width": self.game_state.original_map_width,
-                        "height": self.game_state.original_map_height,
+                        "width": self.game_state.grid.width,
+                        "height": self.game_state.grid.height,
                     },
                     "system_prompt": system_prompt,
                     "turns": [turn_data],
@@ -1150,18 +1150,19 @@ Respond with your strategic plan in JSON format."""
         # Get legal actions first
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
 
-        # Serialize player's units with IDs (convert to original coordinates)
+        # Serialize player's units with IDs. Every coordinate the LLM sees or
+        # sends is on the game's grid (for a GUI game the UI-padded map), the
+        # same one map_width/map_height describe.
         player_units = []
         unit_id = 0
         unit_id_map = {}  # Map unit objects to IDs for later reference
 
         for unit in self.game_state.units:
             if unit.player == self.bot_player:
-                orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
                 unit_data = {
                     "id": unit_id,
                     "type": unit.type,
-                    "position": [orig_x, orig_y],
+                    "position": [unit.x, unit.y],
                     "hp": unit.health,
                     "max_hp": unit.max_health,
                     "can_move": unit.can_move,
@@ -1172,12 +1173,11 @@ Respond with your strategic plan in JSON format."""
                 unit_id_map[unit] = unit_id
                 unit_id += 1
 
-        # Serialize the other players' units (less detail, original
-        # coordinates): enemies, and in a team game the teammates' units,
-        # which are allies for every rule and so must not be listed as
-        # enemies. With fog of war only enemies in sight are included; a
-        # teammate's units are known wherever they stand (see
-        # GameState.pathing_units).
+        # Serialize the other players' units (less detail): enemies, and in
+        # a team game the teammates' units, which are allies for every rule
+        # and so must not be listed as enemies. With fog of war only enemies
+        # in sight are included; a teammate's units are known wherever they
+        # stand (see GameState.pathing_units).
         enemy_units = []
         teammate_units = []
         for unit in self.game_state.units:
@@ -1191,10 +1191,9 @@ Respond with your strategic plan in JSON format."""
             ):
                 continue
 
-            orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
             other_data = {
                 "type": unit.type,
-                "position": [orig_x, orig_y],
+                "position": [unit.x, unit.y],
                 "hp": unit.health,
                 "max_hp": unit.max_health,
             }
@@ -1203,7 +1202,7 @@ Respond with your strategic plan in JSON format."""
             else:
                 teammate_units.append({**other_data, "player": unit.player})
 
-        # Serialize buildings (convert to original coordinates)
+        # Serialize buildings
         # With fog of war, only include structures the bot knows of, with the
         # owner it knows (GameState.known_structure, the same view the RL
         # observation and the renderer use): live while in sight, else as
@@ -1231,10 +1230,9 @@ Respond with your strategic plan in JSON format."""
                             continue  # never seen
                         owner = known.owner
 
-                    orig_x, orig_y = self.game_state.padded_to_original_coords(tile.x, tile.y)
                     building_info = {
                         "type": tile.type,
-                        "position": [orig_x, orig_y],
+                        "position": [tile.x, tile.y],
                         "income": income_by_type[tile.type],
                     }
 
@@ -1267,8 +1265,8 @@ Respond with your strategic plan in JSON format."""
         # Build the state dictionary
         state = {
             "map_name": map_name,
-            "map_width": self.game_state.original_map_width,
-            "map_height": self.game_state.original_map_height,
+            "map_width": self.game_state.grid.width,
+            "map_height": self.game_state.grid.height,
             "turn_number": self.game_state.turn_number,
             "player_gold": self.game_state.player_gold[self.bot_player],
             "enabled_units": enabled_units,
@@ -1343,9 +1341,6 @@ Respond with your strategic plan in JSON format."""
         ]
 
         for to_x, to_y in reachable_positions:
-            # Convert to original coords for output
-            orig_to_x, orig_to_y = self.game_state.padded_to_original_coords(to_x, to_y)
-
             # Check if moving here allows attacking enemies
             # Temporarily calculate what would be in range from this position
             tile = self.game_state.grid.get_tile(to_x, to_y)
@@ -1358,9 +1353,8 @@ Respond with your strategic plan in JSON format."""
                 # Check if enemy would be in attack range from new position
                 min_range, max_range = unit.get_attack_range(on_mountain)
                 if min_range <= distance <= max_range:
-                    orig_enemy_x, orig_enemy_y = self.game_state.padded_to_original_coords(enemy.x, enemy.y)
                     result["move_then_attack"].append(
-                        {"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_attack": [orig_enemy_x, orig_enemy_y]}
+                        {"unit_id": unit_id, "move_to": [to_x, to_y], "then_attack": [enemy.x, enemy.y]}
                     )
 
                     # Mage can also paralyze when the target is within its valid range
@@ -1368,8 +1362,8 @@ Respond with your strategic plan in JSON format."""
                         result["move_then_paralyze"].append(
                             {
                                 "unit_id": unit_id,
-                                "move_to": [orig_to_x, orig_to_y],
-                                "then_paralyze": [orig_enemy_x, orig_enemy_y],
+                                "move_to": [to_x, to_y],
+                                "then_paralyze": [enemy.x, enemy.y],
                             }
                         )
 
@@ -1386,23 +1380,20 @@ Respond with your strategic plan in JSON format."""
                     owner = known.owner if known is not None else None
                 # Its own or a teammate's structure can't be seized.
                 if known_to_bot and not self.game_state.are_allies(owner, self.bot_player):
-                    result["move_then_seize"].append(
-                        {"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True}
-                    )
+                    result["move_then_seize"].append({"unit_id": unit_id, "move_to": [to_x, to_y], "then_seize": True})
 
             # Cleric-specific: check for heal/cure opportunities
             if unit.type == "C":
                 for ally in ally_units:
                     # The engine's heal/cure reach (GameMechanics.is_healable_ally)
                     if 1 <= abs(to_x - ally.x) + abs(to_y - ally.y) <= CLERIC_HEAL_RANGE:
-                        orig_ally_x, orig_ally_y = self.game_state.padded_to_original_coords(ally.x, ally.y)
                         # Heal if damaged
                         if ally.health < ally.max_health:
                             result["move_then_heal"].append(
                                 {
                                     "unit_id": unit_id,
-                                    "move_to": [orig_to_x, orig_to_y],
-                                    "then_heal": [orig_ally_x, orig_ally_y],
+                                    "move_to": [to_x, to_y],
+                                    "then_heal": [ally.x, ally.y],
                                 }
                             )
                         # Cure if paralyzed
@@ -1410,15 +1401,15 @@ Respond with your strategic plan in JSON format."""
                             result["move_then_cure"].append(
                                 {
                                     "unit_id": unit_id,
-                                    "move_to": [orig_to_x, orig_to_y],
-                                    "then_cure": [orig_ally_x, orig_ally_y],
+                                    "move_to": [to_x, to_y],
+                                    "then_cure": [ally.x, ally.y],
                                 }
                             )
 
         return result
 
     def _format_legal_actions(self, legal_actions: dict[str, list[Any]], unit_id_map: dict) -> dict[str, list[dict[str, Any]]]:
-        """Format legal actions for LLM consumption with original map coordinates."""
+        """Format legal actions for LLM consumption."""
         formatted: dict[str, list[dict[str, Any]]] = {
             "create_unit": [],
             "move": [],
@@ -1435,59 +1426,60 @@ Respond with your strategic plan in JSON format."""
             "move_then_paralyze": [],
         }
 
-        # Create unit actions (convert coordinates)
+        # Create unit actions
         for action in legal_actions["create_unit"]:
-            orig_x, orig_y = self.game_state.padded_to_original_coords(action["x"], action["y"])
             formatted["create_unit"].append(
                 {
                     "unit_type": action["unit_type"],
-                    "position": [orig_x, orig_y],
+                    "position": [action["x"], action["y"]],
                     "cost": self.game_state.unit_data[action["unit_type"]]["cost"],  # engine overrides included
                 }
             )
 
-        # Move actions (convert coordinates)
+        # Move actions
         for action in legal_actions["move"]:
             if action["unit"] in unit_id_map:
-                from_x, from_y = self.game_state.padded_to_original_coords(action["from_x"], action["from_y"])
-                to_x, to_y = self.game_state.padded_to_original_coords(action["to_x"], action["to_y"])
                 formatted["move"].append(
-                    {"unit_id": unit_id_map[action["unit"]], "from": [from_x, from_y], "to": [to_x, to_y]}
+                    {
+                        "unit_id": unit_id_map[action["unit"]],
+                        "from": [action["from_x"], action["from_y"]],
+                        "to": [action["to_x"], action["to_y"]],
+                    }
                 )
 
-        # Attack actions (convert coordinates)
+        # Attack actions
         for action in legal_actions["attack"]:
             if action["attacker"] in unit_id_map:
-                target_x, target_y = self.game_state.padded_to_original_coords(action["target"].x, action["target"].y)
+                target = action["target"]
                 formatted["attack"].append(
-                    {"unit_id": unit_id_map[action["attacker"]], "target_position": [target_x, target_y]}
+                    {"unit_id": unit_id_map[action["attacker"]], "target_position": [target.x, target.y]}
                 )
 
-        # Paralyze actions (convert coordinates)
+        # Paralyze actions
         for action in legal_actions["paralyze"]:
             if action["paralyzer"] in unit_id_map:
-                target_x, target_y = self.game_state.padded_to_original_coords(action["target"].x, action["target"].y)
+                target = action["target"]
                 formatted["paralyze"].append(
-                    {"unit_id": unit_id_map[action["paralyzer"]], "target_position": [target_x, target_y]}
+                    {"unit_id": unit_id_map[action["paralyzer"]], "target_position": [target.x, target.y]}
                 )
 
-        # Heal actions (convert coordinates)
+        # Heal actions
         for action in legal_actions["heal"]:
             if action["healer"] in unit_id_map:
-                target_x, target_y = self.game_state.padded_to_original_coords(action["target"].x, action["target"].y)
-                formatted["heal"].append({"unit_id": unit_id_map[action["healer"]], "target_position": [target_x, target_y]})
+                target = action["target"]
+                formatted["heal"].append({"unit_id": unit_id_map[action["healer"]], "target_position": [target.x, target.y]})
 
-        # Cure actions (convert coordinates)
+        # Cure actions
         for action in legal_actions["cure"]:
             if action["curer"] in unit_id_map:
-                target_x, target_y = self.game_state.padded_to_original_coords(action["target"].x, action["target"].y)
-                formatted["cure"].append({"unit_id": unit_id_map[action["curer"]], "target_position": [target_x, target_y]})
+                target = action["target"]
+                formatted["cure"].append({"unit_id": unit_id_map[action["curer"]], "target_position": [target.x, target.y]})
 
-        # Seize actions (convert coordinates)
+        # Seize actions
         for action in legal_actions["seize"]:
             if action["unit"] in unit_id_map:
-                tile_x, tile_y = self.game_state.padded_to_original_coords(action["tile"].x, action["tile"].y)
-                formatted["seize"].append({"unit_id": unit_id_map[action["unit"]], "position": [tile_x, tile_y]})
+                tile = action["tile"]
+                formatted["seize"].append({"unit_id": unit_id_map[action["unit"]], "position": [tile.x, tile.y]})
 
         # Compute move-then-action combinations for units that can move
         # Group move actions by unit to get all reachable positions per unit
@@ -1713,7 +1705,7 @@ Use RESIGN only as a last resort when victory is impossible."""
         self._record(f"llm_illegal_{str(action_type).lower()}" if known else "llm_illegal_other")
 
     def _is_legal_unit_action(self, action_type: str, unit: Any, target_xy: tuple[int, int] | None = None) -> bool:
-        """Whether ``unit`` may do ``action_type`` (at padded ``target_xy``) right now.
+        """Whether ``unit`` may do ``action_type`` (at ``target_xy``) right now.
 
         Re-queries get_legal_actions on every call. Each executed action
         invalidates the engine's cache, so this sees the state after the
@@ -1738,7 +1730,7 @@ Use RESIGN only as a last resort when victory is impossible."""
         return False
 
     def _execute_create_unit(self, action: dict[str, Any]) -> bool:
-        """Execute a CREATE_UNIT action (converts from original to padded coordinates)."""
+        """Execute a CREATE_UNIT action."""
         unit_type = action.get("unit_type")
         position = self._parse_xy(action.get("position"))
 
@@ -1746,30 +1738,26 @@ Use RESIGN only as a last resort when victory is impossible."""
             self._reject_action(action, "needs unit_type and position [x, y]")
             return False
 
-        # Convert from original to padded coordinates
-        orig_x, orig_y = position
-        x, y = self.game_state.original_to_padded_coords(orig_x, orig_y)
+        x, y = position
 
-        # Validate this is a legal action (using padded coordinates)
+        # Validate this is a legal action
         legal_actions = self.game_state.get_legal_actions(self.bot_player)
         is_legal = any(
             a["unit_type"] == unit_type and a["x"] == x and a["y"] == y for a in legal_actions.get("create_unit", [])
         )
 
         if not is_legal:
-            self._reject_action(
-                action, f"not in legal_actions.create_unit (padded [{x}, {y}]): {_ILLEGAL_ACTION_HINTS['CREATE_UNIT']}"
-            )
+            self._reject_action(action, f"not in legal_actions.create_unit: {_ILLEGAL_ACTION_HINTS['CREATE_UNIT']}")
             return False
 
         if self.game_state.create_unit(unit_type, x, y, self.bot_player) is None:
             logger.warning("Engine refused CREATE_UNIT %s", action)
             return False
-        logger.info("Created %s at original coords (%s, %s) / padded coords (%s, %s)", unit_type, orig_x, orig_y, x, y)
+        logger.info("Created %s at (%s, %s)", unit_type, x, y)
         return True
 
     def _execute_move(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:
-        """Execute a MOVE action (converts from original to padded coordinates)."""
+        """Execute a MOVE action."""
         unit = self._lookup_unit(action, unit_map)
         to_pos = self._parse_xy(action.get("to"))
 
@@ -1777,18 +1765,16 @@ Use RESIGN only as a last resort when victory is impossible."""
             self._reject_action(action, "needs a unit_id from player_units and to [x, y]")
             return False
 
-        # Convert from original to padded coordinates
-        orig_to_x, orig_to_y = to_pos
-        to_x, to_y = self.game_state.original_to_padded_coords(orig_to_x, orig_to_y)
+        to_x, to_y = to_pos
 
         # "from" is optional, but when given it must be where the unit is: a
         # mismatch means the LLM has confused its unit IDs, and moving
         # whichever unit the ID happens to name would not be what it meant.
         if "from" in action:
             from_pos = self._parse_xy(action.get("from"))
-            if from_pos is None or self.game_state.original_to_padded_coords(*from_pos) != (unit.x, unit.y):
-                orig_pos = list(self.game_state.padded_to_original_coords(unit.x, unit.y))
-                self._reject_action(action, f"'from' doesn't match unit {action.get('unit_id')}'s position {orig_pos}")
+            if from_pos != (unit.x, unit.y):
+                position = [unit.x, unit.y]
+                self._reject_action(action, f"'from' doesn't match unit {action.get('unit_id')}'s position {position}")
                 return False
 
         if not self._is_legal_unit_action("MOVE", unit, (to_x, to_y)):
@@ -1800,27 +1786,15 @@ Use RESIGN only as a last resort when victory is impossible."""
             return False
         # Log where the unit really is: a fog-of-war ambush stops it short.
         if unit.ambushed:
-            logger.info(
-                "Unit %s was ambushed on its way to original coords (%s, %s)", action.get("unit_id"), orig_to_x, orig_to_y
-            )
-        orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
-        logger.info(
-            "Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)",
-            action.get("unit_id"),
-            orig_x,
-            orig_y,
-            unit.x,
-            unit.y,
-        )
+            logger.info("Unit %s was ambushed on its way to (%s, %s)", action.get("unit_id"), to_x, to_y)
+        logger.info("Moved unit %s to (%s, %s)", action.get("unit_id"), unit.x, unit.y)
         return True
 
-    def _resolve_targeted_action(
-        self, action: dict[str, Any], unit_map: dict[int, Any]
-    ) -> tuple[Any, Any, tuple[int, int]] | None:
+    def _resolve_targeted_action(self, action: dict[str, Any], unit_map: dict[int, Any]) -> tuple[Any, Any] | None:
         """Validate an ATTACK/PARALYZE/HEAL/CURE action against the legal actions.
 
-        Returns ``(unit, target, original_target_xy)`` if legal; otherwise
-        rejects the action (logged and counted) and returns None.
+        Returns ``(unit, target)`` if legal; otherwise rejects the action
+        (logged and counted) and returns None.
         """
         action_type = action["type"]
         unit = self._lookup_unit(action, unit_map)
@@ -1830,92 +1804,61 @@ Use RESIGN only as a last resort when victory is impossible."""
             self._reject_action(action, "needs a unit_id from player_units and target_position [x, y]")
             return None
 
-        # Convert from original to padded coordinates
-        target_x, target_y = self.game_state.original_to_padded_coords(*target_pos)
-        if not self._is_legal_unit_action(action_type, unit, (target_x, target_y)):
+        if not self._is_legal_unit_action(action_type, unit, target_pos):
             legal_key = _UNIT_ACTION_LEGAL_KEYS[action_type][0]
             self._reject_action(action, f"not in legal_actions.{legal_key}: {_ILLEGAL_ACTION_HINTS[action_type]}")
             return None
 
-        target = self.game_state.get_unit_at_position(target_x, target_y)
-        return unit, target, target_pos
+        return unit, self.game_state.get_unit_at_position(*target_pos)
 
     def _execute_attack(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:
-        """Execute an ATTACK action (converts from original to padded coordinates)."""
+        """Execute an ATTACK action."""
         resolved = self._resolve_targeted_action(action, unit_map)
         if resolved is None:
             return False
-        unit, target, (orig_target_x, orig_target_y) = resolved
+        unit, target = resolved
 
         self.game_state.attack(unit, target)
-        logger.info(
-            "Unit %s attacked enemy at original coords (%s, %s) / padded coords (%s, %s)",
-            action.get("unit_id"),
-            orig_target_x,
-            orig_target_y,
-            target.x,
-            target.y,
-        )
+        logger.info("Unit %s attacked enemy at (%s, %s)", action.get("unit_id"), target.x, target.y)
         return True
 
     def _execute_paralyze(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:
-        """Execute a PARALYZE action (converts from original to padded coordinates)."""
+        """Execute a PARALYZE action."""
         resolved = self._resolve_targeted_action(action, unit_map)
         if resolved is None:
             return False
-        unit, target, (orig_target_x, orig_target_y) = resolved
+        unit, target = resolved
 
         if not self.game_state.paralyze(unit, target):
             logger.warning("Engine refused PARALYZE %s", action)
             return False
-        logger.info(
-            "Unit %s paralyzed enemy at original coords (%s, %s) / padded coords (%s, %s)",
-            action.get("unit_id"),
-            orig_target_x,
-            orig_target_y,
-            target.x,
-            target.y,
-        )
+        logger.info("Unit %s paralyzed enemy at (%s, %s)", action.get("unit_id"), target.x, target.y)
         return True
 
     def _execute_heal(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:
-        """Execute a HEAL action (converts from original to padded coordinates)."""
+        """Execute a HEAL action."""
         resolved = self._resolve_targeted_action(action, unit_map)
         if resolved is None:
             return False
-        unit, target, (orig_target_x, orig_target_y) = resolved
+        unit, target = resolved
 
         if not self.game_state.heal(unit, target):
             logger.warning("Engine refused HEAL %s", action)
             return False
-        logger.info(
-            "Unit %s healed ally at original coords (%s, %s) / padded coords (%s, %s)",
-            action.get("unit_id"),
-            orig_target_x,
-            orig_target_y,
-            target.x,
-            target.y,
-        )
+        logger.info("Unit %s healed ally at (%s, %s)", action.get("unit_id"), target.x, target.y)
         return True
 
     def _execute_cure(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:
-        """Execute a CURE action (converts from original to padded coordinates)."""
+        """Execute a CURE action."""
         resolved = self._resolve_targeted_action(action, unit_map)
         if resolved is None:
             return False
-        unit, target, (orig_target_x, orig_target_y) = resolved
+        unit, target = resolved
 
         if not self.game_state.cure(unit, target):
             logger.warning("Engine refused CURE %s", action)
             return False
-        logger.info(
-            "Unit %s cured ally at original coords (%s, %s) / padded coords (%s, %s)",
-            action.get("unit_id"),
-            orig_target_x,
-            orig_target_y,
-            target.x,
-            target.y,
-        )
+        logger.info("Unit %s cured ally at (%s, %s)", action.get("unit_id"), target.x, target.y)
         return True
 
     def _execute_seize(self, action: dict[str, Any], unit_map: dict[int, Any]) -> bool:

@@ -56,22 +56,18 @@ class Tile:
         if self.type == "t":
             self.max_health = TOWER_MAX_HEALTH
             self.health = TOWER_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "h":
             self.max_health = HEADQUARTERS_MAX_HEALTH
             self.health = HEADQUARTERS_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "b":
             self.max_health = BUILDING_MAX_HEALTH
             self.health = BUILDING_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         else:
             self.max_health = None
             self.health = None
-            self.original_player = None
             self.regenerating = False
 
     def is_walkable(self):

@@ -2,7 +2,7 @@
 
 ``to_dict`` dropped fields that ``from_dict`` reads or that the rules depend
 on (winning_action_index, healing_totals, per-unit has_moved, stats from
-engine overrides, padding metadata, the fog-of-war state), and ``from_dict``
+engine overrides, the fog-of-war state), and ``from_dict``
 aliased its inputs. Saves now carry a format version; older saves (every file
 in saves/) still load. The property test at the bottom plays random games
 with and without fog of war, for 2 and 3 players, and checks that a JSON
@@ -118,17 +118,35 @@ class TestEveryFieldSurvivesAReload:
 
         assert (loaded_knight.has_moved, loaded_knight.distance_moved) == (True, 4)
 
-    def test_padding_metadata_and_original_map(self):
+    def test_an_early_version_2_save_with_padding_metadata_loads_unchanged(self, caplog):
+        """Version 2 saves used to carry padding metadata; nothing ever set it."""
         game = GameState(_map(12))
-        original = [row[1:-1] for row in game.initial_map_data[1:-1]]
-        game.set_map_metadata(10, 10, 1, 1, map_file="maps/x.csv", original_map_data=original)
+        warrior = game.place_unit("W", 3, 3, player=1)
+        assert game.move_unit(warrior, 3, 5)
+        data = _json(game.to_dict())
+        data.update(
+            original_map_width=12,
+            original_map_height=12,
+            map_padding_offset_x=0,
+            map_padding_offset_y=0,
+            original_map_data=None,
+        )
 
-        loaded = _reload(game)
+        with caplog.at_level(logging.WARNING, logger="reinforcetactics.core.game_state"):
+            loaded = GameState.from_dict(data)
 
-        assert (loaded.original_map_width, loaded.original_map_height) == (10, 10)
-        assert (loaded.map_padding_offset_x, loaded.map_padding_offset_y) == (1, 1)
-        assert loaded.original_map_data == original
-        assert loaded.padded_to_original_coords(4, 4) == (3, 3)
+        assert _json(loaded.to_dict()) == _json(game.to_dict())
+        assert not caplog.records
+
+    def test_a_save_with_padding_offsets_warns(self, caplog):
+        """Only a script calling the removed set_map_metadata could write one."""
+        data = _json(GameState(_map()).to_dict())
+        data.update(map_padding_offset_x=2, map_padding_offset_y=2)
+
+        with caplog.at_level(logging.WARNING, logger="reinforcetactics.core.game_state"):
+            GameState.from_dict(data)
+
+        assert "padding offsets (2, 2)" in caplog.text
 
     def test_fog_of_war_state_survives(self):
         """critic-integration-11: a reloaded fog game re-fogged the map and forgot structures."""
@@ -242,11 +260,6 @@ class TestOlderSavesStillLoad:
             "save_format_version",
             "winning_action_index",
             "healing_totals",
-            "original_map_width",
-            "original_map_height",
-            "map_padding_offset_x",
-            "map_padding_offset_y",
-            "original_map_data",
             "fog_of_war_state",
         ):
             data.pop(key)

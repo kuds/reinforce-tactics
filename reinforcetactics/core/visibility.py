@@ -368,18 +368,6 @@ class VisibilityMap:
         """
         return self.state >= SHROUDED
 
-    def get_last_seen_unit(self, x: int, y: int) -> UnitSnapshot | None:
-        """Get the last-seen unit at a position.
-
-        Args:
-            x: X coordinate
-            y: Y coordinate
-
-        Returns:
-            UnitSnapshot if a unit was seen there, None otherwise
-        """
-        return self.last_seen_units.get((x, y))
-
     def get_last_seen_structure(self, x: int, y: int) -> StructureSnapshot | None:
         """Get the last-seen structure info at a position.
 
@@ -471,36 +459,3 @@ def get_visible_units(game_state: "GameState", player: int, include_own: bool = 
             visible.append(unit)
 
     return visible
-
-
-def get_visible_tiles_info(game_state: "GameState", player: int) -> list[tuple[int, int, Any, int]]:
-    """Get list of tiles with visibility information.
-
-    Args:
-        game_state: Current game state
-        player: Player to get visible tiles for
-
-    Returns:
-        List of tuples (x, y, tile, visibility_state)
-    """
-    if not game_state.fog_of_war:
-        # No fog of war - all tiles fully visible
-        result = []
-        for y in range(game_state.grid.height):
-            for x in range(game_state.grid.width):
-                tile = game_state.grid.get_tile(x, y)
-                result.append((x, y, tile, VISIBLE))
-        return result
-
-    visibility_map = game_state.visibility_maps.get(player)
-    if visibility_map is None:
-        return []
-
-    result = []
-    for y in range(game_state.grid.height):
-        for x in range(game_state.grid.width):
-            tile = game_state.grid.get_tile(x, y)
-            vis_state = visibility_map.get_visibility_state(x, y)
-            result.append((x, y, tile, vis_state))
-
-    return result

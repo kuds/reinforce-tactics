@@ -351,8 +351,6 @@ def record_replay_to_video(
     Returns:
         Path to the saved video file
     """
-    import pandas as pd
-
     _ensure_headless_pygame()
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
@@ -369,11 +367,7 @@ def record_replay_to_video(
     # no MIN_MAP_SIZE padding is applied: that padding exists to leave room
     # for on-screen controls, and in a video it only produces a huge dead
     # ocean margin around a small board.
-    border = 2
-    h2, w2 = map_df.shape
-    bordered = pd.DataFrame(np.full((h2 + 2 * border, w2 + 2 * border), "o", dtype=object))
-    bordered.iloc[border : border + h2, border : border + w2] = map_df.values
-    offset_x, offset_y = border, border
+    bordered, offset_x, offset_y = FileIO.pad_for_display(map_df, min_size=0, border_size=2)
 
     # Create game state and headless renderer
     game_state = GameState(bordered, **replay_game_state_kwargs(game_info))

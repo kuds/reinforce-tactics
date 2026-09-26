@@ -421,8 +421,10 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
     headless :mod:`~reinforcetactics.utils.video` recorder), so replay
     semantics can't drift between them.
 
-    Coordinates in ``action`` are in original (unpadded) map space;
-    ``translate_fn`` maps them into the padded space of ``game_state``.
+    Coordinates in ``action`` are on the replay's recorded ``initial_map``
+    (the grid the game was played on, UI padding included for GUI games);
+    ``translate_fn`` maps them onto ``game_state``, which the playback path
+    built from that map with display padding of its own.
     ``schema_version`` selects between v3 (id-based lookup), v2 (apply
     recorded outcome), and v1 (re-run engine). v2+ are the only paths
     safe against the Rogue-evade RNG and missing counter-kill info in
