@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from reinforcetactics.core import ActionResult, GameState
+from reinforcetactics.core import ActionResult, GameState, legal_actions
 from reinforcetactics.core.actions import ACTION_KINDS, ACTOR_KEYS
 from reinforcetactics.game.bot import AdvancedBot
 from reinforcetactics.rules import ALL_UNIT_TYPES
@@ -312,7 +312,7 @@ def test_an_eliminated_player_may_only_end_its_turn():
     building = next(t for t in game.grid.get_capturable_tiles() if t.type == "b")
     building.player = 1
     create = {"unit_type": "W", "x": building.x, "y": building.y}
-    assert game._is_free_spawn_tile(1, building.x, building.y) and game._can_afford(1, "W")
+    assert legal_actions.is_free_spawn_tile(game, 1, building.x, building.y) and legal_actions.can_afford(game, 1, "W")
     before = _state(game)
     assert not game.is_legal("create_unit", create)
     assert not game.apply_action("create_unit", create).accepted
@@ -325,7 +325,9 @@ def test_an_eliminated_player_may_only_end_its_turn():
     assert game.is_legal("end_turn", {})
     ended = game.apply_action("end_turn", {})
     assert ended.accepted and game.current_player == 2
-    assert game.is_legal("create_unit", {**create, "player": 2}) is game._is_free_spawn_tile(2, building.x, building.y)
+    assert game.is_legal("create_unit", {**create, "player": 2}) is legal_actions.is_free_spawn_tile(
+        game, 2, building.x, building.y
+    )
 
 
 def test_nothing_is_legal_once_the_game_is_over():

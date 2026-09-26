@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from reinforcetactics.core import legal_actions
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.core.terrain_rules import WALKABLE_TILE_CODES, TerrainRules
 from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
@@ -90,7 +91,7 @@ class TestMoveCosts:
         # Straight through the forest costs 3 (2 + 1) in 2 steps; around it, 4.
         gs = _board(["p p p", "p f p", "p p p"], engine_overrides={"terrain_move_cost": {"f": 2}})
         warrior = gs.place_unit("W", 1, 0, 1)
-        paths = gs._find_paths(warrior)
+        paths = legal_actions.find_paths(gs, warrior)
         assert paths[(1, 2)] == 2
         assert set(paths) == {(0, 0), (2, 0), (0, 1), (2, 1), (1, 1), (0, 2), (2, 2), (1, 2)}
 

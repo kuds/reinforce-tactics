@@ -16,6 +16,7 @@ import pytest
 from reinforcetactics.app.action_executor import apply_targeted_action, execute_unit_action
 from reinforcetactics.app.input_handler import InputHandler
 from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.core import legal_actions
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.ui.menus.in_game.unit_action_menu import UnitActionMenu
 
@@ -51,7 +52,7 @@ class TestMenuTargetsComeFromTheEngine:
     def test_paralyze_offers_range_two_targets(self, screen, game):
         mage = game.place_unit("M", 2, 2, player=1)
         enemy = game.place_unit("W", 2, 4, player=2)  # Manhattan distance 2
-        assert game._can_paralyze_target(mage, enemy)
+        assert legal_actions.TARGET_RULES["paralyze"](game, mage, enemy)
 
         targets = _menu_targets(screen, game, mage)
         # The old menu listed only adjacent enemies for Paralyze.

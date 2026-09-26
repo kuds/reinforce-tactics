@@ -557,7 +557,7 @@ class GameMechanics:
             return False
 
         # The range the legal-action mask uses too (``ABILITY_RANGES``, via
-        # ``GameState._can_paralyze_target``). Kept symmetric with the
+        # ``legal_actions.TARGET_RULES["paralyze"]``). Kept symmetric with the
         # heal/cure/buff checks so the mask and execution can't drift and
         # reopen the heal-spam loop pattern: a legal-but-unexecutable action
         # that, under a deterministic policy, traps the legal-actions cache
