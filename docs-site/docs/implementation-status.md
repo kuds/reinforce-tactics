@@ -17,6 +17,8 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 - [x] `reinforcetactics/core/unit.py` - Unit class with all 8 unit types and abilities
 - [x] `reinforcetactics/core/grid.py` - Grid management with numpy conversion
 - [x] `reinforcetactics/core/game_state.py` - Complete game state manager
+- [x] `reinforcetactics/core/engine_config.py` - `EngineConfig`: a game's `engine_overrides`, validated and resolved over `rules.py`
+- [x] `reinforcetactics/core/serialization.py` - Saves and replays (`to_dict`/`from_dict`, save and replay files)
 - [x] `reinforcetactics/core/visibility.py` - Fog of war visibility system
 
 ### Game Mechanics

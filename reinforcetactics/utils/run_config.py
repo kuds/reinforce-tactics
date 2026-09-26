@@ -155,9 +155,9 @@ def _full_engine_constants_hash() -> str | None:
 def _apply_engine_overrides(economy: Mapping[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return the *effective* economy = captured defaults + overlay.
 
-    Mirrors ``GameState._resolve_engine_overrides`` so config.json
-    records exactly what the env played with, not just the engine
-    defaults. Pure dict math (no engine import); unknown keys are
+    Mirrors the economy half of ``EngineConfig.from_overrides`` so
+    config.json records exactly what the env played with, not just the
+    engine defaults. Pure dict math (no engine import); unknown keys are
     ignored here since GameState already validated them.
     """
     eff: dict[str, Any] = json.loads(json.dumps(economy, default=str)) if economy else {}

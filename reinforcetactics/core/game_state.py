@@ -5,23 +5,23 @@ Fixed version: removed duplicate methods, added type hints, controlled logging.
 
 from __future__ import annotations
 
-import base64
 import copy
 import hashlib
 import logging
 import os
 import random
-import struct
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
+from reinforcetactics.core import serialization
+from reinforcetactics.core.engine_config import ENGINE_OVERRIDE_KEYS, EngineConfig
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics, same_side
-from reinforcetactics.core.terrain_rules import TERRAIN_RULE_KEYS, TerrainRules
+from reinforcetactics.core.serialization import SAVE_FORMAT_VERSION as SAVE_FORMAT_VERSION  # re-exported
+from reinforcetactics.core.terrain_rules import TerrainRules
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.visibility import (
     UNEXPLORED,
@@ -30,34 +30,12 @@ from reinforcetactics.core.visibility import (
     VisibilityMap,
     get_visible_units,
 )
-from reinforcetactics.rules import (
-    ALL_UNIT_TYPES,
-    BUILDING_INCOME,
-    HEADQUARTERS_INCOME,
-    MAX_UNITS_PER_PLAYER,
-    STARTING_GOLD,
-    TOWER_INCOME,
-    UNIT_DATA,
-    TileType,
-)
+from reinforcetactics.rules import ALL_UNIT_TYPES, TileType
 
 # Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
 # recomputed and compared, so a mutator that forgets to invalidate fails
 # loudly instead of handing bots and masks a stale action set.
 _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
-
-# Version of the save format written by ``GameState.to_dict``. Saves without
-# the field are version 1 (everything before it existed) and still load.
-# 2: adds the fields ``from_dict`` needs to resume a game exactly
-# (winning_action_index, healing_totals, per-unit has_moved, fog-of-war
-# attack snapshot and ambushed flag, the fog-of-war state). Early version 2
-# saves also carry padding metadata (original_map_width/height,
-# map_padding_offset_x/y, original_map_data); nothing ever set it, so it
-# always described the saved grid itself, and ``from_dict`` ignores it
-# (with a warning should the offsets not be zero). Later additions, optional
-# on load: per-unit haste_refreshed and the fog-of-war pre-move view
-# cancel_move restores.
-SAVE_FORMAT_VERSION = 2
 
 # Unit attribute types a search clone can share with the original unit.
 _IMMUTABLE_UNIT_FIELD_TYPES = (type(None), bool, int, float, str, tuple, frozenset)
@@ -81,155 +59,64 @@ class GameState:
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
-    # Every engine_overrides key some resolver reads. An unknown key is
-    # rejected: a misspelt rule (``forest_concealement: true``) would
-    # otherwise silently play the default game. New override keys must be
-    # added here.
-    ENGINE_OVERRIDE_KEYS = frozenset(
-        {
-            "starting_gold",
-            "headquarters_income",
-            "building_income",
-            "tower_income",
-            "tower_health",
-            "building_health",
-            "headquarters_health",
-            "damage_model",
-            "max_units_per_player",
-            "unit_data",
-            "begin_first_turn",
-            "legacy_end_rules",
-            *TERRAIN_RULE_KEYS,
-        }
-    )
+    # Every engine_overrides key some resolver reads (see core/engine_config.py).
+    ENGINE_OVERRIDE_KEYS = ENGINE_OVERRIDE_KEYS
 
-    @staticmethod
-    def _resolve_engine_overrides(
-        overrides: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, int], int]:
-        """Merge a sparse override overlay over the module engine constants.
+    # ------------------------------------------------------------------
+    # Rule configuration: read-only views of ``self.engine_config``
+    # ------------------------------------------------------------------
+    # The game's rules live in one frozen EngineConfig (review core-16);
+    # these keep the names every reader has always used.
 
-        Returns ``(unit_data, income_rates, starting_gold)`` fully resolved.
-        ``unit_data`` is a deep copy of :data:`UNIT_DATA` with per-unit,
-        per-field deltas applied (so the shared module dict is never
-        mutated). Unknown unit codes / stat fields raise ``KeyError`` /
-        ``ValueError`` early -- a typo in a balance sweep should fail loud,
-        not silently train on the wrong stats.
-        """
-        unit_data = copy.deepcopy(UNIT_DATA)
-        income_rates = {
-            "headquarters": HEADQUARTERS_INCOME,
-            "building": BUILDING_INCOME,
-            "tower": TOWER_INCOME,
-        }
-        starting_gold = STARTING_GOLD
-        if not overrides:
-            return unit_data, income_rates, starting_gold
-        unknown = set(overrides) - GameState.ENGINE_OVERRIDE_KEYS
-        if unknown:
-            raise KeyError(
-                f"engine_overrides: unknown key(s) {sorted(unknown)} (valid: {sorted(GameState.ENGINE_OVERRIDE_KEYS)})"
-            )
+    @property
+    def engine_overrides(self) -> dict[str, Any]:
+        """The sparse override overlay the game was created with, as saves record it."""
+        return self.engine_config.overrides
 
-        if "starting_gold" in overrides:
-            starting_gold = int(overrides["starting_gold"])
-        for ov_key, rate_key in (
-            ("headquarters_income", "headquarters"),
-            ("building_income", "building"),
-            ("tower_income", "tower"),
-        ):
-            if ov_key in overrides:
-                income_rates[rate_key] = int(overrides[ov_key])
+    @property
+    def unit_data(self) -> dict[str, dict[str, Any]]:
+        """Per-unit stats with the overrides applied; units and costs read these, never rules.UNIT_DATA."""
+        return self.engine_config.unit_data
 
-        unit_overrides = overrides.get("unit_data") or {}
-        for code, fields in unit_overrides.items():
-            if code not in unit_data:
-                raise KeyError(f"engine_overrides.unit_data: unknown unit code '{code}'")
-            for field, value in fields.items():
-                if field not in unit_data[code]:
-                    raise ValueError(
-                        f"engine_overrides.unit_data['{code}']: unknown stat field "
-                        f"'{field}' (valid: {sorted(unit_data[code])})"
-                    )
-                unit_data[code][field] = value
-        return unit_data, income_rates, starting_gold
+    @property
+    def income_rates(self) -> dict[str, int]:
+        """Gold per turn by structure type (``headquarters``, ``building``, ``tower``)."""
+        return self.engine_config.income_rates
 
-    @staticmethod
-    def _resolve_max_units_per_player(overrides: dict[str, Any]) -> int:
-        """Resolve the per-player unit cap from the engine-override overlay.
+    @property
+    def starting_gold(self) -> int:
+        """Each player's gold at the start of the game."""
+        return self.engine_config.starting_gold
 
-        Defaults to :data:`MAX_UNITS_PER_PLAYER`. A positive int is required
-        -- a cap <= 0 would forbid all unit creation, which is never the
-        intent and should fail loud rather than silently soft-lock a game.
+    @property
+    def damage_model(self) -> str:
+        """``"flat"`` or ``"hp_scaled"`` combat damage (see ``mechanics.attack_unit``)."""
+        return self.engine_config.damage_model
 
-        The cap is a *creation gate*, not a retroactive trim: it blocks new
-        ``create_unit`` calls once a player is at the cap but never removes
-        existing units, so a scenario that starts a side at or above the cap
-        (or a sweep that sets the cap below the starting army) simply can't
-        grow until attrition drops the count. It is therefore a soft ceiling
-        on growth, not a hard guarantee of ``<= cap`` units at every instant.
-        """
-        if "max_units_per_player" not in (overrides or {}):
-            return MAX_UNITS_PER_PLAYER
-        val = int(overrides["max_units_per_player"])
-        if val <= 0:
-            raise ValueError(f"engine_overrides.max_units_per_player must be a positive int, got {val}")
-        return val
+    @property
+    def structure_health(self) -> dict[str, int]:
+        """Structure max-HP overrides, ``{tile_code: hp}``."""
+        return self.engine_config.structure_health
 
-    @staticmethod
-    def _resolve_damage_model(overrides: dict[str, Any]) -> str:
-        """Resolve the combat damage model from the engine-override overlay.
+    @property
+    def max_units_per_player(self) -> int:
+        """The unit cap ``create_unit`` and the legal actions enforce."""
+        return self.engine_config.max_units_per_player
 
-        ``"flat"`` (default) reproduces legacy HP-independent damage.
-        ``"hp_scaled"`` multiplies outgoing damage by the attacker's current
-        HP fraction. An unknown value fails loud rather than silently
-        training on an unintended combat model.
-        """
-        model = (overrides or {}).get("damage_model", "flat")
-        if model not in ("flat", "hp_scaled"):
-            raise ValueError(f"engine_overrides.damage_model must be 'flat' or 'hp_scaled', got {model!r}")
-        return model
+    @property
+    def terrain_rules(self) -> TerrainRules:
+        """The optional terrain rules (movement costs, charge distance, vision), all off by default."""
+        return self.engine_config.terrain_rules
 
-    @staticmethod
-    def _resolve_begin_first_turn(overrides: dict[str, Any]) -> bool:
-        """Resolve ``begin_first_turn`` from the engine-override overlay.
+    @property
+    def begin_first_turn(self) -> bool:
+        """Whether Player 1 got start-of-turn processing on turn 0."""
+        return self.engine_config.begin_first_turn
 
-        Start-of-turn processing (income, structure healing, status and
-        cooldown ticks, the visibility update; see ``_begin_turn``) runs in
-        ``end_turn`` for the player whose turn is starting, so Player 1's
-        very first turn never got it: it plays turn 0 on its starting gold
-        alone, while every later turn -- Player 2's first one included --
-        collects income first. ``False`` (default) keeps that schedule.
-        ``True`` runs ``_begin_turn(1)`` when the game is created, so Player
-        1 also collects income before its first move. Recorded with the rest
-        of ``engine_overrides`` (saves and replay ``game_info``) so a balance
-        sweep can toggle it and replays reproduce it. Non-bool values fail
-        loud: ``"false"`` would otherwise read as true.
-        """
-        return GameState._resolve_bool_override(overrides, "begin_first_turn")
-
-    @staticmethod
-    def _resolve_legacy_end_rules(overrides: dict[str, Any]) -> bool:
-        """Resolve ``legacy_end_rules`` from the engine-override overlay.
-
-        ``True`` plays by the end rules of games recorded before September
-        2026 (review core-7), so their replays play back as they were
-        played: any HQ capture wins the game for the capturer, whatever the
-        seat count; nobody is eliminated, so a seat that lost its units or
-        resigned keeps its turns, income and structures; and with three or
-        more seats the game ends only when a single player has units left.
-        ``replay_actions.replay_game_state_kwargs`` sets it for those
-        replays; nothing else should.
-        """
-        return GameState._resolve_bool_override(overrides, "legacy_end_rules")
-
-    @staticmethod
-    def _resolve_bool_override(overrides: dict[str, Any], key: str) -> bool:
-        """A bool engine override, default False. Non-bools fail loud: ``"false"`` would read as true."""
-        value = (overrides or {}).get(key, False)
-        if not isinstance(value, bool):
-            raise ValueError(f"engine_overrides.{key} must be a bool, got {value!r}")
-        return value
+    @property
+    def legacy_end_rules(self) -> bool:
+        """Whether the game plays by the pre-2026-09 end rules (old replays only)."""
+        return self.engine_config.legacy_end_rules
 
     @staticmethod
     def map_team_declarations(map_data: Any, num_players: int) -> dict[int, int]:
@@ -302,33 +189,6 @@ class GameState:
             raise ValueError(f"teams put all {num_players} players on one team; a game needs at least two teams")
         return resolved
 
-    # YAML override key -> structure tile-type code. Lets a balance sweep tune
-    # capture difficulty (e.g. ``headquarters_health: 30`` halves a Warrior's
-    # HQ-capture time) from the config surface instead of editing rules.py.
-    _STRUCTURE_HEALTH_KEYS = {
-        "tower_health": "t",
-        "building_health": "b",
-        "headquarters_health": "h",
-    }
-
-    @classmethod
-    def _resolve_structure_health(cls, overrides: dict[str, Any]) -> dict[str, int]:
-        """Resolve per-structure max-HP overrides into ``{tile_code: hp}``.
-
-        Only keys present in ``overrides`` appear in the result; absent
-        structures keep their ``rules.py`` defaults. Non-positive values
-        fail loud (a structure with <=0 HP would be captured on the first
-        seize / be nonsensical for regen).
-        """
-        resolved: dict[str, int] = {}
-        for ov_key, code in cls._STRUCTURE_HEALTH_KEYS.items():
-            if ov_key in (overrides or {}):
-                val = int(overrides[ov_key])
-                if val <= 0:
-                    raise ValueError(f"engine_overrides.{ov_key} must be a positive int, got {val}")
-                resolved[code] = val
-        return resolved
-
     @staticmethod
     def _resolve_rng(rng: Any | None, seed: int | None) -> tuple[int | None, Any]:
         """Return ``(seed, rng)``: the caller's source, or a game-owned ``random.Random``.
@@ -346,50 +206,6 @@ class GameState:
         if seed is None:
             seed = int.from_bytes(os.urandom(8), "big") >> 1
         return seed, random.Random(seed)
-
-    def _rng_state_for_save(self) -> str | None:
-        """The game RNG's exact position, compact enough for a JSON save.
-
-        The seed alone only reproduces a game from turn 0; a mid-game save
-        also needs the stream position so a reload rolls what the unsaved
-        game would have rolled. None for a caller-supplied source whose
-        state cannot be captured.
-        """
-        if not isinstance(self.rng, random.Random):
-            return None
-        try:
-            version, internal, gauss_next = self.rng.getstate()
-        except NotImplementedError:  # e.g. random.SystemRandom
-            return None
-        packed = base64.b64encode(struct.pack(f"<{len(internal)}I", *internal)).decode("ascii")
-        return f"{version}:{gauss_next!r}:{packed}"
-
-    @staticmethod
-    def _rng_from_save(encoded: str) -> random.Random:
-        """Rebuild the RNG ``_rng_state_for_save`` captured."""
-        version, gauss_next, packed = encoded.split(":", 2)
-        raw = base64.b64decode(packed)
-        internal = struct.unpack(f"<{len(raw) // 4}I", raw)
-        rng = random.Random()
-        rng.setstate((int(version), internal, None if gauss_next == "None" else float(gauss_next)))
-        return rng
-
-    def _apply_structure_health_overrides(self) -> None:
-        """Overlay resolved structure-HP overrides onto the freshly-built grid.
-
-        ``TileGrid`` constructs structure tiles at the ``rules.py`` HP, so
-        this runs right after grid creation while every structure is at full
-        health -- setting both ``max_health`` and ``health`` keeps the tile
-        consistent (regen scales off ``max_health``; capture resets to it).
-        """
-        if not self.structure_health:
-            return
-        for row in self.grid.tiles:
-            for tile in row:
-                override_hp = self.structure_health.get(tile.type)
-                if override_hp is not None and tile.is_capturable():
-                    tile.max_health = override_hp
-                    tile.health = override_hp
 
     def __init__(
         self,
@@ -455,8 +271,9 @@ class GameState:
                 Every key is optional; absent keys fall back to the module
                 constant, so ``None`` / ``{}`` is byte-identical to today.
                 Unknown keys raise ``KeyError`` (see ``ENGINE_OVERRIDE_KEYS``).
-                The resolved tables (``self.unit_data``, ``self.income_rates``,
-                ``self.starting_gold``) are this game's single source of
+                Resolved into ``self.engine_config`` (an ``EngineConfig``),
+                whose tables (``self.unit_data``, ``self.income_rates``,
+                ``self.starting_gold``, ...) are this game's single source of
                 truth -- units and income read them, never the global
                 constant -- so an override can't leak or be half-applied.
             teams: Optional ``{player: team}``. Teams can also be declared by
@@ -492,34 +309,16 @@ class GameState:
         # resigns, and the game goes on until one team is left; with two
         # teams the first HQ capture still ends the game outright.
         self.eliminated_players: set[int] = set()
-        self.engine_overrides: dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
-        (
-            self.unit_data,
-            self.income_rates,
-            self.starting_gold,
-        ) = self._resolve_engine_overrides(self.engine_overrides)
-        # Combat damage model (engine-side, config-surfaced via engine_overrides
-        # so it's snapshotted into config.json like the economy). "flat"
-        # (default, legacy) = HP-independent damage; "hp_scaled" = damage
-        # multiplied by the attacker's current HP fraction (decisive combat;
-        # consistent with seize, which is already HP-scaled).
-        self.damage_model: str = self._resolve_damage_model(self.engine_overrides)
-        # Per-structure max-HP overrides (capture-difficulty lever). Resolved
-        # from engine_overrides and overlaid onto the grid built above; absent
-        # keys keep rules.py defaults. Snapshotted into config.json via the
-        # verbatim engine_overrides log, same as damage_model / economy.
-        self.structure_health: dict[str, int] = self._resolve_structure_health(self.engine_overrides)
-        self._apply_structure_health_overrides()
-        # Hard ceiling on units-per-player (action-space + economy guardrail).
-        # Enforced in both create_unit and get_legal_actions so the cap shows
-        # up in the action mask, not just as a rejected action.
-        self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
-        # Optional terrain rules (movement costs, path-based Knight Charge,
-        # forest concealment, HQ always known). All off by default, which is
-        # the game as shipped; see core/terrain_rules.py.
-        self.terrain_rules: TerrainRules = TerrainRules.from_overrides(self.engine_overrides)
-        self.begin_first_turn: bool = self._resolve_begin_first_turn(self.engine_overrides)
-        self.legacy_end_rules: bool = self._resolve_legacy_end_rules(self.engine_overrides)
+        # The game's rules: engine_overrides validated and resolved over the
+        # rules.py constants (economy, unit stats, structure HP, unit cap,
+        # damage model, terrain and turn rules; see core/engine_config.py).
+        # Fixed for the whole game and read through the properties above
+        # (self.unit_data, self.starting_gold, ...), so an override can't
+        # leak between games or be half-applied.
+        self.engine_config: EngineConfig = EngineConfig.from_overrides(engine_overrides)
+        # Structure max-HP overrides (capture-difficulty lever) go onto the
+        # grid built above while every structure is still at full health.
+        self.engine_config.apply_structure_health(self.grid)
         self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         # Cumulative structure auto-heal totals per player (HP restored and
         # gold spent by ``heal_units_on_structures`` over the whole game).
@@ -593,7 +392,7 @@ class GameState:
         # have to call update_visibility() after construction, and a game
         # built without it showed nothing at all until the first move.
         self._init_visibility()
-        # Turn 0 for Player 1 (see _resolve_begin_first_turn). Last, so the
+        # Turn 0 for Player 1 (see begin_first_turn). Last, so the
         # whole state exists; the default leaves turn 0 as it always was.
         if self.begin_first_turn:
             self._begin_turn(self.current_player)
@@ -1995,7 +1794,7 @@ class GameState:
         income; auto-healing on owned structures; the player's fog-of-war
         update. ``end_turn`` runs it for every turn but Player 1's first,
         which by default starts without it (engine override
-        ``begin_first_turn``; see ``_resolve_begin_first_turn``).
+        ``begin_first_turn``; see ``core/engine_config.py``).
 
         Returns:
             The income breakdown (``calculate_income``) with the healing
@@ -2320,11 +2119,7 @@ class GameState:
     # Anything else is deep-copied, so state added later is safe by default.
     _SEARCH_SHARED_ATTRS = frozenset(
         {
-            "engine_overrides",
-            "unit_data",
-            "income_rates",
-            "structure_health",
-            "terrain_rules",
+            "engine_config",
             "mechanics",
             "enabled_units",
             "initial_map_data",
@@ -2389,98 +2184,6 @@ class GameState:
             if name != "attack_data" and not isinstance(value, _IMMUTABLE_UNIT_FIELD_TYPES):
                 setattr(clone, name, copy.deepcopy(value))
         return clone
-
-    @staticmethod
-    def _unit_to_save_dict(unit: Unit) -> dict[str, Any]:
-        """``unit.to_dict()`` plus, under fog of war, the view ``cancel_move`` restores.
-
-        A unit whose move can still be cancelled carries its side's
-        visibility map from before the move, so a game saved at that point
-        can cancel it after loading, taking back what the move revealed.
-        """
-        data = unit.to_dict()
-        if unit.pre_move_visibility is not None:
-            data["pre_move_visibility"] = unit.pre_move_visibility.to_dict()
-        return data
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert game state to dictionary for serialization.
-
-        Records everything ``from_dict`` needs to resume the game exactly:
-        ``from_dict(json(to_dict(g))).to_dict()`` equals ``json(to_dict(g))``,
-        and both games offer every player the same legal actions (see
-        tests/test_save_roundtrip_core.py). Not recorded: the engine RNG
-        (``rng``; a loaded game rolls Rogue evades from the module-global
-        ``random`` unless given a new one), the legal-action caches, and the
-        UI-only ``Unit.selected``. Mutable containers are copied, so the
-        result shares nothing with the live game.
-        """
-        return {
-            "save_format_version": SAVE_FORMAT_VERSION,
-            "timestamp": self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
-            "current_player": self.current_player,
-            "num_players": self.num_players,
-            "player_gold": dict(self.player_gold),
-            "turn_number": self.turn_number,
-            "game_over": self.game_over,
-            "winner": self.winner,
-            # from_dict has always read these two back; without them a
-            # turn-limited game reloaded as unlimited and a finished game
-            # lost how it ended.
-            "end_reason": self.end_reason,
-            "max_turns": self.max_turns,
-            # The index of the action that ended the game, and the
-            # game-lifetime auto-heal totals: both feed the replay's
-            # integrity fields, which were wrong for continued games.
-            "winning_action_index": self.game_over_action_index,
-            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
-            "map_file": self.map_file_used,
-            # The exact tile codes the grid was built from (after any UI
-            # padding), written for every save, not only map-file-less ones.
-            # "tiles" below holds only capturable tiles, so without this a
-            # random-map save could never be reloaded, and a save that
-            # points at a map file breaks silently if that file is later
-            # edited, renamed or padded differently: unit and structure
-            # coordinates would land on different terrain. The cost is one
-            # short string per tile: a fixed ~7 KB for the usual 24x24 padded
-            # map at the save writer's indent=2, about a quarter of an
-            # early-game save and a shrinking share as action_history grows.
-            "map_data": [list(row) for row in self.initial_map_data],
-            "player_configs": copy.deepcopy(self.player_configs),
-            "enabled_units": list(self.enabled_units),
-            "fog_of_war": self.fog_of_war,
-            "fog_of_war_method": self.fog_of_war_method,
-            # What each player has explored and remembers. Without it a
-            # reloaded fog-of-war game re-fogged every tile out of current
-            # sight and forgot every structure (critic-integration-11).
-            # Keyed by str(player) so the dict is the same before and after
-            # a JSON round trip.
-            "fog_of_war_state": {str(p): vis_map.to_dict() for p, vis_map in self.visibility_maps.items()},
-            # Persist the engine-constant overlay so a reloaded game runs under
-            # the same balance (damage_model, structure HP, economy, unit cap)
-            # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
-            # back to {} (== module defaults), preserving backward-compat.
-            "engine_overrides": copy.deepcopy(self.engine_overrides),
-            # The combat RNG (review core-10): its seed, and its position so a
-            # reloaded game rolls exactly what the unsaved game would have.
-            "seed": self.seed,
-            "rng_state": self._rng_state_for_save(),
-            # Every seat's team and who is out (review core-4/core-7). Teams a
-            # map declares are re-derived from map_data on load and must
-            # agree; this also carries ones passed as GameState(teams=...).
-            "teams": self.teams,
-            "eliminated_players": sorted(self.eliminated_players),
-            "units": [self._unit_to_save_dict(unit) for unit in self.units],
-            "tiles": self.grid.to_dict()["tiles"],
-            # Records are never edited once written, so a new list suffices.
-            "action_history": list(self.action_history),
-            # Restore the per-game unit-id counter on reload so newly
-            # created units after load don't reuse retired ids
-            # (which would let the replay v3 dispatch route an action
-            # to the wrong unit -- exactly the brittleness this whole
-            # schema bump is meant to eliminate).
-            "next_unit_id": self._next_unit_id,
-        }
 
     def to_numpy(self, for_player: int | None = None) -> dict[str, np.ndarray]:
         """
@@ -2590,345 +2293,33 @@ class GameState:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Saves and replays (the code is in core/serialization.py)
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """The game as a JSON-ready save dict ``from_dict`` resumes exactly (``serialization.game_to_dict``)."""
+        return serialization.game_to_dict(self)
+
     def save_to_file(self, filepath: str | None = None) -> str | None:
-        """
-        Save game state to file.
-
-        Args:
-            filepath: Path to save file (auto-generated if None)
-
-        Returns:
-            Path to saved file
-        """
-        from reinforcetactics.utils.file_io import FileIO
-
-        return FileIO.save_game(self, filepath)
-
-    def _get_player_type(self, config: dict[str, Any]) -> str:
-        """
-        Get the standardized player type for replay logs.
-
-        Args:
-            config: Player configuration dictionary
-
-        Returns:
-            Player type string: 'human', 'bot', 'llm', or 'rl'
-        """
-        if config.get("type") == "human":
-            return "human"
-
-        # Prefer the type already resolved by the app / tournament layers
-        # (create_bots_from_config and the tournament runner both stamp it).
-        resolved = config.get("player_type")
-        if resolved:
-            return resolved
-
-        # Fallback for configs that never went through those layers.
-        # Deferred import: the engine must not import the game layer at
-        # module load (core stays self-contained); this only runs on the
-        # save-replay path.
-        from reinforcetactics.game.bot_registry import player_type
-
-        return player_type(config.get("bot_type", ""))
-
-    @staticmethod
-    def build_player_config(
-        player_no: int, name: str, player_type: str, temperature: float | None = None, max_tokens: int | None = None
-    ) -> dict[str, Any]:
-        """
-        Build a standardized player config for replay logs.
-
-        Args:
-            player_no: Player number (1, 2, etc.)
-            name: Display name for the player/bot
-            player_type: One of 'human', 'bot', 'llm', 'rl'
-            temperature: LLM temperature (only for llm type)
-            max_tokens: LLM max tokens (only for llm type)
-
-        Returns:
-            Standardized player config dictionary
-        """
-        config: dict[str, Any] = {"player_no": player_no, "type": player_type, "name": name}
-
-        # Add LLM-specific fields
-        if player_type == "llm":
-            config["temperature"] = temperature
-            config["max_tokens"] = max_tokens
-
-        return config
+        """Save the game to a JSON file (auto-named if ``filepath`` is None); returns its path, None on failure."""
+        return serialization.save_to_file(self, filepath)
 
     def save_replay_to_file(self, filepath: str | None = None) -> str | None:
-        """
-        Save replay to file.
+        """Save the game's replay (action log and ``game_info``); returns its path, None on failure."""
+        return serialization.save_replay_to_file(self, filepath)
 
-        Args:
-            filepath: Path to replay file (auto-generated if None)
-
-        Returns:
-            Path to saved replay
-        """
-        from reinforcetactics.utils.file_io import FileIO
-
-        # Build player_configs for replay
-        # If already in standardized format (has 'player_no'), use directly
-        # Otherwise, transform from old format for backward compatibility
-        enhanced_player_configs = []
-
-        for i, config in enumerate(self.player_configs):
-            player_num = i + 1
-
-            # Check if already in standardized format
-            if "player_no" in config:
-                enhanced_player_configs.append(config)
-            else:
-                # Transform from old format (player_name, player_type, bot_type, etc.)
-                player_name = config.get("player_name", config.get("name", "Unknown"))
-
-                # Always use _get_player_type to map old format types (e.g., 'computer' -> 'bot')
-                player_type = self._get_player_type(config)
-
-                enhanced_config = {"player_no": player_num, "type": player_type, "name": player_name}
-
-                # Add LLM-specific fields if applicable
-                if player_type == "llm":
-                    enhanced_config["temperature"] = config.get("temperature", None)
-                    enhanced_config["max_tokens"] = config.get("max_tokens", None)
-
-                enhanced_player_configs.append(enhanced_config)
-
-        from reinforcetactics import __version__ as _rt_version
-
-        # Final-state snapshot doubles as a replay-integrity checksum;
-        # see runner._save_replay for the same fields.
-        final_units_by_player: dict[int, list] = {}
-        for u in self.units:
-            final_units_by_player.setdefault(u.player, []).append(u)
-        final_counts = {p: len(us) for p, us in final_units_by_player.items()}
-        final_hp = {p: sum(u.health for u in us) for p, us in final_units_by_player.items()}
-
-        game_info = {
-            "num_players": self.num_players,
-            "max_turns": self.max_turns,
-            "total_turns": self.turn_number,
-            "winner": self.winner,
-            "game_over": self.game_over,
-            "end_reason": self.end_reason,
-            "winning_action_index": self.game_over_action_index,
-            "start_time": self.game_start_time.isoformat(),
-            "end_time": datetime.now().isoformat(),
-            "map_file": self.map_file_used,
-            # The grid the actions' coordinates refer to (see record_action)
-            "initial_map": self.initial_map_data,
-            "player_configs": enhanced_player_configs,
-            "enabled_units": self.enabled_units,
-            "fog_of_war": self.fog_of_war,
-            "fog_of_war_method": self.fog_of_war_method,
-            # Seed of the combat RNG, so the game can be re-run (core-10).
-            "seed": self.seed,
-            "library_version": _rt_version,
-            "replay_schema_version": 3,
-            "final_unit_counts": final_counts,
-            "final_hp_totals": final_hp,
-            # Structure auto-heal economics (HP restored / gold spent per
-            # player over the whole game). Queryable without re-simulating
-            # the action log, and doubles as a replay-integrity checksum:
-            # playback re-executes end_turn, so a faithful replay's
-            # re-accumulated healing_totals must match these values.
-            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
-            # What the replay's GameState must be built with to play the log
-            # back faithfully (see replay_actions.replay_game_state_kwargs):
-            # the balance overlay (e.g. begin_first_turn gives Player 1 turn-0
-            # income its first creates may spend) and the teams (explicit
-            # ones are not in the map). eliminated_players is informational.
-            "engine_overrides": self.engine_overrides,
-            "begin_first_turn": self.begin_first_turn,
-            "teams": self.teams,
-            "eliminated_players": sorted(self.eliminated_players),
-        }
-
-        return FileIO.save_replay(self.action_history, game_info, filepath)
-
-    @staticmethod
-    def saved_map_data(save_data: dict[str, Any]) -> pd.DataFrame | None:
-        """Return the terrain a save recorded via ``to_dict``, or None.
-
-        Saves written before the terrain was recorded return None; their
-        callers fall back to reloading ``save_data["map_file"]``.
-        """
-        terrain = save_data.get("map_data")
-        if not terrain:
-            return None
-        return pd.DataFrame(terrain)
+    # Standardized replay-log player config: {"player_no", "type", "name"}
+    # plus the LLM sampling fields for type "llm".
+    build_player_config = staticmethod(serialization.build_player_config)
+    # The terrain a save recorded (a DataFrame), or None for older saves.
+    saved_map_data = staticmethod(serialization.saved_map_data)
 
     @classmethod
     def from_dict(cls, save_data: dict[str, Any], map_data=None) -> GameState:
+        """Restore a game ``to_dict`` saved (``serialization.game_from_dict``).
+
+        ``map_data`` None rebuilds the grid from the terrain the save
+        recorded; raises ValueError for a save too old to have it.
         """
-        Restore game state from dictionary.
-
-        Loads every save format version up to ``SAVE_FORMAT_VERSION``; a
-        field an older save lacks takes the value a new game would have (a
-        version 1 fog-of-war save, for one, gets fog rebuilt from the
-        current board).
-
-        Args:
-            save_data: Dictionary with saved game data
-            map_data: Map data (2D array). ``None`` rebuilds the grid from the
-                terrain ``to_dict`` records under ``"map_data"``.
-
-        Returns:
-            Restored GameState instance
-
-        Raises:
-            ValueError: If ``map_data`` is None and the save predates recorded
-                terrain (it only names a map file, or none for random maps).
-        """
-        if map_data is None:
-            map_data = cls.saved_map_data(save_data)
-            if map_data is None:
-                raise ValueError("Save has no recorded terrain ('map_data'); pass the map explicitly")
-
-        # Nothing below depends on the version yet (every field falls back
-        # to a new game's value), so an unknown one only earns a warning. A
-        # hand-edited, non-numeric version must not make the load crash.
-        raw_version = save_data.get("save_format_version", 1)
-        try:
-            version = int(raw_version)
-        except (TypeError, ValueError):
-            logger.warning("Save format version %r is not a number; loading what it recognises", raw_version)
-        else:
-            if version > SAVE_FORMAT_VERSION:
-                logger.warning(
-                    "Save format version %s is newer than this version of the game (%s); loading what it recognises",
-                    version,
-                    SAVE_FORMAT_VERSION,
-                )
-
-        # Every container read from save_data is copied: the caller keeps its
-        # dict, and a game must not share lists with it (or with the
-        # class-level ALL_UNIT_TYPES) that either side could mutate.
-        # Extract enabled_units from save data (default to all if not present for backward compatibility)
-        saved_units = save_data.get("enabled_units")
-        enabled_units = list(saved_units) if saved_units is not None else list(cls.ALL_UNIT_TYPES)
-
-        # Extract fog_of_war from save data (default to False for backward compatibility)
-        fog_of_war = save_data.get("fog_of_war", False)
-
-        # Extract fog_of_war_method (default to 'simple_radius' if FOW enabled, 'none' otherwise)
-        fog_of_war_method = save_data.get("fog_of_war_method", "simple_radius" if fog_of_war else "none")
-
-        max_turns = save_data.get("max_turns")
-        # Restore the engine-constant overlay (damage_model / structure HP /
-        # economy / unit cap). Absent in pre-0.3.3 saves -> {} == module
-        # defaults, byte-identical to the old load behaviour.
-        engine_overrides = copy.deepcopy(save_data.get("engine_overrides") or {})
-        # JSON turns the int player keys into strings. A save from before
-        # teams existed has none and was played free-for-all, whatever team
-        # codes its map carries: load it that way (map_teams=False).
-        teams = {int(p): int(t) for p, t in (save_data.get("teams") or {}).items()} or None
-        game = cls(
-            map_data,
-            save_data.get("num_players", 2),
-            max_turns=max_turns,
-            enabled_units=enabled_units,
-            fog_of_war=fog_of_war,
-            engine_overrides=engine_overrides,
-            # Saves from before the seed was recorded get a fresh one.
-            seed=save_data.get("seed"),
-            teams=teams,
-            map_teams="teams" in save_data,
-        )
-        if save_data.get("rng_state"):
-            # Continue the saved stream exactly. The seed stays what the save
-            # recorded (None for a caller-supplied rng), not a fresh draw.
-            game.rng = cls._rng_from_save(save_data["rng_state"])
-            game.seed = save_data.get("seed")
-        game.eliminated_players = {int(p) for p in save_data.get("eliminated_players", [])}
-
-        # Restore the fog of war method
-        game.fog_of_war_method = fog_of_war_method
-
-        try:
-            game.game_start_time = datetime.strptime(save_data["timestamp"], "%Y-%m-%d %H-%M-%S")
-        except (KeyError, TypeError, ValueError):
-            pass  # keep "now" for saves without a usable timestamp
-        game.current_player = save_data.get("current_player", 1)
-        game.turn_number = save_data.get("turn_number", 0)
-        game.game_over = save_data.get("game_over", False)
-        game.winner = save_data.get("winner")
-        game.end_reason = save_data.get("end_reason")
-        game.game_over_action_index = save_data.get("winning_action_index")
-        # Restore unit-id counter. Old saves predate this field; ``from_dict``
-        # for the units themselves leaves ``unit.unit_id = None`` in that
-        # case and ``find_unit_by_id`` falls back to position-based lookup.
-        game._next_unit_id = save_data.get("next_unit_id", 0)
-
-        # Fix player_gold dictionary key type (JSON serializes as strings)
-        saved_gold = save_data.get("player_gold", {})
-        game.player_gold = {int(k): v for k, v in saved_gold.items()}
-
-        # Game-lifetime auto-heal totals (version 2+; older saves restart at 0)
-        for p, totals in (save_data.get("healing_totals") or {}).items():
-            game.healing_totals[int(p)] = {"hp": int(totals.get("hp", 0)), "gold": int(totals.get("gold", 0))}
-
-        game.map_file_used = save_data.get("map_file")
-
-        # Early version 2 saves carry padding metadata, always zero offsets
-        # (see SAVE_FORMAT_VERSION). Only a script calling the since-removed
-        # GameState.set_map_metadata could have saved others, and then the
-        # saved action_history is not on the saved grid.
-        offsets = (save_data.get("map_padding_offset_x") or 0, save_data.get("map_padding_offset_y") or 0)
-        if offsets != (0, 0):
-            logger.warning(
-                "Save records map padding offsets %s; its action history is not on its grid, so a replay "
-                "saved from this game will misplace the actions before the save",
-                offsets,
-            )
-
-        # Restore player_configs (backward compatible with old saves)
-        game.player_configs = copy.deepcopy(save_data.get("player_configs", []))
-
-        # Restore units, with this game's stats (engine_overrides may change
-        # them) rather than the module defaults, so max_health and attack
-        # match the game the save was made in.
-        game.units = []
-        for unit_data in save_data.get("units", []):
-            unit = Unit.from_dict(unit_data, stats=game.unit_data[unit_data["type"]])
-            if game.fog_of_war and unit_data.get("pre_move_visibility") is not None:
-                unit.pre_move_visibility = VisibilityMap.from_dict(
-                    unit_data["pre_move_visibility"], game.grid.width, game.grid.height, unit.player
-                )
-            game.units.append(unit)
-
-        # Restore tile states
-        for tile_data in save_data.get("tiles", []):
-            x, y = tile_data["x"], tile_data["y"]
-            if 0 <= x < game.grid.width and 0 <= y < game.grid.height:
-                tile = game.grid.tiles[y][x]
-                # Restore a recorded neutral owner too: an eliminated
-                # player's structures turn neutral (review core-7).
-                if "player" in tile_data:
-                    tile.player = tile_data["player"] or None
-                if tile_data.get("health") is not None:
-                    tile.health = tile_data["health"]
-                if tile_data.get("regenerating") is not None:
-                    tile.regenerating = tile_data["regenerating"]
-
-        # Restore action history (for continuing replay recording from a loaded save)
-        game.action_history = copy.deepcopy(save_data.get("action_history", []))
-
-        # Fog of war: restore what each player had explored and remembers.
-        # The maps __init__ computed describe the fresh map, not this game.
-        # A version 1 save has no such state, so its fog is rebuilt from the
-        # current board (anything explored before the save is lost).
-        if game.fog_of_war:
-            saved_fog = save_data.get("fog_of_war_state") or {}
-            if all(str(p) in saved_fog for p in range(1, game.num_players + 1)):
-                game.visibility_maps = {
-                    p: VisibilityMap.from_dict(saved_fog[str(p)], game.grid.width, game.grid.height, p)
-                    for p in range(1, game.num_players + 1)
-                }
-            else:
-                game._init_visibility()
-
-        game._invalidate_cache()
-        return game
+        return serialization.game_from_dict(cls, save_data, map_data)
