@@ -245,6 +245,27 @@ _ALLY_TARGETED = tuple(
 # ----------------------------------------------------------------------
 
 
+def enumerate_create_actions(state: GameState, player: int) -> list[dict[str, Any]]:
+    """The ``create_unit`` list of ``enumerate_legal_actions``, the same entries in the same order, alone.
+
+    For callers that only buy, such as the scripted bots' purchase loops:
+    the full enumeration also searches every unit's moves, which made
+    listing the purchases cost as much as listing every action.
+    """
+    creates: list[dict[str, Any]] = []
+    # Building units (only at Buildings, not HQ)
+    # Only include enabled unit types. Suppressed entirely once the player
+    # is at the unit cap so the action mask matches create_unit's own
+    # enforcement (no offered-then-rejected create actions).
+    if under_unit_cap(state, player):
+        for tile in state.grid.get_capturable_tiles(player):
+            if is_free_spawn_tile(state, player, tile.x, tile.y):
+                for unit_type in state.enabled_units:
+                    if can_afford(state, player, unit_type):
+                        creates.append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
+    return creates
+
+
 def enumerate_legal_actions(state: GameState, player: int) -> dict[str, Any]:
     """Every action ``player`` may take in ``state`` now, uncached (``GameState.get_legal_actions`` caches it).
 
@@ -261,17 +282,7 @@ def enumerate_legal_actions(state: GameState, player: int) -> dict[str, Any]:
     """
     legal_actions: dict[str, Any] = {kind: [] for kind in ACTION_KINDS}
     legal_actions["end_turn"] = True
-
-    # Building units (only at Buildings, not HQ)
-    # Only include enabled unit types. Suppressed entirely once the player
-    # is at the unit cap so the action mask matches create_unit's own
-    # enforcement (no offered-then-rejected create actions).
-    if under_unit_cap(state, player):
-        for tile in state.grid.get_capturable_tiles(player):
-            if is_free_spawn_tile(state, player, tile.x, tile.y):
-                for unit_type in state.enabled_units:
-                    if can_afford(state, player, unit_type):
-                        legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
+    legal_actions["create_unit"] = enumerate_create_actions(state, player)
 
     # Unit actions. Every move search shares one occupancy set, and one
     # blocker set: who blocks a unit depends only on its player. Both come

@@ -259,6 +259,19 @@ class TestMixedBotTakeTurn:
         bot.take_turn()
         assert called == [True]
 
+    def test_capabilities_fired_are_the_inner_bots(self, map_data):
+        """The tournament snapshots get_capabilities_fired; MixedBot's own were always empty (review rulebots-19)."""
+        gs = _new_game_state(map_data)
+        gs.current_player = 2
+        gs.player_gold[2] = 1000
+        bot = MixedBot(gs, player=2, p_hard=0.0, rng=random.Random(0))
+
+        bot.take_turn()
+
+        fired = bot.get_capabilities_fired()
+        assert fired == bot._inner.get_capabilities_fired()
+        assert any(name.startswith("buy_") for name in fired)
+
 
 class TestMixedBotSamplingDistribution:
     def test_p_hard_matches_empirical_frequency(self, map_data):

@@ -138,7 +138,12 @@ module = [
 ignore_errors = true
 
 [tool.pytest.ini_options]
-addopts = "--cov=reinforcetactics --cov-fail-under=65"
+# Tests marked slow are left out of the default run; `pytest -m slow --no-cov`
+# runs them (CI does, in a step of its own).
+addopts = "--cov=reinforcetactics --cov-fail-under=65 -m 'not slow'"
+markers = [
+    "slow: long whole-game matrices (the scripted-bot legality harness); deselected by default, run with -m slow",
+]
 
 [tool.coverage.run]
 source = ["reinforcetactics"]
