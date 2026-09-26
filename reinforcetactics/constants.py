@@ -297,7 +297,17 @@ FLANK_BONUS = 0.5  # Rogue: +50% damage if enemy is adjacent to a friendly unit
 ROGUE_EVADE_CHANCE = 0.15  # Rogue: 15% chance to dodge counter-attacks
 
 # Status effects
-PARALYZE_DURATION = 3
+# Durations count the affected unit's OWN turns, the same way for every
+# status: a paralyzed unit loses its next PARALYZE_DURATION turns, and a buff
+# covers SORCERER_BUFF_DURATION turns of its owner. The per-unit counters
+# (``paralyzed_turns``, ``*_buff_turns``) instead count the owner's turn
+# STARTS until the status ends -- they tick at the start of the owner's turn
+# -- so a status applied outside its owner's turn is stored one higher (a
+# paralysis is always cast on the victim's opponent's turn, so it is stored as
+# PARALYZE_DURATION + 1 and wears off as the victim's first free turn starts).
+# This is the pre-2026-09 rule unchanged (the constant used to be 3, the
+# counter value, while the victim lost 2 turns).
+PARALYZE_DURATION = 2
 PARALYZE_COOLDOWN = 2  # Turns before Mage can use Paralyze again
 HEAL_AMOUNT = 7
 CLERIC_HEAL_RANGE = 3  # Max Manhattan distance for Cleric heal and cure-paralyze abilities
@@ -307,7 +317,7 @@ HASTE_COOLDOWN = 2  # Turns before Sorcerer can use Haste again
 ROGUE_FOREST_EVADE_BONUS = 0.15  # Additional 15% dodge chance when in forest (15% + 15% = 30%)
 
 # Sorcerer buff abilities
-SORCERER_BUFF_DURATION = 3  # Turns the buff lasts
+SORCERER_BUFF_DURATION = 3  # Own turns of the buffed unit the buff covers (see PARALYZE_DURATION)
 SORCERER_BUFF_COOLDOWN = 2  # Turns before Sorcerer can use buff again
 SORCERER_DEFENCE_BUFF_AMOUNT = 0.50  # 50% damage reduction
 SORCERER_ATTACK_BUFF_AMOUNT = 0.50  # 50% damage increase

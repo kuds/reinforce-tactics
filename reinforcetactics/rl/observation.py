@@ -33,9 +33,11 @@ Observation contract (1v1 only, agent-relative):
                       units are spent without inferring it from the action
                       mask.
         channel  11   unit HP fraction in [0, 1]
-        channel  12   paralyzed_turns / PARALYZE_DURATION (Mage debuff;
-                      remaining turns the unit cannot act, normalised
-                      to [0, 1]).
+        channel  12   paralyzed_turns / (PARALYZE_DURATION + 1) (Mage
+                      debuff; the counter, normalised to [0, 1]: it
+                      starts at PARALYZE_DURATION + 1 when cast -- see
+                      constants.py -- so values are unchanged from when
+                      the constant was 3).
         channel  13   is_hasted (Sorcerer haste buff; 1.0 iff the unit has
                       an extra action queued this turn, 0.0 otherwise).
         channel  14   defence_buff_turns / SORCERER_BUFF_DURATION
@@ -269,7 +271,7 @@ def build_observation(
     #   [..., 1] = absolute owner (0 = empty cell, else player number)
     #   [..., 2] = unit HP percentage in [0, 100]
     #   [..., 3] = exhausted flag in {0.0, 1.0} (not (can_move or can_attack))
-    #   [..., 4] = paralyzed_turns (raw int, 0..PARALYZE_DURATION)
+    #   [..., 4] = paralyzed_turns (raw int, 0..PARALYZE_DURATION + 1)
     #   [..., 5] = is_hasted (0.0 / 1.0)
     #   [..., 6] = defence_buff_turns (raw int, 0..SORCERER_BUFF_DURATION)
     #   [..., 7] = attack_buff_turns (raw int, 0..SORCERER_BUFF_DURATION)
@@ -298,7 +300,7 @@ def build_observation(
     # have zero across every raw_units slot), so the status channels
     # are correctly zeroed under fog of war.
     if raw_units.shape[-1] > 4:
-        units[..., UNIT_CH_PARALYZE] = raw_units[..., 4].astype(np.float32) / float(PARALYZE_DURATION)
+        units[..., UNIT_CH_PARALYZE] = raw_units[..., 4].astype(np.float32) / float(PARALYZE_DURATION + 1)
     if raw_units.shape[-1] > 5:
         units[..., UNIT_CH_HASTE] = raw_units[..., 5].astype(np.float32)
     if raw_units.shape[-1] > 6:

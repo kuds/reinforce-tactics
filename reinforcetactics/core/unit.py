@@ -67,6 +67,11 @@ class Unit:
 
         # Haste buff tracking (for any unit that receives Haste)
         self.is_hasted = False  # True if unit has extra action this turn
+        # True from the moment the engine spends this unit's haste on a new
+        # action (GameState._consume_action) until the unit moves or acts
+        # again; lets GameState.end_unit_turn tell "finish the action that
+        # was just refreshed" (keep the extra action) from a Wait.
+        self.haste_refreshed = False
 
         # Sorcerer buff ability tracking (cooldowns for the Sorcerer)
         self.defence_buff_cooldown = 0  # Turns remaining before can use Defence Buff again
@@ -79,6 +84,10 @@ class Unit:
         # Fog of war: Track which enemy positions were visible when this unit started its action
         # This prevents "move to discover, then attack" exploitation
         self.visible_enemies_at_action_start = None  # Set of (x, y) tuples, or None if not captured
+        # Fog of war: the owner's VisibilityMap as it was before this unit's
+        # latest move, kept until the unit acts or the turn ends so
+        # GameState.cancel_move can take back what the move revealed.
+        self.pre_move_visibility = None
 
     def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
@@ -232,6 +241,7 @@ class Unit:
                   False if the turn actually ended
         """
         # If hasted and not forcing end, consume haste and refresh for another action
+        self.haste_refreshed = False
         if self.is_hasted and not force_end:
             self.is_hasted = False
             self.can_move = True

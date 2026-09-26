@@ -124,6 +124,8 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             return (False, None, unit)
         if result["captured"]:
             print(f"{unit.type} captured structure!")
+        # The engine already spent the action, or refreshed a hasted unit;
+        # end_unit_turn closes the former and keeps the latter's extra action.
         can_still_act = game.end_unit_turn(unit)
         if can_still_act:
             print(f"{unit.type} used haste action (can act again)")
@@ -142,6 +144,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             if not apply_targeted_action(game, action["type"], unit, target):
                 selected_unit_ref[0] = unit
                 return (False, None, unit)
+            # As for capture: True only if haste refreshed the unit.
             can_still_act = game.end_unit_turn(unit)
             if can_still_act:
                 print(f"{unit.type} used haste action (can act again)")

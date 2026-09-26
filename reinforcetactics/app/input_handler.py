@@ -198,8 +198,16 @@ class InputHandler:
                 cancel_text="Cancel",
             )
             if dialog.run():
-                print(f"\nPlayer {self.game.current_player} resigned")
+                player = self.game.current_player
+                print(f"\nPlayer {player} resigned")
                 self.game.resign()
+                if not self.game.game_over and self.game.is_eliminated(player):
+                    # Three or more seats: the others play on (review core-7).
+                    # The resigned seat has nothing left to do, so hand the
+                    # turn on for it, and let any bots that follow play.
+                    self.selected_unit = None
+                    self.game.end_turn()
+                    self._process_bot_turns()
             return "continue"
 
         # Priority 3: Handle grid clicks
@@ -266,7 +274,9 @@ class InputHandler:
             # Get all attackable positions (enemy unit positions)
             from reinforcetactics.core.mechanics import GameMechanics
 
-            attackable_enemies = GameMechanics.get_attackable_enemies(clicked_unit, self.game.units, self.game.grid)
+            attackable_enemies = GameMechanics.get_attackable_enemies(
+                clicked_unit, self.game.units, self.game.grid, self.game.teams
+            )
 
             # Convert to positions list
             self.preview_positions = [(enemy.x, enemy.y) for enemy in attackable_enemies]
@@ -297,7 +307,9 @@ class InputHandler:
                 self.menu_opened_time = current_time
                 return "continue"
 
-            # End unit's turn and reset selection
+            # End unit's turn and reset selection. A hasted unit was already
+            # refreshed by the engine; end_unit_turn then keeps its extra
+            # action and returns True (see GameState.end_unit_turn).
             can_still_act = self.game.end_unit_turn(self.target_selection_unit)
             self.target_selection_mode = False
             self.target_selection_action = None

@@ -144,7 +144,7 @@ See the `examples/` directory for more, including an action-masking training dem
 | Unit | Cost | Move | HP | Special |
 |------|------|------|-----|---------|
 | Warrior | 200 | 3 | 15 | High HP melee |
-| Mage | 300 | 2 | 10 | Ranged 1-2, paralyze (3 turns, 2-turn cooldown) |
+| Mage | 300 | 2 | 10 | Ranged 1-2, paralyze (target loses its next 2 turns, 2-turn cooldown) |
 | Cleric | 200 | 2 | 8 | Heal/cure allies (range 1-2) |
 | Archer | 250 | 3 | 15 | Ranged 2-3 tiles (+1 on mountains) |
 | Knight | 350 | 4 | 18 | Charge (+50% dmg if moved 3+ tiles) |
@@ -152,7 +152,17 @@ See the `examples/` directory for more, including an action-masking training dem
 | Sorcerer | 400 | 2 | 10 | Haste, Attack/Defence Buff (+35%) |
 | Barbarian | 400 | 5 | 24 | Fast, high-damage melee |
 
-**Win Conditions**: Capture enemy HQ or eliminate all enemy units
+**Win Conditions**: With two sides (1v1, 2v2), capturing an enemy HQ wins the game for your side. A player who loses its last unit or resigns is eliminated, and a side whose players are all eliminated loses. With three or more sides (1v1v1 free-for-all), a player is also eliminated when its last HQ is captured; the game goes on until one side is left.
+
+**Elimination**: An eliminated player's units are removed, its structures turn neutral (a neutral HQ is then an ordinary structure to capture) and its turns are skipped, so it gets no income or new units.
+
+**Teams**: A map declares teams on each player's HQ code as `h_<player>_<team>` (e.g. `h_3_1`), or code passes `GameState(teams={player: team})`; the two must agree. Without a declaration every player is its own side. Teammates never attack, paralyze or seize each other; they can heal, cure and buff each other's units (Haste targets only your own units), flank for each other and move through each other. The bundled 2v2 map plays players 1 and 3 against 2 and 4; the 2v2 mode gives those teams to a map that declares none.
+
+**Turns**: Each turn starts with its player's income, auto-heal on owned structures, and status and cooldown ticks. Player 1's first turn skips this step, so it plays turn 0 on starting gold while Player 2 collects income before its first move. That long-standing schedule is the default; the engine override `begin_first_turn: true` gives Player 1 turn-0 income as well. Cancelling a move (in the GUI, before the unit acts) takes it back completely: it leaves no trace in the replay, and under fog of war what the move revealed is hidden again.
+
+**Haste**: The target (one of your own units that is not paralyzed) gets one extra full action this turn. When it attacks, uses an ability or seizes (or Waits, in the GUI), it may move and act once more. A unit that has already acted is refreshed right away.
+
+**Status durations** count the affected unit's own turns. A paralyzed unit loses its next 2 turns (`PARALYZE_DURATION`) and cannot counter-attack until its first free turn starts. A buff lasts 3 of the buffed unit's turns (`SORCERER_BUFF_DURATION`), counting the turn it is cast on your own unit.
 
 **Economy**: Starting gold $200. Income from structures each turn (HQ: $150, Building: $100, Tower: $50)
 

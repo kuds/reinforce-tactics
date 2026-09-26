@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
 from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.core.mechanics import same_side
 
 # Strategic categories used by bot decision logic to bucket unit types by
 # role. Kept as tuples so they're immutable shared constants.
@@ -160,6 +161,21 @@ class BotUnitMixin:
     SUPPORT_UNITS = SUPPORT_UNITS
 
     # ------------------------------------------------------------------
+    # Sides (review core-4): a teammate is an ally, never a target
+    # ------------------------------------------------------------------
+    def _teams(self) -> Any:
+        """The game's player -> team map (None for a stand-in state without one)."""
+        return getattr(self.game_state, "teams", None)
+
+    def _is_friendly(self, player: int | None) -> bool:
+        """``player`` is this bot or a teammate. A neutral owner (None) is not."""
+        return same_side(self.bot_player, player, self._teams())
+
+    def _is_enemy(self, player: int | None) -> bool:
+        """``player`` is on another team. A neutral owner (None) is not an enemy either."""
+        return player is not None and not self._is_friendly(player)
+
+    # ------------------------------------------------------------------
     # Enabled-unit queries
     # ------------------------------------------------------------------
     def get_enabled_units(self) -> list[str]:
@@ -234,7 +250,7 @@ class BotUnitMixin:
             self.game_state.grid.width,
             self.game_state.grid.height,
             lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
+                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False, teams=self._teams()
             ),
         )
 
@@ -260,7 +276,7 @@ class BotUnitMixin:
         purchasing remains static at that tier."""
         counts: dict[str, int] = {}
         for u in self.game_state.units:
-            if u.player == self.bot_player or u.player is None:
+            if not self._is_enemy(u.player):
                 continue
             if u.health <= 0:
                 continue
@@ -325,7 +341,7 @@ class BotUnitMixin:
     def _is_capturing_us(self, enemy) -> bool:
         """True if ``enemy`` stands on a capturable tile we want back."""
         tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
-        return tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health
+        return tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health
 
     # ------------------------------------------------------------------
     # Per-unit ability flows (used by SimpleBot+ via composition)
@@ -340,13 +356,13 @@ class BotUnitMixin:
         if unit.type != "C" or not unit.can_attack:
             return False
 
-        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
+        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units, self._teams())
         if curable:
             self.game_state.cure(unit, curable[0])
             self._record("cleric_cure")
             return True
 
-        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
+        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units, self._teams())
         if not healable:
             return False
 
@@ -370,7 +386,7 @@ class BotUnitMixin:
         if unit.type != "M" or not unit.can_attack or not unit.can_use_paralyze():
             return False
 
-        enemies = [e for e in self.game_state.units if e.player != self.bot_player and e.health > 0 and not e.is_paralyzed()]
+        enemies = [e for e in self.game_state.units if self._is_enemy(e.player) and e.health > 0 and not e.is_paralyzed()]
         if not enemies:
             return False
 

@@ -876,7 +876,12 @@ class TestSorcererHasteAbility:
     """Test Sorcerer's Haste ability."""
 
     def test_sorcerer_can_haste_ally(self, simple_grid):
-        """Test Sorcerer can grant Haste to nearby ally."""
+        """Test Sorcerer can grant Haste to nearby ally.
+
+        The mechanics layer only marks the target: GameState grants the
+        extra action when the target spends its action (review core-8), so
+        haste_unit no longer touches the target's action flags.
+        """
         sorcerer = Unit("S", 5, 5, 1)
         ally = Unit("W", 6, 5, 1)  # Adjacent ally
 
@@ -884,8 +889,8 @@ class TestSorcererHasteAbility:
 
         assert result is True
         assert ally.is_hasted is True
-        assert ally.can_move is True
-        assert ally.can_attack is True
+        assert ally.can_move is False
+        assert ally.can_attack is False
         assert sorcerer.haste_cooldown == 2
 
     def test_sorcerer_cannot_haste_when_on_cooldown(self, simple_grid):
