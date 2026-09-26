@@ -1,6 +1,7 @@
 # Keep the Docker / Cloud Build context small and reproducible.
 .git
 .github
+.gcloudignore
 **/__pycache__/
 *.pyc
 
@@ -20,6 +21,35 @@ replays/
 videos/
 tournament_results/
 benchmarks/
+# Tournament results, LLM conversation logs and replays (mounted at runtime).
+docker/tournament/output/
+
+# Secrets. Both images build with the repo root as context and `COPY . .`
+# (the tournament image via docker-compose's `context: ../..`), so a secret
+# not excluded here lands in a layer that gets pushed to a registry.
+# docker/tournament/README.md has users put their OpenAI/Anthropic/Google API
+# keys in docker/tournament/.env. `**/` also matches the context root.
+**/.env
+**/.env.*
+# The one template, named exactly: a `**` exception could match inside any
+# excluded directory, so Docker would have to walk models/, .git and the rest
+# of them while scanning the context.
+!docker/tournament/.env.example
+**/*credentials*.json
+**/*service-account*.json
+# The name the Cloud Console gives a downloaded service-account key:
+# <project-id>-<first 12 hex digits of the key id>.json.
+**/*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+# Settings() writes settings.json, with the LLM API keys from the settings
+# menu, to whatever directory the game or a tournament was started from.
+**/settings.json
+
+# Agent scratch files at the root (Drive crawls, decoded payloads, notes); the
+# root .gitignore keeps them out of git.
+_*.py
+_*.md
+_*.json
+_*.txt
 
 # Test/coverage and editor cruft
 tests/
@@ -31,4 +61,3 @@ htmlcov/
 *.egg-info/
 dist/
 build/
-settings.json

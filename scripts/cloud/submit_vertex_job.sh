@@ -21,6 +21,9 @@
 #   ACCELERATOR_COUNT  GPU count (0 = CPU only)  (default: 1)
 #   REPLICA_COUNT      Worker replicas           (default: 1)
 #   SYNC_INTERVAL      Seconds between GCS syncs (default: 300)
+#   SYNC_DIRS          Extra dirs to sync, comma-separated (optional; see
+#                      GCS_SYNC_DIRS in vertex_train.py). models/, checkpoints/,
+#                      tensorboard/, logs/ and benchmarks/bootstrap/ always are.
 #   SERVICE_ACCOUNT    Run-as service account    (optional)
 #
 # Example:
@@ -119,6 +122,10 @@ trap 'rm -f "${CONFIG_FILE}"' EXIT
   echo "          value: $(yaml_squote "${BASE_OUTPUT}")"
   echo "        - name: GCS_SYNC_INTERVAL"
   echo "          value: $(yaml_squote "${SYNC_INTERVAL}")"
+  if [[ -n "${SYNC_DIRS:-}" ]]; then
+    echo "        - name: GCS_SYNC_DIRS"
+    echo "          value: $(yaml_squote "${SYNC_DIRS}")"
+  fi
   # Pass W&B credentials through when present so --wandb works on the worker.
   if [[ -n "${WANDB_API_KEY:-}" ]]; then
     echo "        - name: WANDB_API_KEY"
@@ -147,6 +154,7 @@ gcloud ai custom-jobs create \
 echo ""
 echo "✅ Submitted '${JOB_NAME}'. Trained artifacts will appear under:"
 echo "     ${BASE_OUTPUT}/{models,checkpoints,tensorboard,logs}/"
+echo "   (train_bootstrap.py runs: ${BASE_OUTPUT}/<run timestamp>/)"
 echo ""
 echo "Track it:"
 echo "  gcloud ai custom-jobs list --region=${REGION} --project=${PROJECT_ID}"

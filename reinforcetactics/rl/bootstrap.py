@@ -578,6 +578,7 @@ def run_curriculum(
         PeriodicEvalCallback,
         PromotionCallback,
         TrainingMetricsCallback,
+        save_model_atomically,
     )
     from reinforcetactics.rl.purchase_exploration import (
         PurchaseExploreScheduleCallback,
@@ -832,7 +833,7 @@ def run_curriculum(
         best_stage_steps = (best_timestep - stage_start_timesteps) if best_timestep is not None else None
 
         stage_final = stage_dir / "stage_final.zip"
-        model.save(str(stage_final))
+        save_model_atomically(model, stage_final)
 
         # Per-stage run config -- written next to ``best_model.zip`` and
         # ``stage_final.zip`` immediately after the save, so that even if
@@ -922,7 +923,7 @@ def run_curriculum(
             try:
                 final_path = output_dir / "final_model.zip"
                 assert model is not None
-                model.save(str(final_path))
+                save_model_atomically(model, final_path)
                 stalled_final_path = str(final_path)
             except Exception:  # noqa: BLE001
                 stalled_final_path = None
@@ -995,7 +996,7 @@ def run_curriculum(
 
     final_path = output_dir / "final_model.zip"
     assert model is not None  # validate() guarantees stages is non-empty
-    model.save(str(final_path))
+    save_model_atomically(model, final_path)
 
     _write_run_status(
         output_dir,
