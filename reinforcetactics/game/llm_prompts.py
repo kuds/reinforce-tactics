@@ -35,7 +35,7 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
@@ -136,7 +136,7 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
@@ -441,7 +441,7 @@ UNIT_DESCRIPTIONS = {
    - Strong melee fighter, attacks adjacent enemies only""",
     "M": """Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)""",
     "C": """Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)""",
     "A": """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3

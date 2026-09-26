@@ -348,7 +348,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
 
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
-        if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+        if tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health:
             self.game_state.seize(unit)
             # Check if unit can act again (haste)
             if unit.can_move or unit.can_attack:
@@ -396,9 +396,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
         """Find the best target for a unit (enemy unit or structure)."""
         # Find enemy units
         enemy_units = [
-            (u, self.manhattan_distance(unit.x, unit.y, u.x, u.y))
-            for u in self.game_state.units
-            if u.player != self.bot_player
+            (u, self.manhattan_distance(unit.x, unit.y, u.x, u.y)) for u in self.game_state.units if self._is_enemy(u.player)
         ]
 
         # Find capturable structures (enemy-owned and neutral). The enemy HQ is
@@ -407,7 +405,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
         enemy_structures = []
         for row in self.game_state.grid.tiles:
             for tile in row:
-                if tile.is_capturable() and tile.player != self.bot_player:
+                if tile.is_capturable() and not self._is_friendly(tile.player):
                     dist = self.manhattan_distance(unit.x, unit.y, tile.x, tile.y)
                     if tile.type == "t":
                         enemy_structures.append(("enemy_tower", tile, dist))
@@ -749,7 +747,7 @@ class MediumBot(BotUnitMixin, BaseBot):
             for structure in row:
                 if not structure.is_capturable():
                     continue
-                if structure.player == self.bot_player:
+                if self._is_friendly(structure.player):
                     continue
                 if (structure.x, structure.y) in claimed:
                     continue
@@ -892,7 +890,7 @@ class MediumBot(BotUnitMixin, BaseBot):
             List of (enemy, attackers) tuples where attackers can kill the enemy
         """
         killable = []
-        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemy_units = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         for enemy in enemy_units:
             # Find all units that can attack this enemy and the damage they
@@ -990,7 +988,7 @@ class MediumBot(BotUnitMixin, BaseBot):
         def target_priority(item):
             enemy, attackers = item
             tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
-            if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+            if tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health:
                 return (0,)
             cost = UNIT_DATA[enemy.type]["cost"]
             return (1, -cost, len(attackers))
@@ -1059,13 +1057,13 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         for row in self.game_state.grid.tiles:
             for tile in row:
-                if tile.is_capturable() and tile.player != self.bot_player:
+                if tile.is_capturable() and not self._is_friendly(tile.player):
                     # Check if health is below max (being captured)
                     if tile.health < tile.max_health:
                         # Find enemy unit on this structure
                         enemy_on_structure = None
                         for unit in self.game_state.units:
-                            if unit.player != self.bot_player and unit.x == tile.x and unit.y == tile.y:
+                            if self._is_enemy(unit.player) and unit.x == tile.x and unit.y == tile.y:
                                 enemy_on_structure = unit
                                 break
 
@@ -1183,7 +1181,7 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         # Check if any friendly unit is adjacent to target
         for unit in self.game_state.units:
-            if unit.player == self.bot_player and unit != attacker:
+            if self._is_friendly(unit.player) and unit != attacker:
                 dist = self.manhattan_distance(unit.x, unit.y, target.x, target.y)
                 if dist == 1:
                     return True
@@ -1195,7 +1193,7 @@ class MediumBot(BotUnitMixin, BaseBot):
             return []
 
         flankable = []
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         for enemy in enemies:
             if self._can_flank(rogue, enemy):
@@ -1214,7 +1212,7 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
-        if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+        if tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health:
             self.game_state.seize(unit)
             if unit.can_move or unit.can_attack:
                 self.act_with_unit(unit, _depth + 1)
@@ -1283,7 +1281,7 @@ class MediumBot(BotUnitMixin, BaseBot):
         if self.should_retreat_to_heal(unit):
             attackable_now = self.game_state.mechanics.get_attackable_enemies(
                 unit,
-                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0],
                 self.game_state.grid,
             )
             on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
@@ -1292,7 +1290,7 @@ class MediumBot(BotUnitMixin, BaseBot):
                 return
 
         # Priority 2: Attack enemies with good value trades
-        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemy_units = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
         if enemy_units:
             # Evaluate all possible attacks
             best_value = -1000
@@ -1714,7 +1712,7 @@ class AdvancedBot(MediumBot):
             return None
 
         candidates = [(unit.x, unit.y)] + list(reachable)
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         best = None
         # Maximise (heal_amount, -threats_in_range, -distance).
@@ -1861,7 +1859,7 @@ class AdvancedBot(MediumBot):
 
         # Check if already seizing a structure
         tile = self.game_state.grid.get_tile(unit.x, unit.y)
-        if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+        if tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health:
             self.game_state.seize(unit)
             # Check if unit can act again (haste)
             if unit.can_move or unit.can_attack:
@@ -1930,7 +1928,7 @@ class AdvancedBot(MediumBot):
         if self.should_retreat_to_heal(unit):
             attackable_now = self.game_state.mechanics.get_attackable_enemies(
                 unit,
-                [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0],
+                [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0],
                 self.game_state.grid,
             )
             on_mountain = self.game_state.grid.get_tile(unit.x, unit.y).type == "m"
@@ -1981,7 +1979,7 @@ class AdvancedBot(MediumBot):
         # every reachable mountain (without committing the move) and pick
         # the one that yields an in-range enemy; otherwise skip entirely.
         if unit.type in ["W", "B", "A", "M", "K", "S"] and tile.type != "m":
-            enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+            enemy_units = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
             enemy_close = any(self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 4 for e in enemy_units)
             if enemy_close and enemy_units:
                 reachable_mountains = [
@@ -2014,7 +2012,7 @@ class AdvancedBot(MediumBot):
             return
 
         # PRIORITY 7: Move to attack range and attack
-        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemy_units = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         if enemy_units:
             # Find closest attackable enemy. Shuffle the candidate
@@ -2117,7 +2115,7 @@ class AdvancedBot(MediumBot):
         if self.game_state.game_over:
             return False
 
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         if not enemies:
             return False
@@ -2242,7 +2240,7 @@ class AdvancedBot(MediumBot):
             return False
 
         # Check if there are nearby enemies (only position if combat expected)
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
         if not enemies:
             return False
 
@@ -2293,7 +2291,7 @@ class AdvancedBot(MediumBot):
             # randomly under stochastic mode.
             candidates = self._maybe_shuffle(list(self.game_state.units))
             for enemy in candidates:
-                if enemy.player == self.bot_player or enemy.health <= 0 or enemy.is_paralyzed():
+                if not self._is_enemy(enemy.player) or enemy.health <= 0 or enemy.is_paralyzed():
                     continue
                 if not self._is_capturing_us(enemy):
                     continue
@@ -2323,7 +2321,7 @@ class AdvancedBot(MediumBot):
             return False
 
         allies = [u for u in self.game_state.units if u.player == self.bot_player and u != unit]
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         if not allies:
             return False
@@ -2414,7 +2412,7 @@ class AdvancedBot(MediumBot):
         if unit.type not in ["A", "M", "S"]:
             return False
 
-        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0]
+        enemy_units = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
 
         attackable = self.game_state.mechanics.get_attackable_enemies(unit, enemy_units, self.game_state.grid)
 
@@ -2478,13 +2476,13 @@ class MasterBot(AdvancedBot):
        on the way.
 
     4. Haste followthrough (``move_and_act_units_enhanced`` post-pass +
-       expanded ``_try_sorcerer_abilities``). The base flow leaves haste
-       *unused* whenever its target took action via an early-return
-       branch (seize, attack, charge, flank), because those branches
-       zero ``can_move``/``can_attack`` but don't consume ``is_hasted``
-       -- only the fallback ``end_unit_turn`` call site does. Master
-       explicitly re-runs ``act_with_unit_enhanced`` on still-hasted
-       allies after the main pass, enabling:
+       expanded ``_try_sorcerer_abilities``). The engine refreshes a hasted
+       unit when its first action is spent (``GameState._consume_action``),
+       but the base flow's early-return branches (charge, flank, some
+       attacks) don't act with it again, and a unit hasted after it acted
+       is not revisited. Master re-runs ``act_with_unit_enhanced`` after
+       the main pass on allies whose haste refresh is still unused
+       (``haste_refreshed``) or whose haste is still pending, enabling:
         - **Double capture**: warrior seizes structure A, then the haste
           refresh moves it to and seizes structure B in the same turn.
         - **Cross-map mobility**: Barbarian (movement=5) hasted -> two
@@ -2550,7 +2548,7 @@ class MasterBot(AdvancedBot):
         width = self.game_state.grid.width
         height = self.game_state.grid.height
 
-        enemies = [u for u in self.game_state.units if u.player != self.bot_player and u.health > 0 and not u.is_paralyzed()]
+        enemies = [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0 and not u.is_paralyzed()]
 
         for enemy in enemies:
             base_damage = self._enemy_base_damage(enemy)
@@ -2675,7 +2673,7 @@ class MasterBot(AdvancedBot):
         def target_priority(item):
             enemy, attackers = item
             tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
-            if tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health:
+            if tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health:
                 return (0,)
             cost = UNIT_DATA[enemy.type]["cost"]
             return (1, -cost, len(attackers))
@@ -2724,7 +2722,7 @@ class MasterBot(AdvancedBot):
         enemy_hq = None
         for row in self.game_state.grid.tiles:
             for tile in row:
-                if tile.type == "h" and tile.player is not None and tile.player != self.bot_player:
+                if tile.type == "h" and self._is_enemy(tile.player):
                     enemy_hq = tile
                     break
             if enemy_hq:
@@ -2744,20 +2742,18 @@ class MasterBot(AdvancedBot):
         return target
 
     # ------------------------------------------------------------------
-    # move_and_act post-pass: consume leftover haste.
+    # move_and_act post-pass: use leftover haste.
     #
-    # The base flow leaves haste *unused* when its target took action via
-    # any early-return branch (seize, attack, charge, flank ...). Each of
-    # those branches zeros ``can_move``/``can_attack`` but leaves
-    # ``is_hasted=True``; the fallback ``unit.end_unit_turn()`` is the
-    # only call site that consumes haste and refreshes action flags. So
-    # without intervention, a hasted unit that captured / killed / etc.
-    # silently loses its second action when the turn ends and the engine
-    # wipes ``is_hasted`` (see GameState.end_turn).
+    # The engine refreshes a hasted unit as its first action is spent
+    # (GameState._consume_action) and marks it ``haste_refreshed`` until it
+    # moves or acts again. The base flow's early-return branches (charge,
+    # flank ...) don't act with it again, and a unit hasted after it
+    # already acted is never revisited, so without this pass the extra
+    # action is lost when the turn ends.
     #
-    # We mop that up by re-running ``act_with_unit_enhanced`` on every
-    # still-hasted ally after the main pass. This enables two patterns
-    # that are otherwise impossible:
+    # We mop that up by re-running ``act_with_unit_enhanced`` on every ally
+    # with an unused refresh (or a haste still pending) after the main
+    # pass. This enables two patterns that are otherwise impossible:
     #   - **Double capture**: Warrior moves+seizes structure A on action
     #     1; post-pass refreshes flags; action 2 moves+seizes structure B.
     #   - **Cross-map mobility**: Barbarian (movement=5) hasted -> two
@@ -2776,14 +2772,14 @@ class MasterBot(AdvancedBot):
                 return
             if unit.player != self.bot_player:
                 continue
-            if not unit.is_hasted:
+            # Refreshed by haste and not used yet (the engine refreshed it
+            # when its first action was spent), or hasted and never acted.
+            if not (unit.haste_refreshed or unit.is_hasted):
                 continue
-            # end_unit_turn(force_end=False) sees is_hasted=True, refreshes
-            # can_move/can_attack to True, sets is_hasted=False, and
-            # returns True. If the caller already consumed haste (e.g. a
-            # recursion path inside the parent), is_hasted is already
-            # False and we wouldn't have entered this branch.
-            if unit.end_unit_turn(force_end=False):
+            # GameState.end_unit_turn keeps a refreshed unit's extra action
+            # (returns True), or spends an unused haste on a new action; the
+            # unit-level call used here before could not see the former.
+            if self.game_state.end_unit_turn(unit):
                 self._record("haste_followthrough")
                 self.act_with_unit_enhanced(unit)
 
@@ -2828,7 +2824,7 @@ class MasterBot(AdvancedBot):
                 if self.manhattan_distance(k.x, k.y, pos[0], pos[1]) < CHARGE_MIN_DISTANCE:
                     continue
                 for e in self.game_state.units:
-                    if e.player == self.bot_player or e.health <= 0:
+                    if not self._is_enemy(e.player) or e.health <= 0:
                         continue
                     if self.manhattan_distance(pos[0], pos[1], e.x, e.y) != 1:
                         continue
@@ -2849,7 +2845,7 @@ class MasterBot(AdvancedBot):
             tile
             for row in self.game_state.grid.tiles
             for tile in row
-            if tile.is_capturable() and tile.player != self.bot_player
+            if tile.is_capturable() and not self._is_friendly(tile.player)
         ]
         if len(capturables) >= 2:
             for ally in candidates:

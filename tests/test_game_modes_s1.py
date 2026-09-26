@@ -168,7 +168,7 @@ def test_three_player_game_starts_and_cycles_through_every_seat(pygame_init, iso
 
 
 def test_2v2_still_starts_with_four_seats(pygame_init, isolated_settings, monkeypatch):
-    """2v2 team rules are out of scope, but it must keep starting as before."""
+    """2v2 keeps starting with four seats (its teams are checked in test_teams_core)."""
     from reinforcetactics.app import game_loop
 
     observed = {}

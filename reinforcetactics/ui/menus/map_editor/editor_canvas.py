@@ -213,7 +213,7 @@ class EditorCanvas:
                 # For structures with ownership, blend with player color
                 if "_" in tile_code:
                     parts = tile_code.split("_")
-                    if len(parts) == 2 and parts[1].isdigit():
+                    if len(parts) >= 2 and parts[1].isdigit():  # type_player[_team]
                         player_num = int(parts[1])
                         player_color = PLAYER_COLORS.get(player_num, (255, 255, 255))
                         # Blend colors

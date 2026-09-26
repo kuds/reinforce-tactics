@@ -350,12 +350,18 @@ def test_status_channels_zero_when_no_effects_active(game):
 
 
 def test_paralyze_channel_is_normalised_by_duration(game):
-    """Paralyze channel = ``paralyzed_turns / PARALYZE_DURATION``; full
-    debuff freshly applied lands at 1.0."""
+    """Paralyze channel = ``paralyzed_turns / (PARALYZE_DURATION + 1)``; full
+    debuff freshly applied lands at 1.0.
+
+    A fresh paralysis stores PARALYZE_DURATION + 1: the constant counts the
+    victim's lost turns, the counter its turn starts until it is free
+    (constants.py). Normalised values are what they were when the constant
+    was 3.
+    """
     from reinforcetactics.core.unit import Unit
 
     target = Unit("W", 1, 1, player=2)
-    target.paralyzed_turns = PARALYZE_DURATION
+    target.paralyzed_turns = PARALYZE_DURATION + 1
     game.units = [target]
     obs = build_observation(game, perspective_player=1)
     assert obs["units"][1, 1, UNIT_CH_PARALYZE] == pytest.approx(1.0)
@@ -363,7 +369,7 @@ def test_paralyze_channel_is_normalised_by_duration(game):
     # Mid-debuff value normalises proportionally.
     target.paralyzed_turns = 1
     obs = build_observation(game, perspective_player=1)
-    assert obs["units"][1, 1, UNIT_CH_PARALYZE] == pytest.approx(1.0 / PARALYZE_DURATION)
+    assert obs["units"][1, 1, UNIT_CH_PARALYZE] == pytest.approx(1.0 / (PARALYZE_DURATION + 1))
 
 
 def test_haste_channel_is_binary_on_hasted_units(game):
@@ -398,7 +404,7 @@ def test_status_channels_visible_on_opponent_units(game):
     from reinforcetactics.core.unit import Unit
 
     enemy = Unit("W", 5, 5, player=2)
-    enemy.paralyzed_turns = PARALYZE_DURATION
+    enemy.paralyzed_turns = PARALYZE_DURATION + 1  # a fresh paralysis (see above)
     enemy.defence_buff_turns = SORCERER_BUFF_DURATION
     game.units = [enemy]
     obs = build_observation(game, perspective_player=1)

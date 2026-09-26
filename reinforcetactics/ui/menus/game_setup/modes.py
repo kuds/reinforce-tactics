@@ -10,12 +10,18 @@ player-config screen with an uncaught ``ValueError`` that closed the app.
 """
 
 # Mode name (also the ``maps/<mode>/`` folder name) -> number of player seats.
-# 2v2 is still played as four independent seats: team rules are not
-# implemented yet (see ``Tile.team``).
 GAME_MODE_PLAYER_COUNTS: dict[str, int] = {
     "1v1": 2,
     "1v1v1": 3,
     "2v2": 4,
+}
+
+# Teams a mode plays with when its map declares none (a random map, or a
+# hand-made map without ``type_player_team`` HQ codes). Seats alternate
+# teams so turn order alternates too: players 1 and 3 against 2 and 4, as
+# the bundled 2v2 maps declare. Modes not listed are free-for-all.
+GAME_MODE_DEFAULT_TEAMS: dict[str, dict[int, int]] = {
+    "2v2": {1: 1, 2: 2, 3: 1, 4: 2},
 }
 
 
@@ -38,3 +44,9 @@ def mode_for_player_count(num_players: int) -> str | None:
         if count == num_players:
             return mode
     return None
+
+
+def default_teams_for_mode(game_mode: str) -> dict[int, int] | None:
+    """The ``{player: team}`` map for ``game_mode`` when its map declares no teams, if any."""
+    teams = GAME_MODE_DEFAULT_TEAMS.get(game_mode)
+    return dict(teams) if teams else None

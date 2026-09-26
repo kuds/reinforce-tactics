@@ -138,7 +138,7 @@ class MapEditorMenu(Menu):
                 cell = str(map_data.iloc[row, col])
                 if cell.startswith("h_"):
                     parts = cell.split("_")
-                    if len(parts) == 2 and parts[1].isdigit():
+                    if len(parts) >= 2 and parts[1].isdigit():  # h_player[_team]
                         player_num = int(parts[1])
                         max_player = max(max_player, player_num)
 

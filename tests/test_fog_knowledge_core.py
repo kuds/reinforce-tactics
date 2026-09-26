@@ -307,21 +307,29 @@ class TestVisibilityIsAlwaysCurrent:
         assert not fow_game.is_position_visible(9, 8, player=1)
 
     def test_cancel_move_takes_back_the_vision_the_move_gave(self, fow_game):
-        """A cancelled scout left its tiles VISIBLE, so known_structure served (and memorised) live state."""
+        """A cancelled scout left its tiles VISIBLE, so known_structure served (and memorised) live state.
+
+        Cancelling restores what the side knew before the move (see
+        tests/test_cancel_move_core.py), so the building is unexplored again
+        rather than remembered: a free move-and-cancel must not scout.
+        """
         archer = fow_game.place_unit("A", 3, 1, player=1)  # vision 4: sees x <= 7
         assert not fow_game.is_position_visible(*BUILDING, player=1)
+        before = fow_game.visibility_maps[1].get_visibility_state(*BUILDING)
+        assert before != VISIBLE
         assert fow_game.move_unit(archer, 5, 1)
         assert fow_game.is_position_visible(*BUILDING, player=1)
 
         assert fow_game.cancel_move(archer)
 
-        assert fow_game.visibility_maps[1].get_visibility_state(*BUILDING) == SHROUDED  # seen, now out of sight
+        assert fow_game.visibility_maps[1].get_visibility_state(*BUILDING) == before
+        assert fow_game.known_structure(1, *BUILDING) is None
         fow_game.end_turn()
         tile = _tile(fow_game, BUILDING)
         tile.player, tile.health = 2, 5  # captured out of P1's sight
         assert fow_game.to_numpy(for_player=1)["grid"][BUILDING[1], BUILDING[0], 1] == 0
         fow_game.end_turn()
-        assert fow_game.known_structure(1, *BUILDING).owner is None
+        assert fow_game.known_structure(1, *BUILDING) is None
 
     def test_a_bare_update_visibility_invalidates_the_legal_actions(self, fow_game):
         """Legality under fog reads visibility, so any refresh (not just the engine's own) must drop the cache."""

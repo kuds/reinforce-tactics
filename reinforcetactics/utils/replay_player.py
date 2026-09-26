@@ -23,7 +23,11 @@ from reinforcetactics.ui.icons import (
     get_x_icon,
 )
 from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.utils.replay_actions import execute_replay_action, get_schema_version
+from reinforcetactics.utils.replay_actions import (
+    execute_replay_action,
+    get_schema_version,
+    replay_game_state_kwargs,
+)
 
 # Default border size for replay padding (same as UI)
 REPLAY_BORDER_SIZE = 2
@@ -85,9 +89,7 @@ class ReplayPlayer:
         # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(
-            padded_map, num_players=self.game_info.get("num_players", 2), max_turns=self.game_info.get("max_turns")
-        )
+        self.game_state = GameState(padded_map, **replay_game_state_kwargs(self.game_info))
 
         # Create renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
@@ -286,9 +288,7 @@ class ReplayPlayer:
         """
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(
-            self.initial_map_data, num_players=self.game_info.get("num_players", 2), max_turns=self.game_info.get("max_turns")
-        )
+        self.game_state = GameState(self.initial_map_data, **replay_game_state_kwargs(self.game_info))
         self.renderer.game_state = self.game_state
 
     def toggle_pause(self):

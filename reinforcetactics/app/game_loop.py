@@ -22,7 +22,7 @@ from reinforcetactics.ui.menus import (
     ReplaySelectionMenu,
     SaveGameMenu,
 )
-from reinforcetactics.ui.menus.game_setup.modes import GAME_MODE_PLAYER_COUNTS
+from reinforcetactics.ui.menus.game_setup.modes import GAME_MODE_PLAYER_COUNTS, default_teams_for_mode
 from reinforcetactics.ui.renderer import Renderer
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.file_io import FileIO
@@ -264,7 +264,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
         Returns:
             'new_game', 'main_menu', or 'quit'
         """
-        print(f"\n🎉 Game Over! Player {self.game.winner} wins!")
+        print(f"\n🎉 Game Over! {_winner_text(self.game)}")
 
         # Automatically save replay
         replay_path = self.game.save_replay_to_file()
@@ -276,6 +276,17 @@ class GameSession:  # pylint: disable=too-few-public-methods
         result = game_over_menu.run()
 
         return result if result else "quit"
+
+
+def _winner_text(game):
+    """Console line naming who won (the whole team in a team game)."""
+    if game.winner is None:
+        return "The game is a draw."
+    team = game.team_of(game.winner)
+    players = [p for p in sorted(game.teams) if game.teams[p] == team]
+    if len(players) > 1:
+        return f"Team {team} (players {', '.join(str(p) for p in players)}) wins!"
+    return f"Player {game.winner} wins!"
 
 
 def _save_crash_artifacts(game):
@@ -402,8 +413,15 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
         settings = get_settings()
         enabled_units = settings.get_enabled_units()
 
+        # Teams (review core-4): a map declares its own on its HQ codes, and
+        # GameState derives them; for a map that declares none (e.g. a random
+        # map) the mode's default applies, so 2v2 is always played in teams.
+        teams = default_teams_for_mode(mode)
+        if teams and GameState.map_team_declarations(map_data, num_players):
+            teams = None
+
         # Create game state with enabled units from settings
-        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units, fog_of_war=fog_of_war)
+        game = GameState(map_data, num_players=num_players, enabled_units=enabled_units, fog_of_war=fog_of_war, teams=teams)
 
         # GameState computes fog-of-war visibility itself
         if fog_of_war:

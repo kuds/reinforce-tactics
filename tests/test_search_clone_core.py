@@ -137,6 +137,25 @@ def test_clone_copies_state_it_does_not_know_about():
     assert gs.some_future_state == {"counts": [1, 2]}
 
 
+def test_the_clone_has_its_own_pre_move_visibility_map():
+    """The map cancel_move restores is copied, so restoring and updating it in a clone can't reach the original."""
+    gs = _midgame(fog_of_war=True)
+    unit = next(u for u in gs.units if u.player == gs.current_player and u.can_move)
+    destination = next(pos for pos in gs.get_move_destinations(unit) if pos != (unit.x, unit.y))
+    assert gs.move_unit(unit, *destination)
+    snapshot = unit.pre_move_visibility.state.copy()
+
+    clone = gs.clone_for_search()
+    clone_unit = next(u for u in clone.units if u.unit_id == unit.unit_id)
+    assert clone_unit.pre_move_visibility is not unit.pre_move_visibility
+    clone_unit.pre_move_visibility.state[:] = 2
+    clone_unit.pre_move_visibility.last_seen_units[(0, 0)] = None
+
+    assert (unit.pre_move_visibility.state == snapshot).all()
+    assert (0, 0) not in unit.pre_move_visibility.last_seen_units
+    assert gs.cancel_move(unit)
+
+
 def test_mcts_search_clones_instead_of_deepcopying(monkeypatch):
     """The MCTS root and child states come from clone_for_search."""
     torch = pytest.importorskip("torch")
