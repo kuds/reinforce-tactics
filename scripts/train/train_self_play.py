@@ -41,14 +41,11 @@ from typing import Any
 
 import torch
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
-from stable_baselines3.common.callbacks import (
-    BaseCallback,
-    CallbackList,
-    CheckpointCallback,
-)
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
+from reinforcetactics.rl.callbacks import AtomicCheckpointCallback, SaveModelAtomicallyCallback, save_model_atomically
 from reinforcetactics.rl.masking import make_maskable_env
 
 # Local imports
@@ -204,8 +201,9 @@ def train_self_play(args) -> Path:
     )
     callbacks.append(self_play_callback)
 
-    # Checkpoint callback
-    checkpoint_callback = CheckpointCallback(
+    # Checkpoint callback. Atomic: vertex_train.py syncs logs/ while this runs
+    # (and on SIGTERM), and an in-place save could publish a truncated zip.
+    checkpoint_callback = AtomicCheckpointCallback(
         save_freq=_per_call(args.checkpoint_freq, args.n_envs),
         save_path=str(checkpoint_dir),
         name_prefix="mixed" if mixed else "self_play",
@@ -217,7 +215,10 @@ def train_self_play(args) -> Path:
     # plain EvalCallback would ignore masks.
     eval_callback = MaskableEvalCallback(
         eval_env,
-        best_model_save_path=str(log_dir / "best_model"),
+        # Saved by the new-best hook, atomically (see the checkpoint callback),
+        # to the same best_model/best_model.zip path SB3 would use.
+        best_model_save_path=None,
+        callback_on_new_best=SaveModelAtomicallyCallback(log_dir / "best_model" / "best_model.zip"),
         log_path=str(log_dir / "eval"),
         eval_freq=_per_call(args.eval_freq, args.n_envs),
         n_eval_episodes=args.n_eval_episodes,
@@ -252,7 +253,7 @@ def train_self_play(args) -> Path:
 
     # Save final model
     final_path = log_dir / "final_model.zip"
-    model.save(str(final_path))
+    save_model_atomically(model, final_path)
     logger.info("Training complete! Model saved to %s", final_path)
 
     # Save final statistics

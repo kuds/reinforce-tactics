@@ -22,7 +22,6 @@ def train_mode(args):
     """Training mode for RL agents."""
     try:
         from stable_baselines3 import A2C, DQN, PPO
-        from stable_baselines3.common.callbacks import CheckpointCallback
         from stable_baselines3.common.monitor import Monitor
     except ImportError:
         print("❌ Stable-Baselines3 not installed.")
@@ -106,7 +105,11 @@ def train_mode(args):
     checkpoint_dir = Path("checkpoints")
     checkpoint_dir.mkdir(exist_ok=True)
 
-    checkpoint_callback = CheckpointCallback(
+    from reinforcetactics.rl.callbacks import AtomicCheckpointCallback, save_model_atomically
+
+    # Atomic saves, as in the maintained trainers: a Ctrl-C or kill mid-save
+    # must not leave a truncated checkpoint behind.
+    checkpoint_callback = AtomicCheckpointCallback(
         save_freq=10000, save_path=str(checkpoint_dir), name_prefix=f"{args.algorithm}_strategy"
     )
 
@@ -127,7 +130,7 @@ def train_mode(args):
     model_name = args.model_name or f"{args.algorithm}_final"
     model_path = models_dir / model_name
 
-    model.save(str(model_path))
+    save_model_atomically(model, model_path)
     print(f"\n✅ Model saved to {model_path}.zip")
 
     env.close()

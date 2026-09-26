@@ -133,3 +133,58 @@ def test_interrupted_checkpoint_snapshot_leaves_no_truncated_copy(train_bootstra
     with pytest.raises(SystemExit):
         train_bootstrap._snapshot_stage_checkpoints(result, cfg, tmp_path)
     assert list((tmp_path / "checkpoints").iterdir()) == []
+
+
+class _VecModel(_Model):
+    """A _Model that the checkpoint callbacks can query for a VecNormalize env."""
+
+    def get_vec_normalize_env(self):
+        return None
+
+
+class TestAtomicSB3Callbacks:
+    """The CheckpointCallback / EvalCallback replacements used by train_self_play.py and the CLI trainer."""
+
+    def test_checkpoint_callback_keeps_the_previous_checkpoint_on_an_interrupted_save(self, tmp_path):
+        from reinforcetactics.rl.callbacks import AtomicCheckpointCallback
+
+        callback = AtomicCheckpointCallback(save_freq=1, save_path=str(tmp_path), name_prefix="sp")
+        callback.model = _VecModel()
+        callback.n_calls, callback.num_timesteps = 1, 100
+        assert callback._on_step() is True
+        good = tmp_path / "sp_100_steps.zip"
+        assert good.read_bytes() == b"new checkpoint"
+
+        # Same timestep again, interrupted mid-save: the good zip survives
+        # and no half-written file is left for a sync to pick up.
+        callback.model = _VecModel(interrupt=True)
+        with pytest.raises(SystemExit):
+            callback._on_step()
+        assert good.read_bytes() == b"new checkpoint"
+        assert not list(tmp_path.glob("*.partial"))
+
+    def test_checkpoint_callback_saves_only_on_its_frequency(self, tmp_path):
+        from reinforcetactics.rl.callbacks import AtomicCheckpointCallback
+
+        callback = AtomicCheckpointCallback(save_freq=3, save_path=str(tmp_path))
+        callback.model = _VecModel()
+        callback.n_calls, callback.num_timesteps = 2, 64
+        callback._on_step()
+        assert callback.model.saved_to == []
+
+    def test_new_best_callback_writes_atomically(self, tmp_path):
+        from reinforcetactics.rl.callbacks import SaveModelAtomicallyCallback
+
+        path = tmp_path / "best_model" / "best_model.zip"
+        path.parent.mkdir()
+        path.write_bytes(b"old best")
+        callback = SaveModelAtomicallyCallback(path)
+        callback.model = _Model(interrupt=True)
+        with pytest.raises(SystemExit):
+            callback._on_step()
+        assert path.read_bytes() == b"old best"
+        assert not list(path.parent.glob("*.partial"))
+
+        callback.model = _Model()
+        callback._on_step()
+        assert path.read_bytes() == b"new checkpoint"

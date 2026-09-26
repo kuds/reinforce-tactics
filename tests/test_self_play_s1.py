@@ -649,3 +649,7 @@ class TestTrainSelfPlayScript:
         assert log_dir.name.startswith("mixed_training_")
         assert (log_dir / "final_model.zip").exists()
         assert (log_dir / "final_stats.json").exists()
+        # The first eval is always a new best; it is saved through the atomic
+        # new-best hook to the path SB3's best_model_save_path used.
+        assert (log_dir / "best_model" / "best_model.zip").exists()
+        assert not list(log_dir.rglob("*.partial"))

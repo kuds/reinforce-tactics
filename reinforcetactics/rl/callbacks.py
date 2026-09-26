@@ -31,7 +31,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.utils import safe_mean
 
 from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
@@ -60,6 +60,48 @@ def save_model_atomically(model: Any, path: str | os.PathLike[str]) -> None:
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+
+
+class AtomicCheckpointCallback(CheckpointCallback):
+    """SB3's ``CheckpointCallback`` with the model zip written by ``save_model_atomically``.
+
+    Every trainer whose output directory a sync reads while it runs (e.g.
+    vertex_train.py uploading logs/ periodically and on SIGTERM) needs this:
+    the stock callback writes the zip in place, so a sync or a kill mid-save
+    can publish a truncated checkpoint.
+    """
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.save_freq != 0:
+            return True
+        model_path = self._checkpoint_path(extension="zip")
+        save_model_atomically(self.model, model_path)
+        if self.verbose >= 2:
+            print(f"Saving model checkpoint to {model_path}")
+        if self.save_replay_buffer and getattr(self.model, "replay_buffer", None) is not None:
+            self.model.save_replay_buffer(self._checkpoint_path("replay_buffer_", extension="pkl"))  # type: ignore[attr-defined]
+        vec_normalize = self.model.get_vec_normalize_env()
+        if self.save_vecnormalize and vec_normalize is not None:
+            vec_normalize.save(self._checkpoint_path("vecnormalize_", extension="pkl"))
+        return True
+
+
+class SaveModelAtomicallyCallback(BaseCallback):
+    """Save the model to ``path`` with ``save_model_atomically`` each time it is called.
+
+    Meant as an eval callback's ``callback_on_new_best`` in place of its
+    ``best_model_save_path``, which SB3 writes in place.
+    """
+
+    def __init__(self, path: str | os.PathLike[str], verbose: int = 0):
+        super().__init__(verbose)
+        self.path = path
+
+    def _on_step(self) -> bool:
+        save_model_atomically(self.model, self.path)
+        if self.verbose >= 1:
+            print(f"Saved new best model to {self.path}")
+        return True
 
 
 class TrainingMetricsCallback(BaseCallback):

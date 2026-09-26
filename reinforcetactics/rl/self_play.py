@@ -195,7 +195,11 @@ class OpponentPool:
         if save_to_disk and self.save_dir:
             save_path = self.save_dir / f"opponent_{timestep}.zip"
             try:
-                model.save(str(save_path))
+                # Atomic: a sync or a kill mid-save must not leave a truncated
+                # snapshot that later loads (or uploads) as an opponent.
+                from reinforcetactics.rl.callbacks import save_model_atomically
+
+                save_model_atomically(model, save_path)
                 logger.info("Saved opponent to pool: %s", save_path)
             except Exception as exc:
                 logger.warning("Failed to save opponent to disk: %s", exc)
