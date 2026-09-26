@@ -534,8 +534,10 @@ class MediumBot(BotUnitMixin, BaseBot):
         # so multiple units don't all converge on the same interrupt target.
         self._interrupt_assigned = set()
         # Per-turn set of structure positions already claimed by another unit's
-        # capture priority. Reset every turn so abandoned targets are reusable.
+        # capture priority, and who claimed each. Reset every turn so
+        # abandoned targets are reusable.
         self._capture_assigned = set()
+        self._capture_claimed_by = {}
 
         with self.planning_turn():
             # Phase 1: Purchase units - maximize unit production
@@ -552,15 +554,17 @@ class MediumBot(BotUnitMixin, BaseBot):
         Locate the bot's headquarters.
 
         Returns:
-            Tuple of (x, y) for HQ location, or None if not found
+            Tuple of (x, y) for HQ location, or None if not found. The first
+            in row order: in a free-for-all a bot that takes another HQ
+            owns it too.
         """
-        if self._turn is not None:
-            return self._turn.own_hq
-        for row in self.game_state.grid.tiles:
-            for tile in row:
-                if tile.type == "h" and tile.player == self.bot_player:
-                    return (tile.x, tile.y)
-        return None
+
+        def scan():
+            return next(
+                ((t.x, t.y) for t in self.capturable_structures() if t.type == "h" and t.player == self.bot_player), None
+            )
+
+        return self._memo("own_hq", scan)
 
     # Retreat to a friendly structure when below half HP. Subclasses tune this.
     RETREAT_HEALTH_THRESHOLD = 0.5
@@ -1233,7 +1237,7 @@ class MediumBot(BotUnitMixin, BaseBot):
             target_pos = self.find_best_move_position(unit, structure_pos[0], structure_pos[1])
             if target_pos is None or not self.try_move(unit, target_pos[0], target_pos[1]):
                 return
-        self._capture_assignments().add(structure_pos)
+        self._claim_capture(unit, structure_pos)
 
 
 class MixedBot(BotUnitMixin, BaseBot):
@@ -1506,6 +1510,7 @@ class AdvancedBot(MediumBot):
         self._interrupt_assigned = set()
         # Per-turn capture-target dedup; see MediumBot.pick_capture_target.
         self._capture_assigned = set()
+        self._capture_claimed_by = {}
         with self.planning_turn():
             # Phase update before any purchase/movement decisions read self.phase.
             self.update_phase()
@@ -1823,7 +1828,7 @@ class AdvancedBot(MediumBot):
                 # Claimed only once the unit stands on it or has moved (an
                 # ambush under fog of war can stop the move short of it).
                 if already_on or self.try_move(unit, structure_pos[0], structure_pos[1]):
-                    self._capture_assignments().add(structure_pos)
+                    self._claim_capture(unit, structure_pos)
                 if (unit.x, unit.y) == structure_pos and self.try_seize(unit):
                     self.finish_unit_action(unit, act, _depth)
                     return
@@ -2596,6 +2601,7 @@ class MasterBot(AdvancedBot):
             # unit-level call used here before could not see the former.
             if self.game_state.end_unit_turn(unit):
                 self._record("haste_followthrough")
+                self._release_captures(unit)  # a new action picks its target afresh
                 self.act_with_unit_enhanced(unit)
 
     # ------------------------------------------------------------------

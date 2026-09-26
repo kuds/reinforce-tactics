@@ -178,6 +178,36 @@ class TestActingThroughTheEngine:
         assert bot.get_reachable(moved) == [] and bot.get_reachable(dead) == []
         assert bot.find_best_move_position(moved, 0, 0) is None
 
+    def test_a_unit_whose_nearer_tiles_are_all_held_keeps_its_tile(self):
+        """No step sideways or back: staying put is what a move must beat.
+
+        Friends hold the enemy tower's other neighbours and an enemy stands
+        on it. With only legal destinations to choose from, the nearest one
+        was a step away from the tower, and SimpleBot took it.
+        """
+        grid = np.full((7, 7), "p", dtype=object)
+        grid[0, 0], grid[6, 6], grid[3, 3] = "h_1", "h_2", "t_2"
+        game = GameState(grid, num_players=2)
+        unit = game.place_unit("W", 2, 3, 1)
+        for x, y in [(3, 2), (3, 4), (4, 3)]:
+            game.place_unit("W", x, y, 1)
+        game.place_unit("W", 3, 3, 2)
+        bot = SimpleBot(game, player=1, rng=random.Random(0))
+
+        assert bot.find_best_move_position(unit, 3, 3) is None
+        bot.act_with_unit(unit)
+
+        assert (unit.x, unit.y) == (2, 3)
+        assert [a["type"] for a in game.action_history if a["type"] == "move"] == []
+
+    def test_find_best_move_position_takes_the_nearest_tile_nearer_than_the_units_own(self):
+        game = _open_game()
+        unit = game.place_unit("W", 0, 3, 1)
+        game.place_unit("W", 1, 3, 1)  # a friend in the way: pass through it
+        bot = SimpleBot(game, player=1)
+
+        assert bot.find_best_move_position(unit, 6, 3) == (unit.movement_range, 3)
+
     def test_pick_capture_target_skips_a_structure_a_friend_stands_on(self):
         game = _open_game(towers=[(3, 2), (3, 5)])  # (3, 2) is nearer, but a friend holds it
         unit = game.place_unit("W", 3, 3, 1)
@@ -211,6 +241,42 @@ class TestActingThroughTheEngine:
 
         assert bot._capture_assignments() == set()
         assert (unit.x, unit.y) == (3, 3) and not unit.can_attack
+
+    def test_a_new_action_releases_only_the_units_own_claims(self):
+        game = _open_game()
+        first, second = game.place_unit("W", 1, 1, 1), game.place_unit("W", 2, 2, 1)
+        bot = MediumBot(game, player=1)
+        bot._claim_capture(first, (3, 0))
+        bot._claim_capture(second, (5, 6))
+
+        bot._release_captures(first)
+
+        assert bot._capture_assignments() == {(5, 6)}
+
+    @pytest.mark.parametrize("tier", ["medium", "advanced", "master"])
+    def test_haste_carries_a_march_onto_the_structure_it_claimed(self, tier):
+        """The hasted action may pick the structure the unit's first action marched towards.
+
+        The unit's own claim used to hide it, so the second move walked off
+        towards another structure and haste never brought a distant one
+        within a turn's reach.
+        """
+        grid = np.full((9, 15), "p", dtype=object)
+        grid[0, 0], grid[8, 14] = "h_1", "h_2"
+        grid[2, 11], grid[8, 0] = "t", "t"  # 7 tiles away (two Barbarian moves), and far off
+        game = GameState(grid, num_players=2)
+        game.player_gold[1] = 0
+        barbarian = game.place_unit("B", 4, 2, 1)
+        sorcerer = game.place_unit("S", 4, 3, 1)
+        game.place_unit("W", 14, 7, 2)
+        assert game.haste(sorcerer, barbarian)
+        bot = build_scripted(tier, game, player=1)
+
+        bot.take_turn()
+
+        tower = game.grid.get_tile(11, 2)
+        assert (barbarian.x, barbarian.y) == (11, 2)
+        assert tower.health < tower.max_health
 
     @pytest.mark.parametrize(
         "bot_cls,act_name",
@@ -283,6 +349,27 @@ class TestTurnContext:
             assert bot.get_reachable(walker) == game.get_move_destinations(walker)
             assert bot.capturable_structures() is bot.capturable_structures()  # one list for the turn
         assert bot._turn is None
+
+    def test_the_bots_own_hq_is_read_again_once_it_takes_another(self):
+        """In a free-for-all a bot keeps an HQ it takes, so its own HQ can change during its turn.
+
+        find_our_hq returns the first in row order, as a fresh scan does;
+        the turn used to keep the one it held at the start.
+        """
+        grid = np.full((7, 7), "p", dtype=object)
+        grid[6, 0], grid[0, 6], grid[6, 6] = "h_1", "h_2", "h_3"  # player 2's HQ comes first in row order
+        game = GameState(grid, num_players=3)
+        game.grid.get_tile(6, 0).health = 1  # one seize from falling
+        seizer = game.place_unit("W", 6, 0, 1)
+        game.place_unit("W", 3, 3, 2)
+        game.place_unit("W", 5, 5, 3)
+        bot = MediumBot(game, player=1)
+
+        with bot.planning_turn():
+            assert bot.find_our_hq() == (0, 6)
+            assert bot.try_seize(seizer)
+            assert game.grid.get_tile(6, 0).player == 1 and not game.game_over
+            assert bot.find_our_hq() == (6, 0)
 
     @pytest.mark.parametrize("tier", ["simple", "medium", "advanced", "master"])
     @pytest.mark.parametrize("fog", [False, True])

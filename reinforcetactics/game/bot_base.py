@@ -118,11 +118,12 @@ class TurnContext:
     has none and plans from a fresh look at the game every time. Two
     lifetimes:
 
-    * The turn: the map's structures (a tile never changes type) and the
-      bot's own HQ (only an enemy can take it, never during this turn).
+    * The turn: the map's structures (a tile never changes type).
       Ownership and health are always read live from the tiles.
     * Until the engine accepts the bot's next action (``memo``): move
-      destinations, the living enemies, the contested structures. An
+      destinations, the living enemies, the contested structures, the
+      bot's own HQ (in a free-for-all a bot that takes an HQ keeps it, so
+      its own can change during its turn). An
       accepted action is recorded in ``action_history`` and a refused one
       changes nothing, so the history's length stamps the state they were
       computed on: nothing is ever served that a fresh computation would
@@ -132,10 +133,9 @@ class TurnContext:
       hypothetically, ``unit.x = ...``, put it back before asking for any.)
     """
 
-    def __init__(self, game_state: Any, player: int) -> None:
+    def __init__(self, game_state: Any) -> None:
         self.game_state = game_state
         self.structures = [tile for row in game_state.grid.tiles for tile in row if tile.is_capturable()]
-        self.own_hq = next(((t.x, t.y) for t in self.structures if t.type == "h" and t.player == player), None)
         self._stamp = -1
         self._memo: dict[Any, Any] = {}
 
@@ -191,7 +191,7 @@ class BotUnitMixin:
     @contextmanager
     def planning_turn(self) -> Iterator[None]:
         """Plan this turn with a ``TurnContext``; the tiers' ``take_turn`` plays inside it."""
-        self._turn = TurnContext(self.game_state, self.bot_player)
+        self._turn = TurnContext(self.game_state)
         try:
             yield
         finally:
@@ -383,6 +383,33 @@ class BotUnitMixin:
             self._capture_assigned = claimed
         return claimed
 
+    def _capture_claimers(self) -> dict[tuple[int, int], Any]:
+        """Who claimed each position in ``_capture_assignments`` (reset with it by the tiers' take_turn)."""
+        claimers: dict[tuple[int, int], Any] | None = getattr(self, "_capture_claimed_by", None)
+        if claimers is None:
+            claimers = {}
+            self._capture_claimed_by = claimers
+        return claimers
+
+    def _claim_capture(self, unit, pos: tuple[int, int]) -> None:
+        """Claim the structure at ``pos`` for ``unit``: no sibling picks it as its capture target this turn."""
+        self._capture_assignments().add(pos)
+        self._capture_claimers()[pos] = unit
+
+    def _release_captures(self, unit) -> None:
+        """Drop ``unit``'s claims as haste gives it a new action, in which it picks its target again.
+
+        Its own claim otherwise kept it from the structure it had just
+        marched towards: a hasted unit spent its second move walking to
+        another target, so haste never brought a distant structure within
+        one turn's reach.
+        """
+        claimers = self._capture_claimers()
+        claimed = self._capture_assignments()
+        for pos in [pos for pos, claimer in claimers.items() if claimer is unit]:
+            del claimers[pos]
+            claimed.discard(pos)
+
     def continue_active_seizes(self, units) -> None:
         """Seize-in-place for any unit that is mid-capture, before the
         multi-unit coordination passes (coordinate_attacks etc) get a chance
@@ -396,7 +423,7 @@ class BotUnitMixin:
             if self.game_state.game_over:
                 return
             if self.is_actively_capturing(unit) and self.try_seize(unit):
-                self._capture_assignments().add((unit.x, unit.y))
+                self._claim_capture(unit, (unit.x, unit.y))
 
     # ------------------------------------------------------------------
     # Acting through the engine (review rulebots-1/6/8/19)
@@ -487,16 +514,29 @@ class BotUnitMixin:
         ``can_move or can_attack`` instead fired after every move
         (``can_attack`` stays set until the unit acts), so the bot re-ran its
         whole decision for a unit that could only be refused, and it fired
-        for an attacker a counter-attack had just killed.
+        for an attacker a counter-attack had just killed. The new action
+        picks its capture target afresh (``_release_captures``).
         """
         gs = self.game_state
         if gs.game_over or unit not in gs.units:
             return
         if gs.end_unit_turn(unit):
+            self._release_captures(unit)
             act(unit, depth + 1)
 
     def find_best_move_position(self, unit, target_x, target_y):
-        """Find the best position to move towards a target."""
+        """The destination nearest ``(target_x, target_y)``; None when none is nearer than where ``unit`` stands.
+
+        Staying put is the benchmark: a unit whose nearer tiles are all
+        held (by friends crowding a structure, or by an enemy standing on
+        it) keeps its tile rather than stepping sideways or back. Since
+        ``get_reachable`` returns only legal destinations (friends' tiles
+        and the unit's own excluded), comparing against nothing sent such a
+        unit away from its target, a quarter of SimpleBot's moves. Before,
+        the nearest candidate there was usually a friend's tile, which the
+        engine refused, so the unit stayed: this keeps that outcome without
+        the refused move. Every caller treats None as "no move".
+        """
         reachable = self.get_reachable(unit)
 
         if not reachable:
@@ -511,7 +551,7 @@ class BotUnitMixin:
         self._maybe_shuffle(reachable_list)
 
         best_pos = None
-        best_distance = float("inf")
+        best_distance = self.manhattan_distance(unit.x, unit.y, target_x, target_y)
 
         for pos in reachable_list:
             distance = self.manhattan_distance(pos[0], pos[1], target_x, target_y)
