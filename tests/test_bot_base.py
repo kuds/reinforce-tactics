@@ -10,7 +10,13 @@ Covers:
   * ``BotUnitMixin.has_units_with_ability`` returns False for unknown
     abilities (forward-compatible default).
   * ``BaseBot`` is abstract -- instantiation requires ``take_turn``.
+  * The mixin's engine-facing helpers (reach, captures, the per-unit
+    continuation, ``try_action``) lead only to accepted actions, and the
+    per-turn planning cache changes no decision.
 """
+
+import random
+from contextlib import contextmanager
 
 import numpy as np
 import pytest
@@ -34,6 +40,7 @@ from reinforcetactics.game.bot_base import (
     BaseBot,
     BotUnitMixin,
 )
+from reinforcetactics.game.bot_registry import build_scripted
 from reinforcetactics.game.model_bot import ModelBot
 from reinforcetactics.utils.file_io import FileIO
 
@@ -259,3 +266,40 @@ class TestActingThroughTheEngine:
         assert bot.try_mage_paralyze(mage) is False
         assert sent == []  # nothing out of range reached the engine
         assert "mage_paralyze" not in bot.get_capabilities_fired()
+
+
+class TestTurnContext:
+    """The per-turn planning cache (review rulebots-9) must never change a decision."""
+
+    def test_reach_is_searched_again_once_an_action_is_accepted(self):
+        game = _open_game()
+        walker, mover = game.place_unit("W", 3, 3, 1), game.place_unit("W", 5, 3, 1)
+        bot = SimpleBot(game, player=1)
+
+        with bot.planning_turn():
+            assert (4, 3) in bot.get_reachable(walker)
+            assert bot.try_move(mover, 4, 3)
+            assert (4, 3) not in bot.get_reachable(walker)
+            assert bot.get_reachable(walker) == game.get_move_destinations(walker)
+            assert bot.capturable_structures() is bot.capturable_structures()  # one list for the turn
+        assert bot._turn is None
+
+    @pytest.mark.parametrize("tier", ["simple", "medium", "advanced", "master"])
+    @pytest.mark.parametrize("fog", [False, True])
+    def test_seeded_games_are_the_same_with_and_without_it(self, tier, fog, monkeypatch):
+        def play():
+            game = GameState(FileIO.load_map("maps/1v1/crossroads.csv"), num_players=2, max_turns=14, fog_of_war=fog, seed=5)
+            bots = {p: build_scripted(tier, game, player=p, rng=random.Random(50 + p)) for p in (1, 2)}
+            while not game.game_over:
+                bots[game.current_player].take_turn()
+            return [{k: v for k, v in a.items() if k != "timestamp"} for a in game.action_history]
+
+        cached = play()
+
+        @contextmanager
+        def no_context(self):
+            yield
+
+        monkeypatch.setattr(BotUnitMixin, "planning_turn", no_context)
+        assert play() == cached
+        assert any(a["type"] == "attack" for a in cached)

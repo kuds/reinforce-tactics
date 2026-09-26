@@ -274,11 +274,12 @@ class SimpleBot(BotUnitMixin, BaseBot):
 
     def take_turn(self):
         """Execute the bot's turn."""
-        # Phase 1: Purchase units
-        self.purchase_units()
+        with self.planning_turn():
+            # Phase 1: Purchase units
+            self.purchase_units()
 
-        # Phase 2: Move and act with units
-        self.move_and_act_units()
+            # Phase 2: Move and act with units
+            self.move_and_act_units()
 
         # Phase 3: End turn
         self.game_state.end_turn()
@@ -393,16 +394,15 @@ class SimpleBot(BotUnitMixin, BaseBot):
         # always a valid target -- seizing it wins the game, so we don't gate
         # it on the opponent having no other bases/units.
         enemy_structures = []
-        for row in self.game_state.grid.tiles:
-            for tile in row:
-                if tile.is_capturable() and not self._is_friendly(tile.player):
-                    dist = self.manhattan_distance(unit.x, unit.y, tile.x, tile.y)
-                    if tile.type == "t":
-                        enemy_structures.append(("enemy_tower", tile, dist))
-                    elif tile.type == "b":
-                        enemy_structures.append(("enemy_building", tile, dist))
-                    elif tile.type == "h" and tile.player is not None:
-                        enemy_structures.append(("enemy_hq", tile, dist))
+        for tile in self.capturable_structures():
+            if not self._is_friendly(tile.player):
+                dist = self.manhattan_distance(unit.x, unit.y, tile.x, tile.y)
+                if tile.type == "t":
+                    enemy_structures.append(("enemy_tower", tile, dist))
+                elif tile.type == "b":
+                    enemy_structures.append(("enemy_building", tile, dist))
+                elif tile.type == "h" and tile.player is not None:
+                    enemy_structures.append(("enemy_hq", tile, dist))
 
         # Combine targets
         all_targets = [("enemy_unit", u, d) for u, d in enemy_units]
@@ -537,11 +537,12 @@ class MediumBot(BotUnitMixin, BaseBot):
         # capture priority. Reset every turn so abandoned targets are reusable.
         self._capture_assigned = set()
 
-        # Phase 1: Purchase units - maximize unit production
-        self.purchase_units()
+        with self.planning_turn():
+            # Phase 1: Purchase units - maximize unit production
+            self.purchase_units()
 
-        # Phase 2: Move and act with units using coordinated strategy
-        self.move_and_act_units()
+            # Phase 2: Move and act with units using coordinated strategy
+            self.move_and_act_units()
 
         # Phase 3: End turn
         self.game_state.end_turn()
@@ -553,6 +554,8 @@ class MediumBot(BotUnitMixin, BaseBot):
         Returns:
             Tuple of (x, y) for HQ location, or None if not found
         """
+        if self._turn is not None:
+            return self._turn.own_hq
         for row in self.game_state.grid.tiles:
             for tile in row:
                 if tile.type == "h" and tile.player == self.bot_player:
@@ -660,15 +663,12 @@ class MediumBot(BotUnitMixin, BaseBot):
         claimed = self._capture_assignments()
         held = self._held_by_friend(unit)
         candidates = []
-        for row in self.game_state.grid.tiles:
-            for structure in row:
-                if not structure.is_capturable():
-                    continue
-                if self._is_friendly(structure.player):
-                    continue
-                if (structure.x, structure.y) in claimed or (structure.x, structure.y) in held:
-                    continue
-                candidates.append((structure, self.get_structure_priority(structure, unit)))
+        for structure in self.capturable_structures():
+            if self._is_friendly(structure.player):
+                continue
+            if (structure.x, structure.y) in claimed or (structure.x, structure.y) in held:
+                continue
+            candidates.append((structure, self.get_structure_priority(structure, unit)))
 
         if not candidates:
             return None
@@ -808,6 +808,11 @@ class MediumBot(BotUnitMixin, BaseBot):
         """
         killable = []
         enemy_units = self.live_enemies()
+        # Each unit's destinations, searched once for the whole pass rather
+        # than once per (enemy, unit) pair (review rulebots-9). Nothing moves
+        # while the pass plans, and the next pass, after the engine accepted
+        # an action, gets fresh ones (see TurnContext).
+        reach: dict[int, list[tuple[int, int]]] = {}
 
         for enemy in enemy_units:
             # Find all units that can attack this enemy and the damage they
@@ -830,8 +835,14 @@ class MediumBot(BotUnitMixin, BaseBot):
                 # damage. Under fog of war an enemy hidden now is out of
                 # reach after the move too (see in_attack_reach).
                 best_damage = 0
-                reachable = self.get_reachable(unit)
-                for pos in reachable:
+                if id(unit) not in reach:
+                    reach[id(unit)] = self.get_reachable(unit)
+                # A tile farther from the enemy than the unit's longest reach
+                # (an Archer's on a mountain) can't hit it: skip the check.
+                max_reach = unit.get_attack_range(on_mountain=True)[1]
+                for pos in reach[id(unit)]:
+                    if self.manhattan_distance(pos[0], pos[1], enemy.x, enemy.y) > max_reach:
+                        continue
                     move_distance = self.manhattan_distance(unit.x, unit.y, pos[0], pos[1])
                     old_x, old_y = unit.x, unit.y
                     unit.x, unit.y = pos[0], pos[1]
@@ -965,24 +976,27 @@ class MediumBot(BotUnitMixin, BaseBot):
         Returns:
             List of (structure, enemy_unit, capture_progress) tuples
         """
+        # A copy: callers shuffle and sort it.
+        return list(self._memo("contested", self._scan_contested_structures))
+
+    def _scan_contested_structures(self):
         contested = []
 
-        for row in self.game_state.grid.tiles:
-            for tile in row:
-                if tile.is_capturable() and not self._is_friendly(tile.player):
-                    # Check if health is below max (being captured)
-                    if tile.health < tile.max_health:
-                        # Find enemy unit on this structure
-                        enemy_on_structure = None
-                        for unit in self.game_state.units:
-                            if self._is_enemy(unit.player) and unit.x == tile.x and unit.y == tile.y:
-                                enemy_on_structure = unit
-                                break
+        for tile in self.capturable_structures():
+            if not self._is_friendly(tile.player):
+                # Check if health is below max (being captured)
+                if tile.health < tile.max_health:
+                    # Find enemy unit on this structure
+                    enemy_on_structure = None
+                    for unit in self.game_state.units:
+                        if self._is_enemy(unit.player) and unit.x == tile.x and unit.y == tile.y:
+                            enemy_on_structure = unit
+                            break
 
-                        if enemy_on_structure:
-                            # Calculate capture progress (0 to 1)
-                            progress = 1.0 - (tile.health / tile.max_health)
-                            contested.append((tile, enemy_on_structure, progress))
+                    if enemy_on_structure:
+                        # Calculate capture progress (0 to 1)
+                        progress = 1.0 - (tile.health / tile.max_health)
+                        contested.append((tile, enemy_on_structure, progress))
 
         return contested
 
@@ -1446,13 +1460,10 @@ class AdvancedBot(MediumBot):
         """
         total_capturable = 0
         neutral_capturable = 0
-        for row in self.game_state.grid.tiles:
-            for tile in row:
-                if not tile.is_capturable():
-                    continue
-                total_capturable += 1
-                if tile.player is None:
-                    neutral_capturable += 1
+        for tile in self.capturable_structures():
+            total_capturable += 1
+            if tile.player is None:
+                neutral_capturable += 1
         if total_capturable == 0:
             return self.PHASE_CONSOLIDATE
         neutral_pct = neutral_capturable / total_capturable
@@ -1495,19 +1506,20 @@ class AdvancedBot(MediumBot):
         self._interrupt_assigned = set()
         # Per-turn capture-target dedup; see MediumBot.pick_capture_target.
         self._capture_assigned = set()
-        # Phase update before any purchase/movement decisions read self.phase.
-        self.update_phase()
+        with self.planning_turn():
+            # Phase update before any purchase/movement decisions read self.phase.
+            self.update_phase()
 
-        # Phase 1: Analyze map on first turn
-        if not self.map_analyzed:
-            self.analyze_map()
-            self.map_analyzed = True
+            # Phase 1: Analyze map on first turn
+            if not self.map_analyzed:
+                self.analyze_map()
+                self.map_analyzed = True
 
-        # Phase 2: Use enhanced purchase strategy
-        self.purchase_units_enhanced()
+            # Phase 2: Use enhanced purchase strategy
+            self.purchase_units_enhanced()
 
-        # Phase 3: Enhanced unit actions with special abilities and better tactics
-        self.move_and_act_units_enhanced()
+            # Phase 3: Enhanced unit actions with special abilities and better tactics
+            self.move_and_act_units_enhanced()
 
         # Phase 4: End turn
         self.game_state.end_turn()
@@ -2528,14 +2540,7 @@ class MasterBot(AdvancedBot):
         # reachable to *this unit's path planner* we prefer it over a
         # closer tower. AdvancedBot's distance-dominant scoring usually
         # picks it anyway, but only when it's literally closest.
-        enemy_hq = None
-        for row in self.game_state.grid.tiles:
-            for tile in row:
-                if tile.type == "h" and self._is_enemy(tile.player):
-                    enemy_hq = tile
-                    break
-            if enemy_hq:
-                break
+        enemy_hq = next((t for t in self.capturable_structures() if t.type == "h" and self._is_enemy(t.player)), None)
         if enemy_hq is None:
             return target
         # Claimed by a sibling, or a friendly unit already stands on it (see
@@ -2652,12 +2657,7 @@ class MasterBot(AdvancedBot):
         # one capturable now, and whose post-seize position has at least
         # one *other* unclaimed capturable inside its movement range so
         # the haste refresh enables a second seize on the same turn.
-        capturables = [
-            tile
-            for row in self.game_state.grid.tiles
-            for tile in row
-            if tile.is_capturable() and not self._is_friendly(tile.player)
-        ]
+        capturables = [tile for tile in self.capturable_structures() if not self._is_friendly(tile.player)]
         if len(capturables) >= 2:
             for ally in candidates:
                 reachable = set(self.get_reachable(ally))

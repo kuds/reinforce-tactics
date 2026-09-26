@@ -61,9 +61,9 @@ MAPS_1V1V1 = _maps("1v1v1")
 SEATS = {"1v1": 2, "1v1v1": 3, "2v2": 4}
 # Mirror-match length by map folder: long enough for the armies to meet on
 # the maps that have production buildings (7 of the 1v1 maps have none, and
-# nothing happens on them), short enough to keep the whole matrix near 30 s.
+# nothing happens on them), short enough to keep this file near 25 s.
 # The 1v1v1 maps are the largest and seat three bots.
-MIRROR_TURNS = {"1v1": 14, "1v1v1": 10, "2v2": 16}
+MIRROR_TURNS = {"1v1": 20, "1v1v1": 14, "2v2": 20}
 
 
 def _describe(arg):

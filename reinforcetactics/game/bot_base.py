@@ -19,7 +19,8 @@ Provides:
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from reinforcetactics.core.actions import ACTOR_KEYS
@@ -109,6 +110,46 @@ class BaseBot(ABC):
         return dict(getattr(self, "capabilities_fired", {}) or {})
 
 
+class TurnContext:
+    """What one bot turn plans with, computed once instead of per unit, target and priority (review rulebots-9).
+
+    A scripted tier's ``take_turn`` plays inside ``BotUnitMixin.planning_turn``,
+    which holds one of these; a bot driven any other way (tests, tools)
+    has none and plans from a fresh look at the game every time. Two
+    lifetimes:
+
+    * The turn: the map's structures (a tile never changes type) and the
+      bot's own HQ (only an enemy can take it, never during this turn).
+      Ownership and health are always read live from the tiles.
+    * Until the engine accepts the bot's next action (``memo``): move
+      destinations, the living enemies, the contested structures. An
+      accepted action is recorded in ``action_history`` and a refused one
+      changes nothing, so the history's length stamps the state they were
+      computed on: nothing is ever served that a fresh computation would
+      not return, so caching changes no decision. (``end_unit_turn`` is not
+      recorded, but it only changes whether a unit may still move, which
+      ``get_reachable`` checks live; planners that move a unit
+      hypothetically, ``unit.x = ...``, put it back before asking for any.)
+    """
+
+    def __init__(self, game_state: Any, player: int) -> None:
+        self.game_state = game_state
+        self.structures = [tile for row in game_state.grid.tiles for tile in row if tile.is_capturable()]
+        self.own_hq = next(((t.x, t.y) for t in self.structures if t.type == "h" and t.player == player), None)
+        self._stamp = -1
+        self._memo: dict[Any, Any] = {}
+
+    def memo(self, key: Any, compute: Callable[[], Any]) -> Any:
+        """``compute()``, remembered under ``key`` until the engine accepts another action."""
+        stamp = len(self.game_state.action_history)
+        if stamp != self._stamp:
+            self._stamp = stamp
+            self._memo.clear()
+        if key not in self._memo:
+            self._memo[key] = compute()
+        return self._memo[key]
+
+
 class BotUnitMixin:
     """Shared helpers for bots that reason about enabled unit types,
     distances, heal tiles, capture progress, and common ability flows.
@@ -142,6 +183,31 @@ class BotUnitMixin:
     # strategic quality is preserved while episode-level diversity is
     # restored.
     _rng: Any = None
+
+    # The current turn's planning context (see TurnContext); None outside
+    # ``planning_turn``.
+    _turn: TurnContext | None = None
+
+    @contextmanager
+    def planning_turn(self) -> Iterator[None]:
+        """Plan this turn with a ``TurnContext``; the tiers' ``take_turn`` plays inside it."""
+        self._turn = TurnContext(self.game_state, self.bot_player)
+        try:
+            yield
+        finally:
+            self._turn = None
+
+    def _memo(self, key: Any, compute: Callable[[], Any]) -> Any:
+        """``compute()``, remembered by the turn's context until the next accepted action (fresh without one)."""
+        turn = self._turn
+        return compute() if turn is None else turn.memo(key, compute)
+
+    def capturable_structures(self) -> list[Any]:
+        """Every capturable tile on the map, row by row (the turn's list: read-only)."""
+        turn = self._turn
+        if turn is not None:
+            return turn.structures
+        return [tile for row in self.game_state.grid.tiles for tile in row if tile.is_capturable()]
 
     def _maybe_shuffle(self, items: list[Any]) -> list[Any]:
         """Shuffle ``items`` in place when ``self._rng`` is set.
@@ -261,7 +327,8 @@ class BotUnitMixin:
         """
         if not unit.can_move or unit.is_paralyzed() or unit not in self.game_state.units:
             return []
-        return self.game_state.get_move_destinations(unit)
+        # A copy: callers shuffle and extend what they get.
+        return list(self._memo(("reach", id(unit)), lambda: self.game_state.get_move_destinations(unit)))
 
     # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
     # HQ/building=+2 at the start of the owner's next turn.
@@ -346,7 +413,9 @@ class BotUnitMixin:
     # ------------------------------------------------------------------
     def live_enemies(self) -> list[Any]:
         """Living units of the other teams, in ``game_state.units`` order."""
-        return [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0]
+        return list(
+            self._memo("enemies", lambda: [u for u in self.game_state.units if self._is_enemy(u.player) and u.health > 0])
+        )
 
     def in_attack_reach(self, unit, enemy) -> bool:
         """Whether ``unit`` could attack ``enemy`` from where it stands.
