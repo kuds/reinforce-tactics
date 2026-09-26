@@ -63,7 +63,9 @@ _ALIASES: dict[str, str] = {"bot": "simple"}
 _ALIASES.update({cls.__name__.lower(): name for name, cls in SCRIPTED_BOTS.items()})
 
 _LLM_TYPES = frozenset({"openaibot", "claudebot", "geminibot", "llm"})
-_RL_TYPES = frozenset({"modelbot", "model", "rl"})
+# AlphaZeroBot plays a trained network too (through MCTS), so like ModelBot
+# it is an 'rl' player; it used to fall through to 'bot' (review rulebots-23).
+_RL_TYPES = frozenset({"modelbot", "alphazerobot", "model", "rl"})
 
 
 def _key_of(bot_type: Any) -> str:

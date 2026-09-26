@@ -1108,6 +1108,15 @@ class GameState:
             defeated_player = attacker.player
             if attacker in self.units:
                 self.units.remove(attacker)
+            # The counter-attack killed it: out of play, it has no action
+            # left, so a caller still holding it reads it as done. Its flags
+            # were left set (the action below is only spent for a survivor),
+            # and the rule bots re-ran their whole decision on the corpse
+            # until their recursion cap, every action refused (review
+            # rulebots-8). A pending haste goes too, so ``end_unit_turn``
+            # can't re-arm it either.
+            attacker.can_move = attacker.can_attack = False
+            attacker.is_hasted = attacker.haste_refreshed = False
             self._invalidate_cache()
             self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
