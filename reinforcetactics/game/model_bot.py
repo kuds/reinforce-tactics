@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
 from reinforcetactics.game.bot_base import BaseBot
+from reinforcetactics.rules import ALL_UNIT_TYPES, UNIT_DATA
 
 # Configure logging
 logger = logging.getLogger(__name__)

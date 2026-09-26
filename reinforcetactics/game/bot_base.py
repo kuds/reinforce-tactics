@@ -21,8 +21,8 @@ Provides:
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
-from reinforcetactics.constants import UNIT_DATA
 from reinforcetactics.core.mechanics import same_side
+from reinforcetactics.rules import UNIT_DATA
 
 # Strategic categories used by bot decision logic to bucket unit types by
 # role. Kept as tuples so they're immutable shared constants.

@@ -8,8 +8,8 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.constants import PLAYER_COLORS
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import PLAYER_COLORS
 from reinforcetactics.ui.components.map_preview import get_tile_color
 from reinforcetactics.ui.menus.list_detail import ListDetailMenu, draw_preview_or_placeholder
 from reinforcetactics.ui.menus.save_load.utils import (

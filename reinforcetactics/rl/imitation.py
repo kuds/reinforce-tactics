@@ -36,11 +36,11 @@ from typing import Any
 
 import numpy as np
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState, derive_seed
 from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS, build_scripted, canonical_name
 from reinforcetactics.rl.gym_env import build_per_dim_masks
 from reinforcetactics.rl.observation import build_observation
+from reinforcetactics.rules import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)

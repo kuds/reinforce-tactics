@@ -152,7 +152,7 @@ See the `examples/` directory for more, including an action-masking training dem
 | Sorcerer | 350 | 2 | 12 | Haste, Attack/Defence Buff (+50%, 3 turns, 2-turn cooldown) |
 | Barbarian | 400 | 5 | 20 | Fast, high-damage melee |
 
-These numbers are the defaults in `reinforcetactics/constants.py` (`tests/test_rules_docs_core.py` fails if they drift apart); `engine_overrides` can change unit stats and the economy per game.
+These numbers are the defaults in `reinforcetactics/rules.py` (`tests/test_rules_docs_core.py` fails if they drift apart); `engine_overrides` can change unit stats and the economy per game.
 
 **Win Conditions**: With two sides (1v1, 2v2), capturing an enemy HQ wins the game for your side. A player who loses its last unit or resigns is eliminated, and a side whose players are all eliminated loses. With three or more sides (1v1v1 free-for-all), a player is also eliminated when its last HQ is captured; the game goes on until one side is left.
 
@@ -202,8 +202,10 @@ reinforce-tactics/
 │   ├── game/                  # Mechanics, bots (rule-based, LLM, model, AlphaZero)
 │   ├── rl/                    # Gymnasium env, AlphaZero, Feudal RL, MCTS, self-play
 │   ├── tournament/            # Tournament runner, ELO ratings, scheduling
-│   ├── ui/                    # Pygame renderer, menus, map editor, sprites
-│   └── utils/                 # File I/O, replay, settings, language, fonts, deps
+│   ├── ui/                    # Pygame renderer, menus, map editor, sprites and colours (assets.py)
+│   ├── utils/                 # File I/O, replay, settings, language, fonts, deps
+│   ├── rules.py               # Unit stats, economy, combat and status-effect rules
+│   └── constants.py           # Old import path: re-exports rules.py and ui/assets.py
 ├── scripts/                   # Standalone scripts (training, eval, tournaments, asset gen)
 │   └── train/                 # Training entry points (self-play, AlphaZero, Feudal RL)
 ├── maps/                      # CSV map files (1v1, 1v1v1, 2v2)

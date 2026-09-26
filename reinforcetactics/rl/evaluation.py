@@ -65,8 +65,8 @@ REWARD_COMPONENTS = ("action", "shaping_delta", "invalid_penalty", "terminal")
 END_REASONS = ("hq_capture", "elimination", "max_turns_draw", "max_steps_truncate")
 
 # Unit types tracked by ``info["episode_stats"]["units_built"]``. Mirrors
-# ``reinforcetactics.constants.ALL_UNIT_TYPES`` so this module stays
-# importable without pulling the constants module.
+# ``reinforcetactics.rules.ALL_UNIT_TYPES`` so this module stays
+# importable without pulling the rules module.
 UNIT_TYPE_LETTERS = ("W", "M", "C", "A", "K", "R", "S", "B")
 
 # Combat / progression scalars surfaced via ``info["episode_stats"]``.

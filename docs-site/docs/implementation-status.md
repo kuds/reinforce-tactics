@@ -11,7 +11,8 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ## ✅ Completed Features
 
 ### Core Game Logic (Headless-Compatible)
-- [x] `reinforcetactics/constants.py` - All game constants and configuration (8 unit types, terrain, structures)
+- [x] `reinforcetactics/rules.py` - Game rules: unit stats (8 unit types), terrain types, structures, economy, abilities
+- [x] `reinforcetactics/constants.py` - Compatibility re-export of `rules.py` and the UI's `ui/assets.py`
 - [x] `reinforcetactics/core/tile.py` - Tile class with ownership and HP
 - [x] `reinforcetactics/core/unit.py` - Unit class with all 8 unit types and abilities
 - [x] `reinforcetactics/core/grid.py` - Grid management with numpy conversion

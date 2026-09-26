@@ -59,7 +59,7 @@ class EnvConfig:
     max_actions_per_turn: int | None = None
     reward_config: dict[str, float] | None = None
     # Optional sparse overlay over the non-YAML engine constants
-    # (``constants.py``): ``starting_gold``, ``headquarters_income``,
+    # (``rules.py``): ``starting_gold``, ``headquarters_income``,
     # ``building_income``, ``tower_income``, and ``unit_data``
     # (``{CODE: {field: value}}`` per-unit, per-field deltas). Absent /
     # ``None`` = use the module constants (today's behaviour). Makes

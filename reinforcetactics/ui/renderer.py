@@ -10,7 +10,10 @@ import time
 import numpy as np
 import pygame
 
-from reinforcetactics.constants import (
+from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
+from reinforcetactics.rules import TILE_TYPES, UNIT_DATA
+from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import (
     BASE_SPRITE_COLORS,
     NEUTRAL_STRUCTURE_PALETTE,
     PLAYER_COLORS,
@@ -18,13 +21,9 @@ from reinforcetactics.constants import (
     TEAM_PALETTES,
     TILE_IMAGES,
     TILE_SIZE,
-    TILE_TYPES,
-    UNIT_COLORS,
-    UNIT_DATA,
+    UNIT_ASSETS,
+    tile_color,
 )
-from reinforcetactics.core.tile import Tile
-from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
-from reinforcetactics.ui import theme
 from reinforcetactics.ui.sprite_animator import SpriteAnimator, scale_unit_sprite
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
@@ -317,8 +316,8 @@ class Renderer:
             return unit_images
 
         # Load sprite for each unit type
-        for unit_type, unit_data in UNIT_DATA.items():
-            static_path = unit_data.get("static_path", "")
+        for unit_type, unit_assets in UNIT_ASSETS.items():
+            static_path = unit_assets.get("static_path", "")
             if static_path:
                 try:
                     full_path = os.path.join(unit_sprites_path, static_path)
@@ -463,7 +462,7 @@ class Renderer:
         if tile_surface:
             self.screen.blit(tile_surface, rect)
         else:
-            color = Tile.color_for(tile.type, shown_owner)
+            color = tile_color(tile.type, shown_owner)
             pygame.draw.rect(self.screen, color, rect)
 
             # Add visual variety to tiles
@@ -705,7 +704,7 @@ class Renderer:
 
     def _draw_unit_letter(self, unit):
         """Draw a unit using its letter representation (fallback)."""
-        color = UNIT_COLORS[unit.type]
+        color = UNIT_ASSETS[unit.type]["color"]
 
         # Gray out if can't act
         if not unit.can_move and not unit.can_attack:

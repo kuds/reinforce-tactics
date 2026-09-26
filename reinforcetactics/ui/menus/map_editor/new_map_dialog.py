@@ -4,7 +4,7 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.rules import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.fonts import get_font

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from reinforcetactics import __version__
-from reinforcetactics.constants import CLERIC_HEAL_RANGE, UNIT_DATA
 from reinforcetactics.game.bot_base import BaseBot
 from reinforcetactics.game.llm_prompts import (
     DEFAULT_PROMPT,
@@ -27,6 +26,7 @@ from reinforcetactics.game.llm_prompts import (
     PROMPT_TWO_PHASE_PLAN,
     get_prompt,
 )
+from reinforcetactics.rules import CLERIC_HEAL_RANGE, UNIT_DATA
 
 # Configure logging
 logger = logging.getLogger(__name__)

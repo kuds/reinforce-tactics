@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import pygame
 
-from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
+from reinforcetactics.rules import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import PLAYER_COLORS, TILE_SIZE
 from reinforcetactics.ui.icons import (
     get_arrow_left_icon,
     get_arrow_right_icon,
@@ -173,8 +174,6 @@ class ReplayPlayer:
 
     def setup_ui(self):
         """Setup UI elements for replay controls."""
-        from reinforcetactics.constants import TILE_SIZE
-
         screen_width = self.game_state.grid.width * TILE_SIZE
         screen_height = self.game_state.grid.height * TILE_SIZE
 

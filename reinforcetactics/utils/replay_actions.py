@@ -29,7 +29,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from reinforcetactics.constants import HASTE_COOLDOWN
+from reinforcetactics.rules import HASTE_COOLDOWN
 
 logger = logging.getLogger(__name__)
 

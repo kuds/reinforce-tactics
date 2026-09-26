@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from reinforcetactics import constants as C
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics import rules as C
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.game import llm_prompts
+from reinforcetactics.rules import UNIT_DATA
 
 README = Path("README.md").read_text(encoding="utf-8")
 MECHANICS = Path("docs-site/docs/game-mechanics.md").read_text(encoding="utf-8")
