@@ -641,8 +641,6 @@ def _play_episode(
         # fresh seed per episode.
         seed=derive_seed(seed, "engine") if seed is not None else None,
     )
-    if fog_of_war:
-        game_state.update_visibility()
 
     width = game_state.grid.width
     height = game_state.grid.height

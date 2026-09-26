@@ -179,11 +179,24 @@ class TestHqAlwaysVisible:
         gs.update_visibility()
         return gs
 
-    def test_without_the_rule_an_unexplored_hq_is_hidden(self):
+    def test_without_the_rule_an_hq_out_of_sight_shows_its_last_seen_state(self):
+        # Fog of war's default (review core-5): every HQ's location and
+        # starting owner are known from the start, as a last-seen snapshot,
+        # so a change made out of sight stays hidden.
         gs = self._game(False)
-        assert gs.visibility_maps[1].get_visibility_state(11, 11) == UNEXPLORED
+        assert gs.visibility_maps[1].get_visibility_state(11, 11) == SHROUDED
+        gs.grid.get_tile(11, 11).health = 10  # damaged out of player 1's sight
+        gs.update_visibility()
         obs = gs.to_numpy(for_player=1)
-        assert obs["grid"][11, 11, 1] == 0 and obs["grid"][11, 11, 0] == 0
+        assert obs["grid"][11, 11, 1] == 2 and obs["grid"][11, 11, 0] == 6  # owner, HQ type code
+        assert gs.known_structure(1, 11, 11).health == 50  # as last seen, not the live 10
+
+    def test_the_rule_shows_an_hqs_live_state(self):
+        gs = self._game(True)
+        gs.grid.get_tile(11, 11).health = 10
+        gs.update_visibility()
+        assert gs.known_structure(1, 11, 11).health == 10
+        assert not gs.is_position_visible(11, 11, 1)
 
     def test_the_rule_makes_every_hq_known(self):
         gs = self._game(True)

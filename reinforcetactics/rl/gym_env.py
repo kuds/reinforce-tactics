@@ -461,9 +461,6 @@ class StrategyGameEnv(gym.Env):
                 "observation encoding."
             )
 
-        # Initialize visibility at game start
-        if fog_of_war:
-            self.game_state.update_visibility()
         self.opponent_type = opponent
         self.opponent_kwargs: dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
         self.opponent: Any | None = None
@@ -1645,10 +1642,6 @@ class StrategyGameEnv(gym.Env):
         )
         self.current_step = 0
         self._actions_this_turn = 0
-
-        # Initialize visibility at game start
-        if self.fog_of_war:
-            self.game_state.update_visibility()
 
         # Reset opponent.
         #

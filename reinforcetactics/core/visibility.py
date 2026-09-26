@@ -3,6 +3,13 @@ Fog of War visibility system for Reinforce Tactics.
 
 This module provides visibility tracking and calculation for each player,
 implementing a simple radius-based visibility model (Option A).
+
+What a player knows about a structure it cannot currently see is its
+last-seen memory here (``VisibilityMap.last_seen_structures``), read through
+``GameState.known_structure``. The memory is written when a structure leaves
+the player's sight, so it holds exactly what the player last watched happen
+there, and at game start every HQ is recorded as known (location and owner),
+the documented "enemy HQ is always known" rule.
 """
 
 from dataclasses import dataclass
@@ -56,9 +63,13 @@ class UnitSnapshot:
     turn_seen: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class StructureSnapshot:
-    """Snapshot of structure information when last visible."""
+    """Snapshot of structure information when last visible.
+
+    Frozen because ``GameState.known_structure`` hands the stored memory out
+    to observers (observations, renderer, LLM prompts); none may edit it.
+    """
 
     tile_type: str
     owner: int | None
@@ -73,7 +84,9 @@ class VisibilityMap:
     Maintains three layers of information:
     1. Visibility state (unexplored/shrouded/visible) for each tile
     2. Memory of last-seen enemy units
-    3. Memory of last-seen structure states
+    3. Memory of last-seen structure states: for each structure the player
+       has seen but cannot see now, its type, owner and HP at the moment it
+       left sight (structures in sight are read live instead)
 
     Args:
         width: Grid width
@@ -109,27 +122,32 @@ class VisibilityMap:
         Args:
             game_state: Current game state
         """
+        # What was in sight until now: structures that leave sight in this
+        # update are remembered as they are at this moment (_update_memory).
+        was_visible = self.state == VISIBLE
+
         # Step 1: Mark previously visible areas as shrouded (not unexplored)
-        self.state[self.state == VISIBLE] = SHROUDED
+        self.state[was_visible] = SHROUDED
 
         # Step 2: Calculate new visibility
         self._current_visible.fill(False)
 
         # Vision from units (includes terrain bonuses like mountain +1)
+        grid = game_state.grid
         for unit in game_state.units:
             if unit.player == self.player:
-                tile = game_state.grid.get_tile(unit.x, unit.y)
+                tile = grid.get_tile(unit.x, unit.y)
                 tile_type = tile.type if tile else None
                 vision_range = calculate_vision_radius(unit.type, tile_type=tile_type)
                 self._add_vision_radius(unit.x, unit.y, vision_range)
 
-        # Vision from structures
-        for y in range(self.height):
-            for x in range(self.width):
-                tile = game_state.grid.get_tile(x, y)
-                if tile.player == self.player and tile.type in STRUCTURE_VISION_RANGES:
-                    vision_range = calculate_vision_radius(tile.type, is_structure=True)
-                    self._add_vision_radius(x, y, vision_range)
+        # Vision from structures. Tile types never change, so the grid's
+        # cached structure positions replace a scan of every tile.
+        for x, y in grid.structure_positions:
+            tile = grid.tiles[y][x]
+            if tile.player == self.player and tile.type in STRUCTURE_VISION_RANGES:
+                vision_range = calculate_vision_radius(tile.type, is_structure=True)
+                self._add_vision_radius(x, y, vision_range)
 
         # Optional terrain rules (forest concealment, HQ always known) from
         # engine_overrides; off by default. See core/terrain_rules.py.
@@ -141,32 +159,28 @@ class VisibilityMap:
         self.state[self._current_visible] = VISIBLE
 
         # Step 4: Update memory of what we can see
-        self._update_memory(game_state)
+        self._update_memory(game_state, was_visible)
 
     def _add_vision_radius(self, cx: int, cy: int, radius: int) -> None:
         """Add circular vision around a point using Chebyshev distance.
 
         Chebyshev distance (king's movement) creates a square visibility area,
-        which is simpler and faster than Euclidean distance circles.
+        which is simpler and faster than Euclidean distance circles: it is
+        exactly the square slice around the point, clipped to the board.
 
         Args:
             cx: Center x coordinate
             cy: Center y coordinate
             radius: Vision radius in tiles
         """
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                nx, ny = cx + dx, cy + dy
-                if 0 <= nx < self.width and 0 <= ny < self.height:
-                    # Chebyshev distance = max of absolute differences
-                    if max(abs(dx), abs(dy)) <= radius:
-                        self._current_visible[ny, nx] = True
+        self._current_visible[max(0, cy - radius) : cy + radius + 1, max(0, cx - radius) : cx + radius + 1] = True
 
-    def _update_memory(self, game_state: "GameState") -> None:
+    def _update_memory(self, game_state: "GameState", was_visible: np.ndarray) -> None:
         """Update memory of seen units and structures.
 
         Args:
             game_state: Current game state
+            was_visible: Mask of the tiles that were visible before this update
         """
         turn = game_state.turn_number
 
@@ -187,15 +201,98 @@ class VisibilityMap:
                     turn_seen=turn,
                 )
 
-        # Record structures we can see
-        for y in range(self.height):
-            for x in range(self.width):
-                if self.is_visible(x, y):
-                    tile = game_state.grid.get_tile(x, y)
-                    if tile.type in ("h", "b", "t"):
-                        self.last_seen_structures[(x, y)] = StructureSnapshot(
-                            tile_type=tile.type, owner=tile.player, health=tile.health, position=(x, y), turn_seen=turn
-                        )
+        # Structures. One in sight is known live, so it needs no memory. One
+        # that leaves sight now is remembered as it is now: the player
+        # watched it right up to this update, including any change made to it
+        # since the previous one (an enemy's partial seize, say), which a
+        # copy taken at the previous update would miss. Nothing else touches
+        # the memory, so repeating an update changes nothing.
+        grid = game_state.grid
+        for x, y in grid.structure_positions:
+            if self._current_visible[y, x]:
+                self.last_seen_structures.pop((x, y), None)
+            elif was_visible[y, x]:
+                self.remember_structure(grid.tiles[y][x], turn)
+
+    def remember_structure(self, tile: Any, turn: int) -> None:
+        """Record ``tile``'s current type, owner and HP as last seen on ``turn``.
+
+        Also marks the tile explored (its terrain is known from then on).
+        ``GameState`` uses this directly to seed every HQ at game start.
+        """
+        self.last_seen_structures[(tile.x, tile.y)] = StructureSnapshot(
+            tile_type=tile.type, owner=tile.player, health=tile.health, position=(tile.x, tile.y), turn_seen=turn
+        )
+        if self.state[tile.y, tile.x] == UNEXPLORED:
+            self.state[tile.y, tile.x] = SHROUDED
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the explored/visible state and the last-seen memory.
+
+        The state is one string of digits (0/1/2) per row, which keeps a save
+        written with ``indent=2`` to one line per row instead of one per tile.
+        Memory entries are sorted by position so equal maps serialise equally.
+        """
+        return {
+            "state": ["".join(str(v) for v in row) for row in self.state.tolist()],
+            "last_seen_structures": [
+                {
+                    "x": x,
+                    "y": y,
+                    "tile_type": snap.tile_type,
+                    "owner": snap.owner,
+                    "health": snap.health,
+                    "turn_seen": snap.turn_seen,
+                }
+                for (x, y), snap in sorted(self.last_seen_structures.items())
+            ],
+            "last_seen_units": [
+                {
+                    "x": x,
+                    "y": y,
+                    "unit_type": snap.unit_type,
+                    "owner": snap.owner,
+                    "health": snap.health,
+                    "max_health": snap.max_health,
+                    "turn_seen": snap.turn_seen,
+                }
+                for (x, y), snap in sorted(self.last_seen_units.items())
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], width: int, height: int, player: int) -> "VisibilityMap":
+        """Rebuild a map written by :meth:`to_dict` for a ``width`` x ``height`` board.
+
+        Raises:
+            ValueError: if the saved state does not fit the board.
+        """
+        vis_map = cls(width, height, player)
+        rows = data.get("state", [])
+        if len(rows) != height or any(len(row) != width for row in rows):
+            raise ValueError(f"Saved fog-of-war state for player {player} does not fit the {width}x{height} board")
+        vis_map.state = np.array([[int(c) for c in row] for row in rows], dtype=np.uint8).reshape(height, width)
+        vis_map._current_visible = vis_map.state == VISIBLE
+        for entry in data.get("last_seen_structures", []):
+            x, y = entry["x"], entry["y"]
+            vis_map.last_seen_structures[(x, y)] = StructureSnapshot(
+                tile_type=entry["tile_type"],
+                owner=entry["owner"],
+                health=entry["health"],
+                position=(x, y),
+                turn_seen=entry["turn_seen"],
+            )
+        for entry in data.get("last_seen_units", []):
+            x, y = entry["x"], entry["y"]
+            vis_map.last_seen_units[(x, y)] = UnitSnapshot(
+                unit_type=entry["unit_type"],
+                owner=entry["owner"],
+                health=entry["health"],
+                max_health=entry["max_health"],
+                position=(x, y),
+                turn_seen=entry["turn_seen"],
+            )
+        return vis_map
 
     def is_visible(self, x: int, y: int) -> bool:
         """Check if a tile is currently visible.
@@ -270,12 +367,16 @@ class VisibilityMap:
     def get_last_seen_structure(self, x: int, y: int) -> StructureSnapshot | None:
         """Get the last-seen structure info at a position.
 
+        Most callers want ``GameState.known_structure``, which also answers
+        for structures in sight (read live, so not kept here).
+
         Args:
             x: X coordinate
             y: Y coordinate
 
         Returns:
-            StructureSnapshot if a structure was seen there, None otherwise
+            StructureSnapshot if a structure was seen there and is out of
+            sight now (or is an HQ known from the start), None otherwise
         """
         return self.last_seen_structures.get((x, y))
 

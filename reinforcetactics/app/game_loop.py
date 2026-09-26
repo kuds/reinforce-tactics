@@ -405,9 +405,8 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
         # Create game state with enabled units from settings
         game = GameState(map_data, num_players=num_players, enabled_units=enabled_units, fog_of_war=fog_of_war)
 
-        # Initialize visibility for fog of war games
+        # GameState computes fog-of-war visibility itself
         if fog_of_war:
-            game.update_visibility()
             print("Fog of war enabled!")
 
         # Store map file for saving
@@ -539,9 +538,8 @@ def load_saved_game(save_data=None):
                 print("❌ This save can't be loaded: it was made on a random map before saves recorded their terrain.")
             return "main_menu"
 
-        # Initialize visibility for fog of war games
+        # from_dict restores the saved fog of war (or rebuilds it for an old save)
         if game.fog_of_war:
-            game.update_visibility()
             print("Fog of war enabled!")
 
         # Create renderer

@@ -1192,7 +1192,12 @@ Respond with your strategic plan in JSON format."""
                 enemy_units.append(enemy_data)
 
         # Serialize buildings (convert to original coordinates)
-        # With fog of war, only include explored structures
+        # With fog of war, only include structures the bot knows of, with the
+        # owner it knows (GameState.known_structure, the same view the RL
+        # observation and the renderer use): live while in sight, else as
+        # last seen, and every HQ from the start. Reading the live owner of
+        # an out-of-sight structure leaked enemy captures to LLM bots
+        # (review critic-integration-3).
         player_buildings = []
         enemy_buildings = []
         neutral_buildings = []
@@ -1200,10 +1205,13 @@ Respond with your strategic plan in JSON format."""
         for row in self.game_state.grid.tiles:
             for tile in row:
                 if tile.type in ["b", "h", "t"]:
-                    # FOW: Skip structures that haven't been explored
+                    owner = tile.player
+                    known = None
                     if self.game_state.fog_of_war:
-                        if not self.game_state.is_position_explored(tile.x, tile.y, self.bot_player):
-                            continue
+                        known = self.game_state.known_structure(self.bot_player, tile.x, tile.y)
+                        if known is None:
+                            continue  # never seen
+                        owner = known.owner
 
                     orig_x, orig_y = self.game_state.padded_to_original_coords(tile.x, tile.y)
                     building_info = {
@@ -1212,15 +1220,15 @@ Respond with your strategic plan in JSON format."""
                         "income": 100 if tile.type == "h" else (100 if tile.type == "b" else 50),
                     }
 
-                    # FOW: For non-visible structures, don't show current ownership
-                    if self.game_state.fog_of_war:
-                        if not self.game_state.is_position_visible(tile.x, tile.y, self.bot_player):
-                            # Mark as 'last_seen' to indicate outdated info
-                            building_info["last_seen"] = True
+                    # FOW: an out-of-sight structure is reported as last seen
+                    if known is not None and not self.game_state.is_position_visible(tile.x, tile.y, self.bot_player):
+                        building_info["last_seen"] = True
+                        building_info["turn_seen"] = known.turn_seen
+                        building_info["hp"] = known.health
 
-                    if tile.player == self.bot_player:
+                    if owner == self.bot_player:
                         player_buildings.append(building_info)
-                    elif tile.player is not None:
+                    elif owner is not None:
                         enemy_buildings.append(building_info)
                     else:
                         neutral_buildings.append(building_info)
@@ -1327,9 +1335,21 @@ Respond with your strategic plan in JSON format."""
                             }
                         )
 
-            # Check if moving here allows seizing a structure
-            if tile and tile.is_capturable() and tile.player != self.bot_player:
-                result["move_then_seize"].append({"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True})
+            # Check if moving here allows seizing a structure. Under fog of war
+            # the move set includes tiles the bot has never seen, so judge by
+            # the structure it knows of (GameState.known_structure, the same
+            # view as its building lists): offering then_seize on an unseen
+            # tile would reveal that a structure stands there.
+            if tile and tile.is_capturable():
+                known_to_bot, owner = True, tile.player
+                if self.game_state.fog_of_war:
+                    known = self.game_state.known_structure(self.bot_player, to_x, to_y)
+                    known_to_bot = known is not None
+                    owner = known.owner if known is not None else None
+                if known_to_bot and owner != self.bot_player:
+                    result["move_then_seize"].append(
+                        {"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True}
+                    )
 
             # Cleric-specific: check for heal/cure opportunities
             if unit.type == "C":
@@ -1740,13 +1760,19 @@ Use RESIGN only as a last resort when victory is impossible."""
         if not self.game_state.move_unit(unit, to_x, to_y):
             logger.warning("Engine refused MOVE %s", action)
             return False
+        # Log where the unit really is: a fog-of-war ambush stops it short.
+        if unit.ambushed:
+            logger.info(
+                "Unit %s was ambushed on its way to original coords (%s, %s)", action.get("unit_id"), orig_to_x, orig_to_y
+            )
+        orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
         logger.info(
             "Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)",
             action.get("unit_id"),
-            orig_to_x,
-            orig_to_y,
-            to_x,
-            to_y,
+            orig_x,
+            orig_y,
+            unit.x,
+            unit.y,
         )
         return True
 

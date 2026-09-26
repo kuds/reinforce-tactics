@@ -28,6 +28,13 @@ class TileGrid:
                 row.append(tile)
             self.tiles.append(row)
 
+        # Structure (HQ/building/tower) positions in row-major order. Tile
+        # types never change after the grid is built, so fog-of-war code can
+        # visit just these instead of scanning every tile (review core-21).
+        self.structure_positions: list[tuple[int, int]] = [
+            (tile.x, tile.y) for row in self.tiles for tile in row if tile.is_capturable()
+        ]
+
     def get_tile(self, x, y):
         """Get tile at coordinates."""
         if 0 <= x < self.width and 0 <= y < self.height:

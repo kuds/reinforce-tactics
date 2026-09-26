@@ -23,7 +23,7 @@ A turn-based strategy game built with Pygame and Gymnasium for reinforcement lea
 - **Action Masking**: MaskablePPO and legal-action masking across all bot types
 - **Self-Play**: Train agents against copies of themselves with safe weight swapping
 - **Tournament System**: Round-robin tournaments with ELO ratings, Docker support, and result tracking
-- **Fog of War**: Line-of-sight visibility with terrain bonuses
+- **Fog of War**: Radius-based vision with terrain bonuses, remembered structures and ambushes
 - **Map Editor**: In-game editor for creating and modifying maps
 - **Multi-Player Modes**: 1v1, 1v1v1 (free-for-all), and 2v2 (team) maps
 - **Replay System**: Record games, replay them, and export to video
@@ -162,7 +162,11 @@ These numbers are the defaults in `reinforcetactics/constants.py` (`tests/test_r
 
 **Terrain**: Grass, roads and forests are open ground; forests give Rogues +15% evade; mountains give +1 vision and +1 Archer range; water/ocean are impassable
 
-**Fog of War** (optional): Units and structures see a radius around them; enemy units and structures outside it are hidden, the enemy HQ included unless `hq_always_visible` is set
+**Fog of War** (optional, off by default): each player sees a square around its own units (2-4 tiles; Archers and Rogues see farthest, +1 on a mountain) and structures (HQ 4, building 3, tower 5).
+- Every HQ's location and starting owner are known from the start. Other buildings and towers are unknown until scouted; out of sight, a structure shows its owner and HP as you last saw them, so captures made out of sight stay hidden (unless `hq_always_visible` is set, below).
+- Enemies you can't see never block your move options. A move whose path runs into a hidden enemy is *ambushed*: the unit stops on the last free tile before it, the move is spent (it can't be cancelled), and the enemy is revealed. The unit takes a shortest route by what you can see (the same route every time).
+- A unit can only attack enemies that were in sight when its action began, so it can't attack an enemy it found by moving (or by being ambushed).
+- Saves keep each player's explored map and memory.
 
 **Optional rules** (`engine_overrides`, all off by default, so the default game is exactly as described above):
 
@@ -171,7 +175,7 @@ These numbers are the defaults in `reinforcetactics/constants.py` (`tests/test_r
 | `terrain_move_cost` | every tile costs 1 | Movement cost per tile type, e.g. `{"r": 0.5, "f": 2, "m": 2}` for fast roads and slow forests/mountains |
 | `charge_distance` | `"displacement"` | `"path"`: Knight Charge counts the tiles walked, not the straight-line distance |
 | `forest_concealment` | `false` | Under fog of war, a unit in forest is seen only by enemies on or next to its tile |
-| `hq_always_visible` | `false` | Under fog of war, every HQ's position and owner are always known |
+| `hq_always_visible` | `false` | Under fog of war, every HQ's current owner is always known (by default an HQ out of sight shows its owner as last seen) |
 
 ## Project Structure
 

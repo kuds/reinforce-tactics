@@ -225,7 +225,36 @@ These rules are set per game through `engine_overrides` (in a training config's 
 | `terrain_move_cost` | every tile costs 1 | Movement points to enter each tile type, e.g. `{"r": 0.5, "f": 2, "m": 2}`. A unit may enter a tile while its path's total cost stays within its movement, so roads at 0.5 double the distance travelled along them. Only walkable tile codes (`p`, `r`, `f`, `m`, `b`, `h`, `t`) and positive costs are accepted |
 | `charge_distance` | `"displacement"` | `"path"`: the Knight's Charge counts the tiles along the path of the move (going around a lake counts) instead of the straight-line distance from where the Knight started |
 | `forest_concealment` | `false` | Under fog of war, a unit standing in forest is seen only by an enemy with a unit on or orthogonally next to its tile; the forest tile itself still counts as explored |
-| `hq_always_visible` | `false` | Under fog of war, every HQ counts as explored for every player, so its position and owner are always known; units on it still need normal vision |
+| `hq_always_visible` | `false` | Under fog of war, every HQ counts as explored for every player and its current owner is always known (by default every HQ's location and starting owner are known, and an HQ out of sight shows its owner as last seen); units on it still need normal vision |
+
+## Fog of War
+
+Fog of war is optional and off by default. When it is on, each player sees only part of the board.
+
+### Vision
+- Each player sees a square (Chebyshev distance) around each of its units and structures
+- Unit vision: Barbarian 2; Warrior, Mage, Cleric, Knight and Sorcerer 3; Archer and Rogue 4 (the scouts); +1 on a mountain
+- Structure vision: Building 3, HQ 4, Tower 5
+- A tile is **unexplored** until the player has seen it, **visible** while in sight, and **shrouded** once it has been seen and is out of sight again
+
+### What a Player Knows
+- Enemy units are shown only on visible tiles
+- **Every HQ's location and owner are known from the start** of the game; out of sight, an HQ shows its owner as last seen unless the optional `hq_always_visible` rule is on (see Optional Rules)
+- Other buildings and towers are unknown until scouted
+- A structure out of sight shows its owner and HP **as last seen**, the moment it left sight. A capture or seize made out of sight stays hidden until the structure is seen again
+- The RL observation, the game window and the LLM bots' prompt all show the same knowledge (`GameState.known_structure`)
+
+### Ambushes
+- Enemies a player cannot see never block that player's movement options, so the move options reveal nothing hidden
+- A unit moves along a shortest route through the tiles its player knows to be passable (the same route every time)
+- If a hidden enemy stands on that route, or on the destination, the unit is **ambushed**: it stops on the last free tile before the enemy (possibly where it started), its move is spent (it can't be cancelled), and the enemy comes into view. The move is recorded (and replayed) to where the unit actually stopped
+- Without fog of war nothing changes: every enemy blocks movement as usual
+
+### Attacks Under Fog
+- A unit can only attack enemies that were in sight when its action began. An enemy it discovered by moving, including an ambusher, cannot be attacked by that unit this action; units whose action begins after it was revealed can attack it
+
+### Saving
+- Saves keep each player's explored tiles and last-seen memory, so a loaded game shows exactly what each player knew
 
 ## Game Rules
 
