@@ -67,15 +67,36 @@ _ARG_TO_CONFIG_PATH = {
     "seed": "seed",
 }
 
+# Every config field this script reads; anything else a --config sets away
+# from its default is reported (an error with --strict).
+CONSUMED_CONFIG_FIELDS: frozenset[str] = frozenset(_ARG_TO_CONFIG_PATH.values())
+CONSUMED_ALGORITHMS: tuple[str, ...] = ("alphazero",)
+IGNORED_FIELD_HINTS: dict[str, str] = {
+    "algorithm": "this script always trains AlphaZero",
+    "env.max_steps": "the self-play game length is alphazero.max_game_steps",
+    "env.*": "AlphaZero reads only env.map_file and env.enabled_units",
+    "logging.*": "only logging.log_dir (the checkpoint directory) is read",
+    "ppo.*": "read only by the PPO trainers",
+    "eval.*": "AlphaZero evaluates with alphazero.eval_games / eval_threshold",
+    "curriculum.*": "read only by train_bootstrap.py",
+    "feudal.*": "read only by train_feudal_rl.py",
+    "self_play.*": "read only by train_self_play.py / train_feudal_rl.py",
+}
 
-def parse_args():
+
+def parse_args(argv: list[str] | None = None):
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
-    pre_args, _ = pre_parser.parse_known_args()
+    pre_args, _ = pre_parser.parse_known_args(argv)
 
     parser = argparse.ArgumentParser(
         description="AlphaZero training for Reinforce Tactics",
         parents=[pre_parser],
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Make config fields this script does not read an error (default: a warning)",
     )
 
     # Map configuration
@@ -226,13 +247,26 @@ def parse_args():
         help="Base seed for every game's combat RNG (Rogue evade). Default: a fresh seed per game.",
     )
 
+    cfg = None
     if pre_args.config:
         from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
 
         cfg = load_config(pre_args.config)
         parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if cfg is not None:
+        from reinforcetactics.rl.config import check_ignored_config_fields
+
+        check_ignored_config_fields(
+            cfg,
+            CONSUMED_CONFIG_FIELDS,
+            entry_point="train_alphazero.py",
+            strict=args.strict,
+            algorithms=CONSUMED_ALGORITHMS,
+            hints=IGNORED_FIELD_HINTS,
+        )
+    return args
 
 
 def main():

@@ -21,6 +21,7 @@ import argparse
 import sys
 
 from reinforcetactics.cli.commands import evaluate_mode, play_mode, stats_mode, train_mode
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.utils.dependency_checker import check_dependencies
 
 
@@ -68,12 +69,15 @@ Examples:
         "--algorithm", type=str, default="ppo", choices=["ppo", "a2c", "dqn"], help="RL algorithm for training"
     )
     parser.add_argument("--timesteps", type=int, default=100000, help="Total training timesteps")
+    # Every scripted bot the registry knows. 'self' is not offered: this path
+    # builds a bare StrategyGameEnv with no self-play wrapper, where 'self'
+    # meant no opponent at all (use scripts/train/train_self_play.py).
     parser.add_argument(
         "--opponent",
         type=str,
         default="bot",
-        choices=["bot", "random", "noop", "self"],
-        help="Opponent type",
+        choices=accepted_names(),
+        help="Scripted opponent (bot registry name)",
     )
     parser.add_argument("--map-file", type=str, default=None, help="Path to map file (None for random)")
     parser.add_argument("--model-name", type=str, default=None, help="Name for saved model")

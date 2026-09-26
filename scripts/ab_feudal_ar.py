@@ -29,6 +29,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.rl.feudal_rl import FeudalRLAgent
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
@@ -148,8 +149,8 @@ def _print_comparison(legacy: list[dict], ar: list[dict]) -> None:
 def main():
     parser = argparse.ArgumentParser(description="A/B compare legacy vs AR worker for feudal RL")
     parser.add_argument("--map", type=str, default="maps/1v1/beginner.csv")
-    parser.add_argument("--opponent", type=str, default="random")
-    parser.add_argument("--eval-opponent", type=str, default="random")
+    parser.add_argument("--opponent", type=str, default="random", choices=accepted_names())
+    parser.add_argument("--eval-opponent", type=str, default="random", choices=accepted_names())
     parser.add_argument("--enabled-units", nargs="+", default=["W", "M", "A"])
     parser.add_argument("--max-steps", type=int, default=400)
     parser.add_argument("--max-turns", type=int, default=20)

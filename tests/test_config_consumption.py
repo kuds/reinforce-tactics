@@ -374,3 +374,34 @@ class TestTrainBootstrapEntryPoint:
         del argv[argv.index("--device") : argv.index("--device") + 2]
         assert train_bootstrap.main(argv) == 0
         assert seen[0].ppo.device == "cuda:1"
+
+
+class TestOtherEntryPoints:
+    def test_self_play_reports_and_strict_rejects(self, tmp_path):
+        script = _load_script("train_self_play")
+        config = _write_yaml(tmp_path / "sp.yaml", {"ppo": {"lr_schedule": "linear"}, "self_play": {"snapshot_freq": 5}})
+        with pytest.warns(IgnoredConfigFieldWarning, match="ppo.lr_schedule"):
+            script.parse_args(["--config", str(config)])
+        with pytest.raises(IgnoredConfigFieldError, match="self_play.snapshot_freq"):
+            script.parse_args(["--config", str(config), "--strict"])
+
+    def test_feudal_report_depends_on_the_mode(self, tmp_path):
+        script = _load_script("train_feudal_rl")
+        config = _write_yaml(tmp_path / "f.yaml", {"algorithm": "feudal", "feudal": {"manager_horizon": 3}})
+        # --mode flat (the default) trains the flat baseline: feudal.* is ignored.
+        with pytest.raises(IgnoredConfigFieldError, match="(?s)algorithm.*feudal.manager_horizon"):
+            script.parse_args(["--config", str(config), "--strict"])
+        args = script.parse_args(["--config", str(config), "--strict", "--mode", "feudal"])
+        assert args.manager_horizon == 3
+
+    def test_feudal_flat_mode_rejects_self_opponent(self):
+        script = _load_script("train_feudal_rl")
+        with pytest.raises(SystemExit):
+            script.parse_args(["--opponent", "self"])
+        assert script.parse_args(["--opponent", "self", "--mode", "feudal"]).opponent == "self"
+
+    def test_alphazero_reports_env_max_steps(self, tmp_path):
+        script = _load_script("train_alphazero")
+        config = _write_yaml(tmp_path / "az.yaml", {"algorithm": "alphazero", "env": {"max_steps": 400}})
+        with pytest.raises(IgnoredConfigFieldError, match="env.max_steps.*alphazero.max_game_steps"):
+            script.parse_args(["--config", str(config), "--strict"])
