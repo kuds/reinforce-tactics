@@ -16,10 +16,18 @@ from gymnasium import spaces
 
 from reinforcetactics.core.actions import ACTOR_KEYS
 from reinforcetactics.core.game_state import GameState
-from reinforcetactics.game.bot import NoopBot
-from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS
 from reinforcetactics.game.bot_registry import build_scripted as build_scripted_bot
-from reinforcetactics.game.bot_registry import canonical_name as canonical_bot_name
+
+# The opponent and reward_config contract lives in ``env_schema`` (which the
+# config layer checks configs against); re-exported here.
+from reinforcetactics.rl.env_schema import DEFAULT_REWARD_CONFIG as DEFAULT_REWARD_CONFIG
+from reinforcetactics.rl.env_schema import KNOWN_REWARD_KEYS as KNOWN_REWARD_KEYS
+from reinforcetactics.rl.env_schema import OPTIONAL_REWARD_KEYS as OPTIONAL_REWARD_KEYS
+from reinforcetactics.rl.env_schema import SELF_PLAY_OPPONENT as SELF_PLAY_OPPONENT
+from reinforcetactics.rl.env_schema import accepted_opponents as accepted_opponents
+from reinforcetactics.rl.env_schema import resolve_opponent as resolve_opponent
+from reinforcetactics.rl.env_schema import validate_opponent_kwargs as validate_opponent_kwargs
+from reinforcetactics.rl.env_schema import validate_reward_config as validate_reward_config
 from reinforcetactics.rl.observation import (
     GLOBAL_FEATURES_DIM,
     GOLD_SCALE,
@@ -55,22 +63,6 @@ class StructuredActionMasks:
     source: np.ndarray
     target: dict[tuple[int, int, int], np.ndarray] = field(default_factory=dict)
     unit_type: dict[tuple[int, int], np.ndarray] = field(default_factory=dict)
-
-
-# Opponent strings accepted by ``opponent`` arg / set on ``opponent_type``.
-# ``"bot"`` is kept as a back-compat alias for ``"simple"`` (SimpleBot).
-# ``"random"`` runs RandomBot with its default ``max_actions=20`` (more of a
-# stress test than a weak baseline). ``"balanced_random"`` runs
-# BalancedRandomBot, whose action throughput scales with army size (one
-# build attempt + one random action per owned unit per turn) -- a lighter,
-# more resilient stepping stone between ``"noop"`` and ``"random"``;
-# see configs/ppo/bootstrap.yaml.
-# ``"self"`` is included so ``_opponent_turn`` calls ``self.opponent.take_turn()``
-# in self-play training. The opponent itself (a snapshot of the agent under
-# training) is supplied via ``set_self_play_opponent_factory`` -- by
-# ``rl.self_play.SelfPlayEnv`` -- so reset() can rebind a fresh opponent to
-# the new game_state on every episode.
-_BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced", "random", "balanced_random", "noop", "self"})
 
 
 # Mapping from action key → (action_type_idx, source_key, target_key).
@@ -363,7 +355,7 @@ class StrategyGameEnv(gym.Env):
     def __init__(
         self,
         map_file: str | None = None,
-        opponent: str | None = "bot",  # 'bot', 'random', 'noop', 'self', or None
+        opponent: str | None = "bot",  # a bot_registry name ('bot', 'master', 'noop', ...), 'self', or None
         render_mode: str | None = None,
         max_steps: int = 200,
         max_turns: int | None = None,
@@ -388,16 +380,24 @@ class StrategyGameEnv(gym.Env):
 
         Args:
             map_file: Path to map CSV. If None, generates random map
-            opponent: Type of opponent ('bot', 'random', 'noop', 'self',
-                None for manual). 'noop' is a stationary opponent that only
-                ends its turn — useful as a curriculum stage-0 / sanity check.
+            opponent: ``None`` (manual: the caller plays the other seat),
+                ``'self'`` (self-play; see ``set_self_play_opponent_factory``)
+                or a scripted bot from the bot registry
+                (:func:`accepted_opponents`: 'bot' (= 'simple'), 'medium',
+                'advanced', 'master', 'mixed', 'random', 'balanced_random',
+                'noop'). 'noop' is a stationary opponent that only ends its
+                turn — useful as a curriculum stage-0 / sanity check.
+                Anything else raises ValueError.
             render_mode: 'human' or 'rgb_array' or None
             max_steps: Maximum steps per episode
             max_turns: Maximum game turns before auto-draw (None = unlimited).
                 Setting this lets games end via game rules (terminated=True)
                 rather than only via env step truncation, which avoids the
                 value-bootstrapping mismatch in PPO at episode end.
-            reward_config: Dict of reward weights
+            reward_config: Reward weights overlaid on
+                :data:`DEFAULT_REWARD_CONFIG`. Keys outside
+                :data:`KNOWN_REWARD_KEYS` and non-numeric values raise (see
+                :func:`validate_reward_config`).
             hierarchical: Whether to use hierarchical action space
             goal_space_size: Size of goal space for HRL
             enabled_units: List of enabled unit types (default all)
@@ -405,6 +405,9 @@ class StrategyGameEnv(gym.Env):
             action_space_type: 'multi_discrete' (per-dimension masks) or
                 'flat_discrete' (exact per-action masks, eliminates invalid actions)
             max_flat_actions: Upper bound on legal actions per step for flat_discrete
+            opponent_kwargs: Extra constructor kwargs for a scripted
+                opponent; validated against that bot's constructor (see
+                :func:`validate_opponent_kwargs`).
             max_actions_per_turn: Optional hard cap on the number of agent
                 actions taken within a single game-turn before the action
                 mask is narrowed to end_turn only. Defends against the
@@ -439,6 +442,11 @@ class StrategyGameEnv(gym.Env):
                 space depends on grid dims and would need separate padding.
         """
         super().__init__()
+
+        # Validate the cheap arguments before any map I/O, so a typo fails
+        # at construction rather than as a silently different MDP.
+        validate_opponent_kwargs(opponent, opponent_kwargs)
+        validate_reward_config(reward_config)
 
         # Load or generate map
         if map_file:
@@ -477,6 +485,9 @@ class StrategyGameEnv(gym.Env):
                 "observation encoding."
             )
 
+        # As given ("bot" stays "bot"); reset() resolves it through the bot
+        # registry, so it may be reassigned before a reset (SelfPlayEnv sets
+        # "self") and is re-validated there.
         self.opponent_type = opponent
         self.opponent_kwargs: dict[str, Any] = dict(opponent_kwargs) if opponent_kwargs else {}
         self.opponent: Any | None = None
@@ -510,75 +521,10 @@ class StrategyGameEnv(gym.Env):
         # episode (see ``set_agent_seat``).
         self._random_agent_seat = False
 
-        # Reward configuration with defaults.
-        #
-        # Weights are tuned so that capturing the enemy HQ dominates the
-        # alternative of farming kills against a respawning opponent. Old
-        # defaults made a single kill (+10) worth more than a turn of seize
-        # progress (+1), pushing the policy into a kill-farm local optimum
-        # that never finishes the game. Now: capture (+200) >> a full kill
-        # loop, and seize_progress (+5) > a typical attack hit.
-        default_reward_config = {
-            "win": 1000.0,
-            "loss": -1000.0,
-            "draw": -200.0,
-            "income_diff": 0.05,
-            "unit_diff": 0.3,
-            "structure_control": 1.0,
-            "invalid_action": -10.0,
-            # ``turn_penalty`` defaults to 0.0. Earlier defaults charged
-            # a per-end_turn cost to incentivize game progress, but that
-            # made ``end_turn`` the only individually-negative-valued
-            # action and PPO converged to a "never end the turn"
-            # attractor — episodes truncated at ``max_steps`` with very
-            # few game-turns elapsed and 0% win rate. Per-turn pressure
-            # now lives in ``win_speed_bonus`` (terminal-only, can't be
-            # dodged by stalling) and in gamma's natural discount.
-            "turn_penalty": 0.0,
-            # ``win_speed_bonus`` scales linearly with how many turns
-            # remained when the agent won: at turn 1, a winning agent
-            # gets the full bonus; at ``max_turns`` it gets 0. Stacks
-            # with the ``win`` / ``win_by_*`` terminals and only fires
-            # on the agent's own win. With ``max_turns`` unset the bonus
-            # is skipped (no horizon to normalize against). Default 0.0
-            # keeps old configs behaviour-identical; bootstrap.yaml sets
-            # the active magnitude.
-            "win_speed_bonus": 0.0,
-            # Action rewards
-            "create_unit": 0.5,
-            "move": 0.0,
-            "damage_scale": 0.05,  # reward per damage point dealt
-            # Penalty per damage point *taken* during the opponent's turn
-            # (negative magnitude). Makes combat shaping net-zero-sum: a
-            # mutual trade nets ~0 and only decisive combat (dealing more
-            # than you take) pays. Counters the kill/damage-farm draw
-            # attractor where two armies trade blows to the max-turns clock
-            # while collecting only the dealt-damage half of the exchange.
-            # Default 0.0 leaves legacy reward shapes unchanged.
-            "damage_taken_scale": 0.0,
-            "kill": 5.0,
-            "seize_progress": 5.0,
-            "capture": 200.0,
-            "cure": 5.0,
-            "heal_scale": 0.5,  # reward per HP healed
-            "paralyze": 8.0,
-            "haste": 6.0,
-            "defence_buff": 5.0,
-            "attack_buff": 5.0,
-            # Opponent-capture penalty. Fires once per capturable tile the
-            # opponent seizes during their turn (tracked in the end_turn
-            # branch of _execute_action). Tiered to encode two distinct
-            # behaviours: neutral captures punish ignoring the capture race
-            # (the failure mode that collapsed skirmish_simple), owned
-            # captures punish letting the opponent take ground we already
-            # held. Defaults are 0.0 so old reward_configs are unaffected;
-            # configs/ppo/bootstrap.yaml sets the active magnitudes.
-            "enemy_neutral_capture": 0.0,
-            "enemy_owned_capture": 0.0,
-        }
-        if reward_config:
-            default_reward_config.update(reward_config)
-        self.reward_config = default_reward_config
+        # Reward weights: the defaults overlaid with ``reward_config``
+        # (validated above, so every key is one the env reads). Indexed
+        # directly everywhere -- DEFAULT_REWARD_CONFIG is the only default.
+        self.reward_config: dict[str, float] = {**DEFAULT_REWARD_CONFIG, **(reward_config or {})}
 
         # ``global_features`` normalization scales — stored so ``_get_obs``
         # can forward them to ``build_observation`` without re-reading
@@ -1134,22 +1080,22 @@ class StrategyGameEnv(gym.Env):
         reward = 0.0
         if is_valid:
             if action_type == 0:
-                reward += rc.get("create_unit", 2.0)
+                reward += rc["create_unit"]
                 ut_letter = action_dict.get("unit_type")
                 if ut_letter in self.episode_stats["units_built"]:
                     self.episode_stats["units_built"][ut_letter] += 1
             elif action_type == 1:
-                reward += rc.get("move", 0.1)
+                reward += rc["move"]
             elif action_type == 2:
                 damage = result_info.get("damage", 0) or 0
-                reward += damage * rc.get("damage_scale", 0.2)
+                reward += damage * rc["damage_scale"]
                 self.episode_stats["attacks"] += 1
                 self.episode_stats["damage_dealt"] += float(damage)
                 if not result_info.get("target_alive", True):
-                    reward += rc.get("kill", 10.0)
+                    reward += rc["kill"]
                     self.episode_stats["kills"] += 1
             elif action_type == 3:
-                reward += rc.get("seize_progress", 1.0)
+                reward += rc["seize_progress"]
                 self.episode_stats["seize_attempts"] += 1
                 if result_info.get("captured", False):
                     self.episode_stats["captures"] += 1
@@ -1170,14 +1116,14 @@ class StrategyGameEnv(gym.Env):
                     if type_reward_key and type_reward_key in rc:
                         reward += rc[type_reward_key]
                     else:
-                        reward += rc.get("capture", 20.0)
+                        reward += rc["capture"]
             elif action_type == 4:
                 if result_info.get("cured"):
-                    reward += rc.get("cure", 5.0)
+                    reward += rc["cure"]
                 elif result_info.get("heal_amount", 0) > 0:
-                    reward += result_info["heal_amount"] * rc.get("heal_scale", 0.5)
+                    reward += result_info["heal_amount"] * rc["heal_scale"]
             elif action_type == 5:
-                reward += self.reward_config["turn_penalty"]
+                reward += rc["turn_penalty"]
                 # Opponent plays (dispatch on opponent_type, not opponent object).
                 # ``"self"`` is dispatched like any scripted bot: reset() bound a
                 # factory-built opponent (ModelBot / snapshot) to the live
@@ -1215,7 +1161,7 @@ class StrategyGameEnv(gym.Env):
                         # (see ``damage_taken_scale`` in the default config).
                         # Attributed to the end_turn step, mirroring how the
                         # opponent-capture penalties below are attributed.
-                        reward += damage_taken * rc.get("damage_taken_scale", 0.0)
+                        reward += damage_taken * rc["damage_taken_scale"]
                         # Tiered opponent-capture penalty. ``neutral_lost``
                         # fires when the opponent seized an unowned tile
                         # (we lost a race); ``owned_lost`` fires when the
@@ -1241,29 +1187,30 @@ class StrategyGameEnv(gym.Env):
                         # reward_config), added directly -- matches the
                         # convention used by turn_penalty / invalid_action.
                         if neutral_lost:
-                            reward += neutral_lost * rc.get("enemy_neutral_capture", 0.0)
+                            reward += neutral_lost * rc["enemy_neutral_capture"]
                             self.episode_stats["structures_lost_neutral"] += neutral_lost
                         if owned_lost:
-                            reward += owned_lost * rc.get("enemy_owned_capture", 0.0)
+                            reward += owned_lost * rc["enemy_owned_capture"]
                             self.episode_stats["structures_lost_owned"] += owned_lost
             elif action_type == 6:
-                reward += rc.get("paralyze", 8.0)
+                reward += rc["paralyze"]
             elif action_type == 7:
-                reward += rc.get("haste", 6.0)
+                reward += rc["haste"]
             elif action_type == 8:
-                reward += rc.get("defence_buff", 5.0)
+                reward += rc["defence_buff"]
             elif action_type == 9:
-                reward += rc.get("attack_buff", 5.0)
+                reward += rc["attack_buff"]
 
         return reward, is_valid
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
-        if self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent is not None:
+        # reset() binds ``self.opponent`` for every opponent type that plays
+        # (a scripted bot, or the self-play factory's snapshot); ``None``
+        # (manual mode, or 'self' with no factory) no-ops, and the caller's
+        # safety net hands the turn back to the agent.
+        if self.opponent is not None:
             self.opponent.take_turn()
-        # 'self' with no factory leaves ``self.opponent`` as None, so this
-        # safely no-ops (SelfPlayEnv registers a factory whose opponent plays
-        # the policy snapshot for its own seat).
 
     def _compute_potential(self) -> float:
         """
@@ -1280,17 +1227,17 @@ class StrategyGameEnv(gym.Env):
         # computation entirely (the income calc in particular is the
         # expensive one), while a *negative* weight is a legitimate config
         # choice and must not be silently dropped.
-        if self.reward_config.get("income_diff", 0) != 0:
+        if self.reward_config["income_diff"] != 0:
             income_agent = self.game_state.mechanics.calculate_income(ap, self.game_state.grid, self.game_state.income_rates)
             income_opp = self.game_state.mechanics.calculate_income(opp, self.game_state.grid, self.game_state.income_rates)
             potential += (income_agent["total"] - income_opp["total"]) * self.reward_config["income_diff"]
 
-        if self.reward_config.get("unit_diff", 0) != 0:
+        if self.reward_config["unit_diff"] != 0:
             units_agent = sum(1 for u in self.game_state.units if u.player == ap)
             units_opp = sum(1 for u in self.game_state.units if u.player == opp)
             potential += (units_agent - units_opp) * self.reward_config["unit_diff"]
 
-        if self.reward_config.get("structure_control", 0) != 0:
+        if self.reward_config["structure_control"] != 0:
             structures_agent = len(self.game_state.grid.get_capturable_tiles(player=ap))
             structures_opp = len(self.game_state.grid.get_capturable_tiles(player=opp))
             potential += (structures_agent - structures_opp) * self.reward_config["structure_control"]
@@ -1461,21 +1408,21 @@ class StrategyGameEnv(gym.Env):
                 elif end_reason == "elimination" and "win_by_elimination" in rc:
                     terminal_bonus = rc["win_by_elimination"]
                 else:
-                    terminal_bonus = rc.get("win", 0.0)
+                    terminal_bonus = rc["win"]
                 # Speed bonus: linearly rewards winning early. Needs both
                 # a configured magnitude and a finite max_turns to scale
                 # against; with max_turns=None we'd have no horizon and
                 # the bonus is skipped. Capped at 0 below if the win
                 # somehow lands past max_turns (defensive — game would
                 # have terminated as max_turns_draw before then).
-                speed_bonus = rc.get("win_speed_bonus", 0.0)
+                speed_bonus = rc["win_speed_bonus"]
                 if speed_bonus > 0 and self.max_turns:
                     remaining = max(0, self.max_turns - self.game_state.turn_number)
                     terminal_bonus += speed_bonus * remaining / self.max_turns
                 self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)
-                terminal_bonus = self.reward_config.get("draw", 0.0)
+                terminal_bonus = self.reward_config["draw"]
                 self.episode_stats["winner"] = None
             else:
                 terminal_bonus = self.reward_config["loss"]
@@ -1496,7 +1443,7 @@ class StrategyGameEnv(gym.Env):
             # the default charge is 0. Set ``reward_config['truncation']`` to
             # reinstate an explicit penalty -- but note it stacks with the
             # bootstrap rather than replacing it.
-            terminal_bonus = self.reward_config.get("truncation", 0.0)
+            terminal_bonus = self.reward_config["truncation"]
             self.episode_stats["winner"] = None
 
         reward += terminal_bonus
@@ -1581,6 +1528,12 @@ class StrategyGameEnv(gym.Env):
 
     def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
         """Reset environment."""
+        # Resolve the opponent first: ``opponent_type`` may have been
+        # reassigned since __init__ (SelfPlayEnv sets "self"), and an unknown
+        # name must fail here rather than quietly play with no opponent.
+        opponent_name = resolve_opponent(self.opponent_type)
+        validate_opponent_kwargs(opponent_name, self.opponent_kwargs)
+
         super().reset(seed=seed)
 
         # Seat draw for the "random" seat mode (self-play swaps). Drawn first
@@ -1626,27 +1579,25 @@ class StrategyGameEnv(gym.Env):
         # np_random keeps reset(seed=...) reproducible while injecting
         # genuine per-episode opponent variance.
         opponent_player = 3 - self.agent_player
-        if self.opponent_type == "noop":
+        if opponent_name == "noop":
             # NoopBot never chooses anything — no rng, and deliberately no
             # np_random draw so seeded episode streams stay byte-identical
             # with the historic behavior.
-            self.opponent = NoopBot(self.game_state, player=opponent_player)
-        elif self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent_type != "self":
-            # Scripted opponent via the bot registry ("bot" aliases simple).
-            # ``opponent_kwargs`` is forwarded only to the stochastic bots
-            # (mixed / random / balanced_random) — the historic contract;
-            # the deterministic ladder takes rng purely for tiebreaks.
+            self.opponent = build_scripted_bot("noop", self.game_state, player=opponent_player)
+        elif opponent_name is not None and opponent_name != SELF_PLAY_OPPONENT:
+            # Any other scripted opponent, built through the bot registry
+            # ("bot" is "simple", and "master" plays too). ``opponent_kwargs``
+            # were validated against the bot's constructor above: only the
+            # stochastic bots take any.
             bot_seed = int(self.np_random.integers(0, 2**31 - 1))
-            name = canonical_bot_name(self.opponent_type)
-            extra = self.opponent_kwargs if name in STOCHASTIC_BOTS else {}
             self.opponent = build_scripted_bot(
-                name,
+                opponent_name,
                 self.game_state,
                 player=opponent_player,
                 rng=random.Random(bot_seed),
-                **extra,
+                **self.opponent_kwargs,
             )
-        elif self.opponent_type == "self":
+        elif opponent_name == SELF_PLAY_OPPONENT:
             # Self-play: the training script supplies a callable that builds
             # an opponent bot bound to the freshly-reset game_state. Without
             # one we leave the slot empty — _opponent_turn safely no-ops if
