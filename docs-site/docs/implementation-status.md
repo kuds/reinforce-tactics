@@ -11,11 +11,16 @@ This page tracks the current implementation status of the Reinforce Tactics proj
 ## ✅ Completed Features
 
 ### Core Game Logic (Headless-Compatible)
-- [x] `reinforcetactics/constants.py` - All game constants and configuration (8 unit types, terrain, structures)
+- [x] `reinforcetactics/rules.py` - Game rules: unit stats (8 unit types), terrain types, structures, economy, abilities
+- [x] `reinforcetactics/constants.py` - Compatibility re-export of `rules.py` and the UI's `ui/assets.py`
 - [x] `reinforcetactics/core/tile.py` - Tile class with ownership and HP
 - [x] `reinforcetactics/core/unit.py` - Unit class with all 8 unit types and abilities
 - [x] `reinforcetactics/core/grid.py` - Grid management with numpy conversion
 - [x] `reinforcetactics/core/game_state.py` - Complete game state manager
+- [x] `reinforcetactics/core/engine_config.py` - `EngineConfig`: a game's `engine_overrides`, validated and resolved over `rules.py`
+- [x] `reinforcetactics/core/serialization.py` - Saves and replays (`to_dict`/`from_dict`, save and replay files)
+- [x] `reinforcetactics/core/legal_actions.py` - The legality rules and `enumerate_legal_actions` (what `get_legal_actions` lists and the action methods accept)
+- [x] `reinforcetactics/core/fog.py` - `FogOfWar` (`GameState.fog`): each player's visibility maps, fog-of-war knowledge, attack snapshots, the ambush rule and `cancel_move`'s restore
 - [x] `reinforcetactics/core/visibility.py` - Fog of war visibility system
 
 ### Game Mechanics
@@ -97,9 +102,13 @@ from reinforcetactics.utils.file_io import FileIO
 map_data = FileIO.load_map("maps/1v1/beginner.csv")
 game = GameState(map_data)
 
-# Create some units
-game.create_unit("W", 5, 5, player=1)
-game.create_unit("M", 6, 5, player=1)
+# Buy a Warrior on one of player 1's buildings. create_unit is a game
+# action: it returns None unless the purchase is legal (the player's own
+# empty building, on their turn, with enough gold).
+game.create_unit("W", 1, 0, player=1)
+
+# Set up a unit anywhere, free and unrecorded (tests and scenarios)
+game.place_unit("M", 3, 1, player=1)
 
 print(f"Player 1 units: {len([u for u in game.units if u.player == 1])}")
 print(f"Player 1 gold: ${game.player_gold[1]}")

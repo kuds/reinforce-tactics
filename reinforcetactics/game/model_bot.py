@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
 from reinforcetactics.game.bot_base import BaseBot
+from reinforcetactics.rules import ALL_UNIT_TYPES, UNIT_DATA
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -642,9 +642,11 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if self.game_state.get_unit_at_position(x, y):
                 return False
 
-            # Create the unit
-            self.game_state.create_unit(unit_code, x, y, self.bot_player)
-            return True
+            # Create the unit. The engine has the last word (turn, unit cap,
+            # game over): report its refusal so take_turn stops instead of
+            # re-predicting the same no-op action.
+            create = {"unit_type": unit_code, "x": x, "y": y, "player": self.bot_player}
+            return self.game_state.apply_action("create_unit", create).accepted
 
         except Exception as e:
             logger.debug("Failed to create unit: %s", e)
@@ -657,8 +659,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not unit or unit.player != self.bot_player or not unit.can_move:
                 return False
 
-            self.game_state.move_unit(unit, to_x, to_y)
-            return True
+            return self.game_state.apply_action("move", {"unit": unit, "to_x": to_x, "to_y": to_y}).accepted
 
         except Exception as e:
             logger.debug("Failed to move unit: %s", e)
@@ -679,8 +680,8 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not attacker.can_attack:
                 return False
 
-            self.game_state.attack(attacker, target)
-            return True
+            # The engine has the last word (out of range, fog of war, ...).
+            return self.game_state.apply_action("attack", {"attacker": attacker, "target": target}).accepted
 
         except Exception as e:
             logger.debug("Failed to attack: %s", e)
@@ -697,8 +698,8 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not tile.is_capturable() or tile.player == self.bot_player:
                 return False
 
-            self.game_state.seize(unit)
-            return True
+            # Refused if, e.g., the unit already acted this turn.
+            return self.game_state.apply_action("seize", {"unit": unit}).accepted
 
         except Exception as e:
             logger.debug("Failed to seize: %s", e)
@@ -720,13 +721,9 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
                 return False
 
             # Priority: cure if paralyzed, otherwise heal (matches gym_env logic)
-            if target.is_paralyzed():
-                result = self.game_state.cure(healer, target)
-                if result:
-                    return True
-
-            heal_amount = self.game_state.heal(healer, target)
-            return heal_amount > 0
+            if target.is_paralyzed() and self.game_state.apply_action("cure", {"curer": healer, "target": target}).accepted:
+                return True
+            return self.game_state.apply_action("heal", {"healer": healer, "target": target}).accepted
 
         except Exception as e:
             logger.debug("Failed to heal: %s", e)
@@ -747,7 +744,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if unit.type != "M":  # Only Mages can paralyze
                 return False
 
-            return self.game_state.paralyze(unit, target)
+            return self.game_state.apply_action("paralyze", {"paralyzer": unit, "target": target}).accepted
 
         except Exception as e:
             logger.debug("Failed to paralyze: %s", e)
@@ -768,12 +765,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if unit.type != "S":  # Only Sorcerers can buff
                 return False
 
-            buff_fn = getattr(self.game_state, buff_type, None)
-            if buff_fn is None:
-                logger.warning("Unknown buff type: %s", buff_type)
-                return False
-
-            return buff_fn(unit, target)
+            return self.game_state.apply_action(buff_type, {"sorcerer": unit, "target": target}).accepted
 
         except Exception as e:
             logger.debug("Failed to apply %s: %s", buff_type, e)

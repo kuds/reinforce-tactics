@@ -4,11 +4,27 @@ Input Handler for Reinforce Tactics.
 This module manages user input state and event handling for the game loop.
 """
 
+import logging
+
 import pygame
 
-from reinforcetactics.app.action_executor import handle_action_menu_result
-from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.app.action_executor import apply_targeted_action, handle_action_menu_result
+from reinforcetactics.game.llm_bot import LLMBotError
+from reinforcetactics.ui import widgets
+from reinforcetactics.ui.assets import TILE_SIZE
 from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
+from reinforcetactics.ui.menus.base import drain_events
+from reinforcetactics.ui.widgets.dialog import Dialog
+
+# The bot-replaced dialog shortens the LLM error (which can carry a whole
+# HTTP error body) until the dialog fits the window, but not below this many
+# characters. The full message is printed to the console.
+_MIN_DIALOG_REASON_CHARS = 40
+
+logger = logging.getLogger(__name__)
+
+# How long an on-screen notice stays up.
+NOTICE_DURATION_MS = 6000
 
 
 class InputHandler:
@@ -56,6 +72,17 @@ class InputHandler:
         self.preview_unit = None
         self.preview_positions = []
 
+        # Transient on-screen notice, drawn by GameSession. A GUI player
+        # never sees stdout, so problems such as a crashed bot turn are
+        # reported here as well as logged.
+        self.notice_text = None
+        self.notice_expires_at = 0
+
+    def show_notice(self, text, duration_ms=NOTICE_DURATION_MS):
+        """Show ``text`` on screen for ``duration_ms`` milliseconds."""
+        self.notice_text = text
+        self.notice_expires_at = pygame.time.get_ticks() + duration_ms
+
     def handle_keyboard_event(self, event):
         """
         Handle keyboard events.
@@ -78,8 +105,8 @@ class InputHandler:
                 if isinstance(self.active_menu, UnitActionMenu):
                     # Cancel move if unit has moved
                     if self.target_selection_unit and self.target_selection_unit.has_moved:
-                        self.target_selection_unit.cancel_move()
-                        print(f"Cancelled move for {self.target_selection_unit.type}")
+                        if self.game.cancel_move(self.target_selection_unit):
+                            print(f"Cancelled move for {self.target_selection_unit.type}")
                     self.target_selection_unit = None
                 self.active_menu = None
                 return None
@@ -171,8 +198,16 @@ class InputHandler:
                 cancel_text="Cancel",
             )
             if dialog.run():
-                print(f"\nPlayer {self.game.current_player} resigned")
+                player = self.game.current_player
+                print(f"\nPlayer {player} resigned")
                 self.game.resign()
+                if not self.game.game_over and self.game.is_eliminated(player):
+                    # Three or more seats: the others play on (review core-7).
+                    # The resigned seat has nothing left to do, so hand the
+                    # turn on for it, and let any bots that follow play.
+                    self.selected_unit = None
+                    self.game.end_turn()
+                    self._process_bot_turns()
             return "continue"
 
         # Priority 3: Handle grid clicks
@@ -203,8 +238,8 @@ class InputHandler:
             self.target_selection_mode = False
             self.target_selection_action = None
             if self.target_selection_unit and self.target_selection_unit.has_moved:
-                self.target_selection_unit.cancel_move()
-                print(f"Cancelled move for {self.target_selection_unit.type}")
+                if self.game.cancel_move(self.target_selection_unit):
+                    print(f"Cancelled move for {self.target_selection_unit.type}")
             self.target_selection_unit = None
             self.active_menu = None
             self.selected_unit = None
@@ -213,8 +248,8 @@ class InputHandler:
         # Priority 2: Close menu and cancel move if unit has moved
         if self.active_menu and isinstance(self.active_menu, UnitActionMenu):
             if self.target_selection_unit and self.target_selection_unit.has_moved:
-                self.target_selection_unit.cancel_move()
-                print(f"Cancelled move for {self.target_selection_unit.type}")
+                if self.game.cancel_move(self.target_selection_unit):
+                    print(f"Cancelled move for {self.target_selection_unit.type}")
             self.target_selection_unit = None
             self.active_menu = None
             self.selected_unit = None
@@ -239,7 +274,9 @@ class InputHandler:
             # Get all attackable positions (enemy unit positions)
             from reinforcetactics.core.mechanics import GameMechanics
 
-            attackable_enemies = GameMechanics.get_attackable_enemies(clicked_unit, self.game.units, self.game.grid)
+            attackable_enemies = GameMechanics.get_attackable_enemies(
+                clicked_unit, self.game.units, self.game.grid, self.game.teams
+            )
 
             # Convert to positions list
             self.preview_positions = [(enemy.x, enemy.y) for enemy in attackable_enemies]
@@ -261,30 +298,19 @@ class InputHandler:
         if clicked_unit and self.target_selection_action and clicked_unit in self.target_selection_action["targets"]:
             # Execute the action on the clicked target
             action_type = self.target_selection_action["type"]
-            if action_type == "attack":
-                self.game.attack(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} attacked {clicked_unit.type}")
-            elif action_type == "paralyze":
-                self.game.paralyze(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} paralyzed {clicked_unit.type}")
-            elif action_type == "heal":
-                self.game.heal(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} healed {clicked_unit.type}")
-            elif action_type == "cure":
-                self.game.cure(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} cured {clicked_unit.type}")
-            elif action_type == "haste":
-                self.game.haste(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} hasted {clicked_unit.type}")
-            elif action_type == "defence_buff":
-                self.game.defence_buff(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} granted defence buff to {clicked_unit.type}")
-            elif action_type == "attack_buff":
-                self.game.attack_buff(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
+            if not apply_targeted_action(self.game, action_type, self.target_selection_unit, clicked_unit):
+                # The engine refused it and nothing changed, so the unit
+                # still has its action: back to its menu, turn not spent.
+                self.target_selection_mode = False
+                self.target_selection_action = None
+                self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.target_selection_unit)
+                self.menu_opened_time = current_time
+                return "continue"
 
-            # End unit's turn and reset selection
-            can_still_act = self.target_selection_unit.end_unit_turn()
+            # End unit's turn and reset selection. A hasted unit was already
+            # refreshed by the engine; end_unit_turn then keeps its extra
+            # action and returns True (see GameState.end_unit_turn).
+            can_still_act = self.game.end_unit_turn(self.target_selection_unit)
             self.target_selection_mode = False
             self.target_selection_action = None
 
@@ -378,7 +404,12 @@ class InputHandler:
         # Priority 3: Movement with selected unit
         if self.selected_unit and self.selected_unit.can_move:
             if self.game.move_unit(self.selected_unit, grid_x, grid_y):
-                print(f"Moved {self.selected_unit.type} to ({grid_x}, {grid_y})")
+                unit = self.selected_unit
+                # Under fog of war the unit may have been ambushed and stopped
+                # short of the clicked tile (see GameState.move_unit).
+                print(f"Moved {unit.type} to ({unit.x}, {unit.y})")
+                if unit.ambushed:
+                    self.show_notice(f"Ambushed! Your {unit.type} stopped at ({unit.x}, {unit.y})")
                 # After movement, open unit action menu
                 self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.selected_unit)
                 self.target_selection_unit = self.selected_unit
@@ -391,15 +422,117 @@ class InputHandler:
         return "continue"
 
     def _process_bot_turns(self):
-        """Process consecutive bot turns."""
+        """Process consecutive bot turns.
+
+        A bot that raises must not end the game: the exception used to
+        unwind through GameSession.run, dropping the player to the main menu
+        with nothing saved. Now the error is logged with its traceback,
+        reported on screen, and the bot's turn is ended so play continues.
+        """
         # Safety counter to prevent infinite loops
         max_bot_turns = self.num_players * 2
         bot_turn_count = 0
 
         while self.game.current_player in self.bots and not self.game.game_over and bot_turn_count < max_bot_turns:
-            current_bot = self.bots[self.game.current_player]
-            print(f"Bot (Player {self.game.current_player}) is thinking...")
-            current_bot.take_turn()
+            player = self.game.current_player
+            current_bot = self.bots[player]
+            print(f"Bot (Player {player}) is thinking...")
+            try:
+                current_bot.take_turn()
+            except LLMBotError as exc:
+                # The LLM bot can't reach its model (rejected key, unknown
+                # model, an outage that outlasted its retries) and left its
+                # turn un-ended. Letting this unwind ended the session with
+                # nothing saved; SimpleBot takes the seat instead and plays
+                # the turn on the next pass of this loop.
+                self._replace_failed_llm_bot(player, current_bot, exc)
+            except Exception:
+                logger.exception("%s (player %d) raised during its turn", type(current_bot).__name__, player)
+                self.show_notice(f"Player {player}'s bot hit an error; its turn was skipped")
+                if not self._end_crashed_bot_turn(player):
+                    break
             # Note: Bots call end_turn() internally, so we don't call it here
             bot_turn_count += 1
             print(f"Bot finished. Player {self.game.current_player}'s turn\n")
+
+    def _end_crashed_bot_turn(self, player):
+        """End ``player``'s turn after its bot raised part-way through it.
+
+        Returns:
+            False if the turn could not be ended; bot processing then stops
+            instead of re-running a bot against a state it can't leave.
+        """
+        # The bot may have raised after its own end_turn() call already
+        # handed the turn on; ending it again would skip the next player.
+        if self.game.game_over or self.game.current_player != player:
+            return True
+        try:
+            self.game.end_turn()
+        except Exception:
+            logger.exception("Could not end player %d's turn after its bot raised", player)
+            return False
+        return True
+
+    def _replace_failed_llm_bot(self, player, bot, exc):
+        """Hand ``player``'s seat to SimpleBot after its LLM bot raised LLMBotError.
+
+        This is the fallback bot_factory uses when an LLM bot can't be built
+        at all (missing SDK or key). The player is told in a dialog, since a
+        GUI player doesn't see the console.
+        """
+        from reinforcetactics.game.bot import SimpleBot
+
+        bot_name = f"{type(bot).__name__} ({getattr(bot, 'model', 'unknown model')})"
+        print(f"❌ Player {player}'s {bot_name} stopped: {exc}")
+        print(f"   SimpleBot takes over Player {player} for the rest of the game")
+        self.bots[player] = SimpleBot(self.game, player=player)
+
+        # Lead with the cause: the window is sized to the map, and on small
+        # maps a "ClaudeBot (model-id):" prefix pushed the actual reason
+        # (e.g. "HTTP 401 authentication failed") out of the dialog.
+        reason = str(exc)
+        prefix = f"{type(bot).__name__} ({getattr(bot, 'model', 'unknown model')}): "
+        if reason.startswith(prefix):
+            reason = reason[len(prefix) :]
+        try:
+            self._show_bot_replaced_dialog(
+                f"Player {player}: LLM stopped",
+                reason,
+                f"{bot_name}. SimpleBot takes over Player {player}.",
+            )
+        except Exception as dialog_error:  # noqa: BLE001
+            # The notice is best-effort: failing to draw it must not end the
+            # game this fallback exists to keep going. The console has it.
+            print(f"⚠️  Could not show the bot-replaced dialog: {dialog_error}")
+
+    def _show_bot_replaced_dialog(self, title, reason, footer):
+        """Show ``reason`` and ``footer`` in a modal notice with an OK button.
+
+        Split out so tests can stub it. The game window is sized to the map
+        and an LLM error can carry a whole HTTP error body, so ``reason`` is
+        shortened until the dialog fits the window (on the smallest maps it
+        can't entirely: the dialog stays centred and is clipped a little).
+        """
+        screen = self.renderer.screen
+        while True:
+            dialog = Dialog(
+                screen,
+                title,
+                f"{reason}\n\n{footer}",
+                buttons=[("OK", "ok", widgets.CONFIRM)],
+                keymap={pygame.K_RETURN: "ok", pygame.K_KP_ENTER: "ok"},
+                cancel_value="ok",
+                quit_value="quit",
+                min_width=min(500, screen.get_width() - 40),
+            )
+            if dialog.dialog_rect.height <= screen.get_height() or len(reason) <= _MIN_DIALOG_REASON_CHARS:
+                break
+            reason = reason[: len(reason) * 3 // 4].rstrip() + "…"
+        result = dialog.run()
+        # Drop clicks and keys queued while the dialog was up so they don't
+        # land on the board. A window-close is kept, and one that closed the
+        # dialog itself is re-posted, so the game loop still offers to save
+        # before quitting.
+        drain_events()
+        if result == "quit":
+            pygame.event.post(pygame.event.Event(pygame.QUIT))

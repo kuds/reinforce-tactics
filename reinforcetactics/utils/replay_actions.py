@@ -29,12 +29,48 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from reinforcetactics.core.actions import ACTOR_KEYS
+from reinforcetactics.core.legal_actions import TARGET_RULES
+from reinforcetactics.rules import HASTE_COOLDOWN
+
 logger = logging.getLogger(__name__)
 
 
 def get_schema_version(game_info: dict[str, Any]) -> int:
     """Return the replay schema version, defaulting to 1 for older replays."""
     return int(game_info.get("replay_schema_version", 1))
+
+
+def replay_game_state_kwargs(game_info: dict[str, Any]) -> dict[str, Any]:
+    """Keyword arguments for the ``GameState`` a replay is played back on.
+
+    Besides the seat count, the replay needs the game's engine overrides (a
+    ``begin_first_turn`` game gives Player 1 turn-0 income its first creates
+    spend; economy overrides change what is affordable), its teams (ones
+    passed as ``GameState(teams=...)`` are not in the map) and its turn
+    limit (so the final ``end_turn`` of a drawn game ends it instead of
+    starting another turn with its income and healing). Replays written
+    before game_info carried them fall back to the defaults they were
+    always played back with -- free-for-all included, even on a map whose
+    codes declare teams (the old 2v2 map put one player on two teams).
+    Those replays of games with three or more seats were also played by
+    the old end rules (any HQ capture won, nobody was eliminated), so they
+    play back with ``legacy_end_rules`` (see ``GameState``); with two seats
+    the rules are unchanged. ``eliminated_players`` has been in game_info
+    since the new rules, so its absence marks an old replay.
+    """
+    teams = {int(p): int(t) for p, t in (game_info.get("teams") or {}).items()} or None
+    num_players = game_info.get("num_players", 2)
+    engine_overrides = dict(game_info.get("engine_overrides") or {})
+    if num_players > 2 and "eliminated_players" not in game_info:
+        engine_overrides["legacy_end_rules"] = True
+    return {
+        "num_players": num_players,
+        "max_turns": game_info.get("max_turns"),
+        "engine_overrides": engine_overrides or None,
+        "teams": teams,
+        "map_teams": "teams" in game_info,
+    }
 
 
 def find_unit_by_id(game_state, unit_id: int | None):
@@ -60,6 +96,71 @@ def find_unit_by_id(game_state, unit_id: int | None):
 # ---------------------------------------------------------------------------
 
 
+def _apply_legacy_haste_on_paralyzed(game_state, sorcerer, target) -> bool:
+    """Replay a haste the old engine allowed on a paralyzed unit; True if applied.
+
+    Games before September 2026 could haste a paralyzed unit (review
+    core-8); the engine now refuses it, so their replays would diverge
+    here: the Sorcerer would keep its action and its cooldown. This applies
+    what the old engine did (the target is marked hasted, the Sorcerer's
+    cooldown starts and its action is spent) when that is the only reason
+    for the refusal.
+    """
+    if not target.is_paralyzed():
+        return False
+    paralyzed_turns, target.paralyzed_turns = target.paralyzed_turns, 0
+    try:
+        allowed = TARGET_RULES["haste"](game_state, sorcerer, target)
+    finally:
+        target.paralyzed_turns = paralyzed_turns
+    if (
+        not allowed
+        or game_state.game_over
+        or sorcerer.player != game_state.current_player
+        or sorcerer.is_paralyzed()
+        or not sorcerer.can_attack
+    ):
+        return False
+    target.is_hasted = True
+    sorcerer.haste_cooldown = HASTE_COOLDOWN
+    game_state._consume_action(sorcerer)
+    game_state._invalidate_cache()
+    return True
+
+
+def _refresh_hasted_actor(game_state, unit, slot: str = "can_attack") -> None:
+    """Reproduce the haste refresh that the action log does not record.
+
+    The engine now grants the extra action itself when a hasted unit spends
+    its action (``GameState._consume_action``, which the outcome helpers
+    below call too), so a game recorded since then needs nothing here. In
+    games recorded before, the extra action came when the unit's turn was
+    ended: ``GameState.end_unit_turn`` consumed the haste and re-armed
+    ``can_move``/``can_attack``; the GUI and the rule bots both relied on
+    this. ``end_unit_turn`` is not a recorded action, so on playback the
+    unit still has ``is_hasted`` set and ``slot`` spent when its second
+    recorded action arrives. The engine refuses an action whose slot is
+    spent, so without this a hasted Mage's attack-then-paralyze or a hasted
+    Cleric's heal-then-cure lost its second half on replay. A unit that
+    moved and then waited (no act, so ``can_attack`` still set) before
+    moving again also lands here, through the ``can_move`` slot.
+
+    The original game can only have re-armed a hasted unit this way (haste
+    and cure, the other refreshes, are recorded and replayed), so do the
+    same here and let the engine judge the action on every other rule
+    (turn, range, target, cooldown). A unit that is not hasted is left
+    alone: a repeat action from it is a real rules violation, e.g. a
+    pre-enforcement v1 LLM SEIZE-spam, and is refused and reported.
+
+    The v2/v3 outcome helpers bypass the engine's gates, but they refresh
+    too: the refresh also restarts the unit's move bookkeeping
+    (``original_x/y``, ``has_moved``, ``distance_moved``), and end_turn
+    reads that to reset a structure the unit seized and then walked off.
+    """
+    if unit is not None and unit.is_hasted and not getattr(unit, slot):
+        game_state.end_unit_turn(unit)
+
+
 def _apply_attack_outcome(
     game_state,
     action: dict[str, Any],
@@ -68,11 +169,19 @@ def _apply_attack_outcome(
     attacker_player: int | None,
 ) -> None:
     """Apply the recorded attack outcome to (optionally-found) units."""
+    _refresh_hasted_actor(game_state, attacker)
     attacker_killed = bool(action.get("attacker_killed", False))
     target_killed = bool(action.get("target_killed", False))
-    # Action records ``player`` for the attacker only; the target is
-    # the other side in a 2-player game.
-    target_player = 2 if attacker_player == 1 else 1
+    # Action records ``player`` for the attacker only. The target unit
+    # (found by id or position) knows its owner; failing that, the target is
+    # the other side in a 2-player game. With more seats the owner can't be
+    # inferred, and the recorded ``eliminate`` action applies it instead.
+    if target is not None:
+        target_player = target.player
+    elif game_state.num_players == 2:
+        target_player = 2 if attacker_player == 1 else 1
+    else:
+        target_player = None
 
     # Apply HP-after for survivors. Dead units get removed outright;
     # the live engine doesn't bother zeroing HP before removal.
@@ -96,7 +205,8 @@ def _apply_attack_outcome(
         # Fire the elimination check even if the target is missing --
         # in pre-fix replays this is the only way game_over can land
         # on the recorded winning_action_index.
-        game_state._check_player_eliminated(target_player)
+        if target_player is not None:
+            game_state._check_player_eliminated(target_player)
 
     if attacker_killed:
         if attacker is not None:
@@ -109,17 +219,18 @@ def _apply_attack_outcome(
         if attacker_player is not None:
             game_state._check_player_eliminated(attacker_player)
 
-    # Lock out attacker for the rest of the turn (only if still alive
-    # and present).
+    # Spend the attacker's action (only if still alive and present); a
+    # hasted attacker is refreshed, as the engine does.
     if attacker is not None and not attacker_killed:
-        attacker.can_move = False
-        attacker.can_attack = False
+        game_state._consume_action(attacker)
     game_state._invalidate_cache()
 
 
 def _apply_seize_outcome(game_state, action: dict[str, Any], position, unit) -> None:
     """Apply the recorded seize outcome at ``position`` with (optional) ``unit``."""
+    _refresh_hasted_actor(game_state, unit)
     tile = game_state.grid.get_tile(*position)
+    previous_owner = tile.player
 
     # Record-driven tile state -- applied even if the seizer is gone.
     if "tile_hp_after" in action:
@@ -129,23 +240,24 @@ def _apply_seize_outcome(game_state, action: dict[str, Any], position, unit) -> 
     tile.regenerating = False
 
     # HQ capture end-game can be derived from the recorded captured
-    # flag + action player; doesn't need the seizer unit.
+    # flag + action player; doesn't need the seizer unit. The engine's own
+    # rule decides what it means: the game ends with two teams, the
+    # previous owner is eliminated in a free-for-all.
     if action.get("captured") and action.get("structure_type") == "h":
-        game_state._set_game_over(winner=action.get("player"), end_reason="hq_capture")
+        game_state._on_hq_captured(action.get("player"), previous_owner)
 
     if unit is not None:
-        unit.can_move = False
-        unit.can_attack = False
+        game_state._consume_action(unit)
     game_state._invalidate_cache()
 
 
 def _apply_heal_outcome(game_state, action: dict[str, Any], healer, target) -> None:
     if healer is None or target is None:
         return
+    _refresh_hasted_actor(game_state, healer)
     if "target_hp_after" in action:
         target.health = action["target_hp_after"]
-    healer.can_move = False
-    healer.can_attack = False
+    game_state._consume_action(healer)
     game_state._invalidate_cache()
 
 
@@ -178,6 +290,7 @@ def _apply_move_outcome(game_state, action: dict[str, Any], unit, to_x: int, to_
     unit.distance_moved += distance
     unit.has_moved = True
     unit.can_move = False
+    unit.haste_refreshed = False
     game_state._invalidate_cache()
 
 
@@ -276,7 +389,50 @@ def apply_recorded_move_v3(game_state, action: dict[str, Any], translate_fn: Cal
     from_x, from_y = translate_fn(action["from_x"], action["from_y"])
     to_x, to_y = translate_fn(action["to_x"], action["to_y"])
     unit = _resolve_or_warn(game_state, action.get("actor_unit_id"), (from_x, from_y), "move actor")
+    # A spent hasted unit moving again from where it stands followed an
+    # unrecorded haste refresh (see _refresh_hasted_actor). A move that
+    # starts somewhere else followed an unrecorded cancel_move instead,
+    # which re-arms the move but keeps the haste for later.
+    if unit is not None and (unit.x, unit.y) == (from_x, from_y):
+        _refresh_hasted_actor(game_state, unit, "can_move")
     _apply_move_outcome(game_state, action, unit, to_x, to_y)
+
+
+def _warn_refused(action: dict[str, Any], schema_version: int) -> None:
+    """Log that the engine refused a recorded action the replay re-executes.
+
+    The engine now enforces the rules itself (turn, spent actions, range,
+    targets, spawn tiles), so a replay recorded before it did -- e.g. a v1
+    LLM game with a repeated SEIZE or an out-of-range attack -- can hold
+    actions it refuses. Playback then diverges from the recorded game;
+    say so loudly instead of silently dropping the action.
+    """
+    logger.warning(
+        "Replay (schema v%d): the engine refused recorded %s action %r; playback diverges from the recorded game",
+        schema_version,
+        action.get("type"),
+        {k: v for k, v in action.items() if k != "timestamp"},
+    )
+
+
+def _rerun_targeted_action(game_state, action: dict[str, Any], translate_fn: Callable, schema_version: int) -> None:
+    """Re-run a recorded targeted action through the engine; warn if the engine refuses it.
+
+    For the records with no outcome to apply: paralyze, cure and the buffs
+    in every schema, attack and heal in v1. The actor is found at its
+    recorded position (``<actor>_pos``, e.g. ``paralyzer_pos``: the engine
+    records it under its ``ACTOR_KEYS`` name) and the target at
+    ``target_pos``; a hasted actor first gets the refresh the original did
+    (``_refresh_hasted_actor``).
+    """
+    kind = action["type"]
+    actor_key = ACTOR_KEYS[kind]
+    actor = game_state.get_unit_at_position(*translate_fn(*action[f"{actor_key}_pos"]))
+    target = game_state.get_unit_at_position(*translate_fn(*action["target_pos"]))
+    if actor and target:
+        _refresh_hasted_actor(game_state, actor)
+        if not game_state.apply_action(kind, {actor_key: actor, "target": target}).accepted:
+            _warn_refused(action, schema_version)
 
 
 def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Callable, schema_version: int = 1) -> None:
@@ -287,8 +443,10 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
     headless :mod:`~reinforcetactics.utils.video` recorder), so replay
     semantics can't drift between them.
 
-    Coordinates in ``action`` are in original (unpadded) map space;
-    ``translate_fn`` maps them into the padded space of ``game_state``.
+    Coordinates in ``action`` are on the replay's recorded ``initial_map``
+    (the grid the game was played on, UI padding included for GUI games);
+    ``translate_fn`` maps them onto ``game_state``, which the playback path
+    built from that map with display padding of its own.
     ``schema_version`` selects between v3 (id-based lookup), v2 (apply
     recorded outcome), and v1 (re-run engine). v2+ are the only paths
     safe against the Rogue-evade RNG and missing counter-kill info in
@@ -306,8 +464,13 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
     try:
         if action_type == "create_unit":
             px, py = translate_fn(action["x"], action["y"])
-            unit = game_state.create_unit(action["unit_type"], px, py, action["player"])
-            if unit is not None and schema_version >= 3 and "unit_id" in action:
+            created = game_state.apply_action(
+                "create_unit", {"unit_type": action["unit_type"], "x": px, "y": py, "player": action["player"]}
+            )
+            unit = created.result
+            if not created.accepted:
+                _warn_refused(action, schema_version)
+            elif schema_version >= 3 and "unit_id" in action:
                 # Pin the unit's id to the recorded value so later actions
                 # can look it up. The engine's natural id assignment is
                 # monotonic, so values normally already match, but pinning
@@ -328,20 +491,21 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                     # Haste resets can_move/can_attack) was rejected here
                     # without this override -- silent failure that diverged
                     # downstream state and produced ghost-action symptoms.
+                    # Consuming the haste first also resets the unit's
+                    # move origin as the original refresh did, so the
+                    # second leg's distance (Knight charge) is not
+                    # measured from where the turn started.
+                    _refresh_hasted_actor(game_state, unit, "can_move")
                     unit.can_move = True
-                    game_state.move_unit(unit, tx, ty)
+                    if not game_state.apply_action("move", {"unit": unit, "to_x": tx, "to_y": ty}).accepted:
+                        _warn_refused(action, schema_version)
         elif action_type == "attack":
             if schema_version >= 3 and "attacker_unit_id" in action:
                 apply_recorded_attack_v3(game_state, action, translate_fn)
             elif schema_version >= 2:
                 apply_recorded_attack(game_state, action, translate_fn)
             else:
-                ap = translate_fn(*action["attacker_pos"])
-                tp = translate_fn(*action["target_pos"])
-                attacker = game_state.get_unit_at_position(*ap)
-                target = game_state.get_unit_at_position(*tp)
-                if attacker and target:
-                    game_state.attack(attacker, target)
+                _rerun_targeted_action(game_state, action, translate_fn, schema_version)
         elif action_type == "seize":
             if schema_version >= 3 and "actor_unit_id" in action:
                 apply_recorded_seize_v3(game_state, action, translate_fn)
@@ -351,56 +515,51 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                 pos = translate_fn(*action["position"])
                 unit = game_state.get_unit_at_position(*pos)
                 if unit:
-                    game_state.seize(unit)
-        elif action_type == "paralyze":
-            pp = translate_fn(*action["paralyzer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            paralyzer = game_state.get_unit_at_position(*pp)
-            target = game_state.get_unit_at_position(*tp)
-            if paralyzer and target:
-                game_state.paralyze(paralyzer, target)
+                    _refresh_hasted_actor(game_state, unit)
+                    if not game_state.apply_action("seize", {"unit": unit}).accepted:
+                        _warn_refused(action, schema_version)
         elif action_type == "heal":
             if schema_version >= 3 and "actor_unit_id" in action:
                 apply_recorded_heal_v3(game_state, action, translate_fn)
             elif schema_version >= 2:
                 apply_recorded_heal(game_state, action, translate_fn)
             else:
-                hp = translate_fn(*action["healer_pos"])
-                tp = translate_fn(*action["target_pos"])
-                healer = game_state.get_unit_at_position(*hp)
-                target = game_state.get_unit_at_position(*tp)
-                if healer and target:
-                    game_state.heal(healer, target)
-        elif action_type == "cure":
-            cp = translate_fn(*action["curer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            curer = game_state.get_unit_at_position(*cp)
-            target = game_state.get_unit_at_position(*tp)
-            if curer and target:
-                game_state.cure(curer, target)
+                _rerun_targeted_action(game_state, action, translate_fn, schema_version)
+        elif action_type in ("paralyze", "cure", "defence_buff", "attack_buff"):
+            _rerun_targeted_action(game_state, action, translate_fn, schema_version)
         elif action_type == "haste":
             sp = translate_fn(*action["sorcerer_pos"])
             tp = translate_fn(*action["target_pos"])
             sorcerer = game_state.get_unit_at_position(*sp)
             target = game_state.get_unit_at_position(*tp)
             if sorcerer and target:
-                game_state.haste(sorcerer, target)
-        elif action_type == "defence_buff":
-            sp = translate_fn(*action["sorcerer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            sorcerer = game_state.get_unit_at_position(*sp)
-            target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.defence_buff(sorcerer, target)
-        elif action_type == "attack_buff":
-            sp = translate_fn(*action["sorcerer_pos"])
-            tp = translate_fn(*action["target_pos"])
-            sorcerer = game_state.get_unit_at_position(*sp)
-            target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.attack_buff(sorcerer, target)
+                _refresh_hasted_actor(game_state, sorcerer)
+                # Haste is refused on a unit that is already hasted, so a
+                # recorded haste on one that still is here means the
+                # original consumed the earlier haste (end_unit_turn)
+                # before a second Sorcerer re-hasted it.
+                if target.is_hasted:
+                    game_state.end_unit_turn(target)
+                hasted = game_state.apply_action("haste", {"sorcerer": sorcerer, "target": target})
+                if not hasted.accepted and not _apply_legacy_haste_on_paralyzed(game_state, sorcerer, target):
+                    _warn_refused(action, schema_version)
         elif action_type == "resign":
             game_state.resign(action["player"])
+        elif action_type == "eliminate":
+            # Recorded in games with more than two seats (review core-7).
+            # Usually already applied by the action that caused it (the
+            # engine rules re-run above); this is a no-op then, and applies
+            # it when the cause could not be re-derived.
+            game_state._eliminate_player(
+                action["eliminated_player"], action.get("reason", "elimination"), by_player=action.get("player")
+            )
+        elif action_type == "cancel_move":
+            # A move taken back after other actions (a cancel right after
+            # its move deletes the move's record instead; review core-9).
+            fx, fy = translate_fn(action["from_x"], action["from_y"])
+            unit = _resolve_or_warn(game_state, action.get("actor_unit_id"), (fx, fy), "cancel_move actor")
+            if unit is None or not game_state.cancel_move(unit):
+                _warn_refused(action, schema_version)
         elif action_type == "end_turn":
             # Don't re-record this action while replaying it
             old_history = game_state.action_history

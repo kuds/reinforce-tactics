@@ -6,9 +6,10 @@ from typing import Any
 import pandas as pd
 import pygame
 
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.rules import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
+from reinforcetactics.ui.menus.game_setup.modes import mode_for_player_count
 from reinforcetactics.ui.menus.map_editor.editor_canvas import EditorCanvas
 from reinforcetactics.ui.menus.map_editor.tile_palette import TilePalette
 from reinforcetactics.utils.file_io import FileIO
@@ -249,8 +250,10 @@ class MapEditor(ScreenBootstrapMixin):
             save_path = Path(self.map_filename)
         else:
             # Ask for filename (for now, use a default)
-            # Determine directory based on player count
-            map_type = "1v1" if self.num_players == 2 else "2v2"
+            # File the map under the mode folder for its player count, so a
+            # 3-player map lands in 1v1v1 (it used to go to 2v2, where the
+            # New Game flow would seat four players on it).
+            map_type = mode_for_player_count(self.num_players) or "1v1"
             save_dir = Path(f"maps/{map_type}")
             save_dir.mkdir(parents=True, exist_ok=True)
 

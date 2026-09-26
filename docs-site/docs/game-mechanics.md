@@ -17,8 +17,8 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 | Unit | Code | Cost | Health | Movement | Attack | Defence | Special Abilities |
 |------|------|------|--------|----------|--------|---------|-------------------|
 | **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
-| **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns (2-turn cooldown) |
-| **Cleric** | C | 200 | 10 | 3 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
+| **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies: they lose their next 2 turns (2-turn cooldown) |
+| **Cleric** | C | 200 | 10 | 3 | 2 | 4 | Can HEAL allies (+7 HP) at range 1-3, Can CURE paralyzed units at range 1-3 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
 | **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
@@ -41,7 +41,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Abilities**:
   - Attacks at distance 1 (adjacent): 8 damage
   - Attacks at distance 2 (range): 12 damage
-  - Can PARALYZE enemies for 3 turns (2-turn cooldown)
+  - Can PARALYZE enemies: the target loses its next 2 turns (2-turn cooldown)
 - **Best for**: Disabling key enemy units and dealing ranged damage
 
 #### Cleric (C)
@@ -49,10 +49,19 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Cost**: $200
 - **Stats**: 10 HP, 3 Movement, 2 Attack, 4 Defence
 - **Abilities**:
-  - Can HEAL allies for 5 HP per action (range 1-2)
-  - Can CURE paralyzed units (range 1-2)
+  - Can HEAL allies for 7 HP per action (range 1-3)
+  - Can CURE paralyzed units (range 1-3)
   - Weak combat capabilities (2 attack)
 - **Best for**: Keeping your army healthy and removing status effects
+
+#### Archer (A)
+- **Role**: Indirect ranged attacker
+- **Cost**: $250
+- **Stats**: 15 HP, 3 Movement, 5 Attack, 1 Defence
+- **Abilities**:
+  - Attacks at distance 2-3 only (2-4 when standing on a mountain); cannot attack adjacent enemies
+  - Only Archers, Mages and Sorcerers can counter-attack an Archer
+- **Best for**: Wearing down melee units from safety, especially from mountains
 
 #### Knight (K)
 - **Role**: Heavy cavalry
@@ -78,7 +87,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Abilities**:
   - Attacks at distance 1 (adjacent): 6 damage
   - Attacks at distance 2 (range): 8 damage
-  - HASTE: Grant an ally an extra action this turn (2-turn cooldown)
+  - HASTE: Grant one of your own units an extra full action this turn (2-turn cooldown)
   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (2-turn cooldown)
   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (2-turn cooldown)
 - **Best for**: Amplifying ally effectiveness and providing tactical flexibility
@@ -109,16 +118,19 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Units can capture enemy structures by standing on them and using the "Seize" action
 - Each turn the unit seizes, the structure takes damage equal to the unit's current HP
 - Once the structure's HP reaches 0, it is captured and becomes owned by the capturing player
-- Capturing the enemy's HQ wins the game immediately
+- Capturing an enemy HQ wins the game immediately in a game with two sides (1v1, 2v2); in a free-for-all it eliminates the HQ's owner once it has no HQ left
+- You cannot seize a teammate's structure
 
 #### Win Conditions
-- **Capture Enemy HQ**: Capturing the enemy's headquarters wins the game immediately
-- **Eliminate All Units**: If a player loses all their units, they lose the game regardless of how many structures they own
+- **Capture Enemy HQ**: With two sides, capturing an enemy headquarters wins the game for your side immediately
+- **Eliminate All Units**: If a player loses all their units, they are eliminated regardless of how many structures they own
+- **Free-for-all** (three or more sides, e.g. 1v1v1): losing your last HQ, your last unit or resigning eliminates you, and the game goes on until one side is left
 
 #### Structure Regeneration
-- Abandoned structures (not owned by any player) regenerate **50% of their max HP per turn**
-- This regeneration rate is defined by `STRUCTURE_REGEN_RATE = 0.5`
-- Regeneration stops once a structure is captured by a player
+- A partly seized structure recovers when the seizing stops:
+  - If the seizing unit moves off it, its HP is restored to full at the end of that player's turn
+  - If the seizing unit is killed on it, it regenerates **50% of its max HP** (`STRUCTURE_REGEN_RATE = 0.5`) at the end of every turn until it is back to full; a unit stepping onto it stops the regeneration
+- A captured structure starts at full HP under its new owner
 
 #### Unit Creation
 - Units can be created at owned **Buildings** only
@@ -136,13 +148,13 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Basic Combat
 - Units can attack enemy units within their attack range
-- Damage calculation involves both the attacker's attack stat and the defender's defence stat
-- When a melee unit attacks another melee unit, the defender can counter-attack
+- Damage calculation involves both the attacker's attack stat and the defender's defence stat (each point of defence reduces damage by 5%, at most 90%)
+- A defender that survives and can reach its attacker counter-attacks
 
 ### Counter-Attack Mechanics
-- Counter-attacks occur when a melee unit (range 1) is attacked by another melee unit
+- A surviving defender counter-attacks if the attacker is within its own attack range (a Warrior hit by a Mage from 2 tiles away cannot)
 - Counter-attacks deal **80% of normal damage** (`COUNTER_ATTACK_MULTIPLIER = 0.8`)
-- Archers are special: melee units **cannot counter-attack Archers** even when attacked
+- Archers are special: only Archers, Mages and Sorcerers can counter-attack an Archer
 - Units cannot counter-attack if they are paralyzed
 
 ### Status Effects
@@ -150,26 +162,29 @@ Structures provide income and serve as strategic objectives. They can be capture
 #### Paralysis
 - Mages can paralyze enemy units
 - Paralyzed units cannot move or attack
-- Paralysis lasts **3 turns** (`PARALYZE_DURATION = 3`)
-- Clerics can cure paralysis with their CURE ability
+- The target loses its **next 2 turns** (`PARALYZE_DURATION = 2`) and is free again when its third turn starts
+- A paralyzed unit cannot counter-attack, from the moment it is paralyzed until its first free turn starts. This includes the paralyzer's turn just before that. It cannot be paralyzed again in that window either.
+- Clerics can cure paralysis with their CURE ability (the cured unit can act at once if it is its turn)
+- Status durations always count the affected unit's own turns. Internally, the per-unit counter counts that unit's turn starts until the status ends, and it ticks as its owner's turn starts. A paralysis is cast during the victim's opponent's turn, so it is stored as `PARALYZE_DURATION + 1`. This is the rule the game has always played by; before September 2026 the constant was 3, the stored value.
 
 #### Healing
-- Clerics can heal friendly units
-- Each heal action restores **5 HP** (`HEAL_AMOUNT = 5`)
+- Clerics can heal friendly units within range 1-3 (`CLERIC_HEAL_RANGE = 3`)
+- Each heal action restores **7 HP** (`HEAL_AMOUNT = 7`)
 - Units cannot be healed above their maximum HP
 
 #### Haste
-- Sorcerers can grant Haste to friendly units within range 1-2
-- Hasted units can take an additional action this turn (can move, act, then move and act again)
+- Sorcerers can grant Haste to their own units within range 1-2. A paralyzed unit or a teammate's unit can't be hasted: neither could act on your turn.
+- A hasted unit gets **one extra full action** this turn. When it spends its action by attacking, using an ability or seizing (or choosing Wait in the GUI), it is refreshed and may move and act once more. A unit that has already acted when it is hasted is refreshed at once.
+- The engine applies this rule itself, so it plays the same for human players, scripted and LLM bots, RL agents and MCTS. The RL action space has no Wait, so there a hasted unit's first action ends only when it acts.
 - After using Haste, the Sorcerer has a **2 turn cooldown** (`HASTE_COOLDOWN = 2`)
 
 #### Defence Buff
-- Sorcerers can grant Defence Buff to friendly units within range 1-2
+- Sorcerers can grant Defence Buff to friendly units within range 0-2 (including themselves)
 - Buffed units take **50% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.50`)
 - After using Defence Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
 #### Attack Buff
-- Sorcerers can grant Attack Buff to friendly units within range 1-2
+- Sorcerers can grant Attack Buff to friendly units within range 0-2 (including themselves)
 - Buffed units deal **50% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.50`)
 - After using Attack Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
@@ -202,27 +217,88 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Forest evade: 30% dodge chance (+15% bonus)
 - This bonus is automatically applied when calculating counter-attack outcomes
 
+### Movement Cost
+- By default every walkable tile (grass, road, forest, mountain and structures) costs 1 movement, so roads are not faster and forests and mountains are not slower
+- Terrain movement costs can be switched on as an optional rule (below)
+
+## Optional Rules
+
+These rules are set per game through `engine_overrides` (in a training config's `env.engine_overrides`, or `GameState(..., engine_overrides=...)`). All of them are **off by default**, so the default game is exactly as described above. A game's overrides are stored in its saves and in a training run's `config.json`.
+
+| Key | Default | Effect when set |
+|-----|---------|-----------------|
+| `terrain_move_cost` | every tile costs 1 | Movement points to enter each tile type, e.g. `{"r": 0.5, "f": 2, "m": 2}`. A unit may enter a tile while its path's total cost stays within its movement, so roads at 0.5 double the distance travelled along them. Only walkable tile codes (`p`, `r`, `f`, `m`, `b`, `h`, `t`) and positive costs are accepted |
+| `charge_distance` | `"displacement"` | `"path"`: the Knight's Charge counts the tiles along the path of the move (going around a lake counts) instead of the straight-line distance from where the Knight started |
+| `forest_concealment` | `false` | Under fog of war, a unit standing in forest is seen only by an enemy with a unit on or orthogonally next to its tile; the forest tile itself still counts as explored |
+| `hq_always_visible` | `false` | Under fog of war, every HQ counts as explored for every player and its current owner is always known (by default every HQ's location and starting owner are known, and an HQ out of sight shows its owner as last seen); units on it still need normal vision |
+
+## Fog of War
+
+Fog of war is optional and off by default. When it is on, each player sees only part of the board.
+
+### Vision
+- Each player sees a square (Chebyshev distance) around each of its units and structures
+- Unit vision: Barbarian 2; Warrior, Mage, Cleric, Knight and Sorcerer 3; Archer and Rogue 4 (the scouts); +1 on a mountain
+- Structure vision: Building 3, HQ 4, Tower 5
+- A tile is **unexplored** until the player has seen it, **visible** while in sight, and **shrouded** once it has been seen and is out of sight again
+
+### What a Player Knows
+- Enemy units are shown only on visible tiles
+- **Every HQ's location and owner are known from the start** of the game; out of sight, an HQ shows its owner as last seen unless the optional `hq_always_visible` rule is on (see Optional Rules)
+- Other buildings and towers are unknown until scouted
+- A structure out of sight shows its owner and HP **as last seen**, the moment it left sight. A capture or seize made out of sight stays hidden until the structure is seen again
+- The RL observation, the game window and the LLM bots' prompt all show the same knowledge (`GameState.known_structure`)
+
+### Ambushes
+- Enemies a player cannot see never block that player's movement options, so the move options reveal nothing hidden
+- A unit moves along a shortest route through the tiles its player knows to be passable (the same route every time)
+- If a hidden enemy stands on that route, or on the destination, the unit is **ambushed**: it stops on the last free tile before the enemy (possibly where it started), its move is spent (it can't be cancelled), and the enemy comes into view. The move is recorded (and replayed) to where the unit actually stopped
+- Without fog of war nothing changes: every enemy blocks movement as usual
+
+### Attacks Under Fog
+- A unit can only attack enemies that were in sight when its action began. An enemy it discovered by moving, including an ambusher, cannot be attacked by that unit this action; units whose action begins after it was revealed can attack it
+
+### Saving
+- Saves keep each player's explored tiles and last-seen memory, so a loaded game shows exactly what each player knew
+
 ## Game Rules
 
 ### Victory Conditions
-- **Capture enemy HQ**: Win by capturing the opponent's Headquarters
-- **Eliminate all enemy units**: Win if the opponent has no units remaining and cannot create new ones
+- **Capture enemy HQ**: With two sides (1v1, 2v2), capturing an enemy Headquarters wins the game for your side
+- **Eliminate all enemy units**: A player whose last unit dies is eliminated; a side wins when every other side is eliminated
+- **Resign**: A player who resigns is eliminated
+- **Free-for-all** (three or more sides): capturing a player's last HQ eliminates that player, and the last side standing wins
+
+### Teams
+- A map declares teams on each player's HQ tile code as `h_<player>_<team>`, e.g. `h_3_1` is player 3's HQ on team 1. Other structures may repeat the suffix but must agree. Code can also pass `GameState(teams={player: team})`; a conflict with the map raises `ValueError`.
+- Without any declaration every player is its own side (free-for-all), so 1v1 and 1v1v1 maps need no change.
+- Teammates are allies for every rule. They never attack, paralyze or seize each other's units and structures, and they move through each other's units. A teammate standing next to a target counts for a Rogue's flank. Clerics can heal and cure a teammate's units, and Sorcerers can buff them; a buff lasts 3 of that unit's own turns. Haste targets only your own units.
+- Income, gold, unit creation, auto-heal and vision stay per player.
+- The bundled 2v2 map plays players 1 and 3 (top-left, bottom-right) against players 2 and 4 (top-right, bottom-left), so turns alternate between the teams. The 2v2 mode gives those teams to a map that declares none, such as a random map.
+
+### Elimination
+- An eliminated player's units are removed and its structures turn neutral. Structure HP is kept, so a unit that was seizing one keeps its progress. A neutral HQ is then an ordinary structure: capturing it eliminates nobody.
+- Eliminated players are skipped in the turn order, so they get no turns, income or new units. A player eliminated during its own turn (resigning, or losing its last unit to a counter-attack) has nothing left to do but end the turn; the GUI ends it for a player who resigns.
+- In games with more than two seats every elimination is recorded as an `eliminate` action. Replays and saves reproduce eliminations, and saves record the set as `eliminated_players`.
+- When the last opposing side is eliminated, the game ends and the board is left as it stands.
 
 ### Turn Structure
-1. **Income Phase**: Receive income from owned structures
+1. **Start of turn**: Status effects and cooldowns tick, units become ready (a unit still paralyzed stays disabled), income is collected, units on owned structures auto-heal, and fog of war updates for the player. Player 1's very first turn (turn 0) skips this step and is played on starting gold, while Player 2 collects income before its first move. The engine override `begin_first_turn: true` runs the step for Player 1's first turn too, for balance sweeps; it is recorded in saves and replays.
 2. **Action Phase**: Move units, attack enemies, create new units, capture structures
-3. **End Turn**: Pass control to the next player
+3. **End Turn**: Pass control to the next player still in the game
+
+A move can be cancelled until the unit acts: the GUI's Cancel Move, ESC or right-click. The unit returns to where its action started, and the move leaves no trace in the action log. Under fog of war, what the move revealed is hidden again, and only the latest action can be taken back, so moving and cancelling cannot be used to scout.
 
 ### Movement Rules
-- Units can move up to their movement range in Manhattan distance (sum of horizontal and vertical movement)
+- Units move up to their movement range in orthogonal steps (each walkable tile costs 1 movement by default; see Optional Rules)
 - Units cannot move through water or ocean tiles
-- Units cannot move through other units (friendly or enemy)
+- Units can move through friendly units but not through enemies, and must end their move on an empty tile
 - After moving, units can still attack if they haven't attacked yet
 
 ### Attack Rules
-- Units can attack before or after moving (but only once per turn)
+- Units can attack without moving, or move first and then attack (once per turn)
 - Each unit type has specific attack range requirements
-- Attacking or moving ends that unit's turn (it cannot move after attacking, and vice versa)
+- Attacking, using an ability or seizing ends that unit's turn: it cannot move afterwards
 
 ## Strategic Tips
 

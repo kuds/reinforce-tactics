@@ -87,6 +87,7 @@ class MainMenu(Menu):
                         "type": "new_game",
                         "map": selected_map,
                         "mode": selected_mode,
+                        "num_players": player_config_result.get("num_players", len(player_config_result["players"])),
                         "players": player_config_result["players"],
                         "fog_of_war": player_config_result.get("fog_of_war", False),
                     }
@@ -97,11 +98,14 @@ class MainMenu(Menu):
     def _load_game(self) -> dict[str, Any] | None:
         """Handle load game - show load menu and return result."""
         load_menu = LoadGameMenu(self.screen)
-        save_path = load_menu.run()
+        save_data = load_menu.run()
         drain_events()
 
-        if save_path:
-            return {"type": "load_game", "save_path": save_path}
+        if save_data:
+            # LoadGameMenu returns the parsed save, not its path. It is
+            # handed straight to load_saved_game so the player isn't asked to
+            # pick the same save again from a second LoadGameMenu.
+            return {"type": "load_game", "save_data": save_data}
         return None  # Cancelled
 
     def _watch_replay(self) -> dict[str, Any] | None:

@@ -6,12 +6,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pygame
 
-from reinforcetactics.constants import MIN_MAP_SIZE, PLAYER_COLORS
+from reinforcetactics.rules import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import PLAYER_COLORS, TILE_SIZE
 from reinforcetactics.ui.icons import (
     get_arrow_left_icon,
     get_arrow_right_icon,
@@ -22,8 +21,13 @@ from reinforcetactics.ui.icons import (
     get_skip_forward_icon,
     get_x_icon,
 )
+from reinforcetactics.utils.file_io import FileIO
 from reinforcetactics.utils.fonts import get_font
-from reinforcetactics.utils.replay_actions import execute_replay_action, get_schema_version
+from reinforcetactics.utils.replay_actions import (
+    execute_replay_action,
+    get_schema_version,
+    replay_game_state_kwargs,
+)
 
 # Default border size for replay padding (same as UI)
 REPLAY_BORDER_SIZE = 2
@@ -44,8 +48,9 @@ class ReplayPlayer:
         self.actions = replay_data.get("actions", [])
         self.game_info = replay_data.get("game_info", {})
 
-        # Pad the map for UI display (same as gameplay)
-        padded_map, offset_x, offset_y = self._pad_map_for_replay(initial_map_data)
+        # Frame the map for display the way UI games are (minimum size plus a
+        # water border); _translate_coords maps the recorded coordinates in.
+        padded_map, offset_x, offset_y = FileIO.pad_for_display(initial_map_data, MIN_MAP_SIZE, REPLAY_BORDER_SIZE)
         self.initial_map_data = padded_map
         self.padding_offset_x = offset_x
         self.padding_offset_y = offset_y
@@ -85,7 +90,7 @@ class ReplayPlayer:
         # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(padded_map, num_players=self.game_info.get("num_players", 2))
+        self.game_state = GameState(padded_map, **replay_game_state_kwargs(self.game_info))
 
         # Create renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
@@ -95,72 +100,13 @@ class ReplayPlayer:
         # UI elements
         self.setup_ui()
 
-    def _pad_map_for_replay(self, map_data):
-        """
-        Pad the map for replay display (same as UI gameplay).
-
-        Applies minimum size padding and water border, matching the
-        behavior of FileIO.load_map(for_ui=True).
-
-        Args:
-            map_data: Initial map data (DataFrame or array-like)
-
-        Returns:
-            Tuple of (padded_map_dataframe, offset_x, offset_y)
-        """
-        # Convert to DataFrame if needed
-        if isinstance(map_data, pd.DataFrame):
-            df = map_data.copy()
-        elif isinstance(map_data, np.ndarray):
-            df = pd.DataFrame(map_data)
-        else:
-            df = pd.DataFrame(map_data)
-
-        height, width = df.shape
-        offset_x = 0
-        offset_y = 0
-
-        # Apply minimum size padding if needed
-        if height < MIN_MAP_SIZE or width < MIN_MAP_SIZE:
-            min_height = max(height, MIN_MAP_SIZE)
-            min_width = max(width, MIN_MAP_SIZE)
-
-            pad_width = max(0, min_width - width)
-            pad_height = max(0, min_height - height)
-
-            if pad_width > 0 or pad_height > 0:
-                padded = pd.DataFrame(np.full((min_height, min_width), "o", dtype=object))
-                start_y = pad_height // 2
-                start_x = pad_width // 2
-                end_y = start_y + height
-                end_x = start_x + width
-                padded.iloc[start_y:end_y, start_x:end_x] = df.values
-                df = padded
-                offset_x = start_x
-                offset_y = start_y
-
-        # Add water border
-        border_size = REPLAY_BORDER_SIZE
-        height, width = df.shape
-        new_height = height + 2 * border_size
-        new_width = width + 2 * border_size
-
-        bordered = pd.DataFrame(np.full((new_height, new_width), "o", dtype=object))
-        bordered.iloc[border_size : border_size + height, border_size : border_size + width] = df.values
-
-        # Update offsets to include border
-        offset_x += border_size
-        offset_y += border_size
-
-        return bordered, offset_x, offset_y
-
     def _translate_coords(self, x, y):
         """
-        Translate original coordinates to padded coordinates.
+        Translate recorded coordinates to padded coordinates.
 
         Args:
-            x: Original x coordinate
-            y: Original y coordinate
+            x: X coordinate on the replay's recorded initial map
+            y: Y coordinate on the replay's recorded initial map
 
         Returns:
             Tuple of (padded_x, padded_y)
@@ -169,8 +115,6 @@ class ReplayPlayer:
 
     def setup_ui(self):
         """Setup UI elements for replay controls."""
-        from reinforcetactics.constants import TILE_SIZE
-
         screen_width = self.game_state.grid.width * TILE_SIZE
         screen_height = self.game_state.grid.height * TILE_SIZE
 
@@ -284,7 +228,7 @@ class ReplayPlayer:
         """
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
+        self.game_state = GameState(self.initial_map_data, **replay_game_state_kwargs(self.game_info))
         self.renderer.game_state = self.game_state
 
     def toggle_pause(self):

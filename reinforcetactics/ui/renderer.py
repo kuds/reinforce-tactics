@@ -10,7 +10,10 @@ import time
 import numpy as np
 import pygame
 
-from reinforcetactics.constants import (
+from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
+from reinforcetactics.rules import TILE_TYPES, UNIT_DATA
+from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import (
     BASE_SPRITE_COLORS,
     NEUTRAL_STRUCTURE_PALETTE,
     PLAYER_COLORS,
@@ -18,12 +21,9 @@ from reinforcetactics.constants import (
     TEAM_PALETTES,
     TILE_IMAGES,
     TILE_SIZE,
-    TILE_TYPES,
-    UNIT_COLORS,
-    UNIT_DATA,
+    UNIT_ASSETS,
+    tile_color,
 )
-from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE
-from reinforcetactics.ui import theme
 from reinforcetactics.ui.sprite_animator import SpriteAnimator, scale_unit_sprite
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
@@ -316,8 +316,8 @@ class Renderer:
             return unit_images
 
         # Load sprite for each unit type
-        for unit_type, unit_data in UNIT_DATA.items():
-            static_path = unit_data.get("static_path", "")
+        for unit_type, unit_assets in UNIT_ASSETS.items():
+            static_path = unit_assets.get("static_path", "")
             if static_path:
                 try:
                     full_path = os.path.join(unit_sprites_path, static_path)
@@ -435,13 +435,20 @@ class Renderer:
 
         tile_type_name = TILE_TYPES.get(tile.type, "OCEAN")
 
+        # Under fog of war a structure is drawn with the owner the viewer
+        # knows (GameState.known_structure: live in sight, else as last
+        # seen, HQs known from the start), never the live one: sprite
+        # variants and the fallback colour are both owner-coloured and show
+        # through the fog overlay (review pygame-12).
+        shown_owner = self._shown_structure_owner(tile, fow_player) if tile.is_capturable() else tile.player
+
         # Draw tile image or color (always draw terrain, even in fog)
         # For structures, pick from team-coloured variants; for terrain,
         # pick from tile variants.  Selection is deterministic per
         # position so each tile always shows the same variant.
         variants = None
         if tile_type_name in STRUCTURE_TILE_TYPES:
-            variants = self.team_tile_variants.get((tile_type_name, tile.player))
+            variants = self.team_tile_variants.get((tile_type_name, shown_owner))
         if variants is None:
             variants = self.tile_variants.get(tile_type_name)
 
@@ -455,7 +462,7 @@ class Renderer:
         if tile_surface:
             self.screen.blit(tile_surface, rect)
         else:
-            color = tile.get_color()
+            color = tile_color(tile.type, shown_owner)
             pygame.draw.rect(self.screen, color, rect)
 
             # Add visual variety to tiles
@@ -496,12 +503,11 @@ class Renderer:
                 pygame.draw.line(self.screen, stripe_color, (rect.left, center_y), (rect.right, center_y), 2)
 
             elif tile.type in ["h", "b", "t"]:  # Structures - border highlight
-                # HQ ownership is always visible (players know where enemy HQs are)
-                # Buildings and towers only show ownership when visible
-                if tile.player:
-                    if tile.type == "h" or vis_state == VISIBLE:
-                        player_color = PLAYER_COLORS.get(tile.player, (255, 255, 255))
-                        pygame.draw.rect(self.screen, player_color, rect, 3)
+                # Border in the known owner's colour (every HQ is known from
+                # the start; other structures once seen)
+                if shown_owner:
+                    player_color = PLAYER_COLORS.get(shown_owner, (255, 255, 255))
+                    pygame.draw.rect(self.screen, player_color, rect, 3)
 
             # Tile border
             pygame.draw.rect(self.screen, (0, 0, 0), rect, 1)
@@ -516,6 +522,13 @@ class Renderer:
             self.screen.blit(self._fog_unexplored, rect)
         elif vis_state == SHROUDED:
             self.screen.blit(self._fog_shrouded, rect)
+
+    def _shown_structure_owner(self, tile, fow_player):
+        """The owner of structure ``tile`` as ``fow_player`` knows it (live without fog)."""
+        if fow_player is None:
+            return tile.player
+        known = self.game_state.known_structure(fow_player, tile.x, tile.y)
+        return known.owner if known is not None else None
 
     def _draw_structure_health_bar(self, tile):
         """Draw health bar for structures."""
@@ -691,7 +704,7 @@ class Renderer:
 
     def _draw_unit_letter(self, unit):
         """Draw a unit using its letter representation (fallback)."""
-        color = UNIT_COLORS[unit.type]
+        color = UNIT_ASSETS[unit.type]["color"]
 
         # Gray out if can't act
         if not unit.can_move and not unit.can_attack:
@@ -850,13 +863,11 @@ class Renderer:
         if not unit.can_move:
             return
 
-        movement_positions = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        # The engine's search: terrain move costs, and the units the player
+        # knows of (all of them without fog of war), so a hidden enemy neither
+        # punches a hole in the overlay, revealing it, nor hides a tile the
+        # engine allows.
+        movement_positions = self.game_state.get_reachable_positions(unit)
 
         if movement_positions:
             alpha = self._overlay_alpha("move", (id(unit), unit.x, unit.y), theme.OVERLAY_MOVEMENT_ALPHA)

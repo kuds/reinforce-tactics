@@ -21,7 +21,8 @@ Provides:
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.core.mechanics import same_side
+from reinforcetactics.rules import ABILITY_RANGES, UNIT_DATA
 
 # Strategic categories used by bot decision logic to bucket unit types by
 # role. Kept as tuples so they're immutable shared constants.
@@ -51,7 +52,11 @@ class BaseBot(ABC):
 
       * ``take_turn()`` must terminate. It must call
         ``game_state.end_turn()`` (or return without acting once
-        ``game_state.game_over`` is True).
+        ``game_state.game_over`` is True), unless it raises because the bot
+        can't play at all: an LLM bot raises ``LLMBotError`` when its API
+        is unreachable or misconfigured, leaving the turn un-ended for the
+        caller. The tournament runner then records an errored game; the
+        GUI hands the seat to SimpleBot.
       * ``self.game_state`` and ``self.bot_player`` must be set before
         ``take_turn()`` runs. ``BaseBot.__init__`` handles this; subclasses
         that override ``__init__`` should either call ``super().__init__``
@@ -67,7 +72,7 @@ class BaseBot(ABC):
 
     @abstractmethod
     def take_turn(self) -> None:
-        """Execute one full turn for ``self.bot_player`` and end it."""
+        """Execute one full turn for ``self.bot_player`` and end it (see the class contract for when it may raise)."""
 
     # ------------------------------------------------------------------
     # Capability telemetry
@@ -156,6 +161,21 @@ class BotUnitMixin:
     SUPPORT_UNITS = SUPPORT_UNITS
 
     # ------------------------------------------------------------------
+    # Sides (review core-4): a teammate is an ally, never a target
+    # ------------------------------------------------------------------
+    def _teams(self) -> Any:
+        """The game's player -> team map (None for a stand-in state without one)."""
+        return getattr(self.game_state, "teams", None)
+
+    def _is_friendly(self, player: int | None) -> bool:
+        """``player`` is this bot or a teammate. A neutral owner (None) is not."""
+        return same_side(self.bot_player, player, self._teams())
+
+    def _is_enemy(self, player: int | None) -> bool:
+        """``player`` is on another team. A neutral owner (None) is not an enemy either."""
+        return player is not None and not self._is_friendly(player)
+
+    # ------------------------------------------------------------------
     # Enabled-unit queries
     # ------------------------------------------------------------------
     def get_enabled_units(self) -> list[str]:
@@ -226,13 +246,9 @@ class BotUnitMixin:
 
     def get_reachable(self, unit):
         """Get all reachable positions for a unit on the current grid."""
-        return unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        # The engine's search: one blocker set per call instead of a scan of
+        # every unit per tile, and the game's terrain move costs (core-20/25).
+        return self.game_state.get_reachable_positions(unit)
 
     # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
     # HQ/building=+2 at the start of the owner's next turn.
@@ -256,7 +272,7 @@ class BotUnitMixin:
         purchasing remains static at that tier."""
         counts: dict[str, int] = {}
         for u in self.game_state.units:
-            if u.player == self.bot_player or u.player is None:
+            if not self._is_enemy(u.player):
                 continue
             if u.health <= 0:
                 continue
@@ -321,7 +337,7 @@ class BotUnitMixin:
     def _is_capturing_us(self, enemy) -> bool:
         """True if ``enemy`` stands on a capturable tile we want back."""
         tile = self.game_state.grid.get_tile(enemy.x, enemy.y)
-        return tile.is_capturable() and tile.player != self.bot_player and tile.health < tile.max_health
+        return tile.is_capturable() and not self._is_friendly(tile.player) and tile.health < tile.max_health
 
     # ------------------------------------------------------------------
     # Per-unit ability flows (used by SimpleBot+ via composition)
@@ -336,13 +352,13 @@ class BotUnitMixin:
         if unit.type != "C" or not unit.can_attack:
             return False
 
-        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units)
+        curable = self.game_state.mechanics.get_curable_allies(unit, self.game_state.units, self._teams())
         if curable:
             self.game_state.cure(unit, curable[0])
             self._record("cleric_cure")
             return True
 
-        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units)
+        healable = self.game_state.mechanics.get_healable_allies(unit, self.game_state.units, self._teams())
         if not healable:
             return False
 
@@ -366,11 +382,11 @@ class BotUnitMixin:
         if unit.type != "M" or not unit.can_attack or not unit.can_use_paralyze():
             return False
 
-        enemies = [e for e in self.game_state.units if e.player != self.bot_player and e.health > 0 and not e.is_paralyzed()]
+        enemies = [e for e in self.game_state.units if self._is_enemy(e.player) and e.health > 0 and not e.is_paralyzed()]
         if not enemies:
             return False
 
-        in_range = [e for e in enemies if 1 <= self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 2]
+        in_range = self.game_state.mechanics.units_in_range(unit, enemies, *ABILITY_RANGES["paralyze"])
         if not in_range:
             return False
 

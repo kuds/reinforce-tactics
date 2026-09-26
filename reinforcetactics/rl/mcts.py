@@ -11,10 +11,10 @@ Key design decisions:
   attack the same target), the first matching legal action is used.
 - The neural network provides prior probabilities over flat action indices.
 - Dirichlet noise is added at the root for exploration.
-- Game states are cloned via deepcopy for simulation.
+- Game states are cloned with ``GameState.clone_for_search`` for simulation:
+  like deepcopy, but without the action history and caches (review core-18).
 """
 
-import copy
 import logging
 import math
 from typing import Optional
@@ -122,9 +122,9 @@ def _find_unit_at(game_state, x: int, y: int):
 def _resolve_action_refs(game_state, action_key: str, action_data: dict) -> dict:
     """Re-resolve unit/tile references to point to objects in the given game state.
 
-    After deepcopy, action_data still references objects from the original state.
+    After cloning, action_data still references objects from the original state.
     This function creates a new action_data dict with references resolved against
-    the new (deepcopied) game state.
+    the new (cloned) game state.
     """
     if action_key in ("create_unit", "end_turn"):
         return action_data
@@ -190,33 +190,7 @@ def _resolve_action_refs(game_state, action_key: str, action_data: dict) -> dict
 
 def _execute_action_on_state(game_state, action_key: str, action_data: dict) -> None:
     """Execute a structured action on a game state (mutates in place)."""
-    if action_key == "create_unit":
-        game_state.create_unit(
-            action_data["unit_type"],
-            action_data["x"],
-            action_data["y"],
-            player=game_state.current_player,
-        )
-    elif action_key == "move":
-        game_state.move_unit(action_data["unit"], action_data["to_x"], action_data["to_y"])
-    elif action_key == "attack":
-        game_state.attack(action_data["attacker"], action_data["target"])
-    elif action_key == "seize":
-        game_state.seize(action_data["unit"])
-    elif action_key == "heal":
-        game_state.heal(action_data["healer"], action_data["target"])
-    elif action_key == "cure":
-        game_state.cure(action_data["curer"], action_data["target"])
-    elif action_key == "end_turn":
-        game_state.end_turn()
-    elif action_key == "paralyze":
-        game_state.paralyze(action_data["paralyzer"], action_data["target"])
-    elif action_key == "haste":
-        game_state.haste(action_data["sorcerer"], action_data["target"])
-    elif action_key == "defence_buff":
-        game_state.defence_buff(action_data["sorcerer"], action_data["target"])
-    elif action_key == "attack_buff":
-        game_state.attack_buff(action_data["sorcerer"], action_data["target"])
+    game_state.apply_action(action_key, action_data)
 
 
 def _obs_from_game_state(game_state, grid_width: int, grid_height: int, num_action_types: int = 10):
@@ -325,8 +299,8 @@ class MCTS:
             over the flat action space based on visit counts, and root_value
             is the mean value estimate at the root.
         """
-        # Create root node with a deep copy so simulations don't mutate the real state
-        root = MCTSNode(game_state=copy.deepcopy(game_state))
+        # Create root node with a copy so simulations don't mutate the real state
+        root = MCTSNode(game_state=game_state.clone_for_search())
 
         # Evaluate root
         policy_probs, root_value = self._evaluate(root.game_state)
@@ -423,7 +397,7 @@ class MCTS:
 
         # Lazy state creation: if child doesn't have a game state yet, create it
         if best_child is not None and best_child.game_state is None:
-            best_child.game_state = copy.deepcopy(node.game_state)
+            best_child.game_state = node.game_state.clone_for_search()
             action_info = best_child._action_info  # noqa: SLF001
             try:
                 resolved = _resolve_action_refs(

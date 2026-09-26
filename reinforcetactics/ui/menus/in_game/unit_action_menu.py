@@ -4,9 +4,8 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.constants import TILE_SIZE
-from reinforcetactics.core.mechanics import GameMechanics
 from reinforcetactics.ui import theme, widgets
+from reinforcetactics.ui.assets import TILE_SIZE
 from reinforcetactics.utils.fonts import get_display_font, get_font
 
 
@@ -57,58 +56,40 @@ class UnitActionMenu:
         Returns:
             List of action dictionaries with 'name', 'key', 'type', and optionally 'targets'
         """
-        actions = []
+        actions: list[dict[str, Any]] = []
 
-        # Check for attackable enemies (using range-aware method)
-        attackable_enemies = GameMechanics.get_attackable_enemies(self.unit, self.game_state.units, self.game_state.grid)
+        # Targets come from the engine's legal-action set, filtered to this
+        # unit, so the menu offers exactly what GameState will carry out:
+        # fog-of-war attackability, paralyze range and cooldown, and the
+        # heal/cure/buff rules all live in one place. Hand-built target lists
+        # drifted from the engine (review pygame-9, critic-integration-2),
+        # and once the engine started refusing illegal actions the drift
+        # meant offered options that did nothing.
+        legal = self.game_state.get_legal_actions(player=self.unit.player)
 
-        # Attack - available if attackable enemies exist
-        if attackable_enemies:
-            actions.append({"name": "Attack (A)", "key": "a", "type": "attack", "targets": attackable_enemies})
+        def targets_for(kind: str, actor_key: str) -> list[Any]:
+            return [a["target"] for a in legal.get(kind, []) if a[actor_key] is self.unit]
 
-        # Paralyze - only for Mages with adjacent enemies
-        if self.unit.type == "M":
-            adjacent_enemies = GameMechanics.get_adjacent_enemies(self.unit, self.game_state.units)
-            if adjacent_enemies:
-                actions.append({"name": "Paralyze (P)", "key": "p", "type": "paralyze", "targets": adjacent_enemies})
+        for kind, actor_key, name, key in (
+            ("attack", "attacker", "Attack (A)", "a"),
+            ("paralyze", "paralyzer", "Paralyze (P)", "p"),
+            ("heal", "healer", "Heal (H)", "h"),
+            ("cure", "curer", "Cure (C)", "c"),
+            ("haste", "sorcerer", "Haste (T)", "t"),
+            ("defence_buff", "sorcerer", "Defence Buff (D)", "d"),
+            ("attack_buff", "sorcerer", "Attack Buff (B)", "b"),
+        ):
+            targets = targets_for(kind, actor_key)
+            if targets:
+                actions.append({"name": name, "key": key, "type": kind, "targets": targets})
 
-        # Heal and Cure - only for Clerics
-        if self.unit.type == "C":
-            # Heal - damaged allies within CLERIC_HEAL_RANGE
-            healable_allies = GameMechanics.get_healable_allies(self.unit, self.game_state.units)
-            if healable_allies:
-                actions.append({"name": "Heal (H)", "key": "h", "type": "heal", "targets": healable_allies})
-
-            # Cure - paralyzed allies within CLERIC_HEAL_RANGE
-            curable_allies = GameMechanics.get_curable_allies(self.unit, self.game_state.units)
-            if curable_allies:
-                actions.append({"name": "Cure (C)", "key": "c", "type": "cure", "targets": curable_allies})
-
-        # Haste - only for Sorcerers with ability off cooldown
-        if self.unit.type == "S" and self.unit.can_use_haste():
-            hasteable_allies = GameMechanics.get_hasteable_allies(self.unit, self.game_state.units)
-            if hasteable_allies:
-                actions.append({"name": "Haste (T)", "key": "t", "type": "haste", "targets": hasteable_allies})
-
-        # Defence Buff - only for Sorcerers with ability off cooldown
-        if self.unit.type == "S" and self.unit.can_use_defence_buff():
-            buffable_allies = GameMechanics.get_defence_buffable_allies(self.unit, self.game_state.units)
-            if buffable_allies:
-                actions.append({"name": "Defence Buff (D)", "key": "d", "type": "defence_buff", "targets": buffable_allies})
-
-        # Attack Buff - only for Sorcerers with ability off cooldown
-        if self.unit.type == "S" and self.unit.can_use_attack_buff():
-            buffable_allies = GameMechanics.get_attack_buffable_allies(self.unit, self.game_state.units)
-            if buffable_allies:
-                actions.append({"name": "Attack Buff (B)", "key": "b", "type": "attack_buff", "targets": buffable_allies})
-
-        # Capture - only if on a capturable structure
-        tile = self.game_state.grid.get_tile(self.unit.x, self.unit.y)
-        if tile.is_capturable() and tile.player != self.unit.player:
+        # Capture - only if the engine would accept a seize here
+        if any(a["unit"] is self.unit for a in legal.get("seize", [])):
             actions.append({"name": "Capture (S)", "key": "s", "type": "capture", "targets": None})
 
-        # Cancel Move - only if unit has moved this turn
-        if self.unit.has_moved:
+        # Cancel Move - only if the unit has moved this action and the engine
+        # would undo it (a fog-of-war ambush spends the move for good)
+        if self.game_state.can_cancel_move(self.unit):
             actions.append({"name": "Cancel Move (M)", "key": "m", "type": "cancel_move", "targets": None})
 
         # Wait/End Turn - always available

@@ -1,6 +1,7 @@
 """Tests for the Tile class."""
 
 from reinforcetactics.core.tile import Tile
+from reinforcetactics.ui.assets import tile_color
 
 
 class TestTileInitialization:
@@ -101,12 +102,12 @@ class TestTileProperties:
 
 
 class TestTileColors:
-    """Test tile color methods."""
+    """Test the fallback tile colours (ui.assets.tile_color)."""
 
     def test_grass_color(self):
         """Test grass tile returns correct color."""
         tile = Tile("p", 0, 0)
-        color = tile.get_color()
+        color = tile_color(tile.type, tile.player)
         assert isinstance(color, tuple)
         assert len(color) == 3
         # Grass should be greenish
@@ -115,7 +116,7 @@ class TestTileColors:
     def test_water_color(self):
         """Test water tile returns correct color."""
         tile = Tile("w", 0, 0)
-        color = tile.get_color()
+        color = tile_color(tile.type, tile.player)
         assert isinstance(color, tuple)
         assert len(color) == 3
         # Water should be bluish
@@ -124,7 +125,7 @@ class TestTileColors:
     def test_structure_with_player_color(self):
         """Test structure tile with player ownership has blended color."""
         tile = Tile("h_1", 0, 0)
-        color = tile.get_color()
+        color = tile_color(tile.type, tile.player)
         assert isinstance(color, tuple)
         assert len(color) == 3
         # Should be a blend of base color and player 1 color (red)

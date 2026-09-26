@@ -72,7 +72,9 @@ def test_unknown_code_or_field_raises(bad):
 
 
 def test_create_unit_uses_overridden_cost_and_stats():
-    gs = GameState(_map(), engine_overrides={"unit_data": {"W": {"cost": 5, "health": 99}}})
+    map_data = _map()
+    map_data[1][1] = "b_1"  # create_unit needs an owned building
+    gs = GameState(map_data, engine_overrides={"unit_data": {"W": {"cost": 5, "health": 99}}})
     gs.player_gold[1] = 10
     u = gs.create_unit("W", 1, 1, 1)
     assert u is not None
@@ -296,7 +298,10 @@ def test_max_units_rejects_non_positive(bad):
 
 
 def test_create_unit_blocked_at_cap():
-    gs = GameState(_map(), num_players=2, engine_overrides={"max_units_per_player": 2})
+    map_data = _map()
+    for y in range(3):
+        map_data[y][0] = "b_1"  # an owned building for each creation attempt
+    gs = GameState(map_data, num_players=2, engine_overrides={"max_units_per_player": 2})
     gs.current_player = 1
     gs.player_gold[1] = 10000
     assert gs.create_unit("W", 0, 0, player=1) is not None
@@ -353,6 +358,6 @@ def test_legal_actions_hide_create_at_cap():
     assert len(gs.get_legal_actions(player=1)["create_unit"]) > 0
 
     # One unit on the board hits the cap of 1 -> create suppressed.
-    gs.create_unit("W", 5, 5, player=1)
+    gs.place_unit("W", 5, 5, player=1)
     gs._invalidate_cache()
     assert gs.get_legal_actions(player=1)["create_unit"] == []

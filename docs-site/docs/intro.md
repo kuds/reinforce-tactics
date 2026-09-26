@@ -29,7 +29,7 @@ Reinforce Tactics is a 2D turn-based strategy game featuring:
 - **Curriculum training**: MixedBot bridges scripted-bot difficulty tiers (e.g. simple → medium → advanced) for staged opponent progression
 - **Action masking**: MaskablePPO and legal-action masking across all bot types
 - **Self-play**: Train agents against copies of themselves
-- **Fog of War**: Line-of-sight visibility with terrain bonuses
+- **Fog of War**: Radius-based vision with terrain bonuses, remembered structures and ambushes
 - **Map Editor**: In-game editor for creating and modifying maps
 - **Multi-player modes**: 1v1, 1v1v1 (free-for-all), and 2v2 (team) maps
 - **Tournament system**: Round-robin tournaments with ELO ratings and Docker support

@@ -58,9 +58,58 @@ class ActionMaskedEnv(gym.Wrapper):
                 "action_type_distribution": np.zeros(10),
             }
 
+        # From here on, writes to names the wrapper does not own are
+        # forwarded to the wrapped env (see ``__setattr__``). Set through
+        # ``object.__setattr__`` so the flag itself is not subject to the
+        # forwarding rule it switches on.
+        object.__setattr__(self, "_attrs_forwarded", True)
+
     def __getattr__(self, name):
-        """Delegate attribute access to the wrapped environment."""
-        return getattr(self.env, name)
+        """Delegate attribute access to the wrapped environment.
+
+        ``__getattr__`` only runs after normal lookup failed. During
+        unpickling / ``copy.deepcopy`` the instance is created without
+        running ``__init__``, so ``self.env`` does not exist yet and an
+        unguarded ``getattr(self.env, name)`` re-enters ``__getattr__('env')``
+        until RecursionError. Dunder lookups (``__setstate__``,
+        ``__deepcopy__``, ...) are protocol probes on *this* object and must
+        not be answered by the wrapped env either.
+        """
+        env = self.__dict__.get("env")
+        if env is None or name.startswith("__"):
+            raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+        return getattr(env, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Forward writes of the wrapped env's attributes; refuse unknown ones.
+
+        ``gym.Wrapper`` forwards neither reads nor writes, and this class
+        forwards reads (``__getattr__``). Without a matching write rule,
+        ``masked_env.agent_player = 2`` would read back as 2 through the
+        wrapper while the ``StrategyGameEnv`` that actually scores rewards,
+        builds masks and executes actions kept player 1 -- exactly how
+        SelfPlayEnv's seat swap used to be lost. So once construction is
+        done:
+
+        * names the wrapper itself owns (instance attributes set in
+          ``__init__``, or class-level descriptors such as gym.Wrapper's
+          ``action_space`` property) are set on the wrapper;
+        * names that exist on the wrapped env are set there;
+        * anything else raises instead of silently creating a wrapper-only
+          attribute that the env never sees.
+        """
+        if not self.__dict__.get("_attrs_forwarded", False) or name in self.__dict__ or hasattr(type(self), name):
+            super().__setattr__(name, value)
+            return
+        env = self.__dict__["env"]
+        if hasattr(env, name):
+            setattr(env, name, value)
+            return
+        raise AttributeError(
+            f"Cannot set {name!r}: neither {type(self).__name__} nor the wrapped "
+            f"{type(env).__name__} has that attribute. Set it on env.unwrapped explicitly "
+            "if a new attribute on the base env is really intended."
+        )
 
     def action_masks(self) -> np.ndarray:
         """

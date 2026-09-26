@@ -54,7 +54,7 @@ class TestMasterBotThreatMap:
         # Enemy archer at (5, 3) on grass: attack range 2-3, no movement
         # constraint here -- threat covers the union of move + attack.
         simple_game.player_gold[1] = 1000
-        simple_game.create_unit("A", 5, 3, 1)
+        simple_game.place_unit("A", 5, 3, 1)
         bot = MasterBot(simple_game, player=2)
         threat = bot._compute_threat_map()
         # Some tile near the archer must be threatened.
@@ -67,7 +67,7 @@ class TestMasterBotThreatMap:
 
     def test_threat_at_excludes_specific_enemy(self, simple_game):
         simple_game.player_gold[1] = 1000
-        simple_game.create_unit("A", 5, 3, 1)
+        simple_game.place_unit("A", 5, 3, 1)
         bot = MasterBot(simple_game, player=2)
         bot._threat_map = bot._compute_threat_map()
         # Pick a tile the archer threatens directly (no movement needed).
@@ -81,7 +81,7 @@ class TestMasterBotThreatMap:
 
     def test_threat_at_unreachable_tile_is_zero(self, simple_game):
         simple_game.player_gold[1] = 1000
-        simple_game.create_unit("A", 0, 0, 1)
+        simple_game.place_unit("A", 0, 0, 1)
         bot = MasterBot(simple_game, player=2)
         bot._threat_map = bot._compute_threat_map()
         # Far corner is well outside the archer's move-and-attack envelope.
@@ -97,7 +97,7 @@ class TestMasterBotRetreatTile:
         # game setup and just verify the method runs and returns None or
         # a coord when there's no heal tile reachable.
         simple_game.player_gold[2] = 1000
-        simple_game.create_unit("W", 5, 5, 2)
+        simple_game.place_unit("W", 5, 5, 2)
         bot = MasterBot(simple_game, player=2)
         bot._threat_map = bot._compute_threat_map()
         warrior = next(u for u in simple_game.units if u.type == "W" and u.player == 2)
@@ -115,8 +115,8 @@ class TestMasterBotSpecialAbilities:
     def test_try_use_special_ability_cleric(self, simple_game):
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        simple_game.create_unit("C", 5, 5, 2)
-        simple_game.create_unit("W", 5, 6, 2)
+        simple_game.place_unit("C", 5, 5, 2)
+        simple_game.place_unit("W", 5, 6, 2)
         bot = MasterBot(simple_game, player=2)
         bot.analyze_map()
         bot._threat_map = {}
@@ -128,8 +128,8 @@ class TestMasterBotSpecialAbilities:
         simple_game.current_player = 2
         simple_game.player_gold[1] = 1000
         simple_game.player_gold[2] = 1000
-        simple_game.create_unit("K", 5, 5, 2)
-        simple_game.create_unit("W", 5, 1, 1)  # 4 tiles away -> charge eligible
+        simple_game.place_unit("K", 5, 5, 2)
+        simple_game.place_unit("W", 5, 1, 1)  # 4 tiles away -> charge eligible
         bot = MasterBot(simple_game, player=2)
         bot.analyze_map()
         bot._threat_map = bot._compute_threat_map()
@@ -143,9 +143,9 @@ class TestMasterBotSpecialAbilities:
         simple_game.current_player = 2
         simple_game.player_gold[1] = 1000
         simple_game.player_gold[2] = 1000
-        simple_game.create_unit("A", 5, 5, 2)
-        simple_game.create_unit("W", 5, 7, 1)  # full HP
-        simple_game.create_unit("C", 5, 3, 1)  # weak target nearby
+        simple_game.place_unit("A", 5, 5, 2)
+        simple_game.place_unit("W", 5, 7, 1)  # full HP
+        simple_game.place_unit("C", 5, 3, 1)  # weak target nearby
         bot = MasterBot(simple_game, player=2)
         bot.analyze_map()
         bot._threat_map = bot._compute_threat_map()
@@ -174,7 +174,7 @@ class TestMasterBotHasteFollowthrough:
             tile.type = "t"
             tile.player = 1
             tile.health = tile.max_health = 10  # so seize damage triggers capture progress
-        simple_game.create_unit("W", 5, 5, 2)
+        simple_game.place_unit("W", 5, 5, 2)
         warrior = next(u for u in simple_game.units if u.player == 2 and u.type == "W")
         # Manually haste the warrior (simulating Sorcerer's cast).
         warrior.is_hasted = True
@@ -194,7 +194,7 @@ class TestMasterBotHasteFollowthrough:
         # we shouldn't depend on that).
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
-        simple_game.create_unit("W", 5, 5, 2)
+        simple_game.place_unit("W", 5, 5, 2)
         warrior = next(u for u in simple_game.units if u.player == 2 and u.type == "W")
         warrior.can_move = False
         warrior.can_attack = False
@@ -220,8 +220,8 @@ class TestMasterBotSorcererHasteTargeting:
             tile = simple_game.grid.get_tile(tx, ty)
             tile.type = "t"
             tile.player = 1
-        simple_game.create_unit("S", 6, 5, 2)
-        simple_game.create_unit("W", 5, 5, 2)
+        simple_game.place_unit("S", 6, 5, 2)
+        simple_game.place_unit("W", 5, 5, 2)
         sorcerer = next(u for u in simple_game.units if u.type == "S")
         # Disable existing haste cooldowns so the test setup matches a
         # fresh-Sorcerer scenario.
@@ -247,8 +247,8 @@ class TestMasterBotSorcererHasteTargeting:
         far_tile = simple_game.grid.get_tile(5, 0)
         far_tile.type = "b"
         far_tile.player = 1
-        simple_game.create_unit("S", 6, 7, 2)
-        simple_game.create_unit("B", 5, 7, 2)
+        simple_game.place_unit("S", 6, 7, 2)
+        simple_game.place_unit("B", 5, 7, 2)
         sorcerer = next(u for u in simple_game.units if u.type == "S")
         bot = MasterBot(simple_game, player=2)
         bot._threat_map = {}

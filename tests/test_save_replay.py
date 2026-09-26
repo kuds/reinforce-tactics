@@ -38,11 +38,10 @@ def game_with_actions(simple_map):
     game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
 
     # Create some units and perform actions
-    unit1 = game.create_unit("W", 1, 1, player=1)
-    _ = game.create_unit("W", 3, 3, player=2)  # Create unit but not used in test
+    unit1 = game.place_unit("W", 1, 1, player=1)
+    _ = game.place_unit("W", 3, 3, player=2)  # Create unit but not used in test
 
     if unit1:
-        unit1.can_move = True  # Newly created units have can_move=False until next turn
         game.move_unit(unit1, 2, 1)
 
     game.end_turn()
@@ -304,8 +303,8 @@ class TestReplayActionHandlers:
         game = GameState(simple_map, num_players=2)
         # Give player 1 enough gold to afford a Mage (costs 300, starting gold is 250)
         game.player_gold[1] = 500
-        mage = game.create_unit("M", 1, 1, player=1)
-        enemy = game.create_unit("W", 2, 1, player=2)
+        mage = game.place_unit("M", 1, 1, player=1)
+        enemy = game.place_unit("W", 2, 1, player=2)
 
         if mage and enemy:
             game.paralyze(mage, enemy)
@@ -322,8 +321,8 @@ class TestReplayActionHandlers:
     def test_heal_action_handler(self, simple_map):
         """Test that heal actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit("C", 1, 1, player=1)
-        ally = game.create_unit("W", 2, 1, player=1)
+        cleric = game.place_unit("C", 1, 1, player=1)
+        ally = game.place_unit("W", 2, 1, player=1)
 
         if cleric and ally:
             # Damage the ally first
@@ -350,30 +349,23 @@ class TestReplayActionHandlers:
     def test_cure_action_handler(self, simple_map):
         """Test that cure actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit("C", 1, 1, player=1)
-        ally = game.create_unit("W", 2, 1, player=1)
+        cleric = game.place_unit("C", 1, 1, player=1)
+        ally = game.place_unit("W", 2, 1, player=1)
 
-        if cleric and ally:
-            # Paralyze the ally first
-            ally.paralysis_turns = 2
-            cure_result = game.cure(cleric, ally)
+        # Paralyze the ally first. This used to set a misspelled
+        # ``paralysis_turns``, so the cure was always refused and the test
+        # fell back to recording a cure by hand, checking nothing.
+        ally.paralyzed_turns = 2
+        assert game.cure(cleric, ally)
 
-            # Only check if cure was successful
-            if cure_result:
-                # Check that action was recorded
-                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
-                assert len(cure_actions) > 0
+        # Check that action was recorded
+        cure_actions = [a for a in game.action_history if a["type"] == "cure"]
+        assert len(cure_actions) == 1
 
-                # Verify action structure
-                action = cure_actions[0]
-                assert "curer_pos" in action
-                assert "target_pos" in action
-            else:
-                # If cure didn't work, at least verify the structure would be correct
-                # by recording action manually
-                game.record_action("cure", curer_pos=(1, 1), target_pos=(2, 1))
-                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
-                assert len(cure_actions) > 0
+        # Verify action structure
+        action = cure_actions[0]
+        assert "curer_pos" in action
+        assert "target_pos" in action
 
     def test_resign_action_handler(self, simple_map):
         """Test that resign actions are handled in replay."""
@@ -403,8 +395,9 @@ class TestFullSaveLoadCycle:
             # Load the save data
             save_data = FileIO.load_game(save_path)
 
-            # Restore game state
-            restored_game = GameState.from_dict(save_data, game_with_actions.grid.to_numpy())
+            # Restore game state (the tile codes, as rows; this used to pass
+            # the RL encoding grid.to_numpy(), which built an all-ocean map)
+            restored_game = GameState.from_dict(save_data, game_with_actions.initial_map_data)
 
             # Verify basic state
             assert restored_game.current_player == game_with_actions.current_player
@@ -433,7 +426,7 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import REPLAY_BORDER_SIZE, ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        game.create_unit("W", 1, 1, player=1)
+        game.create_unit("W", 2, 1, player=1)  # on player 1's building
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -464,8 +457,8 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        # Create unit at position (1, 1) in original coordinates
-        game.create_unit("W", 1, 1, player=1)
+        # Create unit on player 1's building at (2, 1) in original coordinates
+        game.create_unit("W", 2, 1, player=1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -484,7 +477,7 @@ class TestReplayPadding:
                     break
 
             # The unit should be at translated position
-            expected_x = 1 + player.padding_offset_x
+            expected_x = 2 + player.padding_offset_x
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
@@ -498,10 +491,11 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        unit = game.create_unit("W", 1, 1, player=1)
-        if unit:
-            unit.can_move = True  # Newly created units have can_move=False until next turn
-            game.move_unit(unit, 2, 1)
+        # Create on player 1's building at (2, 1), then step onto the HQ at (1, 1)
+        unit = game.create_unit("W", 2, 1, player=1)
+        assert unit is not None
+        unit.can_move = True  # Newly created units have can_move=False until next turn
+        assert game.move_unit(unit, 1, 1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -518,7 +512,7 @@ class TestReplayPadding:
                     player.execute_action(action)
 
             # The unit should be at translated destination position
-            expected_x = 2 + player.padding_offset_x
+            expected_x = 1 + player.padding_offset_x
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
@@ -531,7 +525,7 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        game.create_unit("W", 1, 1, player=1)
+        game.create_unit("W", 2, 1, player=1)  # on player 1's building
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -554,6 +548,33 @@ class TestReplayPadding:
             # Padding offsets should still be the same
             assert player.padding_offset_x == original_offset_x
             assert player.padding_offset_y == original_offset_y
+
+
+class TestReplayHonoursMaxTurns:
+    """ReplayPlayer built its GameState without max_turns, so a max-turns draw
+    never ended on playback and ran one extra start-of-turn heal phase."""
+
+    def test_max_turns_draw_ends_the_replay_game(self, simple_map):
+        import pandas as pd
+
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
+        game = GameState(simple_map, num_players=2, max_turns=2)
+        while not game.game_over:
+            game.end_turn()
+        assert game.end_reason == "max_turns_draw"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "draw.json"))
+            replay_data = FileIO.load_replay(replay_path)
+            player = ReplayPlayer(replay_data, pd.DataFrame(replay_data["game_info"]["initial_map"]))
+
+            assert player.game_state.max_turns == 2
+            while player.current_action_index < len(player.actions):
+                player.step_forward()
+
+            assert player.game_state.game_over
+            assert player.game_state.end_reason == "max_turns_draw"
 
 
 class TestReplayVideoExport:

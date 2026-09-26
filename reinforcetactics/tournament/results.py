@@ -32,7 +32,9 @@ class GameResult:
         turns: Number of turns played
         map_name: Name of the map
         replay_path: Path to replay file (if saved)
-        error: Error message if game failed
+        error: Error message if the game failed (a bot couldn't be built or
+            raised, e.g. an LLMBotError). Such a game has no result:
+            TournamentResults counts it under ``errors``, not as a draw.
     """
 
     game_id: int
@@ -76,6 +78,8 @@ class BotStanding:
         elo: Current Elo rating
         elo_change: Elo change since start
         per_map_stats: Per-map win/loss/draw breakdown
+        errors: Games involving this bot that ended in an error; not part
+            of the record, the win rate or Elo
     """
 
     bot_name: str
@@ -85,10 +89,11 @@ class BotStanding:
     elo: float = 1500.0
     elo_change: float = 0.0
     per_map_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    errors: int = 0
 
     @property
     def total_games(self) -> int:
-        """Total games played."""
+        """Total games played to a result (errored games excluded)."""
         return self.wins + self.losses + self.draws
 
     @property
@@ -110,6 +115,7 @@ class BotStanding:
             "elo": round(self.elo, 0),
             "elo_change": round(self.elo_change, 0),
             "per_map_stats": self.per_map_stats,
+            "errors": self.errors,
         }
 
 
@@ -165,6 +171,8 @@ class TournamentResults:
             lambda: defaultdict(lambda: {"wins": 0, "losses": 0, "draws": 0})
         )
         self.matchup_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"bot1_wins": 0, "bot2_wins": 0, "draws": 0})
+        # Errored games per bot, kept apart from bot_stats (see add_game_result).
+        self.error_counts: dict[str, int] = defaultdict(int)
         self.maps_used: list[str] = []
         self.start_time: datetime | None = None
         self.end_time: datetime | None = None
@@ -193,6 +201,24 @@ class TournamentResults:
         # Track maps used
         if map_name not in self.maps_used:
             self.maps_used.append(map_name)
+
+        # An errored game (a bot that couldn't be built, or raised mid-game,
+        # e.g. an LLM bot with a bad key or a dead API) has no result. The
+        # runner reports it as winner 0, which would otherwise score it as a
+        # draw: a misconfigured bot would collect draws and Elo instead of
+        # showing up as broken. It is counted separately and changes neither
+        # record nor rating.
+        if result.error:
+            for name in (bot1, bot2):
+                self.error_counts[name] += 1
+            logger.warning(
+                "Game %s (%s vs %s) ended in an error and is excluded from standings and Elo: %s",
+                result.game_id,
+                bot1,
+                bot2,
+                result.error,
+            )
+            return
 
         # Create sorted matchup key
         sorted_bots = tuple(sorted([bot1, bot2]))
@@ -242,7 +268,11 @@ class TournamentResults:
         """
         standings = []
 
-        for bot_name, stats in self.bot_stats.items():
+        # A bot whose every game errored has no bot_stats entry but must
+        # still be listed, so its errors are visible.
+        bot_names = list(self.bot_stats) + [name for name in self.error_counts if name not in self.bot_stats]
+        for bot_name in bot_names:
+            stats = self.bot_stats.get(bot_name, {"wins": 0, "losses": 0, "draws": 0})
             standing = BotStanding(
                 bot_name=bot_name,
                 wins=stats["wins"],
@@ -250,7 +280,10 @@ class TournamentResults:
                 draws=stats["draws"],
                 elo=self.elo_system.get_rating(bot_name),
                 elo_change=self.elo_system.get_rating_change(bot_name),
-                per_map_stats={map_name: dict(map_stats) for map_name, map_stats in self.per_map_stats[bot_name].items()},
+                per_map_stats={
+                    map_name: dict(map_stats) for map_name, map_stats in self.per_map_stats.get(bot_name, {}).items()
+                },
+                errors=self.error_counts.get(bot_name, 0),
             )
             standings.append(standing)
 
@@ -297,6 +330,7 @@ class TournamentResults:
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "maps_used": self.maps_used,
             "total_games": len(self.game_results),
+            "errored_games": sum(1 for g in self.game_results if g.error),
             "standings": [s.to_dict() for s in standings],
             "matchups": [m.to_dict() for m in matchups],
             "elo_history": {
@@ -472,6 +506,13 @@ class ResultsExporter:
             logger.info(
                 f"{rank:<6}{s.bot_name:<25}{s.wins:<8}{s.losses:<8}"
                 f"{s.draws:<8}{s.win_rate:.1%}{'':2}{s.elo:<8.0f}{elo_change_str:<8}"
+            )
+
+        errored = [s for s in standings if s.errors]
+        if errored:
+            logger.warning(
+                "Errored games (not counted above): %s. See 'error' in the games list of the results JSON.",
+                ", ".join(f"{s.bot_name} {s.errors}" for s in errored),
             )
 
         logger.info("=" * 84)

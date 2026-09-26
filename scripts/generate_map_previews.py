@@ -14,7 +14,7 @@ sys.path.insert(0, str(project_root))
 import pandas as pd  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 
-# Color definitions from constants.py
+# Color definitions from reinforcetactics/ui/assets.py
 TILE_COLORS = {
     "p": (100, 200, 100),  # Plains/Grass - Bright green
     "w": (50, 120, 200),  # Water - Blue

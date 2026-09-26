@@ -25,7 +25,8 @@ COPY . .
 RUN pip3 install --no-cache-dir -e ".[cloud]"
 
 # The entrypoint wraps the training command with periodic + final upload of
-# outputs (models/, checkpoints/, tensorboard/, logs/) to Google Cloud Storage
+# outputs (models/, checkpoints/, tensorboard/, logs/, and train_bootstrap.py's
+# runs under benchmarks/bootstrap/) to Google Cloud Storage
 # when GCS_OUTPUT_URI or Vertex's AIP_MODEL_DIR is set. Arguments after the
 # entrypoint are the training command to run; CMD provides a sensible default.
 # To bypass the wrapper for debugging, override it: docker run --entrypoint bash ...

@@ -61,6 +61,10 @@ _ARG_TO_CONFIG_PATH = {
     "lr": "alphazero.lr",
     "weight_decay": "alphazero.weight_decay",
     "checkpoint_dir": "logging.log_dir",
+    "enabled_units": "env.enabled_units",
+    # The config's seed seeds every game's combat RNG, as ``--seed`` does
+    # (without it a config-driven run drew a fresh seed per game).
+    "seed": "seed",
 }
 
 
@@ -215,6 +219,12 @@ def parse_args():
         default=None,
         help="Enabled unit types (e.g., W M A). Default: all units.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Base seed for every game's combat RNG (Rogue evade). Default: a fresh seed per game.",
+    )
 
     if pre_args.config:
         from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
@@ -263,6 +273,7 @@ def main():
             checkpoint_dir=args.checkpoint_dir,
             device=args.device,
             enabled_units=args.enabled_units,
+            seed=args.seed,
         )
 
     history = trainer.train()

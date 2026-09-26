@@ -4,6 +4,36 @@ Action Executor for Reinforce Tactics.
 This module handles unit action execution from the unit action menu.
 """
 
+from reinforcetactics.core.actions import ACTOR_KEYS
+
+# Targeted actions (get_legal_actions kinds): past-tense verb for the console
+# log. The engine refuses an illegal action without changing anything
+# (review §1.2) and apply_action reports whether it did.
+TARGETED_ACTIONS = {
+    "attack": "attacked",
+    "paralyze": "paralyzed",
+    "heal": "healed",
+    "cure": "cured",
+    "haste": "hasted",
+    "defence_buff": "granted defence buff to",
+    "attack_buff": "granted attack buff to",
+}
+
+
+def apply_targeted_action(game, kind, unit, target):
+    """Run the targeted action ``kind`` from ``unit`` on ``target``.
+
+    Returns:
+        True if the engine carried it out. On False nothing changed, and the
+        caller must not end the unit's turn: the refused action did not use it.
+    """
+    verb = TARGETED_ACTIONS[kind]
+    if game.apply_action(kind, {ACTOR_KEYS[kind]: unit, "target": target}).accepted:
+        print(f"{unit.type} {verb} {target.type}")
+        return True
+    print(f"{unit.type} can't {kind.replace('_', ' ')} {target.type} right now (not a legal action)")
+    return False
+
 
 def handle_action_menu_result(game, menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref):
     """
@@ -22,8 +52,8 @@ def handle_action_menu_result(game, menu_result, active_menu_ref, target_selecti
     if menu_result["type"] == "cancel":
         # Cancel move if unit has moved
         if target_selection_unit_ref[0] and target_selection_unit_ref[0].has_moved:
-            target_selection_unit_ref[0].cancel_move()
-            print(f"Cancelled move for {target_selection_unit_ref[0].type}")
+            if game.cancel_move(target_selection_unit_ref[0]):
+                print(f"Cancelled move for {target_selection_unit_ref[0].type}")
         target_selection_unit_ref[0] = None
         active_menu_ref[0] = None
         return None
@@ -55,7 +85,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         Tuple of (target_selection_mode, target_selection_action, unit or None)
     """
     if action["type"] == "wait":
-        can_still_act = unit.end_unit_turn()
+        can_still_act = game.end_unit_turn(unit)
         if can_still_act:
             print(f"{unit.type} used haste action (can act again)")
             # Keep unit selected for another action
@@ -66,16 +96,24 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         return (False, None, None)
 
     if action["type"] == "cancel_move":
-        unit.cancel_move()
-        print(f"Cancelled move for {unit.type}")
+        if game.cancel_move(unit):
+            print(f"Cancelled move for {unit.type}")
         selected_unit_ref[0] = None
         return (False, None, None)
 
     if action["type"] == "capture":
-        result = game.seize(unit)
-        if result["captured"]:
+        seized = game.apply_action("seize", {"unit": unit})
+        if not seized.accepted:
+            # Refused by the engine (see GameState.seize): nothing happened,
+            # so the unit keeps its action.
+            print(f"{unit.type} can't capture here right now (not a legal action)")
+            selected_unit_ref[0] = unit
+            return (False, None, unit)
+        if seized.result["captured"]:
             print(f"{unit.type} captured structure!")
-        can_still_act = unit.end_unit_turn()
+        # The engine already spent the action, or refreshed a hasted unit;
+        # end_unit_turn closes the former and keeps the latter's extra action.
+        can_still_act = game.end_unit_turn(unit)
         if can_still_act:
             print(f"{unit.type} used haste action (can act again)")
             # Keep unit selected for another action
@@ -90,28 +128,11 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         if len(targets) == 1:
             # Only one target, execute immediately
             target = targets[0]
-            if action["type"] == "attack":
-                game.attack(unit, target)
-                print(f"{unit.type} attacked {target.type}")
-            elif action["type"] == "paralyze":
-                game.paralyze(unit, target)
-                print(f"{unit.type} paralyzed {target.type}")
-            elif action["type"] == "heal":
-                game.heal(unit, target)
-                print(f"{unit.type} healed {target.type}")
-            elif action["type"] == "cure":
-                game.cure(unit, target)
-                print(f"{unit.type} cured {target.type}")
-            elif action["type"] == "haste":
-                game.haste(unit, target)
-                print(f"{unit.type} hasted {target.type}")
-            elif action["type"] == "defence_buff":
-                game.defence_buff(unit, target)
-                print(f"{unit.type} granted defence buff to {target.type}")
-            elif action["type"] == "attack_buff":
-                game.attack_buff(unit, target)
-                print(f"{unit.type} granted attack buff to {target.type}")
-            can_still_act = unit.end_unit_turn()
+            if not apply_targeted_action(game, action["type"], unit, target):
+                selected_unit_ref[0] = unit
+                return (False, None, unit)
+            # As for capture: True only if haste refreshed the unit.
+            can_still_act = game.end_unit_turn(unit)
             if can_still_act:
                 print(f"{unit.type} used haste action (can act again)")
                 # Keep unit selected for another action

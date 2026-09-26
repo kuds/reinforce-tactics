@@ -10,34 +10,47 @@ Features:
 - OpponentPool: Manages historical model checkpoints for diverse opponents
 - SelfPlayCallback: Stable-Baselines3 callback for opponent updates
 
+How the pieces fit:
+- The opponent is a *frozen snapshot* of the learner's policy
+  (:func:`policy_snapshot`: policy class, constructor kwargs and CPU
+  weights). Snapshots are plain picklable data, so the callback pushes them
+  to every worker through ``VecEnv.env_method`` -- this is what makes
+  ``SubprocVecEnv`` workers actually play against the learner.
+- The opponent plays inside the base env's ``opponent='self'`` slot, so its
+  turns get exactly the reward accounting (opponent-turn penalties,
+  terminal bonuses, potential-shaping terminal charge) that a scripted bot
+  gets. It observes, masks and decodes actions for its *own* seat.
+- ``swap_players`` puts the agent in seat 2 for about half the episodes
+  (drawn from the env's ``np_random``); the base env then plays player 1's
+  opening turn before the agent's first observation.
+
 Usage:
     from reinforcetactics.rl.self_play import (
-        SelfPlayEnv,
-        make_self_play_env,
+        SelfPlayCallback,
         make_self_play_vec_env,
-        SelfPlayCallback
     )
 
-    # Create self-play environment
-    env = make_self_play_env()
-
-    # Train with self-play
-    model = MaskablePPO("MultiInputPolicy", env)
-    callback = SelfPlayCallback(env, update_freq=10000)
+    vec_env = make_self_play_vec_env(n_envs=8, map_file="maps/1v1/beginner.csv")
+    model = MaskablePPO("MultiInputPolicy", vec_env)
+    # The callback pushes the current policy to the opponents at the start
+    # of training and every ``update_freq`` calls (vec steps).
+    callback = SelfPlayCallback(vec_env, update_freq=1250)
     model.learn(total_timesteps=1000000, callback=callback)
 """
 
+import copy
 import logging
 import random
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import gymnasium as gym
 import numpy as np
 
-from reinforcetactics.rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.gym_env import StrategyGameEnv, build_flat_actions, build_per_dim_masks
+from reinforcetactics.rl.observation import build_observation
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +59,72 @@ try:
     from stable_baselines3.common.callbacks import BaseCallback as _BaseCallback
 except ImportError:  # pragma: no cover
     _BaseCallback = None
+
+# The canonical end_turn action in the 6-vector layout shared by both action
+# spaces (see ``StrategyGameEnv._encode_action``).
+_END_TURN = (5, 0, 0, 0, 0, 0)
+
+# Safety cap on opponent actions per game-turn (same limit ModelBot uses).
+_MAX_OPPONENT_ACTIONS = 50
+# Consecutive rejected actions after which the opponent's turn is ended.
+# Only multi_discrete can produce these: its per-dimension masks
+# over-approximate the legal set, while flat_discrete masks are exact.
+_MAX_CONSECUTIVE_INVALID = 5
+
+
+def _state_dict_to_numpy(policy: Any) -> dict[str, np.ndarray]:
+    """Detached CPU numpy copy of a torch module's ``state_dict``."""
+    return {name: param.detach().cpu().numpy().copy() for name, param in policy.state_dict().items()}
+
+
+def _load_numpy_state_dict(policy: Any, params: Mapping[str, np.ndarray]) -> None:
+    """Load a numpy state dict (as produced by :func:`_state_dict_to_numpy`)."""
+    import torch
+
+    policy.load_state_dict({name: torch.as_tensor(value) for name, value in params.items()})
+
+
+def params_checksum(params: Mapping[str, np.ndarray]) -> float:
+    """Cheap fingerprint of a numpy state dict (float64 sum of all entries).
+
+    Lets callers verify *which* weights an opponent holds -- e.g. that an
+    update pushed from the trainer reached a ``SubprocVecEnv`` worker --
+    without shipping the weights back across the process boundary.
+    """
+    return float(sum(np.sum(value, dtype=np.float64) for value in params.values()))
+
+
+def policy_snapshot(model: Any) -> dict[str, Any]:
+    """Picklable, frozen description of ``model``'s policy.
+
+    Returns ``{"policy_class", "policy_kwargs", "state_dict"}``: everything
+    needed to rebuild an independent copy of the policy (the same recipe
+    SB3's ``BasePolicy.save``/``load`` uses). This, not the model, is what
+    crosses into ``SubprocVecEnv`` workers: the live model cannot be pickled
+    (it owns the vec env and its pipes), and holding a separate copy also
+    avoids swapping weights in and out of the learner on every opponent
+    action.
+
+    Args:
+        model: An SB3 model (anything with a ``.policy``) or a policy itself.
+    """
+    policy = getattr(model, "policy", model)
+    return {
+        "policy_class": type(policy),
+        # Deep-copied: the constructor kwargs reference the learner policy's
+        # own config dicts (optimizer_kwargs, net_arch, ...), which an
+        # in-process rebuild would otherwise share with the learner.
+        "policy_kwargs": copy.deepcopy(policy._get_constructor_parameters()),
+        "state_dict": _state_dict_to_numpy(policy),
+    }
+
+
+def _accepts_action_masks(predictor: Any) -> bool:
+    # Lazy import: rl.evaluation is light, but keep module import order
+    # independent of it.
+    from reinforcetactics.rl.evaluation import _model_accepts_action_masks
+
+    return _model_accepts_action_masks(predictor)
 
 
 class OpponentPool:
@@ -56,9 +135,13 @@ class OpponentPool:
     a mixture of historical versions of itself, preventing overfitting
     to a single opponent strategy.
 
+    Pool entries are numpy ``state_dict`` copies of the policy; the
+    architecture comes from the latest :func:`policy_snapshot` the env
+    received.
+
     Attributes:
         max_size: Maximum number of models to keep in the pool
-        models: Deque of (model, metadata) tuples
+        models: Deque of parameter dicts
         selection_strategy: How to select opponents ('uniform', 'recent', 'prioritized')
     """
 
@@ -82,7 +165,9 @@ class OpponentPool:
         if self.save_dir:
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
-    def add_model(self, model: Any, timestep: int = 0, win_rate: float = 0.5, save_to_disk: bool = True) -> None:
+    def add_model(
+        self, model: Any, timestep: int = 0, win_rate: float = 0.5, save_to_disk: bool = True
+    ) -> dict[str, np.ndarray] | None:
         """
         Add a model to the pool.
 
@@ -91,32 +176,48 @@ class OpponentPool:
             timestep: Training timestep when model was saved
             win_rate: Model's win rate (for prioritized selection)
             save_to_disk: Whether to save to disk
+
+        Returns:
+            The parameter dict that was added (so callers can mirror it into
+            pools living in other processes), or None if the parameters
+            could not be copied and nothing was added.
         """
         # Deep copy the model's policy parameters
         model_copy = self._copy_model_params(model)
+        if not model_copy:
+            # An empty entry would be sampled like any other and then fail
+            # to load on every episode it is drawn for.
+            logger.warning("Not adding opponent at timestep %d to the pool: its parameters could not be copied", timestep)
+            return None
 
-        metadata = {"timestep": timestep, "win_rate": win_rate, "index": len(self.models)}
-
-        self.models.append(model_copy)
-        self.metadata.append(metadata)
-        self._update_selection_weights()
+        self.add_params(model_copy, timestep=timestep, win_rate=win_rate)
 
         if save_to_disk and self.save_dir:
             save_path = self.save_dir / f"opponent_{timestep}.zip"
             try:
-                model.save(str(save_path))
+                # Atomic: a sync or a kill mid-save must not leave a truncated
+                # snapshot that later loads (or uploads) as an opponent.
+                from reinforcetactics.rl.callbacks import save_model_atomically
+
+                save_model_atomically(model, save_path)
                 logger.info("Saved opponent to pool: %s", save_path)
             except Exception as exc:
                 logger.warning("Failed to save opponent to disk: %s", exc)
+
+        return model_copy
+
+    def add_params(self, params: dict[str, np.ndarray], timestep: int = 0, win_rate: float = 0.5) -> None:
+        """Add an already-copied parameter dict (no disk write)."""
+        metadata = {"timestep": timestep, "win_rate": win_rate, "index": len(self.models)}
+        self.models.append(params)
+        self.metadata.append(metadata)
+        self._update_selection_weights()
 
     def _copy_model_params(self, model: Any) -> dict[str, np.ndarray]:
         """Create a lightweight copy of model parameters."""
         try:
             # For SB3 models, get policy parameters
-            params = {}
-            for name, param in model.policy.state_dict().items():
-                params[name] = param.cpu().numpy().copy()
-            return params
+            return _state_dict_to_numpy(model.policy)
         except Exception as exc:
             logger.warning("Could not copy model params: %s", exc)
             return {}
@@ -124,10 +225,7 @@ class OpponentPool:
     def _load_model_params(self, model: Any, params: dict[str, np.ndarray]) -> None:
         """Load parameters into a model's policy."""
         try:
-            import torch
-
-            state_dict = {name: torch.tensor(param) for name, param in params.items()}
-            model.policy.load_state_dict(state_dict)
+            _load_numpy_state_dict(model.policy, params)
         except Exception as exc:
             logger.warning("Could not load model params: %s", exc)
 
@@ -155,27 +253,38 @@ class OpponentPool:
             total = sum(weights)
             self._selection_weights = [w / total for w in weights]
 
-    def sample_opponent(self) -> dict[str, np.ndarray] | None:
+    def _sample_index(self, rng: np.random.Generator | None) -> int:
+        if len(self._selection_weights) != len(self.models):
+            # Entries appended to ``models`` directly (bypassing add_params)
+            # leave stale weights behind; recompute rather than fail.
+            self._update_selection_weights()
+        if rng is None:
+            return random.choices(range(len(self.models)), weights=self._selection_weights, k=1)[0]
+        probs = np.asarray(self._selection_weights, dtype=np.float64)
+        return int(rng.choice(len(self.models), p=probs / probs.sum()))
+
+    def sample_opponent(self, rng: np.random.Generator | None = None) -> dict[str, np.ndarray] | None:
         """
         Sample an opponent from the pool.
+
+        Args:
+            rng: Generator to draw from. SelfPlayEnv passes its env's
+                ``np_random`` so the draw is reproducible under
+                ``reset(seed=...)``; ``None`` falls back to the global
+                ``random`` module.
 
         Returns:
             Model parameters dict, or None if pool is empty
         """
         if not self.models:
             return None
+        return self.models[self._sample_index(rng)]
 
-        idx = random.choices(range(len(self.models)), weights=self._selection_weights, k=1)[0]
-
-        return self.models[idx]
-
-    def sample_opponent_with_metadata(self) -> tuple[dict, dict] | None:
+    def sample_opponent_with_metadata(self, rng: np.random.Generator | None = None) -> tuple[dict, dict] | None:
         """Sample an opponent and return with metadata."""
         if not self.models:
             return None
-
-        idx = random.choices(range(len(self.models)), weights=self._selection_weights, k=1)[0]
-
+        idx = self._sample_index(rng)
         return self.models[idx], self.metadata[idx]
 
     def update_win_rate(self, model_idx: int, new_win_rate: float) -> None:
@@ -222,29 +331,48 @@ class OpponentPool:
         return self.size
 
 
+class _SelfPlayOpponent:
+    """Bot-shaped adapter the base env's ``opponent='self'`` slot plays.
+
+    ``StrategyGameEnv.reset`` builds one per episode through the factory
+    SelfPlayEnv registers, and calls ``take_turn()`` on it for player 1's
+    opening turn (agent in seat 2) and after every agent end_turn.
+    """
+
+    def __init__(self, self_play_env: "SelfPlayEnv", game_state: Any, player: int):
+        self._self_play_env = self_play_env
+        self.game_state = game_state
+        self.bot_player = player
+
+    def take_turn(self) -> None:
+        self._self_play_env._execute_opponent_turn(self.game_state, self.bot_player)
+
+
 class SelfPlayEnv(gym.Wrapper):
     """
     Gymnasium wrapper that enables self-play training.
 
-    The agent controls player 1, and the opponent (controlled by a copy
-    of the agent's policy) controls player 2. The environment handles
-    turn alternation and opponent action execution automatically.
+    The learning agent controls one seat and a frozen snapshot of its own
+    policy controls the other. The opponent plays through the base env's
+    ``opponent='self'`` hook, so an opponent turn is scored exactly like a
+    scripted bot's turn (see ``StrategyGameEnv._execute_action``).
 
     Features:
-    - Symmetric gameplay (same observations/actions for both players)
-    - Configurable opponent update frequency
+    - The opponent observes, is masked and decodes actions for its own seat
+    - Configurable opponent update frequency (via SelfPlayCallback)
     - Support for opponent pool (multiple historical models)
-    - Optional random starting player to encourage robust play
+    - Optional random seat per episode (``swap_players``)
 
     Attributes:
-        opponent_model: The model used for opponent decisions
+        opponent_model: The model used for opponent decisions until the
+            first snapshot is installed (in-process only)
         opponent_pool: Pool of historical opponents (optional)
-        swap_players: Whether to randomly swap player order
+        swap_players: Whether the agent's seat is drawn per episode
     """
 
     def __init__(
         self,
-        env: StrategyGameEnv,
+        env: gym.Env,
         opponent_model: Any | None = None,
         opponent_pool: OpponentPool | None = None,
         swap_players: bool = True,
@@ -254,119 +382,322 @@ class SelfPlayEnv(gym.Wrapper):
         Initialize the self-play environment.
 
         Args:
-            env: The base StrategyGameEnv
+            env: A StrategyGameEnv (optionally wrapped, e.g. by
+                ActionMaskedEnv) built with ``opponent=None`` or ``'self'``.
             opponent_model: Initial opponent model (can be updated later)
             opponent_pool: Pool of historical opponents for diverse training
             swap_players: Randomly swap which player agent controls each episode
             opponent_deterministic: Use deterministic opponent actions
         """
         super().__init__(env)
+        base = env.unwrapped
+        if not isinstance(base, StrategyGameEnv):
+            raise TypeError(f"SelfPlayEnv needs a StrategyGameEnv underneath; got {type(base).__name__}")
+        if base.opponent_type not in (None, "self"):
+            raise ValueError(
+                f"SelfPlayEnv drives the opponent itself; build the base env with opponent=None or 'self' "
+                f"(got {base.opponent_type!r})"
+            )
+        # Play the opponent through the base env's own opponent slot rather
+        # than after step() returns: that path already charges opponent-turn
+        # damage/capture penalties and scores a game that ends on the
+        # opponent's turn (win_by_*, speed bonus, draw, -Phi terminal),
+        # which a wrapper-side re-implementation kept getting wrong.
+        base.opponent_type = "self"
+        base.set_self_play_opponent_factory(self._build_opponent)
+
         self.opponent_model = opponent_model
         self.opponent_pool = opponent_pool
-        self.swap_players = swap_players
         self.opponent_deterministic = opponent_deterministic
+        self.swap_players = swap_players
 
-        # Track which player the learning agent controls
-        self.agent_player = 1
-        self._opponent_params: dict | None = None
+        # Frozen opponent policy (built from a policy_snapshot) and the
+        # weights it currently holds: the latest snapshot, or a pool sample.
+        self._opponent_policy: Any | None = None
+        self._opponent_accepts_masks = False
+        self._latest_params: dict[str, np.ndarray] | None = None
+        self._opponent_params: dict[str, np.ndarray] | None = None
+        self._opponent_source = "random"
 
-        # Statistics
-        self.stats = {"agent_wins": 0, "opponent_wins": 0, "draws": 0, "total_games": 0}
+        # Statistics. ``total_games`` counts every finished episode,
+        # including step-limit truncations (recorded as ``truncations``), so
+        # the win rate is never inflated by leaving unfinished games out.
+        self.stats = {"agent_wins": 0, "opponent_wins": 0, "draws": 0, "truncations": 0, "total_games": 0}
+
+    @property
+    def _base_env(self) -> StrategyGameEnv:
+        """The StrategyGameEnv under all wrappers (checked in ``__init__``)."""
+        return cast(StrategyGameEnv, self.env.unwrapped)
+
+    # ------------------------------------------------------------------
+    # Seat
+    # ------------------------------------------------------------------
+
+    @property
+    def agent_player(self) -> int:
+        """The seat the learning agent plays this episode.
+
+        Read from the base env, which is the only copy: it is what builds
+        the masks, scores rewards and the shaping potential, and executes
+        the agent's actions.
+        """
+        return int(self._base_env.agent_player)
+
+    @property
+    def swap_players(self) -> bool:
+        return self._swap_players
+
+    @swap_players.setter
+    def swap_players(self, value: bool) -> None:
+        # The seat is configured on the base env *before* its reset() runs:
+        # reset draws it from np_random (after seeding), binds the opponent
+        # to the other seat, plays player 1's opening turn if the agent is
+        # player 2, and only then computes Phi(s_0) and the first obs.
+        self._swap_players = bool(value)
+        self._base_env.set_agent_seat("random" if self._swap_players else 1)
+
+    # ------------------------------------------------------------------
+    # Opponent management
+    # ------------------------------------------------------------------
 
     def set_opponent_model(self, model: Any) -> None:
-        """Set or update the opponent model."""
+        """Set the model the opponent plays with (in-process only).
+
+        The opponent uses the live model's policy until a frozen snapshot
+        is installed with :meth:`update_opponent_from_current` (or
+        :meth:`set_opponent_snapshot`, which is what SelfPlayCallback uses
+        and which also works across processes).
+        """
         self.opponent_model = model
+
+    def set_opponent_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        """Install a frozen opponent policy built from a :func:`policy_snapshot`.
+
+        Safe to call through ``VecEnv.env_method``: the snapshot is plain
+        picklable data, so this is how opponent updates reach
+        ``SubprocVecEnv`` workers.
+        """
+        policy = snapshot["policy_class"](**snapshot["policy_kwargs"])
+        params = snapshot["state_dict"]
+        _load_numpy_state_dict(policy, params)
+        policy.set_training_mode(False)
+        self._opponent_policy = policy
+        self._opponent_accepts_masks = _accepts_action_masks(policy)
+        self._latest_params = params
+        self._opponent_params = params
+        self._opponent_source = "latest"
+
+    def update_opponent_from_current(self) -> None:
+        """Snapshot ``opponent_model``'s current weights as the opponent."""
+        if self.opponent_model is not None:
+            self.set_opponent_snapshot(policy_snapshot(self.opponent_model))
 
     def update_opponent_from_pool(self) -> bool:
         """
-        Sample a new opponent from the pool.
+        Sample a new opponent from the pool (drawn from the env's np_random).
 
         Returns:
-            True if opponent was updated, False if pool is empty
+            True if the opponent now plays a pool member, False if the pool
+            is empty, no opponent architecture is known yet (no snapshot has
+            been installed), or the sampled weights could not be loaded.
         """
         if self.opponent_pool is None or self.opponent_pool.size == 0:
             return False
+        params = self.opponent_pool.sample_opponent(rng=self._base_env.np_random)
+        if params is None:
+            return False
+        return self._load_opponent_params(params, source="pool")
 
-        self._opponent_params = self.opponent_pool.sample_opponent()
-        return self._opponent_params is not None
+    def add_opponent_to_pool(self, params: dict[str, np.ndarray], metadata: Mapping[str, Any] | None = None) -> bool:
+        """Mirror a pool addition made in the trainer process into this env's pool.
 
-    def update_opponent_from_current(self) -> None:
-        """Update opponent to use current model's parameters."""
-        if self.opponent_model is not None:
-            try:
-                self._opponent_params = {}
-                for name, param in self.opponent_model.policy.state_dict().items():
-                    self._opponent_params[name] = param.cpu().numpy().copy()
-            except Exception as exc:
-                logger.warning("Could not copy current model params: %s", exc)
-
-    def _get_opponent_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
-        """
-        Get opponent's action using the opponent model.
-
-        Args:
-            obs: Observation from opponent's perspective
+        Under ``SubprocVecEnv`` each worker holds its own copy of the pool
+        (pickled with the env factory), so ``OpponentPool.add_model`` in the
+        trainer never reaches it. SelfPlayCallback forwards every addition
+        here through ``env_method``. In-process envs usually share the
+        trainer's pool object, where the entry is already present.
 
         Returns:
-            Action array
+            True if the entry was added to this env's pool.
         """
-        if self.opponent_model is None:
-            # Fallback to random valid action
-            return self._get_random_valid_action()
+        if self.opponent_pool is None:
+            return False
+        if any(existing is params for existing in self.opponent_pool.models):
+            return False
+        meta = dict(metadata or {})
+        self.opponent_pool.add_params(params, timestep=int(meta.get("timestep", 0)), win_rate=float(meta.get("win_rate", 0.5)))
+        return True
 
+    def has_opponent_pool(self) -> bool:
+        return self.opponent_pool is not None
+
+    def describe_opponent(self) -> dict[str, Any]:
+        """Which opponent this env currently plays (diagnostics / tests)."""
+        params = self._opponent_params
+        if self._opponent_policy is not None:
+            source = self._opponent_source
+        else:
+            source = "live" if self.opponent_model is not None else "random"
+        return {
+            "source": source,
+            "params_checksum": params_checksum(params) if params is not None else None,
+            "pool_size": self.opponent_pool.size if self.opponent_pool is not None else 0,
+        }
+
+    def _load_opponent_params(self, params: dict[str, np.ndarray], source: str) -> bool:
+        if self._opponent_policy is None:
+            logger.debug("No opponent architecture known yet; ignoring %s parameters", source)
+            return False
+        if params is self._opponent_params:
+            self._opponent_source = source
+            return True
         try:
-            # If we have stored params, temporarily load them
-            original_params = None
-            if self._opponent_params:
-                import torch
+            _load_numpy_state_dict(self._opponent_policy, params)
+        except Exception as exc:
+            logger.warning("Could not load %s opponent parameters (%s); keeping the latest snapshot", source, exc)
+            if self._latest_params is not None and self._opponent_params is not self._latest_params:
+                _load_numpy_state_dict(self._opponent_policy, self._latest_params)
+                self._opponent_params = self._latest_params
+                self._opponent_source = "latest"
+            return False
+        self._opponent_params = params
+        self._opponent_source = source
+        return True
 
-                original_params = {
-                    name: param.cpu().numpy().copy() for name, param in self.opponent_model.policy.state_dict().items()
-                }
-                # Load opponent params
-                state_dict = {name: torch.tensor(param) for name, param in self._opponent_params.items()}
-                self.opponent_model.policy.load_state_dict(state_dict)
+    def _build_opponent(self, game_state: Any, opponent_player: int) -> _SelfPlayOpponent:
+        """Opponent factory registered with the base env.
 
-            try:
-                # Get action from model
-                action, _ = self.opponent_model.predict(obs, deterministic=self.opponent_deterministic)
-                return action
-            finally:
-                # Always restore original params if we swapped
-                if original_params:
-                    import torch
+        Called from ``StrategyGameEnv.reset`` after ``np_random`` has been
+        seeded and before player 1's opening turn, so the per-episode pool
+        draw is reproducible and in place for the opponent's first move.
+        """
+        self.update_opponent_from_pool()
+        return _SelfPlayOpponent(self, game_state, opponent_player)
 
-                    state_dict = {name: torch.tensor(param) for name, param in original_params.items()}
-                    self.opponent_model.policy.load_state_dict(state_dict)
+    # ------------------------------------------------------------------
+    # Opponent turn
+    # ------------------------------------------------------------------
 
+    def _execute_opponent_turn(self, game_state: Any | None = None, player: int | None = None) -> None:
+        """Play one full turn for the opponent seat, then hand the turn back."""
+        base_env = self._base_env
+        game_state = base_env.game_state if game_state is None else game_state
+        opponent_player = 3 - self.agent_player if player is None else player
+
+        # Mirror the agent's per-turn budget: the same policy was trained to
+        # see an end_turn-only mask once ``max_actions_per_turn`` is used up.
+        max_actions = _MAX_OPPONENT_ACTIONS
+        if base_env.max_actions_per_turn is not None:
+            max_actions = min(max_actions, base_env.max_actions_per_turn)
+
+        actions_taken = 0
+        consecutive_invalid = 0
+        while game_state.current_player == opponent_player and not game_state.game_over and actions_taken < max_actions:
+            action_arr = self._get_opponent_action(opponent_player)
+            if int(action_arr[0]) == 5:
+                break
+
+            action_dict = base_env._encode_action(action_arr)
+            _, is_valid = base_env.execute_game_action(action_dict, opponent_player)
+
+            if is_valid:
+                consecutive_invalid = 0
+                actions_taken += 1
+            else:
+                consecutive_invalid += 1
+                if consecutive_invalid >= _MAX_CONSECUTIVE_INVALID:
+                    break
+
+        if game_state.current_player == opponent_player and not game_state.game_over:
+            game_state.end_turn()
+
+    def _get_opponent_action(self, player: int) -> np.ndarray:
+        """Choose the opponent's next action as a 6-vector, for its own seat.
+
+        The observation, the masks passed to ``predict`` and (for
+        flat_discrete) the index -> action table are all built for
+        ``player``. Using the base env's ``action_masks()`` /
+        ``_current_actions`` instead would describe the *agent's* legal
+        moves, which is how the opponent used to end up executing nothing.
+        """
+        policy = self._opponent_policy
+        accepts_masks = self._opponent_accepts_masks
+        if policy is None and self.opponent_model is not None:
+            policy = self.opponent_model.policy
+            accepts_masks = _accepts_action_masks(policy)
+        if policy is None:
+            return self._get_random_valid_action(player)
+
+        base_env = self._base_env
+        try:
+            obs = self._build_obs_for_player(player)
+            if base_env.action_space_type == "flat_discrete":
+                actions = build_flat_actions(base_env.game_state, player, base_env.max_flat_actions)
+                mask = np.zeros(base_env.max_flat_actions, dtype=bool)
+                mask[: len(actions)] = True
+                raw = self._predict_opponent(policy, obs, mask if accepts_masks else None)
+                idx = int(np.asarray(raw).reshape(-1)[0])
+                if 0 <= idx < len(actions):
+                    return actions[idx]
+                return np.array(_END_TURN, dtype=np.int32)
+
+            per_dim = self._opponent_per_dim_masks(player)
+            mask = np.concatenate([m.astype(np.bool_) for m in per_dim])
+            raw = self._predict_opponent(policy, obs, mask if accepts_masks else None)
+            return np.asarray(raw).reshape(-1)
         except Exception as exc:
             logger.warning("Error getting opponent action: %s", exc)
-            return self._get_random_valid_action()
+            return self._get_random_valid_action(player)
 
-    def _get_random_valid_action(self) -> np.ndarray:
-        """Get a random valid action (fallback)."""
-        base_env = self.env.unwrapped
+    def _predict_opponent(self, policy: Any, obs: dict[str, np.ndarray], action_masks: np.ndarray | None) -> Any:
+        kwargs: dict[str, Any] = {"deterministic": self.opponent_deterministic}
+        if action_masks is not None:
+            kwargs["action_masks"] = action_masks
+        if self.opponent_deterministic:
+            action, _ = policy.predict(obs, **kwargs)
+            return action
 
-        if base_env.action_space_type == "flat_discrete":
-            # For flat_discrete, sample a random valid index
-            base_env._build_flat_actions()
-            n_actions = len(base_env._current_actions)
-            if n_actions > 0:
-                return np.array(np.random.randint(0, n_actions))
-            return np.array(0)
+        import torch
 
-        # For multi_discrete, sample valid action for each dimension
-        masks = self.action_masks()
-        action = []
-        for mask in masks:
-            mask = np.atleast_1d(mask)
-            valid_indices = np.where(mask)[0]
-            if len(valid_indices) > 0:
-                action.append(np.random.choice(valid_indices))
-            else:
-                action.append(0)
+        # Stochastic predict() samples from torch's global CPU generator.
+        # Seed it from the env's np_random inside fork_rng so the opponent
+        # is reproducible under reset(seed=...) and the trainer's own torch
+        # stream is left exactly as it was. Only the CPU generator is
+        # touched (``default_generator``, not ``torch.manual_seed``, which
+        # would also reseed CUDA): snapshot policies always live on the CPU.
+        seed = int(self._base_env.np_random.integers(0, 2**31 - 1))
+        with torch.random.fork_rng(devices=[]):
+            torch.default_generator.manual_seed(seed)
+            action, _ = policy.predict(obs, **kwargs)
+        return action
 
-        return np.array(action)
+    def _opponent_per_dim_masks(self, player: int) -> tuple[np.ndarray, ...]:
+        """Per-dimension multi_discrete masks for ``player``'s legal actions."""
+        base_env = self._base_env
+        _, at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask = build_per_dim_masks(
+            base_env.game_state,
+            base_env.grid_width,
+            base_env.grid_height,
+            enabled_units=base_env.enabled_units,
+            player=player,
+        )
+        return (at_mask, ut_mask, fx_mask, fy_mask, tx_mask, ty_mask)
+
+    def _get_random_valid_action(self, player: int | None = None) -> np.ndarray:
+        """A uniformly random legal action (6-vector) for ``player``.
+
+        The fallback opponent before any policy is installed. Drawn from
+        the exact legal list in both action spaces (sampling each
+        multi_discrete dimension independently mostly yields illegal
+        combinations) and from the env's np_random, not the global RNGs.
+        Defaults to the opponent seat.
+        """
+        base_env = self._base_env
+        if player is None:
+            player = 3 - self.agent_player
+        actions = build_flat_actions(base_env.game_state, player, base_env.max_flat_actions)
+        idx = int(base_env.np_random.integers(len(actions)))
+        return np.array(actions[idx])
 
     def _flip_observation(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """
@@ -399,77 +730,24 @@ class SelfPlayEnv(gym.Wrapper):
         """Build a fresh observation from ``player``'s perspective.
 
         Delegates to the shared ``build_observation`` helper so FOW handling
-        matches gym_env and ModelBot. The action mask is not embedded in
-        the obs dict (the policy consumes it via ``env.action_masks()``);
-        SelfPlayEnv's opponent-action sampler reads the mask from the base
-        env directly when needed.
+        and padding match gym_env and ModelBot. The action mask is not
+        embedded in the obs dict (policies consume it through
+        ``predict(action_masks=...)``).
         """
-        from reinforcetactics.rl.observation import build_observation
-
-        base_env = self.env.unwrapped
+        base_env = self._base_env
+        pad_to: tuple[int, int] | None = None
+        if base_env.pad_height != base_env.grid_height or base_env.pad_width != base_env.grid_width:
+            pad_to = (base_env.pad_height, base_env.pad_width)
         return build_observation(
             base_env.game_state,
             perspective_player=player,
             action_mask=None,
             fog_of_war=base_env.fog_of_war,
+            pad_to=pad_to,
             gold_scale=base_env.gold_scale,
             turn_scale=base_env.turn_scale,
             unit_count_scale=base_env.unit_count_scale,
         )
-
-    def _resolve_action(self, action) -> np.ndarray:
-        """
-        Resolve any action format to the canonical 6-element array.
-
-        For multi_discrete, action is already a 6-element array.
-        For flat_discrete, action is a scalar index into _current_actions.
-        """
-        base_env = self.env.unwrapped
-
-        if base_env.action_space_type == "flat_discrete":
-            action_idx = int(action)
-            if 0 <= action_idx < len(base_env._current_actions):
-                return base_env._current_actions[action_idx]
-            return np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)
-
-        return np.asarray(action)
-
-    def _execute_opponent_turn(self) -> None:
-        """Execute the opponent's turn using the shared action dispatch."""
-        base_env = self.env.unwrapped
-        game_state = base_env.game_state
-        opponent_player = 3 - self.agent_player
-
-        max_actions = 50
-        actions_taken = 0
-        consecutive_invalid = 0
-        max_consecutive_invalid = 5
-
-        while game_state.current_player == opponent_player and not game_state.game_over and actions_taken < max_actions:
-            obs = self._get_obs_for_player(opponent_player)
-
-            raw_action = self._get_opponent_action(obs)
-            action_arr = self._resolve_action(raw_action)
-            action_type = int(action_arr[0])
-
-            if action_type == 5:
-                game_state.end_turn()
-                break
-
-            action_dict = base_env._encode_action(action_arr)
-            _, is_valid = base_env.execute_game_action(action_dict, opponent_player)
-
-            if is_valid:
-                consecutive_invalid = 0
-                actions_taken += 1
-            else:
-                consecutive_invalid += 1
-                if consecutive_invalid >= max_consecutive_invalid:
-                    game_state.end_turn()
-                    break
-
-        if game_state.current_player == opponent_player and not game_state.game_over:
-            game_state.end_turn()
 
     def _get_obs_for_player(self, player: int) -> dict[str, np.ndarray]:
         """Get observation from a specific player's perspective.
@@ -480,12 +758,17 @@ class SelfPlayEnv(gym.Wrapper):
         correctly (rather than reusing the agent's filtered grid/units).
         """
         if player == self.agent_player:
-            return self.env._get_obs()
+            return self._base_env._get_obs()
         return self._build_obs_for_player(player)
+
+    # ------------------------------------------------------------------
+    # Gym API
+    # ------------------------------------------------------------------
 
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         """
-        Execute agent's action and then opponent's turn.
+        Execute the agent's action. On end_turn the base env plays the
+        opponent's whole turn before returning.
 
         Args:
             action: Agent's action (array for multi_discrete, scalar for flat_discrete)
@@ -493,68 +776,57 @@ class SelfPlayEnv(gym.Wrapper):
         Returns:
             (observation, reward, terminated, truncated, info)
         """
-        # Execute agent's action
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        # Check if the action was end_turn using info from base env
-        is_end_turn = info.get("action_type") == 5
-
-        # If game not over and action was end_turn, let opponent play
-        if not terminated and is_end_turn:
-            self._execute_opponent_turn()
-
-            # Get new observation after opponent's turn
-            obs = self.env._get_obs()
-            terminated = self.env.game_state.game_over
-
-            # Adjust reward for game end during opponent's turn
-            if terminated:
-                winner = self.env.game_state.winner
-                if winner == self.agent_player:
-                    reward += self.env.reward_config["win"]
-                    self.stats["agent_wins"] += 1
-                elif winner is not None:
-                    reward += self.env.reward_config["loss"]
-                    self.stats["opponent_wins"] += 1
-                else:
-                    self.stats["draws"] += 1
-                self.stats["total_games"] += 1
+        if terminated or truncated:
+            self._record_outcome(info.get("winner") if terminated else None, terminated)
 
         info["self_play_stats"] = self.stats.copy()
-
+        info["agent_player"] = self.agent_player
         return obs, reward, terminated, truncated, info
+
+    def _record_outcome(self, winner: int | None, terminated: bool) -> None:
+        """Count a finished episode, whichever move (agent's or opponent's) ended it."""
+        if not terminated:
+            self.stats["truncations"] += 1
+        elif winner == self.agent_player:
+            self.stats["agent_wins"] += 1
+        elif winner is not None:
+            self.stats["opponent_wins"] += 1
+        else:
+            self.stats["draws"] += 1
+        self.stats["total_games"] += 1
 
     def reset(self, seed: int | None = None, options: dict | None = None) -> tuple[dict, dict]:
         """
         Reset the environment.
 
-        Optionally swaps player order and updates opponent from pool.
+        The base env draws the seat (when ``swap_players``), samples a pool
+        opponent through the registered factory, and plays player 1's
+        opening turn if the agent is player 2.
         """
         obs, info = self.env.reset(seed=seed, options=options)
-
-        # Potentially update opponent from pool
-        if self.opponent_pool and self.opponent_pool.size > 0:
-            self.update_opponent_from_pool()
-
-        # Optionally swap player order
-        self.agent_player = 1  # Reset to default
-        self.env.agent_player = 1
-        if self.swap_players and random.random() < 0.5:
-            # Agent plays as player 2 this game
-            self.agent_player = 2
-            self.env.agent_player = 2
-            # Let opponent go first as player 1
-            self._execute_opponent_turn()
-            obs = self.env._get_obs()
-
+        info = dict(info)
+        info["agent_player"] = self.agent_player
         return obs, info
 
-    def action_masks(self) -> tuple[np.ndarray, ...]:
-        """Get action masks for agent."""
-        # Check if wrapped env has get_action_masks_tuple (ActionMaskedEnv)
-        if hasattr(self.env, "get_action_masks_tuple"):
-            return self.env.get_action_masks_tuple()
-        return self.env.action_masks()
+    def action_masks(self) -> np.ndarray:
+        """Agent masks in the layout MaskablePPO expects.
+
+        flat_discrete: the ``(max_flat_actions,)`` mask. multi_discrete: the
+        six per-dimension masks concatenated into one 1-D array (what
+        ``ActionMaskedEnv.action_masks`` returns and what sb3-contrib's
+        ``get_action_masks`` stacks across envs). Returning the tuple here
+        made MaskablePPO crash on its first rollout.
+        """
+        return np.concatenate([m.astype(np.bool_) for m in self.get_action_masks_tuple()])
+
+    def get_action_masks_tuple(self) -> tuple[np.ndarray, ...]:
+        """The agent's masks as a tuple (one array per action dimension)."""
+        return tuple(self._base_env.action_masks())
+
+    def get_self_play_stats(self) -> dict[str, int]:
+        return self.stats.copy()
 
     def get_win_rate(self) -> float:
         """Get agent's win rate against opponents."""
@@ -562,6 +834,24 @@ class SelfPlayEnv(gym.Wrapper):
         if total == 0:
             return 0.5
         return self.stats["agent_wins"] / total
+
+
+def _find_self_play_envs(env: Any) -> list[SelfPlayEnv]:
+    """In-process SelfPlayEnvs reachable from ``env`` (a gym env or DummyVecEnv)."""
+    candidates = env.envs if hasattr(env, "envs") else [env]
+    found = []
+    for candidate in candidates:
+        current = candidate
+        while current is not None:
+            if isinstance(current, SelfPlayEnv):
+                found.append(current)
+                break
+            current = getattr(current, "env", None)
+    return found
+
+
+def _is_vec_env(env: Any) -> bool:
+    return hasattr(env, "env_method") and hasattr(env, "env_is_wrapped")
 
 
 def _make_callback_class():
@@ -579,15 +869,24 @@ def _make_callback_class():
         (``init_callback`` → ``on_training_start`` → ``on_step`` → …).
 
         This callback:
-        1. Initializes opponents with the current model at training start
-        2. Periodically updates the opponent model to the current policy
-        3. Optionally adds models to the opponent pool
-        4. Tracks win rates and logs stats (incl. tensorboard when available)
+        1. Pushes a snapshot of the current policy to every opponent at
+           training start and every ``update_freq`` calls
+        2. Optionally adds the model to the opponent pool (and mirrors the
+           addition into worker-process pools)
+        3. Tracks win rates and logs stats (incl. tensorboard when available)
+
+        Vectorized envs (DummyVecEnv, SubprocVecEnv, VecMonitor over either,
+        or a mixed bot/self-play VecEnv) are driven through
+        ``env_method`` on exactly the workers wrapped in SelfPlayEnv, so the
+        same code reaches in-process envs and worker processes. Finding no
+        SelfPlayEnv is an error, not a silent no-op.
+
+        Frequencies count ``n_calls`` (one per vec-env step, i.e. ``n_envs``
+        timesteps), as in SB3's own callbacks.
 
         Usage:
-            # Auto-discovery from a (vec) env:
-            callback = SelfPlayCallback(env, update_freq=10000, add_to_pool_freq=50000)
-            # Or with an explicit env list + shared pool (the training script's form):
+            callback = SelfPlayCallback(vec_env, update_freq=1250, opponent_pool=pool)
+            # Or with an explicit list of in-process SelfPlayEnvs:
             callback = SelfPlayCallback(envs=self_play_envs, opponent_pool=pool)
             model.learn(total_timesteps=1000000, callback=callback)
         """
@@ -607,17 +906,21 @@ def _make_callback_class():
             Initialize the callback.
 
             Args:
-                env: The SelfPlayEnv or vectorized environment to discover
-                    self-play envs from. Mutually exclusive with ``envs``.
-                update_freq: How often to update opponent to current model
-                add_to_pool_freq: How often to add model to opponent pool
-                min_win_rate_for_pool: Minimum win rate to add to pool
+                env: The SelfPlayEnv or vectorized environment whose
+                    self-play opponents to manage. Mutually exclusive with
+                    ``envs``.
+                update_freq: How often (in calls) to update the opponent to
+                    the current model
+                add_to_pool_freq: How often (in calls) to consider adding
+                    the model to the opponent pool
+                min_win_rate_for_pool: Minimum win rate, over the games
+                    finished since the previous pool check, to add to pool
                 verbose: Verbosity level
-                envs: Explicit list of ``SelfPlayEnv`` instances (skips
-                    discovery). Used by the training script, which already
-                    holds the unwrapped envs.
+                envs: Explicit list of in-process ``SelfPlayEnv`` instances
+                    (skips discovery).
                 opponent_pool: Shared :class:`OpponentPool` to add snapshots
-                    to. Defaults to the first pool found on the envs.
+                    to. Defaults to the first pool found on in-process envs;
+                    required when the envs live in worker processes.
             """
             if _BaseCallback is not None:
                 super().__init__(verbose=verbose)
@@ -630,6 +933,8 @@ def _make_callback_class():
 
             if env is None and envs is None:
                 raise ValueError("SelfPlayCallback needs either env= or envs=")
+            if envs is not None and len(envs) == 0:
+                raise ValueError("SelfPlayCallback got envs=[]: there are no self-play opponents to update")
 
             self.env = env
             self._explicit_envs = list(envs) if envs is not None else None
@@ -640,39 +945,89 @@ def _make_callback_class():
 
             self.win_rate_history: list[float] = []
             self.pool_additions = 0
+            self._vec_indices: list[int] | None = None
+            # (agent_wins, total_games) at the previous pool check: the pool
+            # gate judges the games played since then, not the whole run.
+            self._pool_window_start = (0, 0)
+
+        # -- target plumbing ------------------------------------------------
+
+        def _uses_env_method(self) -> bool:
+            return self._explicit_envs is None and _is_vec_env(self.env)
+
+        def _self_play_indices(self) -> list[int]:
+            """Indices of the vec-env workers wrapped in SelfPlayEnv."""
+            if self._vec_indices is None:
+                flags = self.env.env_is_wrapped(SelfPlayEnv)
+                indices = [i for i, wrapped in enumerate(flags) if wrapped]
+                if not indices:
+                    raise ValueError(
+                        f"SelfPlayCallback: none of the {len(flags)} envs in {type(self.env).__name__} is a "
+                        "SelfPlayEnv, so there is no opponent to update. Build the envs with "
+                        "make_self_play_vec_env."
+                    )
+                self._vec_indices = indices
+            return self._vec_indices
+
+        def _call(self, method: str, *args: Any, **kwargs: Any) -> list[Any]:
+            """Call ``method`` on every self-play env, in-process or in a worker."""
+            if self._uses_env_method():
+                return self.env.env_method(method, *args, indices=self._self_play_indices(), **kwargs)
+            return [getattr(env, method)(*args, **kwargs) for env in self._get_self_play_envs()]
 
         def _get_self_play_envs(self) -> list[SelfPlayEnv]:
-            """Get all SelfPlayEnv instances (explicit list or discovered)."""
+            """In-process SelfPlayEnv instances (explicit list or discovered).
+
+            Raises for SubprocVecEnv (whose envs live in other processes and
+            are reached through ``env_method``) and when none are found.
+            """
             if self._explicit_envs is not None:
                 return self._explicit_envs
-
-            envs = []
-            # Vectorized envs: unwrap each sub-env's .env chain until a
-            # SelfPlayEnv shows up (Monitor/wrapper layers in between).
-            candidates = self.env.envs if hasattr(self.env, "envs") else [self.env]
-            for env in candidates:
-                current = env
-                while current is not None:
-                    if isinstance(current, SelfPlayEnv):
-                        envs.append(current)
-                        break
-                    current = getattr(current, "env", None)
+            if _is_vec_env(self.env) and not hasattr(self.env, "envs"):
+                raise TypeError(
+                    f"{type(self.env).__name__} runs its envs in worker processes; SelfPlayCallback reaches "
+                    "them through env_method and cannot return the env objects."
+                )
+            envs = _find_self_play_envs(self.env)
+            if not envs:
+                raise ValueError(f"SelfPlayCallback: no SelfPlayEnv found in {type(self.env).__name__}")
             return envs
 
         def _resolve_pool(self):
-            """The shared pool if given, else the first env pool found."""
+            """The shared pool if given, else the first in-process env pool found."""
             if self.opponent_pool is not None:
                 return self.opponent_pool
+            if self._uses_env_method() and not hasattr(self.env, "envs"):
+                return None
             for env in self._get_self_play_envs():
                 if env.opponent_pool is not None:
                     return env.opponent_pool
             return None
 
+        def _collect_stats(self) -> tuple[int, int]:
+            """(agent_wins, total_games) summed over all self-play envs."""
+            stats = self._call("get_self_play_stats")
+            return sum(s["agent_wins"] for s in stats), sum(s["total_games"] for s in stats)
+
+        # -- lifecycle ----------------------------------------------------
+
         def _init_callback(self) -> None:
             """Called by BaseCallback.init_callback() after self.model is set."""
 
         def _on_training_start(self) -> None:
-            """Initialize opponents with the current model."""
+            """Validate the wiring and initialize opponents with the current model."""
+            if (
+                self.opponent_pool is None
+                and self._uses_env_method()
+                and not hasattr(self.env, "envs")
+                and any(self._call("has_opponent_pool"))
+            ):
+                # Each worker holds a private copy of the pool; without the
+                # trainer-side pool nothing could ever be added to it.
+                raise ValueError(
+                    "The self-play workers have an opponent pool but SelfPlayCallback got no opponent_pool=. "
+                    "Pass the same OpponentPool given to make_self_play_vec_env."
+                )
             if self.verbose >= 1:
                 logger.info("Initializing self-play opponents with current model...")
             self._update_opponents(log=False)
@@ -691,20 +1046,18 @@ def _make_callback_class():
             return True
 
         def _get_average_win_rate(self) -> float:
-            """Average win rate across all self-play envs."""
-            win_rates = [env.get_win_rate() for env in self._get_self_play_envs()]
-            return float(np.mean(win_rates)) if win_rates else 0.5
+            """Agent win rate over every game finished so far, pooled across envs."""
+            wins, games = self._collect_stats()
+            return wins / games if games else 0.5
 
         def _update_opponents(self, log: bool = True) -> None:
-            """Update all opponents to current model."""
-            for env in self._get_self_play_envs():
-                env.set_opponent_model(self.model)
-                env.update_opponent_from_current()
+            """Update all opponents to a snapshot of the current model."""
+            self._call("set_opponent_snapshot", policy_snapshot(self.model))
 
             if log and self.verbose >= 1:
                 logger.info(
                     "Step %d: Updated opponents. Avg win rate: %.2f%%",
-                    self.n_calls,
+                    self.num_timesteps,
                     self._get_average_win_rate() * 100,
                 )
 
@@ -712,12 +1065,8 @@ def _make_callback_class():
             """Log training statistics (and tensorboard series when attached)."""
             if self.verbose < 1 and getattr(self, "logger", None) is None:
                 return
-            envs = self._get_self_play_envs()
-            if not envs:
-                return
-            avg_win_rate = self._get_average_win_rate()
-            total_games = sum(env.stats["total_games"] for env in envs)
-            total_wins = sum(env.stats["agent_wins"] for env in envs)
+            total_wins, total_games = self._collect_stats()
+            avg_win_rate = total_wins / total_games if total_games else 0.5
 
             if self.verbose >= 1:
                 logger.info(
@@ -738,29 +1087,44 @@ def _make_callback_class():
                     sb3_logger.record("self_play/pool_size", pool.size)
 
         def _add_to_pool(self) -> None:
-            """Add current model to opponent pool if win rate is good enough."""
+            """Add current model to opponent pool if its recent win rate is good enough."""
             pool = self._resolve_pool()
-            if pool is None or not self._get_self_play_envs():
+            if pool is None:
                 return
 
-            avg_win_rate = self._get_average_win_rate()
-            self.win_rate_history.append(avg_win_rate)
+            wins, games = self._collect_stats()
+            prev_wins, prev_games = self._pool_window_start
+            self._pool_window_start = (wins, games)
+            window_games = games - prev_games
+            if window_games <= 0:
+                if self.verbose >= 1:
+                    logger.info("Step %d: No self-play games finished since the last pool check", self.num_timesteps)
+                return
+            win_rate = (wins - prev_wins) / window_games
+            self.win_rate_history.append(win_rate)
 
-            if avg_win_rate >= self.min_win_rate_for_pool:
-                pool.add_model(self.model, timestep=self.num_timesteps, win_rate=avg_win_rate)
+            if win_rate >= self.min_win_rate_for_pool:
+                params = pool.add_model(self.model, timestep=self.num_timesteps, win_rate=win_rate)
+                if params is None:
+                    return
                 self.pool_additions += 1
+                # Mirror into the envs' own pools (worker processes hold
+                # copies; in-process envs sharing ``pool`` skip it).
+                self._call("add_opponent_to_pool", params, {"timestep": self.num_timesteps, "win_rate": win_rate})
                 if self.verbose >= 1:
                     logger.info(
-                        "Step %d: Added model to pool (win rate: %.2f%%, pool size: %d)",
+                        "Step %d: Added model to pool (win rate: %.2f%% over %d games, pool size: %d)",
                         self.num_timesteps,
-                        avg_win_rate * 100,
+                        win_rate * 100,
+                        window_games,
                         pool.size,
                     )
             elif self.verbose >= 1:
                 logger.info(
-                    "Step %d: Win rate %.2f%% below threshold %.2f%%, not adding to pool",
+                    "Step %d: Win rate %.2f%% over %d games below threshold %.2f%%, not adding to pool",
                     self.num_timesteps,
-                    avg_win_rate * 100,
+                    win_rate * 100,
+                    window_games,
                     self.min_win_rate_for_pool * 100,
                 )
 
@@ -768,6 +1132,47 @@ def _make_callback_class():
 
 
 SelfPlayCallback = _make_callback_class()
+
+
+def _env_kwargs(
+    *,
+    map_file: str | None,
+    max_steps: int,
+    max_turns: int | None,
+    reward_config: dict[str, float] | None,
+    enabled_units: list[str] | None,
+    action_space_type: str,
+    max_flat_actions: int,
+    max_actions_per_turn: int | None,
+    gamma: float,
+    pad_to_size: tuple[int, int] | None,
+) -> dict[str, Any]:
+    """The StrategyGameEnv construction kwargs shared by self-play and bot workers."""
+    return {
+        "map_file": map_file,
+        "render_mode": None,
+        "max_steps": max_steps,
+        "max_turns": max_turns,
+        "reward_config": reward_config,
+        "enabled_units": enabled_units,
+        "action_space_type": action_space_type,
+        "max_flat_actions": max_flat_actions,
+        "max_actions_per_turn": max_actions_per_turn,
+        "opponent_kwargs": None,
+        "gamma": gamma,
+        "pad_to_size": tuple(pad_to_size) if pad_to_size is not None else None,
+        "engine_overrides": None,
+        "gold_scale": None,
+        "turn_scale": None,
+        "unit_count_scale": None,
+    }
+
+
+def _build_self_play_env(env_kwargs: dict[str, Any], opponent_pool: OpponentPool | None, swap_players: bool) -> SelfPlayEnv:
+    from reinforcetactics.rl.masking import ActionMaskedEnv, _build_strategy_env
+
+    base_env = _build_strategy_env(opponent="self", **env_kwargs)
+    return SelfPlayEnv(ActionMaskedEnv(base_env), opponent_pool=opponent_pool, swap_players=swap_players)
 
 
 def make_self_play_env(
@@ -779,6 +1184,11 @@ def make_self_play_env(
     enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    max_turns: int | None = None,
+    max_actions_per_turn: int | None = None,
+    gamma: float = 0.99,
+    pad_to_size: tuple[int, int] | None = None,
+    seed: int | None = None,
 ) -> SelfPlayEnv:
     """
     Create a single self-play environment.
@@ -792,6 +1202,12 @@ def make_self_play_env(
         enabled_units: List of enabled unit types
         action_space_type: 'multi_discrete' (default) or 'flat_discrete'
         max_flat_actions: Max actions for flat_discrete mode (default 512)
+        max_turns: Game-turn limit before a draw (None = unlimited)
+        max_actions_per_turn: Optional per-turn action budget (both seats)
+        gamma: Discount for potential-based shaping; match the trainer's
+        pad_to_size: Optional ``(pad_h, pad_w)`` observation padding
+            (flat_discrete only)
+        seed: Optional seed for an initial ``reset(seed=...)``
 
     Returns:
         SelfPlayEnv ready for training
@@ -799,66 +1215,61 @@ def make_self_play_env(
     Example:
         env = make_self_play_env()
         model = MaskablePPO("MultiInputPolicy", env)
-
-        # Set opponent after model creation
-        env.set_opponent_model(model)
-
         callback = SelfPlayCallback(env, update_freq=10000)
         model.learn(total_timesteps=1000000, callback=callback)
     """
-    from reinforcetactics.rl.masking import ActionMaskedEnv
-
-    base_env = StrategyGameEnv(
-        map_file=map_file,
-        opponent=None,  # No built-in opponent for self-play
-        render_mode=None,
-        max_steps=max_steps,
-        reward_config=reward_config,
-        enabled_units=enabled_units,
-        action_space_type=action_space_type,
-        max_flat_actions=max_flat_actions,
+    env = _build_self_play_env(
+        _env_kwargs(
+            map_file=map_file,
+            max_steps=max_steps,
+            max_turns=max_turns,
+            reward_config=reward_config,
+            enabled_units=enabled_units,
+            action_space_type=action_space_type,
+            max_flat_actions=max_flat_actions,
+            max_actions_per_turn=max_actions_per_turn,
+            gamma=gamma,
+            pad_to_size=pad_to_size,
+        ),
+        opponent_pool,
+        swap_players,
     )
-
-    # Wrap with action masking first
-    masked_env = ActionMaskedEnv(base_env)
-
-    # Then wrap with self-play
-    self_play_env = SelfPlayEnv(masked_env, opponent_pool=opponent_pool, swap_players=swap_players)
-
-    return self_play_env
+    if seed is not None:
+        env.reset(seed=seed)
+    return env
 
 
 def _make_self_play_env_fn(
     rank: int,
     seed: int,
-    map_file: str | None,
-    max_steps: int,
-    reward_config: dict[str, float] | None,
+    *,
+    env_kwargs: dict[str, Any],
     opponent_pool: OpponentPool | None,
     swap_players: bool,
-    enabled_units: list[str] | None,
-    action_space_type: str = "multi_discrete",
-    max_flat_actions: int = 512,
 ) -> Callable[[], SelfPlayEnv]:
     """Create a function that creates a self-play environment."""
-    from reinforcetactics.rl.masking import ActionMaskedEnv
 
     def _init() -> SelfPlayEnv:
-        base_env = StrategyGameEnv(
-            map_file=map_file,
-            opponent=None,
-            render_mode=None,
-            max_steps=max_steps,
-            reward_config=reward_config,
-            enabled_units=enabled_units,
-            action_space_type=action_space_type,
-            max_flat_actions=max_flat_actions,
-        )
-        base_env.reset(seed=seed + rank)
+        env = _build_self_play_env(env_kwargs, opponent_pool, swap_players)
+        # Seed through the wrapper so the seat draw is part of the seeded
+        # stream too.
+        env.reset(seed=seed + rank)
+        return env
 
-        masked_env = ActionMaskedEnv(base_env)
-        self_play_env = SelfPlayEnv(masked_env, opponent_pool=opponent_pool, swap_players=swap_players)
-        return self_play_env
+    return _init
+
+
+def _make_bot_env_fn(rank: int, seed: int, *, env_kwargs: dict[str, Any], opponent: str) -> Callable[[], gym.Env]:
+    """A scripted-bot worker for a mixed VecEnv (same spaces as the self-play workers)."""
+
+    def _init() -> gym.Env:
+        from reinforcetactics.rl.masking import ActionMaskedEnv, _build_strategy_env
+
+        env = _build_strategy_env(opponent=opponent, **env_kwargs)
+        env.reset(seed=seed + rank)
+        # No Monitor here, matching the self-play workers: the caller wraps
+        # the whole VecEnv in VecMonitor.
+        return ActionMaskedEnv(env)
 
     return _init
 
@@ -875,6 +1286,12 @@ def make_self_play_vec_env(
     enabled_units: list[str] | None = None,
     action_space_type: str = "multi_discrete",
     max_flat_actions: int = 512,
+    max_turns: int | None = None,
+    max_actions_per_turn: int | None = None,
+    gamma: float = 0.99,
+    pad_to_size: tuple[int, int] | None = None,
+    bot_ratio: float = 0.0,
+    bot_opponent: str = "bot",
 ):
     """
     Create vectorized self-play environments for parallel training.
@@ -891,38 +1308,55 @@ def make_self_play_vec_env(
         enabled_units: List of enabled unit types
         action_space_type: 'multi_discrete' (default) or 'flat_discrete'
         max_flat_actions: Max actions for flat_discrete mode (default 512)
+        max_turns: Game-turn limit before a draw (None = unlimited)
+        max_actions_per_turn: Optional per-turn action budget (both seats)
+        gamma: Discount for potential-based shaping; match the trainer's
+        pad_to_size: Optional ``(pad_h, pad_w)`` observation padding
+        bot_ratio: Fraction of workers that play a scripted bot instead of
+            self-play (mixed training). ``round(n_envs * bot_ratio)``
+            workers, which must leave at least one of each kind when > 0.
+        bot_opponent: Opponent type for the bot workers.
 
     Returns:
-        Vectorized environment ready for MaskablePPO
+        Vectorized environment ready for MaskablePPO. Wrap it in
+        ``VecMonitor`` for episode statistics, and pass it (not a list of
+        envs) to :class:`SelfPlayCallback`.
 
     Example:
         pool = OpponentPool(max_size=10)
-        vec_env = make_self_play_vec_env(
-            n_envs=8,
-            opponent_pool=pool
-        )
+        vec_env = make_self_play_vec_env(n_envs=8, opponent_pool=pool)
         model = MaskablePPO("MultiInputPolicy", vec_env)
-
-        callback = SelfPlayCallback(vec_env, update_freq=10000)
+        callback = SelfPlayCallback(vec_env, update_freq=1250, opponent_pool=pool)
         model.learn(total_timesteps=1000000, callback=callback)
     """
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-    env_fns = [
-        _make_self_play_env_fn(
-            i,
-            seed,
-            map_file,
-            max_steps,
-            reward_config,
-            opponent_pool,
-            swap_players,
-            enabled_units,
-            action_space_type,
-            max_flat_actions,
+    if not 0.0 <= bot_ratio < 1.0:
+        raise ValueError(f"bot_ratio must be in [0, 1); got {bot_ratio}")
+    n_bot = int(round(n_envs * bot_ratio))
+    if bot_ratio > 0 and not 0 < n_bot < n_envs:
+        raise ValueError(
+            f"bot_ratio={bot_ratio} with n_envs={n_envs} gives {n_bot} bot workers; mixed training needs at "
+            "least one bot worker and one self-play worker"
         )
-        for i in range(n_envs)
+
+    env_kwargs = _env_kwargs(
+        map_file=map_file,
+        max_steps=max_steps,
+        max_turns=max_turns,
+        reward_config=reward_config,
+        enabled_units=enabled_units,
+        action_space_type=action_space_type,
+        max_flat_actions=max_flat_actions,
+        max_actions_per_turn=max_actions_per_turn,
+        gamma=gamma,
+        pad_to_size=pad_to_size,
+    )
+    env_fns: list[Callable[[], gym.Env]] = [
+        _make_self_play_env_fn(i, seed, env_kwargs=env_kwargs, opponent_pool=opponent_pool, swap_players=swap_players)
+        for i in range(n_envs - n_bot)
     ]
+    env_fns += [_make_bot_env_fn(i, seed, env_kwargs=env_kwargs, opponent=bot_opponent) for i in range(n_envs - n_bot, n_envs)]
 
     if use_subprocess and n_envs > 1:
         vec_env = SubprocVecEnv(env_fns)

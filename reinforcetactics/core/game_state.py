@@ -6,30 +6,49 @@ Fixed version: removed duplicate methods, added type hints, controlled logging.
 from __future__ import annotations
 
 import copy
+import hashlib
 import logging
+import os
+import random
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
-from reinforcetactics.constants import (
-    ALL_UNIT_TYPES,
-    BUILDING_INCOME,
-    HEADQUARTERS_INCOME,
-    MAX_UNITS_PER_PLAYER,
-    STARTING_GOLD,
-    TOWER_INCOME,
-    UNIT_DATA,
-    TileType,
-)
+from reinforcetactics.core import legal_actions, serialization
+from reinforcetactics.core.actions import ACTION_KINDS, ACTOR_KEYS, ActionResult
+from reinforcetactics.core.engine_config import ENGINE_OVERRIDE_KEYS, EngineConfig
+from reinforcetactics.core.fog import FogOfWar
 from reinforcetactics.core.grid import TileGrid
-from reinforcetactics.core.mechanics import GameMechanics
+from reinforcetactics.core.legal_actions import TARGET_RULES
+from reinforcetactics.core.mechanics import GameMechanics, same_side
+from reinforcetactics.core.serialization import SAVE_FORMAT_VERSION as SAVE_FORMAT_VERSION  # re-exported
+from reinforcetactics.core.terrain_rules import TerrainRules
 from reinforcetactics.core.unit import Unit
-from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
+from reinforcetactics.core.visibility import UNEXPLORED, VISIBLE, StructureSnapshot, VisibilityMap
+from reinforcetactics.rules import ALL_UNIT_TYPES, TileType
+
+# Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
+# recomputed and compared, so a mutator that forgets to invalidate fails
+# loudly instead of handing bots and masks a stale action set.
+_CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
+
+# Unit attribute types a search clone can share with the original unit.
+_IMMUTABLE_UNIT_FIELD_TYPES = (type(None), bool, int, float, str, tuple, frozenset)
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def derive_seed(*parts: object) -> int:
+    """A stable 63-bit seed derived from ``parts`` (e.g. a run seed and a game id).
+
+    SHA-256 rather than ``hash()``, which is salted per process and would
+    give a different seed on every run.
+    """
+    key = "|".join(str(p) for p in parts)
+    return int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big") >> 1
 
 
 class GameState:
@@ -37,131 +56,153 @@ class GameState:
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
+    # Every engine_overrides key some resolver reads (see core/engine_config.py).
+    ENGINE_OVERRIDE_KEYS = ENGINE_OVERRIDE_KEYS
+
+    # ------------------------------------------------------------------
+    # Rule configuration: read-only views of ``self.engine_config``
+    # ------------------------------------------------------------------
+    # The game's rules live in one frozen EngineConfig (review core-16);
+    # these keep the names every reader has always used.
+
+    @property
+    def engine_overrides(self) -> dict[str, Any]:
+        """The sparse override overlay the game was created with, as saves record it."""
+        return self.engine_config.overrides
+
+    @property
+    def unit_data(self) -> dict[str, dict[str, Any]]:
+        """Per-unit stats with the overrides applied; units and costs read these, never rules.UNIT_DATA."""
+        return self.engine_config.unit_data
+
+    @property
+    def income_rates(self) -> dict[str, int]:
+        """Gold per turn by structure type (``headquarters``, ``building``, ``tower``)."""
+        return self.engine_config.income_rates
+
+    @property
+    def starting_gold(self) -> int:
+        """Each player's gold at the start of the game."""
+        return self.engine_config.starting_gold
+
+    @property
+    def damage_model(self) -> str:
+        """``"flat"`` or ``"hp_scaled"`` combat damage (see ``mechanics.attack_unit``)."""
+        return self.engine_config.damage_model
+
+    @property
+    def structure_health(self) -> dict[str, int]:
+        """Structure max-HP overrides, ``{tile_code: hp}``."""
+        return self.engine_config.structure_health
+
+    @property
+    def max_units_per_player(self) -> int:
+        """The unit cap ``create_unit`` and the legal actions enforce."""
+        return self.engine_config.max_units_per_player
+
+    @property
+    def terrain_rules(self) -> TerrainRules:
+        """The optional terrain rules (movement costs, charge distance, vision), all off by default."""
+        return self.engine_config.terrain_rules
+
+    @property
+    def begin_first_turn(self) -> bool:
+        """Whether Player 1 got start-of-turn processing on turn 0."""
+        return self.engine_config.begin_first_turn
+
+    @property
+    def legacy_end_rules(self) -> bool:
+        """Whether the game plays by the pre-2026-09 end rules (old replays only)."""
+        return self.engine_config.legacy_end_rules
+
     @staticmethod
-    def _resolve_engine_overrides(
-        overrides: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, int], int]:
-        """Merge a sparse override overlay over the module engine constants.
+    def map_team_declarations(map_data: Any, num_players: int) -> dict[int, int]:
+        """Teams a map declares, as ``{player: team}`` (empty if it declares none).
 
-        Returns ``(unit_data, income_rates, starting_gold)`` fully resolved.
-        ``unit_data`` is a deep copy of :data:`UNIT_DATA` with per-unit,
-        per-field deltas applied (so the shared module dict is never
-        mutated). Unknown unit codes / stat fields raise ``KeyError`` /
-        ``ValueError`` early -- a typo in a balance sweep should fail loud,
-        not silently train on the wrong stats.
+        The canonical team encoding is the structure tile code
+        ``type_player_team`` (``Tile.team``), e.g. ``h_3_1``: player 3's HQ,
+        team 1. Declare it on each player's HQ; other structures may repeat
+        it but must agree. Owners outside ``1..num_players`` are ignored (a
+        1v1v1 map played by two seats).
+
+        Raises:
+            ValueError: if one player is declared on two different teams, or
+                a team id is not a positive int.
         """
-        unit_data = copy.deepcopy(UNIT_DATA)
-        income_rates = {
-            "headquarters": HEADQUARTERS_INCOME,
-            "building": BUILDING_INCOME,
-            "tower": TOWER_INCOME,
-        }
-        starting_gold = STARTING_GOLD
-        if not overrides:
-            return unit_data, income_rates, starting_gold
-
-        if "starting_gold" in overrides:
-            starting_gold = int(overrides["starting_gold"])
-        for ov_key, rate_key in (
-            ("headquarters_income", "headquarters"),
-            ("building_income", "building"),
-            ("tower_income", "tower"),
-        ):
-            if ov_key in overrides:
-                income_rates[rate_key] = int(overrides[ov_key])
-
-        unit_overrides = overrides.get("unit_data") or {}
-        for code, fields in unit_overrides.items():
-            if code not in unit_data:
-                raise KeyError(f"engine_overrides.unit_data: unknown unit code '{code}'")
-            for field, value in fields.items():
-                if field not in unit_data[code]:
+        grid = map_data if isinstance(map_data, TileGrid) else TileGrid(map_data)
+        declared: dict[int, int] = {}
+        for row in grid.tiles:
+            for tile in row:
+                if tile.team is None or tile.player is None or not 1 <= tile.player <= num_players:
+                    continue
+                if tile.team <= 0:
+                    raise ValueError(f"Tile ({tile.x}, {tile.y}) declares team {tile.team}; team ids must be positive")
+                known = declared.setdefault(tile.player, tile.team)
+                if known != tile.team:
                     raise ValueError(
-                        f"engine_overrides.unit_data['{code}']: unknown stat field "
-                        f"'{field}' (valid: {sorted(unit_data[code])})"
+                        f"The map puts player {tile.player} on team {known} and on team {tile.team} "
+                        f"(tile ({tile.x}, {tile.y}))"
                     )
-                unit_data[code][field] = value
-        return unit_data, income_rates, starting_gold
-
-    @staticmethod
-    def _resolve_max_units_per_player(overrides: dict[str, Any]) -> int:
-        """Resolve the per-player unit cap from the engine-override overlay.
-
-        Defaults to :data:`MAX_UNITS_PER_PLAYER`. A positive int is required
-        -- a cap <= 0 would forbid all unit creation, which is never the
-        intent and should fail loud rather than silently soft-lock a game.
-
-        The cap is a *creation gate*, not a retroactive trim: it blocks new
-        ``create_unit`` calls once a player is at the cap but never removes
-        existing units, so a scenario that starts a side at or above the cap
-        (or a sweep that sets the cap below the starting army) simply can't
-        grow until attrition drops the count. It is therefore a soft ceiling
-        on growth, not a hard guarantee of ``<= cap`` units at every instant.
-        """
-        if "max_units_per_player" not in (overrides or {}):
-            return MAX_UNITS_PER_PLAYER
-        val = int(overrides["max_units_per_player"])
-        if val <= 0:
-            raise ValueError(f"engine_overrides.max_units_per_player must be a positive int, got {val}")
-        return val
-
-    @staticmethod
-    def _resolve_damage_model(overrides: dict[str, Any]) -> str:
-        """Resolve the combat damage model from the engine-override overlay.
-
-        ``"flat"`` (default) reproduces legacy HP-independent damage.
-        ``"hp_scaled"`` multiplies outgoing damage by the attacker's current
-        HP fraction. An unknown value fails loud rather than silently
-        training on an unintended combat model.
-        """
-        model = (overrides or {}).get("damage_model", "flat")
-        if model not in ("flat", "hp_scaled"):
-            raise ValueError(f"engine_overrides.damage_model must be 'flat' or 'hp_scaled', got {model!r}")
-        return model
-
-    # YAML override key -> structure tile-type code. Lets a balance sweep tune
-    # capture difficulty (e.g. ``headquarters_health: 30`` halves a Warrior's
-    # HQ-capture time) from the config surface instead of editing constants.py.
-    _STRUCTURE_HEALTH_KEYS = {
-        "tower_health": "t",
-        "building_health": "b",
-        "headquarters_health": "h",
-    }
+        return declared
 
     @classmethod
-    def _resolve_structure_health(cls, overrides: dict[str, Any]) -> dict[str, int]:
-        """Resolve per-structure max-HP overrides into ``{tile_code: hp}``.
+    def _resolve_teams(
+        cls, grid: TileGrid, num_players: int, teams: dict[int, int] | None, map_teams: bool = True
+    ) -> dict[int, int]:
+        """Resolve every seat's team from the map's declarations and an explicit ``teams``.
 
-        Only keys present in ``overrides`` appear in the result; absent
-        structures keep their ``constants.py`` defaults. Non-positive values
-        fail loud (a structure with <=0 HP would be captured on the first
-        seize / be nonsensical for regen).
+        Both sources may declare a player; they must agree (``map_teams=False``
+        ignores the map's). A player neither
+        declares is a team of its own: its player number when nothing at
+        all is declared (free-for-all, so 1v1 and 1v1v1 maps are unchanged),
+        otherwise a fresh id after the declared ones so it cannot collide
+        with a declared team.
+
+        Raises:
+            ValueError: on a conflicting or malformed declaration, or when
+                every seat ends up on one team (nobody left to fight).
         """
-        resolved: dict[str, int] = {}
-        for ov_key, code in cls._STRUCTURE_HEALTH_KEYS.items():
-            if ov_key in (overrides or {}):
-                val = int(overrides[ov_key])
-                if val <= 0:
-                    raise ValueError(f"engine_overrides.{ov_key} must be a positive int, got {val}")
-                resolved[code] = val
+        declared = cls.map_team_declarations(grid, num_players) if map_teams else {}
+        for player, team in (teams or {}).items():
+            if not isinstance(player, int) or not 1 <= player <= num_players:
+                raise ValueError(f"teams: player {player!r} is not a seat of this {num_players}-player game")
+            if not isinstance(team, int) or isinstance(team, bool) or team <= 0:
+                raise ValueError(f"teams: team id for player {player} must be a positive int, got {team!r}")
+            if declared.get(player, team) != team:
+                raise ValueError(f"teams puts player {player} on team {team}, but the map declares team {declared[player]}")
+            declared[player] = team
+
+        resolved: dict[int, int] = {}
+        next_free = max(declared.values(), default=0) + 1
+        for player in range(1, num_players + 1):
+            if player in declared:
+                resolved[player] = declared[player]
+            elif not declared:
+                resolved[player] = player
+            else:
+                resolved[player] = next_free
+                next_free += 1
+        if num_players >= 2 and len(set(resolved.values())) < 2:
+            raise ValueError(f"teams put all {num_players} players on one team; a game needs at least two teams")
         return resolved
 
-    def _apply_structure_health_overrides(self) -> None:
-        """Overlay resolved structure-HP overrides onto the freshly-built grid.
+    @staticmethod
+    def _resolve_rng(rng: Any | None, seed: int | None) -> tuple[int | None, Any]:
+        """Return ``(seed, rng)``: the caller's source, or a game-owned ``random.Random``.
 
-        ``TileGrid`` constructs structure tiles at the ``constants.py`` HP, so
-        this runs right after grid creation while every structure is at full
-        health -- setting both ``max_health`` and ``health`` keeps the tile
-        consistent (regen scales off ``max_health``; capture resets to it).
+        A caller-supplied ``rng`` is used as is, and ``seed`` is recorded
+        only if the caller names one (the engine cannot know how that
+        source was seeded). Otherwise a missing seed is drawn from OS
+        entropy -- not from ``random``, whose state a seeded caller may
+        have fixed for its own purposes.
         """
-        if not self.structure_health:
-            return
-        for row in self.grid.tiles:
-            for tile in row:
-                override_hp = self.structure_health.get(tile.type)
-                if override_hp is not None and tile.is_capturable():
-                    tile.max_health = override_hp
-                    tile.health = override_hp
+        if seed is not None:
+            seed = int(seed)  # numpy ints are not valid random.Random seeds
+        if rng is not None:
+            return seed, rng
+        if seed is None:
+            seed = int.from_bytes(os.urandom(8), "big") >> 1
+        return seed, random.Random(seed)
 
     def __init__(
         self,
@@ -172,28 +213,36 @@ class GameState:
         fog_of_war: bool = False,
         engine_overrides: dict[str, Any] | None = None,
         rng: Any | None = None,
+        seed: int | None = None,
+        teams: dict[int, int] | None = None,
+        map_teams: bool = True,
     ) -> None:
         """
         Initialize the game state.
 
         Args:
-            map_data: 2D array containing map information
+            map_data: Tile codes by row: a pandas DataFrame, numpy array or
+                list of lists
             num_players: Number of players (default 2)
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
             fog_of_war: Enable fog of war (default False for backward compatibility)
-            rng: Optional random source exposing ``random()`` (e.g. a seeded
-                ``random.Random``) used for engine-side stochastic outcomes —
-                currently only the Rogue evade roll in
-                ``mechanics.attack_unit``. ``None`` (default) falls back to
-                the module-global ``random``, preserving legacy behaviour.
-                The RL env passes a generator derived from its episode seed
-                so ``reset(seed=...)`` controls combat randomness too.
-                Replays are unaffected either way: they apply recorded
-                outcomes directly instead of re-rolling
-                (``utils/replay_actions.py``).
+            rng: Optional random source exposing ``random()`` used for
+                engine-side stochastic outcomes -- currently only the Rogue
+                evade roll in ``mechanics.attack_unit``. ``None`` (default)
+                gives the game its own ``random.Random(seed)``; the engine
+                never reads the module-global ``random``. Replays are
+                unaffected either way: they apply recorded outcomes
+                directly instead of re-rolling (``utils/replay_actions.py``).
+            seed: Seed for the game's own RNG (ignored for sampling when
+                ``rng`` is given, but still recorded). ``None`` draws one
+                from OS entropy. Kept in ``self.seed`` and written to saves
+                and replays, so any game can be re-run with the same
+                combat rolls. The RL env passes one derived from its
+                episode seed, the tournament runner one derived from
+                ``rng_seed`` and the game id.
             engine_overrides: Optional sparse overlay over the non-YAML
-                engine constants (``constants.py``), so balance can be
+                engine constants (``rules.py``), so balance can be
                 varied/recorded as config instead of a code edit. Shape::
 
                     {
@@ -206,15 +255,35 @@ class GameState:
                       "headquarters_health": int,
                       "damage_model": "flat" | "hp_scaled",  # combat model
                       "max_units_per_player": int,  # per-player unit cap
+                      "begin_first_turn": bool,    # P1 turn-0 start-of-turn
+                      "legacy_end_rules": bool,    # pre-2026-09 replays only
                       "unit_data": {CODE: {field: value}},  # sparse deltas
+                      # optional terrain rules, see core/terrain_rules.py:
+                      "terrain_move_cost": {TILE_CODE: cost},
+                      "charge_distance": "displacement" | "path",
+                      "forest_concealment": bool,
+                      "hq_always_visible": bool,
                     }
 
                 Every key is optional; absent keys fall back to the module
                 constant, so ``None`` / ``{}`` is byte-identical to today.
-                The resolved tables (``self.unit_data``, ``self.income_rates``,
-                ``self.starting_gold``) are this game's single source of
+                Unknown keys raise ``KeyError`` (see ``ENGINE_OVERRIDE_KEYS``).
+                Resolved into ``self.engine_config`` (an ``EngineConfig``),
+                whose tables (``self.unit_data``, ``self.income_rates``,
+                ``self.starting_gold``, ...) are this game's single source of
                 truth -- units and income read them, never the global
                 constant -- so an override can't leak or be half-applied.
+            teams: Optional ``{player: team}``. Teams can also be declared by
+                the map (``type_player_team`` structure codes, see
+                ``map_team_declarations``); the two must agree. Players
+                nobody declares are each their own team, so by default every
+                game is free-for-all. Teammates are allies for every rule
+                (``are_allies``); the game ends when one team is left.
+            map_teams: Whether the map's ``type_player_team`` codes declare
+                teams (default). ``False`` ignores them: saves and replays
+                written before teams existed were played free-for-all even
+                on a map with those codes (the old 2v2 map put one player on
+                two teams), and are loaded that way.
         """
         self.grid = TileGrid(map_data)
         self.units: list[Unit] = []
@@ -226,28 +295,27 @@ class GameState:
         self._next_unit_id: int = 0
         self.current_player: int = 1
         self.num_players: int = num_players
-        self.engine_overrides: dict[str, Any] = dict(engine_overrides) if engine_overrides else {}
-        (
-            self.unit_data,
-            self.income_rates,
-            self.starting_gold,
-        ) = self._resolve_engine_overrides(self.engine_overrides)
-        # Combat damage model (engine-side, config-surfaced via engine_overrides
-        # so it's snapshotted into config.json like the economy). "flat"
-        # (default, legacy) = HP-independent damage; "hp_scaled" = damage
-        # multiplied by the attacker's current HP fraction (decisive combat;
-        # consistent with seize, which is already HP-scaled).
-        self.damage_model: str = self._resolve_damage_model(self.engine_overrides)
-        # Per-structure max-HP overrides (capture-difficulty lever). Resolved
-        # from engine_overrides and overlaid onto the grid built above; absent
-        # keys keep constants.py defaults. Snapshotted into config.json via the
-        # verbatim engine_overrides log, same as damage_model / economy.
-        self.structure_health: dict[str, int] = self._resolve_structure_health(self.engine_overrides)
-        self._apply_structure_health_overrides()
-        # Hard ceiling on units-per-player (action-space + economy guardrail).
-        # Enforced in both create_unit and get_legal_actions so the cap shows
-        # up in the action mask, not just as a rejected action.
-        self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
+        # Player -> team id for every seat (see _resolve_teams). Every
+        # hostility rule goes through are_allies/are_enemies, which read it.
+        self._teams_arg: dict[int, int] | None = dict(teams) if teams else None
+        self._map_teams: bool = map_teams
+        self.teams: dict[int, int] = self._resolve_teams(self.grid, num_players, teams, map_teams)
+        # Seats knocked out of the game (review core-7): they hold no units
+        # or structures and end_turn skips them. With more than two teams a
+        # player is eliminated when it loses its last HQ, its last unit or
+        # resigns, and the game goes on until one team is left; with two
+        # teams the first HQ capture still ends the game outright.
+        self.eliminated_players: set[int] = set()
+        # The game's rules: engine_overrides validated and resolved over the
+        # rules.py constants (economy, unit stats, structure HP, unit cap,
+        # damage model, terrain and turn rules; see core/engine_config.py).
+        # Fixed for the whole game and read through the properties above
+        # (self.unit_data, self.starting_gold, ...), so an override can't
+        # leak between games or be half-applied.
+        self.engine_config: EngineConfig = EngineConfig.from_overrides(engine_overrides)
+        # Structure max-HP overrides (capture-difficulty lever) go onto the
+        # grid built above while every structure is still at full health.
+        self.engine_config.apply_structure_health(self.grid)
         self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         # Cumulative structure auto-heal totals per player (HP restored and
         # gold spent by ``heal_units_on_structures`` over the whole game).
@@ -272,21 +340,19 @@ class GameState:
         self.game_over_action_index: int | None = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
-        # Engine-side RNG for stochastic combat outcomes (Rogue evade).
-        # ``None`` = module-global ``random`` (legacy / GUI play); seeded
-        # callers (the RL env) inject a ``random.Random`` for reproducibility.
-        self.rng: Any | None = rng
+        # Engine-side RNG for stochastic combat outcomes (Rogue evade). Every
+        # game owns one (review core-10): the old default, the module-global
+        # ``random``, made seeded tournaments, AlphaZero evals and BC datasets
+        # irreproducible and was shared by every thread. The seed is recorded
+        # even when drawn from entropy, so any game can be re-run.
+        self.seed: int | None
+        self.rng: Any
+        self.seed, self.rng = self._resolve_rng(rng, seed)
 
-        # Fog of war settings
-        self.fog_of_war: bool = fog_of_war
-        # FOW method for future compatibility when different algorithms are added
-        # Current options: 'simple_radius' (Option A from proposal)
-        # Future options: 'line_of_sight', 'hybrid'
-        self.fog_of_war_method: str = "simple_radius" if fog_of_war else "none"
-        self.visibility_maps: dict[int, VisibilityMap] = {}
-        if fog_of_war:
-            for player in range(1, num_players + 1):
-                self.visibility_maps[player] = VisibilityMap(self.grid.width, self.grid.height, player)
+        # Fog of war: each player's visibility map and the rules that read
+        # them (core/fog.py). Its maps are built and first computed at the
+        # end of __init__, once the whole state exists.
+        self.fog: FogOfWar = FogOfWar(self, fog_of_war)
 
         # Enabled unit types (defaults to all if not specified)
         self.enabled_units: list[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
@@ -294,25 +360,12 @@ class GameState:
         # Optional map file reference for saving
         self.map_file_used: str | None = None
 
-        # Original map dimensions (before padding)
-        # These default to the current grid dimensions if not set
-        self.original_map_width: int = self.grid.width
-        self.original_map_height: int = self.grid.height
-        self.map_padding_offset_x: int = 0
-        self.map_padding_offset_y: int = 0
-
-        # Store initial map data for replays (as 2D list of tile codes)
-        # This stores the PADDED map by default
-        if isinstance(map_data, pd.DataFrame):
-            self.initial_map_data: list[list[str]] = map_data.values.tolist()
-        elif isinstance(map_data, np.ndarray):
-            self.initial_map_data: list[list[str]] = map_data.tolist()
-        else:
-            self.initial_map_data: list[list[str]] = [list(row) for row in map_data]
-
-        # Store original unpadded map data (will be set via set_map_metadata if map was padded)
-        # If not set, defaults to the same as initial_map_data (no padding)
-        self.original_map_data: list[list[str]] | None = None
+        # The tile codes the grid was built from (a 2D list), for saves and
+        # replays. Every coordinate the engine uses or records -- units,
+        # structures, action_history -- is on this grid: a GUI game's map is
+        # the UI-padded one (FileIO.load_map(for_ui=True)), so its saves and
+        # replays carry that padding too, and stay self-consistent.
+        self.initial_map_data: list[list[str]] = np.asarray(map_data, dtype=object).tolist()
 
         # Player configurations (human vs bot)
         self.player_configs: list[dict[str, Any]] = []
@@ -324,11 +377,18 @@ class GameState:
         self.action_history: list[dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
 
-        # Cached values for performance (separate validity flags to prevent stale cross-reads)
-        self._unit_count_cache: dict[int, int] = {}
-        self._unit_count_cache_valid: bool = False
+        # Cached legal actions per player (see get_legal_actions)
         self._legal_actions_cache: dict[int, dict[str, list[Any]]] = {}
         self._legal_actions_cache_valid: bool = False
+
+        # Every player starts with a computed fog-of-war view. Callers used to
+        # have to call update_visibility() after construction, and a game
+        # built without it showed nothing at all until the first move.
+        self.fog.reset()
+        # Turn 0 for Player 1 (see begin_first_turn). Last, so the
+        # whole state exists; the default leaves turn 0 as it always was.
+        if self.begin_first_turn:
+            self._begin_turn(self.current_player)
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
@@ -340,67 +400,13 @@ class GameState:
             self.fog_of_war,
             engine_overrides=self.engine_overrides,
             rng=self.rng,
+            seed=self.seed,
+            teams=self._teams_arg,
+            map_teams=self._map_teams,
         )
-
-    def set_map_metadata(
-        self,
-        original_width: int,
-        original_height: int,
-        padding_offset_x: int,
-        padding_offset_y: int,
-        map_file: str | None = None,
-        original_map_data: list[list[str]] | None = None,
-    ) -> None:
-        """
-        Set metadata about the original map before padding.
-
-        Args:
-            original_width: Width of the map before padding
-            original_height: Height of the map before padding
-            padding_offset_x: X offset added by padding (left side)
-            padding_offset_y: Y offset added by padding (top side)
-            map_file: Path to the map file
-            original_map_data: The unpadded map data (2D list of tile codes)
-        """
-        self.original_map_width = original_width
-        self.original_map_height = original_height
-        self.map_padding_offset_x = padding_offset_x
-        self.map_padding_offset_y = padding_offset_y
-        if map_file:
-            self.map_file_used = map_file
-        if original_map_data:
-            self.original_map_data = original_map_data
-
-    def padded_to_original_coords(self, x: int, y: int) -> tuple[int, int]:
-        """
-        Convert padded map coordinates to original map coordinates.
-
-        Args:
-            x: X coordinate in padded map
-            y: Y coordinate in padded map
-
-        Returns:
-            Tuple of (original_x, original_y)
-        """
-        return (x - self.map_padding_offset_x, y - self.map_padding_offset_y)
-
-    def original_to_padded_coords(self, x: int, y: int) -> tuple[int, int]:
-        """
-        Convert original map coordinates to padded map coordinates.
-
-        Args:
-            x: X coordinate in original map
-            y: Y coordinate in original map
-
-        Returns:
-            Tuple of (padded_x, padded_y)
-        """
-        return (x + self.map_padding_offset_x, y + self.map_padding_offset_y)
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
-        self._unit_count_cache_valid = False
-        self._unit_count_cache.clear()
         self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
@@ -421,140 +427,201 @@ class GameState:
         self.end_reason = end_reason
         self.game_over_action_index = len(self.action_history) - 1 if self.action_history else -1
 
-    def _check_player_eliminated(self, defeated_player: int) -> None:
-        """Check if a player has been eliminated and determine winner if appropriate.
+    # ------------------------------------------------------------------
+    # Teams and elimination
+    # ------------------------------------------------------------------
 
-        For 2-player games, the other player wins immediately.
-        For 3+ player games, a winner is only declared when exactly one player remains.
+    def team_of(self, player: int) -> int | None:
+        """The team ``player`` plays on (None for a player outside this game)."""
+        return self.teams.get(player)
+
+    def are_allies(self, player_a: int | None, player_b: int | None) -> bool:
+        """Same player or teammates. ``None`` (a neutral owner) is nobody's ally."""
+        return same_side(player_a, player_b, self.teams)
+
+    def are_enemies(self, player_a: int | None, player_b: int | None) -> bool:
+        """Two players on different teams. ``None`` (neutral) is nobody's enemy either."""
+        return player_a is not None and player_b is not None and not self.are_allies(player_a, player_b)
+
+    def is_eliminated(self, player: int) -> bool:
+        """Whether ``player`` has been knocked out of the game (see ``eliminated_players``)."""
+        return player in self.eliminated_players
+
+    def _active_players(self) -> list[int]:
+        """Seats still in the game, in turn order."""
+        return [p for p in range(1, self.num_players + 1) if p not in self.eliminated_players]
+
+    def _starting_team_count(self) -> int:
+        return len(set(self.teams.values()))
+
+    def _player_owns_hq(self, player: int) -> bool:
+        return any(
+            tile.type == TileType.HEADQUARTERS.value and tile.player == player for row in self.grid.tiles for tile in row
+        )
+
+    def _eliminate_player(self, player: int, reason: str, by_player: int | None = None) -> None:
+        """Knock ``player`` out of the game (review core-7).
+
+        While other teams play on, its units are removed and every structure
+        it still owns becomes neutral (health kept, so an enemy mid-seize
+        keeps its progress); end_turn skips it from now on, so it gets no
+        turns, income or new units. When one team is left the game ends with
+        ``reason`` as its end reason and the board is left as it stands, as
+        a decided game's always was; the winner is ``by_player`` (whose
+        action decided it) when it is on the winning team, else that team's
+        lowest-numbered remaining player. In games with more than two seats
+        the elimination is also recorded as an ``eliminate`` action so
+        replays and analysis see it; a two-seat game ends at its first
+        elimination, which game_info already describes, so its action log is
+        unchanged.
         """
-        remaining_units = [u for u in self.units if u.player == defeated_player]
-        if len(remaining_units) == 0:
-            if self.num_players == 2:
-                self._set_game_over(winner=2 if defeated_player == 1 else 1, end_reason="elimination")
-            else:
-                active_players = set(u.player for u in self.units)
-                if len(active_players) == 1:
-                    self._set_game_over(winner=active_players.pop(), end_reason="elimination")
+        if self.game_over or player in self.eliminated_players:
+            return
+        self.eliminated_players.add(player)
+        if self.num_players > 2:
+            self.record_action("eliminate", eliminated_player=player, reason=reason)
+        logger.debug("Player %d eliminated (%s)", player, reason)
+
+        remaining_teams = {self.teams[p] for p in self._active_players()}
+        if len(remaining_teams) > 1:
+            # In place: bots and the renderer may hold a reference to the list.
+            self.units[:] = [u for u in self.units if u.player != player]
+            for row in self.grid.tiles:
+                for tile in row:
+                    if tile.is_capturable() and tile.player == player:
+                        tile.player = None
+            self._invalidate_cache()
+            return
+        if not remaining_teams:
+            self._set_game_over(winner=None, end_reason=reason)
+            return
+        winning_team = remaining_teams.pop()
+        if by_player is not None and self.teams.get(by_player) == winning_team and by_player not in self.eliminated_players:
+            winner = by_player
+        else:
+            winner = min(p for p in self._active_players() if self.teams[p] == winning_team)
+        self._set_game_over(winner=winner, end_reason=reason)
+
+    def _check_player_eliminated(self, defeated_player: int) -> None:
+        """Eliminate ``defeated_player`` if it has just lost its last unit.
+
+        Called when one of its units dies. In a 1v1 this ends the game with
+        the opponent as the winner, as it always did; with more seats the
+        player is knocked out and the game ends only when one team is left
+        (see ``_eliminate_player``).
+        """
+        if any(u.player == defeated_player for u in self.units):
+            return
+        if self.legacy_end_rules:
+            self._legacy_last_player_standing(defeated_player, "elimination")
+            return
+        self._eliminate_player(defeated_player, "elimination", by_player=self.current_player)
+
+    def _legacy_last_player_standing(self, defeated_player: int, reason: str) -> None:
+        """The pre-September-2026 end check after ``defeated_player`` lost its units (see ``legacy_end_rules``).
+
+        Two seats: the other player wins. More: the game ends when only one
+        player has units left (after a resign, also when none has). Nobody
+        is eliminated otherwise.
+        """
+        if self.num_players == 2:
+            self._set_game_over(winner=2 if defeated_player == 1 else 1, end_reason=reason)
+            return
+        players_with_units = {u.player for u in self.units}
+        if len(players_with_units) == 1:
+            self._set_game_over(winner=players_with_units.pop(), end_reason=reason)
+        elif not players_with_units and reason == "resign":
+            self._set_game_over(winner=None, end_reason=reason)
+
+    def _on_hq_captured(self, capturer: int, previous_owner: int | None) -> None:
+        """Apply the end rule for an HQ that ``capturer`` just took from ``previous_owner``.
+
+        Two teams (1v1, 2v2): capturing an enemy HQ wins the game for the
+        capturer's team, as it always did. More than two teams
+        (free-for-all): the previous owner is eliminated once it holds no HQ
+        any more, and play goes on for everyone else. A neutral HQ (left by
+        an eliminated player) is just a structure: taking it ends nothing.
+        """
+        if previous_owner is None or self.game_over:
+            return
+        if self.legacy_end_rules or self._starting_team_count() <= 2:
+            self._set_game_over(winner=capturer, end_reason="hq_capture")
+        elif not self._player_owns_hq(previous_owner):
+            self._eliminate_player(previous_owner, "hq_capture", by_player=capturer)
+
+    # ------------------------------------------------------------------
+    # Fog of war (the code is in core/fog.py)
+    # ------------------------------------------------------------------
+    # ``self.fog`` owns the visibility maps and the fog-of-war rules; these
+    # keep the names the renderer, the observation builder, the LLM bot,
+    # the gym env, the tests and the notebooks have always called.
+
+    @property
+    def fog_of_war(self) -> bool:
+        """Whether the game is played under fog of war (``fog.enabled``)."""
+        return self.fog.enabled
+
+    @property
+    def fog_of_war_method(self) -> str:
+        """The visibility algorithm: ``"simple_radius"`` under fog of war, else ``"none"`` (``fog.method``)."""
+        return self.fog.method
+
+    @property
+    def visibility_maps(self) -> dict[int, VisibilityMap]:
+        """Each player's ``VisibilityMap`` (``fog.maps``; empty without fog of war)."""
+        return self.fog.maps
 
     def update_visibility(self, player: int | None = None) -> None:
-        """
-        Update visibility maps for fog of war.
+        """Recompute ``player``'s fog-of-war view, every player's when None (``FogOfWar.update``).
 
-        Args:
-            player: Specific player to update, or None to update all players
+        The engine calls this itself whenever a player's vision can change
+        (construction and load, moves, unit creation and placement, captures,
+        deaths, turn changes), so callers never need to.
         """
-        if not self.fog_of_war:
-            return
-
-        if player is not None:
-            if player in self.visibility_maps:
-                self.visibility_maps[player].update(self)
-                self.visibility_maps[player].clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
-        else:
-            for vis_map in self.visibility_maps.values():
-                vis_map.update(self)
-                vis_map.clear_stale_unit_memory(max_turns=10, current_turn=self.turn_number)
+        self.fog.update(player)
 
     def get_visible_units_for_player(self, player: int, include_own: bool = True) -> list[Unit]:
-        """
-        Get units visible to a specific player.
-
-        Args:
-            player: Player to get visible units for
-            include_own: Whether to include the player's own units
-
-        Returns:
-            List of visible units
-        """
-        return get_visible_units(self, player, include_own)
+        """The units ``player`` can see, its own too unless ``include_own`` is False (``FogOfWar.visible_units``)."""
+        return self.fog.visible_units(player, include_own)
 
     def is_position_visible(self, x: int, y: int, player: int) -> bool:
-        """
-        Check if a position is visible to a player.
-
-        Args:
-            x: X coordinate
-            y: Y coordinate
-            player: Player to check visibility for
-
-        Returns:
-            True if position is visible (or if fog of war is disabled)
-        """
-        if not self.fog_of_war:
-            return True
-
-        vis_map = self.visibility_maps.get(player)
-        if vis_map is None:
-            return True
-
-        return vis_map.is_visible(x, y)
+        """Whether ``(x, y)`` is in ``player``'s sight (always without fog of war; ``FogOfWar.is_visible``)."""
+        return self.fog.is_visible(x, y, player)
 
     def is_position_explored(self, x: int, y: int, player: int) -> bool:
+        """Whether ``player`` has explored ``(x, y)`` (always without fog of war; ``FogOfWar.is_explored``)."""
+        return self.fog.is_explored(x, y, player)
+
+    def known_structure(self, player: int, x: int, y: int) -> StructureSnapshot | None:
+        """What ``player`` knows about the structure at ``(x, y)``: live in sight, else as last seen.
+
+        The one view of structures under fog of war (``FogOfWar.known_structure``);
+        None when there is none there or ``player`` has never seen it.
         """
-        Check if a position has been explored by a player.
+        return self.fog.known_structure(player, x, y)
 
-        Args:
-            x: X coordinate
-            y: Y coordinate
-            player: Player to check exploration for
+    def pathing_units(self, player: int) -> list[Unit]:
+        """The units ``player``'s pathfinding treats as present (``FogOfWar.pathing_units``).
 
-        Returns:
-            True if position is explored (or if fog of war is disabled)
+        Every unit without fog of war; under it, the player's own and its
+        teammates' units and the units it can see. Public so the GUI's
+        movement overlay plans with the same view and shows exactly the
+        tiles the engine allows.
         """
-        if not self.fog_of_war:
-            return True
-
-        vis_map = self.visibility_maps.get(player)
-        if vis_map is None:
-            return True
-
-        return vis_map.is_explored(x, y)
+        return self.fog.pathing_units(player)
 
     def capture_visible_enemies_for_unit(self, unit: Unit) -> None:
+        """Snapshot the enemies ``unit`` may attack this action: those its owner sees now.
+
+        Prevents "move to discover, then attack" under fog of war. The GUI
+        calls this when a unit is selected; ``move_unit`` takes it lazily
+        otherwise (``FogOfWar.capture_visible_enemies``).
         """
-        Capture which enemy units are currently visible to a unit's owner.
-
-        This is used for fog of war to prevent "move to discover, then attack"
-        exploitation. Call this when a unit starts its action (is selected).
-
-        Args:
-            unit: The unit starting its action
-        """
-        if not self.fog_of_war:
-            unit.visible_enemies_at_action_start = None
-            return
-
-        visible_positions = set()
-        for enemy in self.units:
-            if enemy.player != unit.player:
-                if self.is_position_visible(enemy.x, enemy.y, unit.player):
-                    visible_positions.add((enemy.x, enemy.y))
-
-        unit.visible_enemies_at_action_start = visible_positions
+        self.fog.capture_visible_enemies(unit)
 
     def is_enemy_attackable_by_unit(self, unit: Unit, enemy: Unit) -> bool:
-        """
-        Check if an enemy is attackable by a unit considering FOW pre-move snapshot.
-
-        In fog of war mode, a unit can only attack enemies that were visible
-        when the unit started its action, not enemies discovered by moving.
-
-        Args:
-            unit: The attacking unit
-            enemy: The potential target
-
-        Returns:
-            True if the enemy can be attacked
-        """
-        if not self.fog_of_war:
-            return True  # No FOW, all visible enemies are attackable
-
-        # If no snapshot was captured, fall back to current visibility
-        if unit.visible_enemies_at_action_start is None:
-            return self.is_position_visible(enemy.x, enemy.y, unit.player)
-
-        # Check if enemy's position was in the pre-move snapshot
-        return (enemy.x, enemy.y) in unit.visible_enemies_at_action_start
+        """Whether fog of war lets ``unit`` attack ``enemy``: seen when its action began (``FogOfWar.is_enemy_attackable``)."""
+        return self.fog.is_enemy_attackable(unit, enemy)
 
     def is_unit_type_enabled(self, unit_type: str) -> bool:
         """Check if a unit type is enabled for this game."""
@@ -565,17 +632,15 @@ class GameState:
         self.enabled_units = enabled_units
         self._invalidate_cache()
 
-    def get_unit_count(self, player: int) -> int:
-        """Get cached unit count for a player."""
-        if not self._unit_count_cache_valid:
-            self._unit_count_cache = {}
-            for unit in self.units:
-                self._unit_count_cache[unit.player] = self._unit_count_cache.get(unit.player, 0) + 1
-            self._unit_count_cache_valid = True
-        return self._unit_count_cache.get(player, 0)
-
     def get_unit_at_position(self, x: int, y: int) -> Unit | None:
-        """Get the unit at a grid position."""
+        """Get the unit at a grid position.
+
+        A linear scan, deliberately: a persistent position index would go
+        stale whenever a unit is moved or removed outside GameState's own
+        methods, and the replay applier, the rule bots' look-ahead and many
+        tests do exactly that. The hot path (pathfinding) builds its own
+        occupancy set per call instead (review core-20).
+        """
         for unit in self.units:
             if unit.x == x and unit.y == y:
                 return unit
@@ -585,11 +650,13 @@ class GameState:
         """
         Record an action for replay purposes.
 
-        Automatically converts any coordinate parameters from padded to original coordinates.
+        Coordinates are recorded as given, on this game's grid: a replay
+        stores ``initial_map_data`` with them, and its playback translates
+        both onto its own display padding the same way.
 
         Args:
             action_type: Type of action (move, attack, create_unit, etc.)
-            **kwargs: Action-specific parameters (coordinates will be converted)
+            **kwargs: Action-specific parameters
         """
         # Don't log anything once the game has been decided. Without this,
         # bots that don't break their per-unit loop on game_over append
@@ -600,57 +667,244 @@ class GameState:
         if self.game_over:
             return
 
-        # Convert coordinate parameters from padded to original
-        converted_kwargs = {}
-        for key, value in kwargs.items():
-            if key in ["x", "y", "from_x", "from_y", "to_x", "to_y"]:
-                # Single coordinate value
-                if key.endswith("_x"):
-                    # Store x coordinate to pair with y
-                    converted_kwargs[key] = value
-                elif key.endswith("_y"):
-                    # Convert the x,y pair
-                    x_key = key.replace("_y", "_x")
-                    if x_key in kwargs:
-                        orig_x, orig_y = self.padded_to_original_coords(kwargs[x_key], value)
-                        converted_kwargs[x_key] = orig_x
-                        converted_kwargs[key] = orig_y
-                    else:
-                        converted_kwargs[key] = value
-                elif key == "x":
-                    # Will be converted when we see 'y'
-                    converted_kwargs[key] = value
-                elif key == "y":
-                    # Convert x,y pair
-                    if "x" in kwargs:
-                        orig_x, orig_y = self.padded_to_original_coords(kwargs["x"], value)
-                        converted_kwargs["x"] = orig_x
-                        converted_kwargs[key] = orig_y
-                    else:
-                        converted_kwargs[key] = value
-            elif key in ["position", "attacker_pos", "target_pos", "healer_pos", "paralyzer_pos", "curer_pos"]:
-                # Tuple/list of (x, y) coordinates
-                if isinstance(value, (tuple, list)) and len(value) == 2:
-                    orig_x, orig_y = self.padded_to_original_coords(value[0], value[1])
-                    converted_kwargs[key] = (orig_x, orig_y)
-                else:
-                    converted_kwargs[key] = value
-            else:
-                # Non-coordinate parameter, keep as-is
-                converted_kwargs[key] = value
-
         action_record = {
             "turn": self.turn_number,
             "player": self.current_player,
             "type": action_type,
             "timestamp": datetime.now().isoformat(),
-            **converted_kwargs,
+            **kwargs,
         }
         self.action_history.append(action_record)
+
+    # ------------------------------------------------------------------
+    # Validating actions (the rules are in core/legal_actions.py)
+    # ------------------------------------------------------------------
+    # Each rule is written once, in core/legal_actions.py, and used twice:
+    # ``enumerate_legal_actions`` offers what a player may do with it, and
+    # the validators below, which the action methods and ``is_legal`` call,
+    # reject anything else with it (review core-2). They add the two gates
+    # that apply only on execution, not in enumeration: the game must not be
+    # over, and it must be the acting player's turn.
+
+    def get_reachable_positions(self, unit: Unit) -> list[tuple[int, int]]:
+        """Tiles ``unit`` can move through this turn, including ones friends stand on.
+
+        Same result as ``unit.get_reachable_positions`` with
+        ``can_move_to_position`` as its predicate over ``pathing_units``,
+        but under the game's terrain move costs and without scanning every
+        unit per tile: for bots, overlays and anything else that plans paths.
+        """
+        return list(legal_actions.find_paths(self, unit))
+
+    def get_move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
+        """Tiles ``unit`` may legally end a move on (reachable and empty), in search order.
+
+        Ignores whose turn it is and whether the unit may still move; see
+        ``get_legal_actions`` for that.
+        """
+        return list(legal_actions.move_paths(self, unit))
+
+    def _may_act(
+        self,
+        action: str,
+        unit: Unit,
+        target: Unit | None = None,
+        rule: Callable[[], bool] | None = None,
+        log: bool = True,
+    ) -> bool:
+        """Validate one unit action before it is applied; log why when it is not.
+
+        Rejects when the game is over; when ``unit`` (or ``target``) is no
+        longer in play -- a stale reference, e.g. a bot still holding a unit
+        that died to a counter earlier in its loop; when it is not the
+        unit's player's turn; when the unit is dead or paralyzed; when the
+        action slot it needs is spent (``can_move`` for a move,
+        ``can_attack`` for attacks, abilities and seizing); or when
+        ``rule`` (the action's target/range predicate) fails. ``log=False``
+        is for ``is_legal``, which asks without attempting anything.
+        """
+        if self.game_over:
+            reason = "the game is over"
+        elif unit not in self.units or (target is not None and target not in self.units):
+            reason = "a unit involved is no longer in play"
+        elif unit.player != self.current_player:
+            reason = f"it is player {self.current_player}'s turn"
+        elif not legal_actions.is_ready_unit(unit, unit.player):
+            reason = "the unit is dead or paralyzed"
+        elif not (unit.can_move if action == "move" else unit.can_attack):
+            reason = "the unit has already spent that action this turn"
+        elif rule is not None and not rule():
+            reason = "the target is out of range, on the wrong side, or a precondition fails"
+        else:
+            return True
+        if log:
+            logger.debug("Rejected %s by player %d %s at (%d, %d): %s", action, unit.player, unit.type, unit.x, unit.y, reason)
+        return False
+
+    def _may_target(self, action: str, actor: Unit, target: Unit, log: bool = True) -> bool:
+        """``_may_act`` for the targeted action ``action`` (a ``TARGET_RULES`` key) from ``actor`` on ``target``."""
+        rule = TARGET_RULES[action]
+        return self._may_act(action, actor, target, lambda: rule(self, actor, target), log=log)
+
+    def _may_seize(self, unit: Unit, log: bool = True) -> bool:
+        """``_may_act`` for ``unit`` seizing the structure it stands on."""
+        return self._may_act("seize", unit, rule=lambda: legal_actions.can_seize(self, unit), log=log)
+
+    def _move_steps(
+        self,
+        unit: Unit,
+        to_x: int,
+        to_y: int,
+        came_from: dict[tuple[int, int], tuple[int, int]] | None = None,
+        log: bool = True,
+    ) -> int | None:
+        """Tiles ``unit`` steps to end a legal move on ``(to_x, to_y)``; None if it may not move there.
+
+        The move rule: ``_may_act``, and a destination among the tiles
+        ``get_move_destinations`` (and so ``get_legal_actions``) offers,
+        planned around the units the player knows of. ``came_from``
+        receives the path search tree (``move_unit`` walks it for the
+        ambush rule).
+        """
+        if not self._may_act("move", unit, log=log):
+            return None
+        steps = legal_actions.move_paths(self, unit, came_from=came_from).get((to_x, to_y))
+        if steps is None and log:
+            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
+        return steps
+
+    def _may_create(self, unit_type: str, x: int, y: int, player: int, log: bool = True) -> bool:
+        """Validate a ``create_unit`` before it is applied; log why when it is not.
+
+        The game must be running, ``player`` must be the current player and
+        still in the game, ``unit_type`` enabled, the player under the unit
+        cap and able to afford it, and ``(x, y)`` an empty Building the
+        player owns -- the same rules ``get_legal_actions`` offers creates
+        by. ``log=False`` is for ``is_legal``.
+        """
+        level = logging.DEBUG
+        if self.game_over:
+            reason = "the game is over"
+        elif player != self.current_player:
+            reason = f"it is player {self.current_player}'s turn"
+        elif player in self.eliminated_players:
+            reason = "the player is eliminated"
+        elif unit_type not in self.unit_data:
+            reason, level = "unknown unit type", logging.WARNING
+        elif unit_type not in self.enabled_units:
+            reason = "the unit type is not enabled in this game"
+        # The per-player unit cap. Mirrored in get_legal_actions so the RL
+        # action mask hides create_unit at the cap rather than the agent
+        # issuing a rejected action and eating the invalid_action penalty.
+        elif not legal_actions.under_unit_cap(self, player):
+            reason = f"the player is at the unit cap ({self.max_units_per_player})"
+        elif not legal_actions.is_free_spawn_tile(self, player, x, y):
+            reason = "not an empty building the player owns"
+        elif not legal_actions.can_afford(self, player, unit_type):
+            reason = f"insufficient gold ({self.player_gold[player]} < {self.unit_data[unit_type]['cost']})"
+        else:
+            return True
+        if log:
+            logger.log(level, "Cannot create %s at (%s, %s) for player %s: %s", unit_type, x, y, player, reason)
+        return False
+
+    def _consume_action(self, unit: Unit) -> None:
+        """Spend ``unit``'s action for this turn -- or its haste, if it has one.
+
+        Every action method that uses up a unit's action (attack, seize and
+        the abilities; not a move, which only spends ``can_move``) ends with
+        this, so haste works the same whoever drives the engine (review
+        core-8). A unit without haste is done for the turn
+        (``can_move``/``can_attack`` False, exactly as before). A hasted unit
+        instead uses up its haste and gets one more full action this turn: it
+        may move again (a fresh move, so a Knight's charge distance restarts
+        here) and act again. Before this lived here, only callers that ran
+        ``end_unit_turn`` after an action (the GUI, the rule bots) granted
+        the extra action; the RL env, MCTS and LLM bots never did.
+
+        ``haste_refreshed`` marks the refreshed unit until it moves or acts
+        again, so ``end_unit_turn`` called right after the action (as the
+        GUI and bots still do) leaves it its extra action instead of ending
+        it.
+        """
+        if unit.is_hasted:
+            unit.is_hasted = False
+            unit.can_move = True
+            unit.can_attack = True
+            unit.has_moved = False
+            unit.original_x = unit.x
+            unit.original_y = unit.y
+            unit.distance_moved = 0
+            # FOW: the extra action starts from a fresh snapshot of what its
+            # owner sees (captured lazily by move_unit).
+            unit.visible_enemies_at_action_start = None
+            unit.haste_refreshed = True
+        else:
+            unit.can_move = False
+            unit.can_attack = False
+            unit.haste_refreshed = False
+        # The move before this action can no longer be cancelled.
+        unit.pre_move_visibility = None
+
+    @staticmethod
+    def _noop_attack_result() -> dict[str, Any]:
+        """What ``attack`` returns when it applies nothing (``damage`` 0)."""
+        return {
+            "attacker_alive": True,
+            "target_alive": True,
+            "damage": 0,
+            "counter_damage": 0,
+            "charge_bonus": False,
+            "flank_bonus": False,
+            "evade": False,
+            "attack_buff": False,
+            "defence_buff": False,
+        }
+
+    def place_unit(self, unit_type: str, x: int, y: int, player: int) -> Unit:
+        """Put a unit on the board for a test, scenario or other setup.
+
+        Not a game action, so none of ``create_unit``'s rules apply: no gold
+        is charged, nothing is recorded in the action history, and any tile
+        (walkable or not), any player and any unit type (enabled or not) is
+        accepted whoever's turn it is. The unit gets the next ``unit_id``
+        and starts ready to act (``can_move``/``can_attack`` True), as if it
+        had begun the turn on that tile; a unit made with ``create_unit``
+        instead waits for its player's next turn. Because nothing is
+        recorded, a replay cannot rebuild placed units from its action log.
+
+        Raises:
+            ValueError: for an unknown unit type, an off-board position or
+                an occupied tile -- states the engine cannot represent.
+        """
+        if unit_type not in self.unit_data:
+            raise ValueError(f"Unknown unit type: {unit_type!r}")
+        if self.grid.get_tile(x, y) is None:
+            raise ValueError(f"({x}, {y}) is off the {self.grid.width}x{self.grid.height} board")
+        if self.get_unit_at_position(x, y) is not None:
+            raise ValueError(f"({x}, {y}) is already occupied")
+
+        unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
+        unit.unit_id = self._next_unit_id
+        self._next_unit_id += 1
+        unit.can_move = True
+        unit.can_attack = True
+        self.units.append(unit)
+        self._invalidate_cache()
+        # A placed unit can reveal (or stand in) fog for every player.
+        self.fog.update()
+        return unit
 
     def create_unit(self, unit_type: str, x: int, y: int, player: int | None = None) -> Unit | None:
         """
         Create a unit at the specified position.
+
+        Rejected (returns None, changes and records nothing) unless the game
+        is running, ``player`` is the current player, ``unit_type`` is
+        enabled, the player is under the unit cap and can afford it, and
+        ``(x, y)`` is an empty Building the player owns (``_may_create``) --
+        the same rules ``get_legal_actions`` offers creates by. For test or
+        scenario setup use :meth:`place_unit`.
 
         Args:
             unit_type: 'W', 'M', 'C', 'B', or 'A'
@@ -664,36 +918,18 @@ class GameState:
         if player is None:
             player = self.current_player
 
-        # Enforce the per-player unit cap. Mirrored in get_legal_actions so
-        # the RL action mask hides create_unit at the cap rather than the
-        # agent issuing a rejected action and eating the invalid_action
-        # penalty.
-        if sum(1 for u in self.units if u.player == player) >= self.max_units_per_player:
-            logger.debug(f"Cannot create unit: player {player} at unit cap ({self.max_units_per_player})")
-            return None
-
-        # Check if position is occupied
-        if self.get_unit_at_position(x, y):
-            logger.debug(f"Cannot create unit at ({x}, {y}): position occupied")
-            return None
-
-        # Check if player can afford
-        if unit_type not in self.unit_data:
-            logger.warning(f"Unknown unit type: {unit_type}")
-            return None
-
-        cost = self.unit_data[unit_type]["cost"]
-        if self.player_gold[player] < cost:
-            logger.debug(f"Cannot create unit: insufficient gold ({self.player_gold[player]} < {cost})")
+        if not self._may_create(unit_type, x, y, player):
             return None
 
         # Create the unit
-        self.player_gold[player] -= cost
+        self.player_gold[player] -= self.unit_data[unit_type]["cost"]
         unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
         unit.unit_id = self._next_unit_id
         self._next_unit_id += 1
         self.units.append(unit)
         self._invalidate_cache()
+        # The new unit sees from its first moment (review core-12).
+        self.fog.update(player)
 
         # Record action. unit_id lets the replay player rebuild its
         # id -> Unit map on the fly (v3 schema), so subsequent
@@ -707,64 +943,78 @@ class GameState:
         """
         Move a unit to a new position.
 
+        Under fog of war the destination only has to be legal by what the
+        player can see (see ``pathing_units``), and the unit takes the
+        shortest such path the breadth-first search finds first (it tries
+        up, down, left, right from each tile). If a hidden unit stands on
+        that path or on the destination the unit is ambushed: it stops on
+        the last free tile before it (possibly where it started), the move
+        is spent (``unit.ambushed`` is set and ``cancel_move`` refuses to
+        undo it) and is recorded to where the unit really stopped (with
+        ``ambushed: True``), and the ambusher comes into view. Read
+        ``unit.x``/``unit.y`` for where it ended up.
+
         Args:
             unit: Unit to move
             to_x: Target x coordinate
             to_y: Target y coordinate
 
         Returns:
-            bool: True if move successful
+            bool: True if the move happened (ambushed or not)
         """
         from_x, from_y = unit.x, unit.y
 
-        # Reject duplicate moves: bot/RL/LLM call sites don't all gate on
-        # ``unit.can_move`` before calling, and ``get_reachable_positions``
-        # ignores it too, so without this check a unit could be moved more
-        # than once per turn (producing duplicate "move" events in replays
-        # and illegal positioning in-game).
-        if not unit.can_move:
-            logger.debug(f"Cannot move {unit.type} at ({unit.x}, {unit.y}): can_move is False")
-            return False
-
-        # Stale-reference guard: bots iterate over their own units once
-        # per turn, but a unit can die mid-loop from a counter-attack on
-        # an earlier action. The bot still holds the Python reference and
-        # will keep calling APIs on the dead unit; without this guard
-        # the engine moves it, logs the event, and the replay player
-        # (which only sees self.units) can't reproduce it -- the action
-        # silently no-ops and state diverges. See PR #360 audit.
-        if unit not in self.units:
-            return False
-
-        # Check if move is valid
-        reachable = unit.get_reachable_positions(
-            self.grid.width,
-            self.grid.height,
-            lambda x, y: self.mechanics.can_move_to_position(
-                x, y, self.grid, self.units, moving_unit=unit, is_destination=False
-            ),
-        )
-
-        if (to_x, to_y) not in reachable:
-            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable")
-            return False
-
-        if not self.mechanics.can_move_to_position(to_x, to_y, self.grid, self.units, moving_unit=unit, is_destination=True):
-            logger.debug(f"Cannot move to ({to_x}, {to_y}): position blocked")
+        # The move rule (see _move_steps). Its actor gate (_may_act) rejects,
+        # among other things, duplicate moves -- bot/RL/LLM call sites don't
+        # all gate on ``unit.can_move`` before calling, and
+        # ``get_reachable_positions`` ignores it, so a unit could otherwise
+        # move more than once per turn -- and stale references: a unit can
+        # die mid-loop from a counter-attack while the bot still holds it,
+        # and moving it would log an event the replay player (which only
+        # sees self.units) can't reproduce (PR #360 audit).
+        came_from: dict[tuple[int, int], tuple[int, int]] = {}
+        steps = self._move_steps(unit, to_x, to_y, came_from)
+        if steps is None:
             return False
 
         # FOW: Snapshot pre-move enemy visibility so the unit cannot attack
-        # enemies it discovers by moving. The UI's input_handler captures this
+        # enemies it discovers by moving (the UI's input_handler captures this
         # at unit-selection time; for RL/LLM/bot code paths that drive
-        # move_unit directly, capture lazily here just before the move.
-        if self.fog_of_war and unit.visible_enemies_at_action_start is None:
-            self.capture_visible_enemies_for_unit(unit)
+        # move_unit directly it is captured lazily here), and remember what
+        # the mover's side saw, so a cancel_move can take back what the move
+        # revealed (review core-9).
+        self.fog.before_move(unit)
+
+        # FOW ambush rule: without fog of war the path was planned around
+        # every unit, so it is always clear.
+        ambusher = None
+        if self.fog_of_war:
+            path = [(to_x, to_y)]
+            while path[-1] != (from_x, from_y):
+                path.append(came_from[path[-1]])
+            path.reverse()
+            (to_x, to_y), ambusher = self.fog.resolve_ambush(unit, path)
+            if ambusher is not None:
+                # Tiles actually stepped (for the path-length Knight's Charge).
+                steps = path.index((to_x, to_y))
+                logger.debug(
+                    f"{unit.type} ambushed by {ambusher.type} at ({ambusher.x}, {ambusher.y}); stopped at ({to_x}, {to_y})"
+                )
 
         # Execute move
         unit.move_to(to_x, to_y)
+        if self.terrain_rules.charge_distance == "path":
+            # Optional rule: the Knight's Charge counts the tiles along the
+            # path, not the straight-line displacement move_to recorded.
+            unit.distance_moved = steps
         unit.can_move = False  # Consume move action
+        # An ambushed move is spent: cancel_move refuses to undo it, or a
+        # human could scout with it for free and re-plan around the ambusher.
+        unit.ambushed = ambusher is not None
+        unit.haste_refreshed = False  # the haste-granted action has begun
 
-        # Record action
+        # Record action (where the unit really went, so replays need no
+        # knowledge of the ambush rule)
         self.record_action(
             "move",
             unit_type=unit.type,
@@ -774,13 +1024,14 @@ class GameState:
             to_y=to_y,
             player=unit.player,
             actor_unit_id=unit.unit_id,
+            **({"ambushed": True} if ambusher is not None else {}),
         )
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
         self._invalidate_cache()
 
         # Update visibility for the moving player
-        self.update_visibility(unit.player)
+        self.fog.update(unit.player)
 
         return True
 
@@ -793,26 +1044,20 @@ class GameState:
             target: Target unit
 
         Returns:
-            dict: Attack results
+            dict: Attack results. An illegal attack (see ``_may_act``; the
+            target must also be a living enemy within reach that fog of war
+            lets the attacker see) changes nothing and returns the no-op
+            result with ``damage`` 0. An executed attack always deals at
+            least 1, so ``result["damage"] > 0`` tells callers whether the
+            attack happened.
         """
-        # Stale-reference guard (see move_unit for full rationale).
-        # Returns the same shape as a clean no-op attack so callers
+        # Rejections return the same shape as a clean attack so callers
         # that index into the result dict don't KeyError.
-        if attacker not in self.units or target not in self.units:
-            return {
-                "attacker_alive": True,
-                "target_alive": True,
-                "damage": 0,
-                "counter_damage": 0,
-                "charge_bonus": False,
-                "flank_bonus": False,
-                "evade": False,
-                "attack_buff": False,
-                "defence_buff": False,
-            }
+        if not self._may_target("attack", attacker, target):
+            return self._noop_attack_result()
 
         result = self.mechanics.attack_unit(
-            attacker, target, self.grid, self.units, damage_model=self.damage_model, rng=self.rng
+            attacker, target, self.grid, self.units, damage_model=self.damage_model, rng=self.rng, teams=self.teams
         )
 
         # Record action. The extra fields (attacker_killed, counter_damage,
@@ -852,6 +1097,8 @@ class GameState:
             defeated_player = target.player
             self.units.remove(target)
             self._invalidate_cache()
+            # A dead unit stops giving its owner vision (review core-12).
+            self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
 
         if not result["attacker_alive"]:
@@ -862,107 +1109,146 @@ class GameState:
             if attacker in self.units:
                 self.units.remove(attacker)
             self._invalidate_cache()
+            self.fog.update(defeated_player)
             self._check_player_eliminated(defeated_player)
 
-        # Disable attacker actions after combat (only if still alive)
+        # Spend the attacker's action (only if still alive; a hasted attacker
+        # gets its extra action instead, see _consume_action)
         if result["attacker_alive"]:
-            attacker.can_move = False
-            attacker.can_attack = False
+            self._consume_action(attacker)
         self._invalidate_cache()
 
         return result
 
-    def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
-        """Paralyze a target unit."""
-        if paralyzer not in self.units or target not in self.units:
-            return False
-        result = self.mechanics.paralyze_unit(paralyzer, target)
-        if result:
-            paralyzer.can_move = False
-            paralyzer.can_attack = False
+    def _use_ability(
+        self,
+        action: str,
+        actor: Unit,
+        target: Unit,
+        apply: Callable[[], Any],
+        rejected: Any,
+        actor_pos_field: str,
+        record_fields: Callable[[Any], dict[str, Any]] | None = None,
+        after_apply: Callable[[], None] | None = None,
+    ) -> Any:
+        """The shared body of the targeted abilities (paralyze, heal, cure, haste, the buffs).
+
+        Validates with ``_may_target`` (``_may_act`` and the ability's
+        ``legal_actions.TARGET_RULES`` rule, the one its legal actions are
+        listed by), returning ``rejected`` and changing nothing when that fails.
+        Otherwise applies the mechanics call ``apply``; if it took effect,
+        spends ``actor``'s action (``_consume_action``), runs
+        ``after_apply``, records ``action`` with the fields ``actor_pos_field``
+        (the actor's position), ``target_pos``, ``record_fields(result)``,
+        ``player``, ``actor_unit_id`` and ``target_unit_id`` -- in that order,
+        the record layout replays and saves have always had -- and
+        invalidates the legal-action cache.
+
+        Returns:
+            ``apply``'s result, or ``rejected``.
+        """
+        if not self._may_target(action, actor, target):
+            return rejected
+        result = apply()
+        # heal_unit returns the HP it restored (-1 if refused), the others a
+        # bool; either way the ability took effect iff result > 0.
+        if result > 0:
+            self._consume_action(actor)
+            if after_apply is not None:
+                after_apply()
             self.record_action(
-                "paralyze",
-                paralyzer_pos=(paralyzer.x, paralyzer.y),
+                action,
+                **{actor_pos_field: (actor.x, actor.y)},
                 target_pos=(target.x, target.y),
-                player=paralyzer.player,
-                actor_unit_id=paralyzer.unit_id,
+                **(record_fields(result) if record_fields is not None else {}),
+                player=actor.player,
+                actor_unit_id=actor.unit_id,
                 target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
 
+    def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
+        """Paralyze a target unit. Returns False, changing nothing, if illegal."""
+        return self._use_ability(
+            "paralyze",
+            paralyzer,
+            target,
+            lambda: self.mechanics.paralyze_unit(paralyzer, target, self.teams),
+            rejected=False,
+            actor_pos_field="paralyzer_pos",
+        )
+
     def heal(self, healer: Unit, target: Unit) -> int:
-        """Heal a target unit."""
-        if healer not in self.units or target not in self.units:
-            return 0
-        amount = self.mechanics.heal_unit(healer, target)
-        if amount > 0:
-            healer.can_move = False
-            healer.can_attack = False
+        """Heal a target unit. Returns the HP healed; 0, changing nothing, if illegal."""
+        return self._use_ability(
+            "heal",
+            healer,
+            target,
+            lambda: self.mechanics.heal_unit(healer, target, self.teams),
+            rejected=0,
+            actor_pos_field="healer_pos",
             # target_hp_after lets the replay player set HP directly
             # instead of re-calling mechanics.heal_unit (the only path
             # today that could observe HEAL_AMOUNT drift between save
             # and replay).
-            self.record_action(
-                "heal",
-                healer_pos=(healer.x, healer.y),
-                target_pos=(target.x, target.y),
-                amount=amount,
-                target_hp_after=target.health,
-                player=healer.player,
-                actor_unit_id=healer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return amount
+            record_fields=lambda amount: {"amount": amount, "target_hp_after": target.health},
+        )
 
     def cure(self, curer: Unit, target: Unit) -> bool:
-        """Cure a target unit's paralysis."""
-        if curer not in self.units or target not in self.units:
-            return False
-        result = self.mechanics.cure_unit(curer, target)
-        if result:
-            curer.can_move = False
-            curer.can_attack = False
-            self.record_action(
-                "cure",
-                curer_pos=(curer.x, curer.y),
-                target_pos=(target.x, target.y),
-                player=curer.player,
-                actor_unit_id=curer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        """Cure a target unit's paralysis. Returns False, changing nothing, if illegal."""
+        return self._use_ability(
+            "cure",
+            curer,
+            target,
+            lambda: self.mechanics.cure_unit(curer, target, self.teams),
+            rejected=False,
+            actor_pos_field="curer_pos",
+        )
 
     def haste(self, sorcerer: Unit, target: Unit) -> bool:
         """
         Sorcerer grants Haste to a target unit.
+
+        Haste gives the target one extra full action this turn (a move and an
+        attack, ability or seize). The target must be one of the Sorcerer's
+        own units, alive, unparalyzed and not already hasted. If it has
+        already spent its action this turn, the extra action is granted at
+        once; otherwise it is granted when the target spends its current one
+        (see ``_consume_action``) -- by acting, or when its controller ends
+        its action (``end_unit_turn``: the GUI's Wait, a bot done with it).
+        The RL action space has no Wait, so there a hasted unit's first
+        action ends only by acting.
 
         Args:
             sorcerer: The Sorcerer unit using Haste
             target: The target friendly unit
 
         Returns:
-            bool: True if Haste was successfully applied
+            bool: True if Haste was successfully applied (False, changing
+            nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
-            return False
-        result = self.mechanics.haste_unit(sorcerer, target)
-        if result:
-            sorcerer.can_move = False
-            sorcerer.can_attack = False
-            self.record_action(
-                "haste",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+
+        def grant_if_already_acted() -> None:
+            if not (target.can_move or target.can_attack):
+                # Already done for the turn: the extra action starts now.
+                self._consume_action(target)
+                # haste_refreshed shields the unit that just acted from the
+                # end_unit_turn its controller calls next. The target didn't
+                # act, so its controller's next end_unit_turn (the GUI's Wait)
+                # must end the extra action, not be swallowed.
+                target.haste_refreshed = False
+
+        return self._use_ability(
+            "haste",
+            sorcerer,
+            target,
+            lambda: self.mechanics.haste_unit(sorcerer, target),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+            after_apply=grant_if_already_acted,
+        )
 
     def defence_buff(self, sorcerer: Unit, target: Unit) -> bool:
         """
@@ -973,25 +1259,18 @@ class GameState:
             target: The target friendly unit
 
         Returns:
-            bool: True if Defence Buff was successfully applied
+            bool: True if Defence Buff was successfully applied (False,
+            changing nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
-            return False
-        result = self.mechanics.defence_buff_unit(sorcerer, target)
-        if result:
-            sorcerer.can_move = False
-            sorcerer.can_attack = False
-            self.record_action(
-                "defence_buff",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        return self._use_ability(
+            "defence_buff",
+            sorcerer,
+            target,
+            lambda: self.mechanics.defence_buff_unit(sorcerer, target, self.teams),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+        )
 
     def attack_buff(self, sorcerer: Unit, target: Unit) -> bool:
         """
@@ -1002,33 +1281,33 @@ class GameState:
             target: The target friendly unit
 
         Returns:
-            bool: True if Attack Buff was successfully applied
+            bool: True if Attack Buff was successfully applied (False,
+            changing nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
-            return False
-        result = self.mechanics.attack_buff_unit(sorcerer, target)
-        if result:
-            sorcerer.can_move = False
-            sorcerer.can_attack = False
-            self.record_action(
-                "attack_buff",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        return self._use_ability(
+            "attack_buff",
+            sorcerer,
+            target,
+            lambda: self.mechanics.attack_buff_unit(sorcerer, target, self.teams),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+        )
 
     def seize(self, unit: Unit) -> dict[str, Any]:
-        """Seize the structure the unit is on."""
-        if unit not in self.units:
-            tile = self.grid.get_tile(unit.x, unit.y)
-            return {"captured": False, "game_over": False, "structure_type": tile.type}
+        """Seize the structure the unit is on.
+
+        An illegal seize (see ``_may_act``; the unit must also stand on a
+        structure its player does not own) changes and records nothing and
+        returns a result without ``damage``. Checking ``can_attack`` here is
+        what stops one unit from seizing several times a turn -- repeated
+        SEIZEs from an LLM took a 50-HP HQ in one turn (review aibots-1).
+        """
         tile = self.grid.get_tile(unit.x, unit.y)
-        result = self.mechanics.seize_structure(unit, tile)
+        if not self._may_seize(unit):
+            return {"captured": False, "game_over": False, "structure_type": tile.type if tile else None}
+        previous_owner = tile.player
+        result = self.mechanics.seize_structure(unit, tile, self.teams)
 
         # Record action. tile_hp_after / tile_owner_after let the v2
         # replay player set tile state directly instead of re-calling
@@ -1051,12 +1330,19 @@ class GameState:
             actor_unit_id=unit.unit_id,
         )
 
-        if result["game_over"]:
-            self._set_game_over(winner=unit.player, end_reason="hq_capture")
+        if result["captured"] and tile.type == TileType.HEADQUARTERS.value:
+            self._on_hq_captured(unit.player, previous_owner)
+            # mechanics flags every HQ capture; whether it ended the game is
+            # the engine's call (not in a free-for-all, nor for a neutral HQ).
+            result["game_over"] = self.game_over
 
-        unit.can_move = False
-        unit.can_attack = False
+        self._consume_action(unit)
         self._invalidate_cache()
+
+        # A captured structure gives its vision to the capturer and takes it
+        # from the previous owner (review core-12).
+        if result["captured"]:
+            self.fog.update()
 
         return result
 
@@ -1082,7 +1368,7 @@ class GameState:
         enemy_hq_pos = None
         for row in self.grid.tiles:
             for tile in row:
-                if tile.type == TileType.HEADQUARTERS.value and tile.player and tile.player != player:
+                if tile.type == TileType.HEADQUARTERS.value and self.are_enemies(tile.player, player):
                     enemy_hq_pos = (tile.x, tile.y)
                     break
             if enemy_hq_pos:
@@ -1199,6 +1485,14 @@ class GameState:
         if self.game_over:
             return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
 
+        # Everything below changes what is legal (can_move/can_attack resets,
+        # paralysis and cooldown ticks, income, healing, current_player), and
+        # nothing below reads the legal-action cache, so one invalidation up
+        # front covers every exit path. Without it, a turn in which nothing
+        # else mutates state hands the next player the actions cached at the
+        # end of its previous turn (e.g. RandomBot's empty list).
+        self._invalidate_cache()
+
         # Record action
         self.record_action("end_turn", player=self.current_player)
 
@@ -1212,34 +1506,48 @@ class GameState:
         # Regenerate structures
         self.mechanics.regenerate_structures(self.grid, self.units)
 
-        # Move to next player
-        self.current_player += 1
-        if self.current_player > self.num_players:
-            self.current_player = 1
-            self.turn_number += 1
+        # Vision a move revealed can no longer be taken back (cancel_move).
+        for unit in self.units:
+            unit.pre_move_visibility = None
 
-            # Check max_turns limit (checked once per full round, after all players have gone)
-            if self.max_turns is not None and self.turn_number >= self.max_turns:
-                self._set_game_over(winner=None, end_reason="max_turns_draw")
-                return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
+        # Move to the next seat still in the game (review core-7: eliminated
+        # players get no turns, so no income and no new units either).
+        # Checked once per full round, after all players have gone: the
+        # max_turns limit, as it always was.
+        for _ in range(self.num_players):
+            self.current_player += 1
+            if self.current_player > self.num_players:
+                self.current_player = 1
+                self.turn_number += 1
+                if self.max_turns is not None and self.turn_number >= self.max_turns:
+                    self._set_game_over(winner=None, end_reason="max_turns_draw")
+                    return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
+            if self.current_player not in self.eliminated_players:
+                break
 
-        # Handle paralysis and enable units
-        self.mechanics.decrement_paralysis(self.units, self.current_player)
+        return self._begin_turn(self.current_player)
 
-        # Decrement Mage paralyze cooldowns
-        self.mechanics.decrement_paralyze_cooldowns(self.units, self.current_player)
+    def _begin_turn(self, player: int) -> dict[str, Any]:
+        """Start-of-turn processing for ``player``, whose turn is starting (review core-13).
 
-        # Decrement Sorcerer haste cooldowns
-        self.mechanics.decrement_haste_cooldowns(self.units, self.current_player)
+        In order: paralysis, cooldown and buff-duration ticks for the
+        player's units; re-arming them (a unit still paralyzed after the tick
+        stays disabled) and resetting their per-turn move/haste bookkeeping;
+        income; auto-healing on owned structures; the player's fog-of-war
+        update. ``end_turn`` runs it for every turn but Player 1's first,
+        which by default starts without it (engine override
+        ``begin_first_turn``; see ``core/engine_config.py``).
 
-        # Decrement Sorcerer buff cooldowns (defence buff and attack buff)
-        self.mechanics.decrement_buff_cooldowns(self.units, self.current_player)
-
-        # Decrement buff durations for units with active buffs
-        self.mechanics.decrement_buff_durations(self.units, self.current_player)
+        Returns:
+            The income breakdown (``calculate_income``) with the healing
+            stats under ``"healing"`` -- what ``end_turn`` returns.
+        """
+        # Tick paralysis, ability cooldowns and buff durations of the
+        # player's units (only theirs: durations count the unit's own turns)
+        self.mechanics.tick_statuses(self.units, player)
 
         for unit in self.units:
-            if unit.player == self.current_player:
+            if unit.player == player:
                 if not unit.is_paralyzed():
                     unit.can_move = True
                     unit.can_attack = True
@@ -1250,50 +1558,271 @@ class GameState:
                 unit.original_x = unit.x
                 unit.original_y = unit.y
                 unit.has_moved = False
+                unit.ambushed = False
                 unit.distance_moved = 0
                 unit.is_hasted = False
+                unit.haste_refreshed = False
                 # FOW: Clear stale snapshot so it gets recaptured before
                 # this unit's next move (see move_unit lazy capture).
                 unit.visible_enemies_at_action_start = None
             unit.selected = False
 
         # Calculate and apply income
-        income_data = self.mechanics.calculate_income(self.current_player, self.grid, self.income_rates)
-        self.player_gold[self.current_player] += income_data["total"]
+        income_data = self.mechanics.calculate_income(player, self.grid, self.income_rates)
+        self.player_gold[player] += income_data["total"]
 
         # Heal units on structures after income collection
-        healing_stats = self.heal_units_on_structures(self.current_player)
+        healing_stats = self.heal_units_on_structures(player)
         income_data["healing"] = healing_stats
 
         # Update visibility for the new current player
-        self.update_visibility(self.current_player)
+        self.fog.update(player)
 
+        self._invalidate_cache()
         return income_data
 
     def resign(self, player: int | None = None) -> None:
-        """Player resigns."""
+        """``player`` (default: the current player) resigns.
+
+        Its units are removed and it is eliminated (see ``_eliminate_player``):
+        in a 1v1 the opponent wins at once, as before; with more seats the
+        others play on until one team is left. Resigning on your own turn
+        leaves you the current player until ``end_turn`` hands the turn on
+        (the GUI does that for you); an eliminated player has nothing left
+        to do but end its turn. No-op once the game is over or for a player
+        already out.
+        """
         if player is None:
             player = self.current_player
+        if self.game_over or player in self.eliminated_players:
+            return
 
         self.record_action("resign", player=player)
 
-        # Remove resigning player's units
-        self.units = [u for u in self.units if u.player != player]
+        # Remove resigning player's units (in place: bots and the renderer
+        # may hold a reference to the list)
+        self.units[:] = [u for u in self.units if u.player != player]
         self._invalidate_cache()
 
-        if self.num_players == 2:
-            self._set_game_over(winner=2 if player == 1 else 1, end_reason="resign")
+        if self.legacy_end_rules:
+            self._legacy_last_player_standing(player, "resign")
+            return
+        self._eliminate_player(player, "resign")
+
+    def end_unit_turn(self, unit: Unit, force_end: bool = False) -> bool:
+        """End ``unit``'s current action through the engine (the GUI's Wait).
+
+        Haste is applied by the engine when a unit spends its action
+        (``_consume_action``), so nobody needs to call this after an action
+        to get the extra one. Called right after an action that haste
+        refreshed (``unit.haste_refreshed``), it keeps the extra action and
+        returns True, so the GUI and bots that still call it there are
+        unaffected. Otherwise a hasted unit that ends its action without
+        acting spends its haste on it and is refreshed (True), and any other
+        unit is done for the turn (False). ``force_end`` always ends the
+        turn. Goes through ``Unit.end_unit_turn`` and invalidates the
+        legal-action cache, which the unit-level call cannot.
+
+        Returns:
+            True if the unit can still act (haste was consumed).
+        """
+        if unit.haste_refreshed and not force_end:
+            unit.haste_refreshed = False
+            return True
+        unit.haste_refreshed = False
+        can_still_act = unit.end_unit_turn(force_end=force_end)
+        unit.ambushed = False  # the action is over (see move_unit)
+        self._invalidate_cache()
+        return can_still_act
+
+    def can_cancel_move(self, unit: Unit) -> bool:
+        """Whether ``cancel_move`` would undo ``unit``'s move (the GUI offers it only then).
+
+        On the current player's turn, the unit must have moved and not acted
+        since (the GUI's post-move menu), its starting tile must be free, and
+        the move must not have run into a fog-of-war ambush: an ambushed move
+        is spent (see ``move_unit``). Under fog of war only the latest action
+        can be cancelled: once another action followed the move, it may have
+        used what the move revealed (another unit's attack on an enemy the
+        move uncovered), which no restore can take back. It also needs the
+        side's view from before the move (``pre_move_visibility``) to put
+        back; a save written before that was saved has none.
+        """
+        if (
+            self.game_over
+            or unit not in self.units
+            or unit.player != self.current_player
+            or not unit.has_moved
+            or not unit.can_attack
+            or unit.ambushed
+        ):
+            return False
+        occupant = self.get_unit_at_position(unit.original_x, unit.original_y)
+        if occupant is not None and occupant is not unit:
+            return False
+        return not (self.fog_of_war and (unit.pre_move_visibility is None or not self._move_is_latest_action(unit)))
+
+    def _move_is_latest_action(self, unit: Unit) -> bool:
+        """Whether the last recorded action is ``unit``'s move to where it stands."""
+        last = self.action_history[-1] if self.action_history else None
+        return (
+            last is not None
+            and last.get("type") == "move"
+            and last.get("actor_unit_id") == unit.unit_id
+            and (last.get("to_x"), last.get("to_y")) == (unit.x, unit.y)
+        )
+
+    def cancel_move(self, unit: Unit) -> bool:
+        """Take back ``unit``'s move, returning it to where its action started (review core-9).
+
+        Refused (returns False, changing nothing) when ``can_cancel_move`` is
+        False. Takes the move out of the record too: when the move is the
+        latest action its record is removed, so the game reads as if it never
+        happened; otherwise a ``cancel_move`` action is recorded for replays
+        to apply. Under fog of war the mover's side also loses what the move
+        revealed -- its visibility map is restored to its pre-move state and
+        recomputed from where units now stand -- so moving and cancelling
+        can't be used to scout.
+
+        Returns:
+            True if the move was cancelled.
+        """
+        if not self.can_cancel_move(unit):
+            return False
+        origin = (unit.original_x, unit.original_y)
+        moved_to = (unit.x, unit.y)
+        is_latest = self._move_is_latest_action(unit)
+        if not unit.cancel_move():
+            return False
+
+        if is_latest:
+            self.action_history.pop()
         else:
-            active_players = set(u.player for u in self.units)
-            if len(active_players) <= 1:
-                self._set_game_over(
-                    winner=active_players.pop() if active_players else None,
-                    end_reason="resign",
-                )
+            self.record_action(
+                "cancel_move",
+                unit_type=unit.type,
+                from_x=moved_to[0],
+                from_y=moved_to[1],
+                to_x=origin[0],
+                to_y=origin[1],
+                player=unit.player,
+                actor_unit_id=unit.unit_id,
+            )
+
+        # FOW: the side's view goes back to what it was before the move.
+        snapshot, unit.pre_move_visibility = unit.pre_move_visibility, None
+        self.fog.undo_move(unit, snapshot)
+
+        self._invalidate_cache()
+        return True
+
+    # ------------------------------------------------------------------
+    # Actions by name
+    # ------------------------------------------------------------------
+    # The entry point for code that picks actions the way get_legal_actions
+    # lists them (bots, MCTS, the gym env, the LLM bots, the GUI): a kind
+    # (a get_legal_actions key, see ``core.actions.ACTION_KINDS``) and a
+    # payload (one of that key's entries). Each of them used to keep its own
+    # table from that shape to an action method, and from the method's
+    # return value to "did it happen" (review core-14).
+
+    def apply_action(self, kind: str, action: Mapping[str, Any]) -> ActionResult:
+        """Carry out the action ``kind`` that ``action`` describes, through its action method.
+
+        ``action`` has the shape of a ``get_legal_actions()[kind]`` entry:
+        ``{"unit_type", "x", "y"}`` for ``create_unit`` (with an optional
+        ``"player"``, the current player by default, as ``create_unit``
+        takes), ``{"unit", "to_x", "to_y"}`` for ``move``, ``{"unit"}`` for
+        ``seize``, ``{}`` for ``end_turn``, and the acting unit (under
+        ``ACTOR_KEYS[kind]``) and ``"target"`` for the others. Other keys (an
+        entry's ``from_x``/``from_y`` or ``tile``) are ignored. The method
+        (``create_unit``, ``move_unit``, ``seize``, ``end_turn``, or the one
+        named ``kind``) is looked up on the instance, so the action is
+        validated and recorded exactly as by a direct call, and a wrapper
+        installed on the instance (the imitation recorder's) sees it too.
+
+        Returns:
+            The method's return value, and whether the engine carried the
+            action out: always what ``is_legal(kind, action)`` answered just
+            before. A refused action changes nothing.
+
+        Raises:
+            ValueError: ``kind`` is not one of ``ACTION_KINDS``.
+        """
+        if kind == "create_unit":
+            unit = self.create_unit(action["unit_type"], action["x"], action["y"], player=action.get("player"))
+            return ActionResult(kind, unit is not None, unit)
+        if kind == "move":
+            moved = self.move_unit(action["unit"], action["to_x"], action["to_y"])
+            return ActionResult(kind, bool(moved), moved)
+        if kind == "seize":
+            result = self.seize(action["unit"])
+            return ActionResult(kind, "damage" in result, result)
+        if kind == "end_turn":
+            # end_turn returns the same empty breakdown for a game it ends on
+            # max_turns and for one already over, which it leaves alone; so
+            # whether it did anything is decided before the call.
+            running = not self.game_over
+            return ActionResult(kind, running, self.end_turn())
+        if kind in TARGET_RULES:
+            result = getattr(self, kind)(action[ACTOR_KEYS[kind]], action["target"])
+            if kind == "attack":
+                # An executed attack always deals at least 1 damage.
+                return ActionResult(kind, result["damage"] > 0, result)
+            # heal returns the HP it restored, the others a bool (see _use_ability).
+            return ActionResult(kind, result > 0, result)
+        raise ValueError(f"Unknown action kind {kind!r}; expected one of {', '.join(ACTION_KINDS)}")
+
+    def is_legal(self, kind: str, action: Mapping[str, Any]) -> bool:
+        """Whether ``apply_action(kind, action)`` would carry the action out now; changes nothing.
+
+        Asks the rule the action method validates with (``_may_create``,
+        ``_move_steps``, ``_may_target``, ``_may_seize``; ``end_turn`` only
+        needs the game to be running), so ``apply_action(kind,
+        action).accepted`` always equals it, and it holds for every entry
+        of ``get_legal_actions()[kind]`` (``{}`` for ``end_turn``) while the
+        game runs. Unlike ``get_legal_actions`` it answers for the current
+        player only, as the action methods do: another player's action, and
+        any action once the game is over, is not legal. It enumerates
+        nothing (a move costs one path search), logs no refusal, and
+        neither reads nor fills the legal-action cache.
+
+        Under fog of war an attack or paralyze needs a target the attacker
+        could see when its action started (``is_enemy_attackable_by_unit``):
+        its snapshot if it has one, else what its player sees now. This
+        answers from the snapshot as it stands and never takes one.
+        ``attack`` and the abilities don't take one either, and
+        ``move_unit`` takes it only once the move is accepted, so this is
+        exactly what the method would decide. Taking one here would freeze
+        the unit's targets at the moment of asking: an enemy another unit
+        then uncovers would be attackable by ``get_legal_actions`` and the
+        methods, but not by this.
+
+        Raises:
+            ValueError: ``kind`` is not one of ``ACTION_KINDS``.
+        """
+        if kind == "create_unit":
+            player = action.get("player")
+            if player is None:
+                player = self.current_player
+            return self._may_create(action["unit_type"], action["x"], action["y"], player, log=False)
+        if kind == "move":
+            return self._move_steps(action["unit"], action["to_x"], action["to_y"], log=False) is not None
+        if kind == "seize":
+            return self._may_seize(action["unit"], log=False)
+        if kind == "end_turn":
+            return not self.game_over
+        if kind in TARGET_RULES:
+            return self._may_target(kind, action[ACTOR_KEYS[kind]], action["target"], log=False)
+        raise ValueError(f"Unknown action kind {kind!r}; expected one of {', '.join(ACTION_KINDS)}")
 
     def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
-        """
-        Get all legal actions for the current player.
+        """Every action ``player`` (default: the current player) may take now, by kind.
+
+        The enumeration is ``legal_actions.enumerate_legal_actions``; this
+        caches its result per player until the state next changes (every
+        mutator invalidates the cache), because the RL env, the bots and
+        the GUI ask for the same actions many times between changes.
 
         Returns:
             dict: Legal actions organized by type
@@ -1303,166 +1832,104 @@ class GameState:
 
         # Return cached actions if available and cache is valid
         if self._legal_actions_cache_valid and player in self._legal_actions_cache:
-            return self._legal_actions_cache[player]
-
-        legal_actions = {
-            "create_unit": [],
-            "move": [],
-            "attack": [],
-            "paralyze": [],
-            "heal": [],
-            "cure": [],
-            "haste": [],
-            "defence_buff": [],
-            "attack_buff": [],
-            "seize": [],
-            "end_turn": True,
-        }
-
-        # Building units (only at Buildings, not HQ)
-        # Only include enabled unit types. Suppressed entirely once the player
-        # is at the unit cap so the action mask matches create_unit's own
-        # enforcement (no offered-then-rejected create actions).
-        if sum(1 for u in self.units if u.player == player) < self.max_units_per_player:
-            for tile in self.grid.get_capturable_tiles(player):
-                if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
-                    for unit_type in self.enabled_units:
-                        if self.player_gold[player] >= self.unit_data[unit_type]["cost"]:
-                            legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
-
-        # Unit actions
-        for unit in self.units:
-            # Guard on health: dead units are normally removed synchronously
-            # by ``attack`` (see self.units.remove), but the helpers below all
-            # filter on ``health > 0`` defensively -- mirror that here so a
-            # corpse left in ``self.units`` by any future deferred-removal path
-            # (AoE, end-of-turn DoT, status damage) can't emit phantom actions.
-            if unit.player == player and unit.health > 0 and not unit.is_paralyzed():
-                # Movement
-                if unit.can_move:
-                    reachable = unit.get_reachable_positions(
-                        self.grid.width,
-                        self.grid.height,
-                        lambda x, y, _u=unit: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=_u),
+            cached = self._legal_actions_cache[player]
+            if _CHECK_LEGAL_ACTION_CACHE:
+                fresh = self._compute_legal_actions(player)
+                if fresh != cached:
+                    stale = {k: (len(cached.get(k, [])), len(v)) for k, v in fresh.items() if cached.get(k) != v}
+                    raise AssertionError(
+                        f"Stale legal-action cache for player {player} "
+                        f"(turn {self.turn_number}): (cached, fresh) counts by type {stale}"
                     )
-                    for pos in reachable:
-                        # Only include positions that are valid as final destinations
-                        # (not occupied by any unit)
-                        if self.mechanics.can_move_to_position(
-                            pos[0], pos[1], self.grid, self.units, moving_unit=unit, is_destination=True
-                        ):
-                            legal_actions["move"].append(
-                                {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
-                            )
+            return cached
 
-                # Combat actions
-                if unit.can_attack:
-                    # For Archers, Mages, and Sorcerers, find enemies within range (not just adjacent)
-                    if unit.type in ["M", "A", "S"]:
-                        # Check if unit is on mountain (for Archer range bonus)
-                        unit_tile = self.grid.get_tile(unit.x, unit.y)
-                        on_mountain = unit_tile.type == "m"
-
-                        for enemy in self.units:
-                            if enemy.player != player and enemy.health > 0:
-                                # FOW: Skip enemies not attackable (checks pre-move snapshot)
-                                if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
-                                    continue
-
-                                damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
-                                if damage > 0:
-                                    legal_actions["attack"].append({"attacker": unit, "target": enemy})
-
-                                    # Paralyze: skip already-paralyzed targets.
-                                    # Re-casting only refreshes the status (a
-                                    # near no-op) and inflates the action space,
-                                    # unlike heal/cure/buffs which all guard
-                                    # against re-applying to an already-affected
-                                    # ally.
-                                    if unit.type == "M" and unit.can_use_paralyze() and not enemy.is_paralyzed():
-                                        # Mages can also paralyze at range (if not on cooldown)
-                                        distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
-                                        if distance <= 2:
-                                            legal_actions["paralyze"].append({"paralyzer": unit, "target": enemy})
-                    else:
-                        # For other units, only adjacent enemies
-                        adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
-                        for enemy in adjacent_enemies:
-                            # FOW: Skip enemies not attackable (checks pre-move snapshot)
-                            if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
-                                continue
-
-                            legal_actions["attack"].append({"attacker": unit, "target": enemy})
-
-                    # Healing (Cleric only) - range 1-2
-                    if unit.type == "C":
-                        healable_allies = self.mechanics.get_healable_allies(unit, self.units)
-                        for ally in healable_allies:
-                            legal_actions["heal"].append({"healer": unit, "target": ally})
-
-                        curable_allies = self.mechanics.get_curable_allies(unit, self.units)
-                        for ally in curable_allies:
-                            legal_actions["cure"].append({"curer": unit, "target": ally})
-
-                    # Haste (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_haste():
-                        hasteable_allies = self.mechanics.get_hasteable_allies(unit, self.units)
-                        for ally in hasteable_allies:
-                            legal_actions["haste"].append({"sorcerer": unit, "target": ally})
-
-                    # Defence Buff (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_defence_buff():
-                        buffable_allies = self.mechanics.get_defence_buffable_allies(unit, self.units)
-                        for ally in buffable_allies:
-                            legal_actions["defence_buff"].append({"sorcerer": unit, "target": ally})
-
-                    # Attack Buff (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_attack_buff():
-                        buffable_allies = self.mechanics.get_attack_buffable_allies(unit, self.units)
-                        for ally in buffable_allies:
-                            legal_actions["attack_buff"].append({"sorcerer": unit, "target": ally})
-
-                    # Seizing
-                    tile = self.grid.get_tile(unit.x, unit.y)
-                    if tile.is_capturable() and tile.player != player:
-                        legal_actions["seize"].append({"unit": unit, "tile": tile})
+        actions = self._compute_legal_actions(player)
 
         # Cache the result
-        self._legal_actions_cache[player] = legal_actions
+        self._legal_actions_cache[player] = actions
         self._legal_actions_cache_valid = True
 
-        return legal_actions
+        return actions
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert game state to dictionary for serialization."""
-        return {
-            "timestamp": self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
-            "current_player": self.current_player,
-            "num_players": self.num_players,
-            "player_gold": self.player_gold,
-            "turn_number": self.turn_number,
-            "game_over": self.game_over,
-            "winner": self.winner,
-            "map_file": self.map_file_used,
-            "player_configs": self.player_configs,
-            "enabled_units": self.enabled_units,
-            "fog_of_war": self.fog_of_war,
-            "fog_of_war_method": self.fog_of_war_method,
-            # Persist the engine-constant overlay so a reloaded game runs under
-            # the same balance (damage_model, structure HP, economy, unit cap)
-            # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
-            # back to {} (== module defaults), preserving backward-compat.
-            "engine_overrides": self.engine_overrides,
-            "units": [unit.to_dict() for unit in self.units],
-            "tiles": self.grid.to_dict()["tiles"],
-            "action_history": self.action_history,
-            # Restore the per-game unit-id counter on reload so newly
-            # created units after load don't reuse retired ids
-            # (which would let the replay v3 dispatch route an action
-            # to the wrong unit -- exactly the brittleness this whole
-            # schema bump is meant to eliminate).
-            "next_unit_id": self._next_unit_id,
+    def _compute_legal_actions(self, player: int) -> dict[str, list[Any]]:
+        """Enumerate ``player``'s legal actions from the current state (uncached; ``enumerate_legal_actions``)."""
+        return legal_actions.enumerate_legal_actions(self, player)
+
+    # How clone_for_search treats each attribute (review core-18). Shared:
+    # fixed for the whole game (configuration, terrain source, stateless
+    # helpers), so the clone references the original's object. Dropped:
+    # history and caches search never reads, replaced by empty values.
+    # Anything else is deep-copied, so state added later is safe by default.
+    _SEARCH_SHARED_ATTRS = frozenset(
+        {
+            "engine_config",
+            "mechanics",
+            "enabled_units",
+            "initial_map_data",
+            "player_configs",
+            "game_start_time",
         }
+    )
+    _SEARCH_DROPPED_ATTRS: dict[str, Callable[[], Any]] = {
+        "action_history": list,
+        "_legal_actions_cache": dict,
+        "_legal_actions_cache_valid": lambda: False,
+    }
+
+    def clone_for_search(self) -> GameState:
+        """An independent copy of the game for tree search (MCTS), made cheaply.
+
+        Plays exactly like ``copy.deepcopy(self)`` (same legal actions, same
+        outcomes, including the combat RNG's position), and nothing done to
+        the clone touches the original. It drops what search never reads --
+        the action history (which grows all game and dominated deepcopy's
+        cost) and the legal-action cache -- and shares, instead of copying,
+        the terrain tiles, configuration and replay metadata, none of which
+        change during a game. The clone's own ``action_history`` starts
+        empty, so it cannot be saved as a replay of the whole game.
+        """
+        clone = GameState.__new__(GameState)
+        for name, value in vars(self).items():
+            if name in self._SEARCH_SHARED_ATTRS:
+                setattr(clone, name, value)
+            elif name in self._SEARCH_DROPPED_ATTRS:
+                setattr(clone, name, self._SEARCH_DROPPED_ATTRS[name]())
+            elif name == "grid":
+                clone.grid = self._clone_grid_for_search(value)
+            elif name == "fog":
+                # Deep-copied like any other state, but bound to the clone.
+                clone.fog = value.copy_for(clone)
+            elif name == "units":
+                clone.units = [self._clone_unit_for_search(unit) for unit in value]
+            else:
+                setattr(clone, name, copy.deepcopy(value))
+        return clone
+
+    @staticmethod
+    def _clone_grid_for_search(grid: TileGrid) -> TileGrid:
+        """New row lists and structure tiles; terrain tiles are shared.
+
+        Only structures change during a game (owner, HP, regeneration), so
+        plain terrain tiles are shared between the original and its clones.
+        """
+        clone = copy.copy(grid)
+        clone.tiles = [[copy.copy(tile) if tile.is_capturable() else tile for tile in row] for row in grid.tiles]
+        return clone
+
+    @staticmethod
+    def _clone_unit_for_search(unit: Unit) -> Unit:
+        """A copy of ``unit`` whose containers are its own.
+
+        ``attack_data`` is the unit type's stat entry (never mutated), so it
+        stays shared; any other mutable value (the fog-of-war snapshot, the
+        pre-move visibility map that ``cancel_move`` restores) is copied so
+        mutating it in the clone cannot reach the original.
+        """
+        clone = copy.copy(unit)
+        for name, value in vars(unit).items():
+            if name != "attack_data" and not isinstance(value, _IMMUTABLE_UNIT_FIELD_TYPES):
+                setattr(clone, name, copy.deepcopy(value))
+        return clone
 
     def to_numpy(self, for_player: int | None = None) -> dict[str, np.ndarray]:
         """
@@ -1491,7 +1958,7 @@ class GameState:
         #             0.0; a unit that attacked without moving reads 1.0.)
         #             Consumed by build_observation as a per-unit "exhausted"
         #             signal for the policy.
-        #   [..., 4] = paralyzed_turns (0..PARALYZE_DURATION). Surfaces the
+        #   [..., 4] = paralyzed_turns (0..PARALYZE_DURATION + 1). Surfaces the
         #             Mage paralyze debuff so the policy can value attacking /
         #             defending paralyzed targets correctly.
         #   [..., 5] = is_hasted (0.0 / 1.0). Surfaces the Sorcerer haste
@@ -1511,15 +1978,20 @@ class GameState:
         # Visibility mask for FOW
         visibility_state = np.full((self.grid.height, self.grid.width), VISIBLE, dtype=np.uint8)
 
+        # The player whose knowledge filters the arrays: set only under fog
+        # of war when it has a visibility map (otherwise everything counts as
+        # visible, as is_position_visible has it).
+        fog_player: int | None = None
         if self.fog_of_war and for_player is not None:
-            vis_map = self.visibility_maps.get(for_player)
+            vis_map = self.fog.maps.get(for_player)
             if vis_map is not None:
                 visibility_state = vis_map.to_numpy()
+                fog_player = for_player
 
         for unit in self.units:
             # FOW: Only show units that are visible or owned by the player
-            if self.fog_of_war and for_player is not None:
-                if unit.player != for_player and visibility_state[unit.y, unit.x] != VISIBLE:
+            if fog_player is not None:
+                if unit.player != fog_player and visibility_state[unit.y, unit.x] != VISIBLE:
                     continue
 
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)
@@ -1533,19 +2005,25 @@ class GameState:
             unit_state[unit.y, unit.x, 6] = float(getattr(unit, "defence_buff_turns", 0))
             unit_state[unit.y, unit.x, 7] = float(getattr(unit, "attack_buff_turns", 0))
 
-        # FOW: Mask grid ownership for non-visible tiles
-        if self.fog_of_war and for_player is not None:
-            # For shrouded/unexplored tiles, hide current ownership updates
-            # (they keep their last-seen state in the visibility map)
-            for y in range(self.grid.height):
-                for x in range(self.grid.width):
-                    if visibility_state[y, x] != VISIBLE:
-                        # Hide structure ownership for non-visible tiles
-                        # Keep terrain type visible if explored
-                        if visibility_state[y, x] == 0:  # UNEXPLORED
-                            grid_state[y, x, 0] = 0  # Hide terrain type
-                            grid_state[y, x, 1] = 0  # Hide owner
-                            grid_state[y, x, 2] = 0  # Hide health
+        # FOW: show only what for_player knows of the board (review core-5)
+        if fog_player is not None:
+            # Never-explored tiles: terrain, owner and HP all unknown.
+            grid_state[visibility_state == UNEXPLORED] = 0
+            # Structures out of sight show their owner and HP as the player
+            # last saw them (known_structure), not live: a capture or seize
+            # made out of sight must not reach the observation. Only
+            # structures have owner/HP that change, so plain terrain needs
+            # nothing beyond the mask above.
+            for x, y in self.grid.structure_positions:
+                if visibility_state[y, x] == VISIBLE:
+                    continue
+                known = self.fog.known_structure(fog_player, x, y)
+                tile = self.grid.tiles[y][x]
+                if known is None:
+                    grid_state[y, x, 1:] = 0
+                else:
+                    grid_state[y, x, 1] = known.owner or 0
+                    grid_state[y, x, 2] = (known.health / tile.max_health) * 100 if tile.max_health else 0
 
         result = {
             "grid": grid_state,
@@ -1561,233 +2039,33 @@ class GameState:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Saves and replays (the code is in core/serialization.py)
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """The game as a JSON-ready save dict ``from_dict`` resumes exactly (``serialization.game_to_dict``)."""
+        return serialization.game_to_dict(self)
+
     def save_to_file(self, filepath: str | None = None) -> str | None:
-        """
-        Save game state to file.
-
-        Args:
-            filepath: Path to save file (auto-generated if None)
-
-        Returns:
-            Path to saved file
-        """
-        from reinforcetactics.utils.file_io import FileIO
-
-        return FileIO.save_game(self, filepath)
-
-    def _get_player_type(self, config: dict[str, Any]) -> str:
-        """
-        Get the standardized player type for replay logs.
-
-        Args:
-            config: Player configuration dictionary
-
-        Returns:
-            Player type string: 'human', 'bot', 'llm', or 'rl'
-        """
-        if config.get("type") == "human":
-            return "human"
-
-        # Prefer the type already resolved by the app / tournament layers
-        # (create_bots_from_config and the tournament runner both stamp it).
-        resolved = config.get("player_type")
-        if resolved:
-            return resolved
-
-        # Fallback for configs that never went through those layers.
-        # Deferred import: the engine must not import the game layer at
-        # module load (core stays self-contained); this only runs on the
-        # save-replay path.
-        from reinforcetactics.game.bot_registry import player_type
-
-        return player_type(config.get("bot_type", ""))
-
-    @staticmethod
-    def build_player_config(
-        player_no: int, name: str, player_type: str, temperature: float | None = None, max_tokens: int | None = None
-    ) -> dict[str, Any]:
-        """
-        Build a standardized player config for replay logs.
-
-        Args:
-            player_no: Player number (1, 2, etc.)
-            name: Display name for the player/bot
-            player_type: One of 'human', 'bot', 'llm', 'rl'
-            temperature: LLM temperature (only for llm type)
-            max_tokens: LLM max tokens (only for llm type)
-
-        Returns:
-            Standardized player config dictionary
-        """
-        config: dict[str, Any] = {"player_no": player_no, "type": player_type, "name": name}
-
-        # Add LLM-specific fields
-        if player_type == "llm":
-            config["temperature"] = temperature
-            config["max_tokens"] = max_tokens
-
-        return config
+        """Save the game to a JSON file (auto-named if ``filepath`` is None); returns its path, None on failure."""
+        return serialization.save_to_file(self, filepath)
 
     def save_replay_to_file(self, filepath: str | None = None) -> str | None:
-        """
-        Save replay to file.
+        """Save the game's replay (action log and ``game_info``); returns its path, None on failure."""
+        return serialization.save_replay_to_file(self, filepath)
 
-        Args:
-            filepath: Path to replay file (auto-generated if None)
-
-        Returns:
-            Path to saved replay
-        """
-        from reinforcetactics.utils.file_io import FileIO
-
-        # Use original unpadded map if available, otherwise use initial_map_data
-        map_to_save = self.original_map_data if self.original_map_data else self.initial_map_data
-
-        # Build player_configs for replay
-        # If already in standardized format (has 'player_no'), use directly
-        # Otherwise, transform from old format for backward compatibility
-        enhanced_player_configs = []
-
-        for i, config in enumerate(self.player_configs):
-            player_num = i + 1
-
-            # Check if already in standardized format
-            if "player_no" in config:
-                enhanced_player_configs.append(config)
-            else:
-                # Transform from old format (player_name, player_type, bot_type, etc.)
-                player_name = config.get("player_name", config.get("name", "Unknown"))
-
-                # Always use _get_player_type to map old format types (e.g., 'computer' -> 'bot')
-                player_type = self._get_player_type(config)
-
-                enhanced_config = {"player_no": player_num, "type": player_type, "name": player_name}
-
-                # Add LLM-specific fields if applicable
-                if player_type == "llm":
-                    enhanced_config["temperature"] = config.get("temperature", None)
-                    enhanced_config["max_tokens"] = config.get("max_tokens", None)
-
-                enhanced_player_configs.append(enhanced_config)
-
-        from reinforcetactics import __version__ as _rt_version
-
-        # Final-state snapshot doubles as a replay-integrity checksum;
-        # see runner._save_replay for the same fields.
-        final_units_by_player: dict[int, list] = {}
-        for u in self.units:
-            final_units_by_player.setdefault(u.player, []).append(u)
-        final_counts = {p: len(us) for p, us in final_units_by_player.items()}
-        final_hp = {p: sum(u.health for u in us) for p, us in final_units_by_player.items()}
-
-        game_info = {
-            "num_players": self.num_players,
-            "max_turns": self.max_turns,
-            "total_turns": self.turn_number,
-            "winner": self.winner,
-            "game_over": self.game_over,
-            "end_reason": self.end_reason,
-            "winning_action_index": self.game_over_action_index,
-            "start_time": self.game_start_time.isoformat(),
-            "end_time": datetime.now().isoformat(),
-            "map_file": self.map_file_used,
-            "initial_map": map_to_save,
-            "player_configs": enhanced_player_configs,
-            "enabled_units": self.enabled_units,
-            "fog_of_war": self.fog_of_war,
-            "fog_of_war_method": self.fog_of_war_method,
-            "library_version": _rt_version,
-            "replay_schema_version": 3,
-            "final_unit_counts": final_counts,
-            "final_hp_totals": final_hp,
-            # Structure auto-heal economics (HP restored / gold spent per
-            # player over the whole game). Queryable without re-simulating
-            # the action log, and doubles as a replay-integrity checksum:
-            # playback re-executes end_turn, so a faithful replay's
-            # re-accumulated healing_totals must match these values.
-            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
-        }
-
-        return FileIO.save_replay(self.action_history, game_info, filepath)
+    # Standardized replay-log player config: {"player_no", "type", "name"}
+    # plus the LLM sampling fields for type "llm".
+    build_player_config = staticmethod(serialization.build_player_config)
+    # The terrain a save recorded (a DataFrame), or None for older saves.
+    saved_map_data = staticmethod(serialization.saved_map_data)
 
     @classmethod
-    def from_dict(cls, save_data: dict[str, Any], map_data) -> GameState:
+    def from_dict(cls, save_data: dict[str, Any], map_data=None) -> GameState:
+        """Restore a game ``to_dict`` saved (``serialization.game_from_dict``).
+
+        ``map_data`` None rebuilds the grid from the terrain the save
+        recorded; raises ValueError for a save too old to have it.
         """
-        Restore game state from dictionary.
-
-        Args:
-            save_data: Dictionary with saved game data
-            map_data: Map data (2D array)
-
-        Returns:
-            Restored GameState instance
-        """
-        # Extract enabled_units from save data (default to all if not present for backward compatibility)
-        enabled_units = save_data.get("enabled_units", cls.ALL_UNIT_TYPES)
-
-        # Extract fog_of_war from save data (default to False for backward compatibility)
-        fog_of_war = save_data.get("fog_of_war", False)
-
-        # Extract fog_of_war_method (default to 'simple_radius' if FOW enabled, 'none' otherwise)
-        fog_of_war_method = save_data.get("fog_of_war_method", "simple_radius" if fog_of_war else "none")
-
-        max_turns = save_data.get("max_turns")
-        # Restore the engine-constant overlay (damage_model / structure HP /
-        # economy / unit cap). Absent in pre-0.3.3 saves -> {} == module
-        # defaults, byte-identical to the old load behaviour.
-        engine_overrides = save_data.get("engine_overrides") or {}
-        game = cls(
-            map_data,
-            save_data.get("num_players", 2),
-            max_turns=max_turns,
-            enabled_units=enabled_units,
-            fog_of_war=fog_of_war,
-            engine_overrides=engine_overrides,
-        )
-
-        # Restore the fog of war method
-        game.fog_of_war_method = fog_of_war_method
-
-        game.current_player = save_data.get("current_player", 1)
-        game.turn_number = save_data.get("turn_number", 0)
-        game.game_over = save_data.get("game_over", False)
-        game.winner = save_data.get("winner")
-        game.end_reason = save_data.get("end_reason")
-        game.game_over_action_index = save_data.get("winning_action_index")
-        # Restore unit-id counter. Old saves predate this field; ``from_dict``
-        # for the units themselves leaves ``unit.unit_id = None`` in that
-        # case and ``find_unit_by_id`` falls back to position-based lookup.
-        game._next_unit_id = save_data.get("next_unit_id", 0)
-
-        # Fix player_gold dictionary key type (JSON serializes as strings)
-        saved_gold = save_data.get("player_gold", {})
-        game.player_gold = {int(k): v for k, v in saved_gold.items()}
-
-        game.map_file_used = save_data.get("map_file")
-
-        # Restore player_configs (backward compatible with old saves)
-        game.player_configs = save_data.get("player_configs", [])
-
-        # Restore units
-        game.units = []
-        for unit_data in save_data.get("units", []):
-            unit = Unit.from_dict(unit_data)
-            game.units.append(unit)
-
-        # Restore tile states
-        for tile_data in save_data.get("tiles", []):
-            x, y = tile_data["x"], tile_data["y"]
-            if 0 <= x < game.grid.width and 0 <= y < game.grid.height:
-                tile = game.grid.tiles[y][x]
-                if tile_data.get("player"):
-                    tile.player = tile_data["player"]
-                if tile_data.get("health") is not None:
-                    tile.health = tile_data["health"]
-                if tile_data.get("regenerating") is not None:
-                    tile.regenerating = tile_data["regenerating"]
-
-        # Restore action history (for continuing replay recording from a loaded save)
-        game.action_history = save_data.get("action_history", [])
-
-        game._invalidate_cache()
-        return game
+        return serialization.game_from_dict(cls, save_data, map_data)

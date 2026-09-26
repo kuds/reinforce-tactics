@@ -2,13 +2,21 @@
 Tile class representing a single tile in the game grid.
 """
 
-from reinforcetactics.constants import (
+import logging
+
+from reinforcetactics.rules import (
     BUILDING_MAX_HEALTH,
     HEADQUARTERS_MAX_HEALTH,
-    PLAYER_COLORS,
-    TILE_COLORS,
     TOWER_MAX_HEALTH,
+    TileType,
 )
+
+logger = logging.getLogger(__name__)
+
+# Tile codes a map may use; anything else loads as ocean.
+_VALID_TILE_CODES = frozenset(tile_type.value for tile_type in TileType)
+_IMPASSABLE_TILE_CODES = frozenset(tile_type.value for tile_type in TileType if not tile_type.is_walkable())
+_CAPTURABLE_TILE_CODES = frozenset(tile_type.value for tile_type in TileType if tile_type.is_capturable())
 
 
 class Tile:
@@ -28,7 +36,7 @@ class Tile:
 
         # Handle NaN, empty, or invalid values
         if tile_str in ["", "nan", "None", "NaN"]:
-            tile_str = "o"  # Default to grass
+            tile_str = "o"  # Default to ocean (impassable), not open ground
 
         # Split by underscore
         parts = tile_str.split("_")
@@ -39,58 +47,36 @@ class Tile:
         self.x = x
         self.y = y
 
-        # Validate tile type - if invalid, default to grass
-        valid_types = ["p", "w", "m", "f", "r", "b", "h", "t", "o"]
-        if self.type not in valid_types:
-            print(f"⚠️  Invalid tile type '{self.type}' at ({x}, {y}), defaulting to grass")
+        # Validate tile type - if invalid, default to ocean (impassable)
+        if self.type not in _VALID_TILE_CODES:
+            logger.warning("Invalid tile type %r at (%d, %d), defaulting to ocean", self.type, x, y)
             self.type = "o"
 
         # Tower/Headquarters/Building-specific properties
         if self.type == "t":
             self.max_health = TOWER_MAX_HEALTH
             self.health = TOWER_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "h":
             self.max_health = HEADQUARTERS_MAX_HEALTH
             self.health = HEADQUARTERS_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         elif self.type == "b":
             self.max_health = BUILDING_MAX_HEALTH
             self.health = BUILDING_MAX_HEALTH
-            self.original_player = self.player
             self.regenerating = False
         else:
             self.max_health = None
             self.health = None
-            self.original_player = None
             self.regenerating = False
-
-    def get_color(self):
-        """Calculate the final color for this tile based on type and player ownership."""
-        base_color = TILE_COLORS.get(self.type, (0, 0, 0))
-
-        # For structures (buildings, HQ, towers), emphasize player color more
-        if self.player and self.player in PLAYER_COLORS:
-            player_color = PLAYER_COLORS[self.player]
-
-            if self.type in ["h", "b", "t"]:
-                # Structures: 70% player color, 30% base color
-                return tuple(min(int(base * 0.3 + player * 0.7), 255) for base, player in zip(base_color, player_color))
-            else:
-                # Regular terrain with owner: 60% base, 40% player
-                return tuple(min(int(base * 0.6 + player * 0.4), 255) for base, player in zip(base_color, player_color))
-
-        return base_color
 
     def is_walkable(self):
         """Check if this tile can be walked on."""
-        return self.type != "w" and self.type != "o"  # Water is not walkable
+        return self.type not in _IMPASSABLE_TILE_CODES  # Water and ocean
 
     def is_capturable(self):
         """Check if this tile can be captured."""
-        return self.type in ["t", "h", "b"]
+        return self.type in _CAPTURABLE_TILE_CODES
 
     def to_dict(self):
         """Convert tile to dictionary for serialization."""

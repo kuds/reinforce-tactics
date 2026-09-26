@@ -13,6 +13,11 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
+`docker compose` reads `.env` to fill the `${...}` variables in
+`docker-compose.yml`, so the keys reach the container as environment variables
+at run time. The repo's `.dockerignore` keeps every `.env` file (and `output/`)
+out of the build context, so the keys never end up in an image layer you push.
+
 Or export them directly:
 
 ```bash
@@ -105,7 +110,7 @@ You can mix both formats:
 | Provider | Environment Variable | Supported Models |
 |----------|---------------------|------------------|
 | `openai` | `OPENAI_API_KEY` | gpt-5.2, gpt-5-mini, gpt-5-nano |
-| `anthropic` | `ANTHROPIC_API_KEY` | claude-opus-4-6, claude-sonnet-4-5, claude-haiku-4-5 |
+| `anthropic` | `ANTHROPIC_API_KEY` | claude-haiku-4-5-20251001, claude-sonnet-4-6, claude-opus-4-6, claude-sonnet-5, claude-opus-5, claude-fable-5-1 (full list: `ANTHROPIC_MODELS` in `reinforcetactics/game/llm_bot.py`) |
 | `google` | `GOOGLE_API_KEY` | gemini-3-flash-preview, gemini-2.5-flash, gemini-2.5-pro |
 
 ## Example Configurations

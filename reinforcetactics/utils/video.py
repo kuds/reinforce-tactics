@@ -17,6 +17,7 @@ from reinforcetactics.utils.replay_actions import (
 )
 from reinforcetactics.utils.replay_actions import (
     get_schema_version,
+    replay_game_state_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,12 @@ def record_game_to_video(
         renderer = None
         total = len(game_states)
         for i, state_dict in enumerate(game_states):
-            gs = GameState.from_dict(state_dict, state_dict.get("map_data") if "map_data" in state_dict else map_df)
+            # to_dict() records the terrain under "map_data" (as a list of
+            # rows, which from_dict turns back into a grid), so snapshots of
+            # random-map games render on their own terrain; map_file only
+            # serves snapshots from before the terrain was recorded.
+            snapshot_map = GameState.saved_map_data(state_dict)
+            gs = GameState.from_dict(state_dict, snapshot_map if snapshot_map is not None else map_df)
             if renderer is None:
                 renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
             else:
@@ -345,33 +351,26 @@ def record_replay_to_video(
     Returns:
         Path to the saved video file
     """
-    import pandas as pd
-
     _ensure_headless_pygame()
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
+    from reinforcetactics.utils.file_io import FileIO
 
     actions = replay_data.get("actions", [])
     game_info = replay_data.get("game_info", {})
-    initial_map = game_info.get("initial_map")
 
-    if initial_map is None:
-        raise ValueError("Replay data missing 'initial_map' in game_info")
-
-    map_df = pd.DataFrame(initial_map)
+    # Same terrain source as the interactive ReplayPlayer: the recorded
+    # initial_map, else the recorded map file; raises rather than guessing.
+    map_df = FileIO.load_replay_map(game_info)
 
     # Add an ocean border for framing. Unlike the interactive ReplayPlayer,
     # no MIN_MAP_SIZE padding is applied: that padding exists to leave room
     # for on-screen controls, and in a video it only produces a huge dead
     # ocean margin around a small board.
-    border = 2
-    h2, w2 = map_df.shape
-    bordered = pd.DataFrame(np.full((h2 + 2 * border, w2 + 2 * border), "o", dtype=object))
-    bordered.iloc[border : border + h2, border : border + w2] = map_df.values
-    offset_x, offset_y = border, border
+    bordered, offset_x, offset_y = FileIO.pad_for_display(map_df, min_size=0, border_size=2)
 
     # Create game state and headless renderer
-    game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
+    game_state = GameState(bordered, **replay_game_state_kwargs(game_info))
     renderer = Renderer(game_state, replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
     # Helper to translate coordinates
@@ -434,7 +433,7 @@ def _draw_video_hud(screen, game_state) -> None:
     """
     import pygame
 
-    from reinforcetactics.constants import PLAYER_COLORS
+    from reinforcetactics.ui.assets import PLAYER_COLORS
     from reinforcetactics.utils.fonts import get_font
 
     turn_text = f"Turn {game_state.turn_number + 1}"

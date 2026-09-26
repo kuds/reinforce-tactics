@@ -2105,3 +2105,49 @@ class TestAutoHealEpisodeStats:
         assert env.episode_stats["opp_heal_hp"] == gs.healing_totals[opp]["hp"]
         assert env.episode_stats["opp_heal_gold"] == gs.healing_totals[opp]["gold"]
         env.close()
+
+
+class TestPassingAgentDoesNotFreezeOpponent:
+    """Regression: GameState.end_turn() must invalidate the legal-action cache.
+
+    RandomBot ends its turn once get_legal_actions() returns an empty list.
+    Before the fix that empty list stayed cached, so an agent that only ended
+    its turn left the opponent reading it forever: RandomBot never acted
+    again (2 units, gold piling up) and passivity was a free draw.
+    """
+
+    @pytest.mark.parametrize("action_space_type", ["flat_discrete", "multi_discrete"])
+    @pytest.mark.parametrize(
+        "opponent,opponent_kwargs",
+        [("random", None), ("mixed", {"easy": "random", "hard": "simple", "p_hard": 0.0})],
+    )
+    def test_random_opponent_keeps_acting_while_agent_passes(self, action_space_type, opponent, opponent_kwargs):
+        env = StrategyGameEnv(
+            map_file="maps/1v1/beginner.csv",
+            opponent=opponent,
+            opponent_kwargs=opponent_kwargs,
+            action_space_type=action_space_type,
+            max_steps=500,
+            max_turns=30,
+            render_mode=None,
+        )
+        env.reset(seed=1)
+        gs = env.game_state
+        opp = 3 - env.agent_player
+
+        per_turn = []
+        for _ in range(8):
+            if action_space_type == "flat_discrete":
+                env.action_masks()
+                action = next(i for i, a in enumerate(env._current_actions) if a[0] == 5)
+            else:
+                action = np.array([5, 0, 0, 0, 0, 0])
+            before = len(gs.action_history)
+            env.step(action)
+            new = gs.action_history[before:]
+            per_turn.append(sum(1 for a in new if a.get("player") == opp and a.get("type") != "end_turn"))
+
+        # The opponent must keep acting on turns after the first, not just once.
+        assert sum(per_turn[1:]) > 0, per_turn
+        assert sum(1 for n in per_turn[1:] if n > 0) >= 3, per_turn
+        env.close()

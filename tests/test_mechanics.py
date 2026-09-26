@@ -149,60 +149,6 @@ class TestMovement:
         assert (2, 3) in reachable
 
 
-class TestAdjacentUnits:
-    """Test getting adjacent units."""
-
-    def test_get_adjacent_enemies(self):
-        """Test finding adjacent enemy units."""
-        unit = Unit("W", 5, 5, 1)
-        enemy1 = Unit("W", 6, 5, 2)  # Right
-        enemy2 = Unit("M", 5, 4, 2)  # Up
-        ally = Unit("C", 4, 5, 1)  # Left (same player)
-
-        units = [unit, enemy1, enemy2, ally]
-
-        adjacent_enemies = GameMechanics.get_adjacent_enemies(unit, units)
-
-        assert len(adjacent_enemies) == 2
-        assert enemy1 in adjacent_enemies
-        assert enemy2 in adjacent_enemies
-        assert ally not in adjacent_enemies
-
-    def test_get_adjacent_allies(self):
-        """Test finding damaged adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, damaged
-        ally1.health = 10
-        ally2 = Unit("M", 5, 4, 1)  # Up, full health
-        ally2.health = ally2.max_health
-        enemy = Unit("W", 4, 5, 2)  # Left, different player
-
-        units = [unit, ally1, ally2, enemy]
-
-        adjacent_allies = GameMechanics.get_adjacent_allies(unit, units)
-
-        assert len(adjacent_allies) == 1
-        assert ally1 in adjacent_allies
-        assert ally2 not in adjacent_allies  # Full health
-        assert enemy not in adjacent_allies  # Different player
-
-    def test_get_adjacent_paralyzed_allies(self):
-        """Test finding paralyzed adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, paralyzed
-        ally1.paralyzed_turns = 2
-        ally2 = Unit("M", 5, 4, 1)  # Up, not paralyzed
-        ally2.paralyzed_turns = 0
-
-        units = [unit, ally1, ally2]
-
-        adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(unit, units)
-
-        assert len(adjacent_paralyzed) == 1
-        assert ally1 in adjacent_paralyzed
-        assert ally2 not in adjacent_paralyzed
-
-
 class TestAttackableEnemies:
     """Test finding enemies within attack range."""
 
@@ -591,13 +537,12 @@ class TestParalysisDecrement:
 
         units = [unit1, unit2, unit3]
 
-        cured = GameMechanics.decrement_paralysis(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert unit1.paralyzed_turns == 1
         assert unit2.paralyzed_turns == 0
         assert unit3.paralyzed_turns == 3  # Different player
-        assert len(cured) == 1  # Only unit2 was cured
-        assert unit2 in cured
+        assert expired == [(unit2, "paralyzed_turns")]  # Only unit2 was cured
 
 
 class TestArcherCounterAttack:
@@ -821,51 +766,42 @@ class TestRogueFlankAbility:
 
 
 class TestRogueEvadeAbility:
-    """Test Rogue's Evade ability (25% dodge counter-attacks)."""
+    """Test Rogue's Evade ability (15% dodge counter-attacks).
 
-    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid, monkeypatch):
-        """Test Rogue evades counter-attack when random roll is below 0.25."""
-        # Mock random.random to return a value below 0.25
-        import reinforcetactics.core.mechanics as mechanics_module
+    The roll comes from an injected rng (``_ScriptedEvadeRng``, below): the
+    mechanics no longer read the module-global ``random`` these tests used
+    to monkeypatch (review core-10).
+    """
 
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.1)
-
+    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid):
+        """Test Rogue evades counter-attack when random roll is below 0.15."""
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)  # Warrior can counter-attack
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.1))
 
         assert result["evade"] is True
         assert result["counter_damage"] == 0
         assert rogue.health == 12  # Full health, no counter damage taken
 
-    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid, monkeypatch):
-        """Test Rogue doesn't evade when random roll is above 0.25."""
-        # Mock random.random to return a value above 0.25
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.5)
-
+    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid):
+        """Test Rogue doesn't evade when random roll is above 0.15."""
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)  # Warrior can counter-attack
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.5))
 
         assert result["evade"] is False
         assert result["counter_damage"] > 0
         assert rogue.health < 12  # Took counter damage
 
-    def test_non_rogue_cannot_evade(self, simple_grid, monkeypatch):
+    def test_non_rogue_cannot_evade(self, simple_grid):
         """Test non-Rogue units cannot evade counter-attacks."""
         # Even with favorable random roll, non-Rogues shouldn't evade
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.1)
-
         warrior = Unit("W", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(warrior, target, simple_grid)
+        result = GameMechanics.attack_unit(warrior, target, simple_grid, rng=_ScriptedEvadeRng(0.1))
 
         assert result["evade"] is False
         # Warrior should take counter damage
@@ -876,7 +812,12 @@ class TestSorcererHasteAbility:
     """Test Sorcerer's Haste ability."""
 
     def test_sorcerer_can_haste_ally(self, simple_grid):
-        """Test Sorcerer can grant Haste to nearby ally."""
+        """Test Sorcerer can grant Haste to nearby ally.
+
+        The mechanics layer only marks the target: GameState grants the
+        extra action when the target spends its action (review core-8), so
+        haste_unit no longer touches the target's action flags.
+        """
         sorcerer = Unit("S", 5, 5, 1)
         ally = Unit("W", 6, 5, 1)  # Adjacent ally
 
@@ -884,8 +825,8 @@ class TestSorcererHasteAbility:
 
         assert result is True
         assert ally.is_hasted is True
-        assert ally.can_move is True
-        assert ally.can_attack is True
+        assert ally.can_move is False
+        assert ally.can_attack is False
         assert sorcerer.haste_cooldown == 2
 
     def test_sorcerer_cannot_haste_when_on_cooldown(self, simple_grid):
@@ -931,16 +872,15 @@ class TestSorcererHasteAbility:
         sorcerer.haste_cooldown = 2
 
         units = [sorcerer]
-        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.haste_cooldown == 1
-        assert len(ready) == 0
+        assert expired == []
 
-        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.haste_cooldown == 0
-        assert len(ready) == 1
-        assert sorcerer in ready
+        assert expired == [(sorcerer, "haste_cooldown")]
 
 
 class TestSorcererAttacks:
@@ -1023,51 +963,39 @@ def forest_grid():
 class TestRogueForestEvadeBonus:
     """Test Rogue's additional evade chance when in forest."""
 
-    def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid, monkeypatch):
+    def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid):
         """Test Rogue in forest evades at 0.25 (above 0.15 but below 0.30)."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.25)
-
         # Place rogue on forest tile (5, 5)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, forest_grid)
+        result = GameMechanics.attack_unit(rogue, target, forest_grid, rng=_ScriptedEvadeRng(0.25))
 
         # Should evade because 0.25 < 0.30 (base 0.15 + forest bonus 0.15)
         assert result["evade"] is True
         assert result["counter_damage"] == 0
         assert rogue.health == 12
 
-    def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid, monkeypatch):
+    def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid):
         """Test Rogue in forest doesn't evade when random is above 0.30."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.35)
-
         # Place rogue on forest tile (5, 5)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, forest_grid)
+        result = GameMechanics.attack_unit(rogue, target, forest_grid, rng=_ScriptedEvadeRng(0.35))
 
         # Should NOT evade because 0.35 > 0.30
         assert result["evade"] is False
         assert result["counter_damage"] > 0
         assert rogue.health < 12
 
-    def test_rogue_evade_on_grass_uses_base_chance(self, simple_grid, monkeypatch):
+    def test_rogue_evade_on_grass_uses_base_chance(self, simple_grid):
         """Test Rogue on grass uses base 15% evade chance, not forest bonus."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.20)
-
         # Place rogue on grass tile (not forest)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.20))
 
         # Should NOT evade because 0.20 > 0.15 (base chance without forest bonus)
         assert result["evade"] is False
@@ -1093,8 +1021,8 @@ class TestRogueEvadeRngInjection:
     Regression tests for the roll reading the module-global ``random``
     unconditionally, which made seeded games (env ``reset(seed=...)``)
     non-reproducible whenever a Rogue attacked into a counter. ``rng=None``
-    keeps the module-global fallback (covered by the monkeypatch tests
-    above).
+    rolls with a private unseeded generator, never the module-global
+    ``random`` (see tests/test_rng_core.py).
     """
 
     def test_injected_rng_forces_evade(self, simple_grid):
@@ -1329,16 +1257,15 @@ class TestBuffCooldownDecrement:
         sorcerer.defence_buff_cooldown = 2
 
         units = [sorcerer]
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.defence_buff_cooldown == 1
-        assert len(result["defence_ready"]) == 0
+        assert expired == []
 
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.defence_buff_cooldown == 0
-        assert len(result["defence_ready"]) == 1
-        assert sorcerer in result["defence_ready"]
+        assert expired == [(sorcerer, "defence_buff_cooldown")]
 
     def test_attack_buff_cooldown_decrements(self, simple_grid):
         """Test attack buff cooldown decrements each turn."""
@@ -1346,16 +1273,15 @@ class TestBuffCooldownDecrement:
         sorcerer.attack_buff_cooldown = 2
 
         units = [sorcerer]
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.attack_buff_cooldown == 1
-        assert len(result["attack_ready"]) == 0
+        assert expired == []
 
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.attack_buff_cooldown == 0
-        assert len(result["attack_ready"]) == 1
-        assert sorcerer in result["attack_ready"]
+        assert expired == [(sorcerer, "attack_buff_cooldown")]
 
 
 class TestBuffDurationDecrement:
@@ -1367,17 +1293,16 @@ class TestBuffDurationDecrement:
         warrior.defence_buff_turns = 2
 
         units = [warrior]
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.defence_buff_turns == 1
-        assert len(result["defence_expired"]) == 0
+        assert expired == []
         assert warrior.has_defence_buff() is True
 
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.defence_buff_turns == 0
-        assert len(result["defence_expired"]) == 1
-        assert warrior in result["defence_expired"]
+        assert expired == [(warrior, "defence_buff_turns")]
         assert warrior.has_defence_buff() is False
 
     def test_attack_buff_duration_decrements(self, simple_grid):
@@ -1386,15 +1311,14 @@ class TestBuffDurationDecrement:
         warrior.attack_buff_turns = 2
 
         units = [warrior]
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.attack_buff_turns == 1
-        assert len(result["attack_expired"]) == 0
+        assert expired == []
         assert warrior.has_attack_buff() is True
 
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.attack_buff_turns == 0
-        assert len(result["attack_expired"]) == 1
-        assert warrior in result["attack_expired"]
+        assert expired == [(warrior, "attack_buff_turns")]
         assert warrior.has_attack_buff() is False

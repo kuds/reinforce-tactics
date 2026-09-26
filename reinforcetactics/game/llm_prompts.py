@@ -35,7 +35,7 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
@@ -52,9 +52,9 @@ UNIT TYPES:
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)
 7. Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
-   - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
+   - HASTE: Grant an ally an extra action (2-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (2-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (2-turn cooldown)
 8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers
@@ -72,8 +72,8 @@ AVAILABLE ACTIONS:
 5. HEAL: (Cleric only) Heal an ally unit within range 1-3
 6. CURE: (Cleric only) Remove paralysis from an ally within range 1-3
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
-8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
-9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
 10. SEIZE: Capture a neutral/enemy structure by standing on it
 11. END_TURN: Finish your turn
 12. RESIGN: Concede the game (use only as last resort when victory is impossible)
@@ -136,7 +136,7 @@ UNIT TYPES:
    - Strong melee fighter, attacks adjacent enemies only
 2. Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)
 3. Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)
 4. Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
@@ -153,9 +153,9 @@ UNIT TYPES:
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)
 7. Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
-   - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)
+   - HASTE: Grant an ally an extra action (2-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (2-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (2-turn cooldown)
 8. Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers
@@ -173,8 +173,8 @@ AVAILABLE ACTIONS:
 5. HEAL: (Cleric only) Heal an ally unit within range 1-3
 6. CURE: (Cleric only) Remove paralysis from an ally within range 1-3
 7. HASTE: (Sorcerer only) Grant an ally an extra action this turn
-8. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns
-9. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns
+8. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns
+9. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns
 10. SEIZE: Capture a neutral/enemy structure by standing on it
 11. END_TURN: Finish your turn
 12. RESIGN: Concede the game (use only as last resort when victory is impossible)
@@ -277,7 +277,7 @@ UNIT TYPES (for reference):
 - Barbarian (B): Glass cannon, high HP and mobility, 20 HP, 5 movement
 
 BUILDING TYPES:
-- HQ (h): 100 gold/turn, losing it = defeat
+- HQ (h): 150 gold/turn, losing it = defeat
 - Building (b): 100 gold/turn
 - Tower (t): 50 gold/turn
 
@@ -327,14 +327,14 @@ AVAILABLE ACTIONS:
 2. MOVE: Move a unit to a reachable position
 3. ATTACK: Attack an enemy unit
 4. PARALYZE: (Mage only) Paralyze an enemy unit
-5. HEAL: (Cleric only) Heal an adjacent ally
-6. CURE: (Cleric only) Remove paralysis from an ally
+5. HEAL: (Cleric only) Heal an ally within range 1-3
+6. CURE: (Cleric only) Remove paralysis from an ally within range 1-3
 7. SEIZE: Capture a structure by standing on it
 8. END_TURN: Finish your turn
 
 COMBAT RULES:
-- Warriors attack adjacent only. Mages/Archers attack at range 1-2.
-- Archers cannot attack adjacent enemies (distance 0)
+- Warriors attack adjacent only. Mages and Sorcerers attack at range 1-2.
+- Archers attack at range 2-3 (2-4 from mountains) and cannot attack adjacent enemies (distance 1)
 - Counter-attacks occur unless attacker is an Archer (vs melee defenders)
 
 CRITICAL CONSTRAINTS:
@@ -441,7 +441,7 @@ UNIT_DESCRIPTIONS = {
    - Strong melee fighter, attacks adjacent enemies only""",
     "M": """Mage (M): Cost 300 gold, HP 10, Attack 8 (adjacent) or 12 (range), Defense 4, Movement 2
    - Can attack at range (1-2 spaces)
-   - Can PARALYZE enemies (disable them for 3 turns, 2-turn cooldown)""",
+   - Can PARALYZE enemies (they lose their next 2 turns and cannot counter-attack until then; 2-turn cooldown)""",
     "C": """Cleric (C): Cost 200 gold, HP 10, Attack 2, Defense 4, Movement 3
    - Can HEAL allies (range 1-3) and CURE paralyzed units (range 1-3)""",
     "A": """Archer (A): Cost 250 gold, HP 15, Attack 5, Defense 1, Movement 3
@@ -458,9 +458,9 @@ UNIT_DESCRIPTIONS = {
    - EVADE: 15% chance to dodge counter-attacks (30% in forest)""",
     "S": """Sorcerer (S): Cost 350 gold, HP 12, Attack 6 (adjacent) or 8 (range), Defense 3, Movement 2
    - Support caster with ranged attacks (1-2 spaces)
-   - HASTE: Grant an ally an extra action (3-turn cooldown)
-   - DEFENCE BUFF: Give ally -35% damage taken for 3 turns (3-turn cooldown)
-   - ATTACK BUFF: Give ally +35% damage dealt for 3 turns (3-turn cooldown)""",
+   - HASTE: Grant an ally an extra action (2-turn cooldown)
+   - DEFENCE BUFF: Give ally -50% damage taken for 3 turns (2-turn cooldown)
+   - ATTACK BUFF: Give ally +50% damage dealt for 3 turns (2-turn cooldown)""",
     "B": """Barbarian (B): Cost 400 gold, HP 20, Attack 10, Defense 2, Movement 5
    - High HP glass cannon with excellent mobility
    - Best for rapid strikes and flanking maneuvers""",
@@ -588,17 +588,17 @@ def get_available_actions_section(enabled_units: list) -> str:
         action_num += 1
 
     if "C" in enabled_units:
-        lines.append(f"{action_num}. HEAL: (Cleric only) Heal an adjacent ally unit")
+        lines.append(f"{action_num}. HEAL: (Cleric only) Heal an ally unit within range 1-3")
         action_num += 1
-        lines.append(f"{action_num}. CURE: (Cleric only) Remove paralysis from an adjacent ally")
+        lines.append(f"{action_num}. CURE: (Cleric only) Remove paralysis from an ally within range 1-3")
         action_num += 1
 
     if "S" in enabled_units:
         lines.append(f"{action_num}. HASTE: (Sorcerer only) Grant an ally an extra action this turn")
         action_num += 1
-        lines.append(f"{action_num}. DEFENCE_BUFF: (Sorcerer only) Give an ally 35% damage reduction for 3 turns")
+        lines.append(f"{action_num}. DEFENCE_BUFF: (Sorcerer only) Give an ally 50% damage reduction for 3 turns")
         action_num += 1
-        lines.append(f"{action_num}. ATTACK_BUFF: (Sorcerer only) Give an ally 35% damage boost for 3 turns")
+        lines.append(f"{action_num}. ATTACK_BUFF: (Sorcerer only) Give an ally 50% damage boost for 3 turns")
         action_num += 1
 
     lines.append(f"{action_num}. SEIZE: Capture a neutral/enemy structure by standing on it")
@@ -636,7 +636,7 @@ def get_dynamic_prompt(base_prompt_name: str, enabled_units: list) -> str:
     disabled_units_note = ""
     disabled = [u for u in all_units if u not in enabled_units]
     if disabled:
-        from reinforcetactics.constants import UNIT_DATA
+        from reinforcetactics.rules import UNIT_DATA
 
         disabled_names: list[str] = [str(UNIT_DATA[u]["name"]) for u in disabled]
         disabled_units_note = (

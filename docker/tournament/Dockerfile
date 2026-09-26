@@ -25,7 +25,9 @@ RUN pip3 install --no-cache-dir \
     numpy \
     pandas \
     tensorboard \
-    PyYAML
+    PyYAML \
+    tqdm \
+    rich
 
 # LLM provider SDKs and Google Cloud Storage for GCS upload support
 RUN pip3 install --no-cache-dir \

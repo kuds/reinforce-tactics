@@ -2,9 +2,10 @@
 Unit class representing a game unit.
 """
 
+import heapq
 from collections import deque
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.rules import UNIT_DATA
 
 
 class Unit:
@@ -22,7 +23,7 @@ class Unit:
             player: Player number who owns this unit
             stats: Optional resolved stat block (cost/health/attack/defence/
                 movement) for this unit type. When ``None`` the global
-                :data:`reinforcetactics.constants.UNIT_DATA` entry is used,
+                :data:`reinforcetactics.rules.UNIT_DATA` entry is used,
                 preserving behaviour for direct/legacy callers. ``GameState``
                 passes its per-game resolved table so engine-override sweeps
                 (balance experiments) flow through here without mutating the
@@ -67,6 +68,11 @@ class Unit:
 
         # Haste buff tracking (for any unit that receives Haste)
         self.is_hasted = False  # True if unit has extra action this turn
+        # True from the moment the engine spends this unit's haste on a new
+        # action (GameState._consume_action) until the unit moves or acts
+        # again; lets GameState.end_unit_turn tell "finish the action that
+        # was just refreshed" (keep the extra action) from a Wait.
+        self.haste_refreshed = False
 
         # Sorcerer buff ability tracking (cooldowns for the Sorcerer)
         self.defence_buff_cooldown = 0  # Turns remaining before can use Defence Buff again
@@ -79,10 +85,23 @@ class Unit:
         # Fog of war: Track which enemy positions were visible when this unit started its action
         # This prevents "move to discover, then attack" exploitation
         self.visible_enemies_at_action_start = None  # Set of (x, y) tuples, or None if not captured
+        # Fog of war: this action's move was ambushed, so it can't be
+        # cancelled (see GameState.move_unit and GameState.can_cancel_move)
+        self.ambushed = False
+        # Fog of war: the owner's VisibilityMap as it was before this unit's
+        # latest move, kept until the unit acts or the turn ends so
+        # GameState.cancel_move can take back what the move revealed.
+        self.pre_move_visibility = None
 
     def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
         Calculate attack damage based on distance to target.
+
+        Reach is ``get_attack_range``'s, so the damage lookup and the range
+        cannot disagree: 0 outside it. Inside it, a split attack (Mage and
+        Sorcerer: ``{"adjacent": ..., "range": ...}``) deals its adjacent
+        value at distance 1 and its range value beyond; any other unit deals
+        its one attack value.
 
         Args:
             target_x: Target X coordinate
@@ -93,31 +112,20 @@ class Unit:
             Attack damage value
         """
         distance = abs(self.x - target_x) + abs(self.y - target_y)
-
-        if self.type in ["M", "S"]:
-            # Mage and Sorcerer have ranged attacks
-            if distance == 1:
-                return self.attack_data["adjacent"]
-            elif distance == 2:
-                return self.attack_data["range"]
-            else:
-                return 0
-        elif self.type == "A":
-            # Archer has range 2-3 normally, 2-4 on mountain (cannot attack at distance 1)
-            max_range = 4 if on_mountain else 3
-            if 2 <= distance <= max_range:
-                return self.attack_data
-            else:
-                return 0
-        else:
-            if distance == 1:
-                return self.attack_data
-            else:
-                return 0
+        min_range, max_range = self.get_attack_range(on_mountain)
+        if not min_range <= distance <= max_range:
+            return 0
+        if isinstance(self.attack_data, dict):
+            return self.attack_data["adjacent"] if distance == 1 else self.attack_data["range"]
+        return self.attack_data
 
     def get_attack_range(self, on_mountain=False):
         """
         Get the min and max attack range for this unit.
+
+        The one definition of attack reach: ``get_attack_damage`` is 0
+        outside it, so ``GameMechanics.can_reach`` (what the engine
+        enumerates and validates attacks with) follows it too.
 
         Args:
             on_mountain: Whether the unit is on a mountain tile (for Archer range bonus)
@@ -156,41 +164,109 @@ class Unit:
         """Check if this unit is currently paralyzed."""
         return self.paralyzed_turns > 0
 
-    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func):
+    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func, move_cost=None, came_from=None):
         """
-        Get all positions reachable within movement range using BFS.
+        Get all positions reachable within movement range.
 
         Args:
             grid_width: Width of the grid
             grid_height: Height of the grid
             can_move_to_func: Function to check if a position is valid for movement
+            move_cost: Optional ``(x, y) -> cost`` of entering a tile (see
+                ``find_paths``); None means every tile costs 1
+            came_from: Optional dict filled with each reachable position's
+                predecessor on the path the search found to it, so a caller
+                can rebuild the route a move takes (the fog-of-war ambush
+                rule walks it)
 
         Returns:
-            List of (x, y) tuples for all reachable positions
+            List of (x, y) tuples for all reachable positions, in search order
         """
-        reachable = []
-        visited = set()
-        queue = deque([(self.x, self.y, 0)])
-        visited.add((self.x, self.y))
+        return list(self.find_paths(grid_width, grid_height, can_move_to_func, move_cost, came_from))
 
-        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    # Neighbour order is part of the search order, which fixes the order of
+    # move actions (the flat_discrete encoding and every bot tiebreak).
+    _DIRECTIONS = ((0, -1), (0, 1), (-1, 0), (1, 0))
+
+    def find_paths(self, grid_width, grid_height, can_enter, move_cost=None, came_from=None):
+        """Every tile this unit can reach this turn, mapped to the tiles stepped to get there.
+
+        A tile is reachable when some path of enterable tiles (``can_enter``)
+        costs at most ``movement_range`` in total, each step costing
+        ``move_cost(x, y)`` of the tile entered (1 when ``move_cost`` is
+        None). The start tile is not included. The step count is that of
+        the cheapest path found, which is what a "path" Knight Charge
+        counts.
+
+        Uniform cost is a breadth-first search; any other cost is a Dijkstra
+        search whose ties are broken by discovery order, so with every cost
+        1 it finds exactly the tiles the BFS finds, in the same order
+        (tests/test_pathfinding_core.py checks this on every shipped map).
+
+        ``came_from``, if given, is filled with each reached tile's
+        predecessor on the path found to it, so a caller can walk the route a
+        move takes (the fog-of-war ambush rule does).
+
+        Returns:
+            dict ``{(x, y): steps}`` in the order tiles were settled.
+        """
+        if move_cost is None:
+            return self._find_paths_uniform(grid_width, grid_height, can_enter, came_from)
+
+        budget = self.movement_range + 1e-9  # float costs such as 0.5 may accumulate rounding error
+        start = (self.x, self.y)
+        best_cost = {start: 0}
+        steps = {start: 0}
+        settled = {}
+        seq = 0  # discovery order: the tiebreak that makes cost-1 Dijkstra match BFS
+        heap = [(0, seq, self.x, self.y)]
+        while heap:
+            cost, _, x, y = heapq.heappop(heap)
+            if (x, y) in settled or cost > best_cost[(x, y)]:
+                continue  # a stale entry for a tile since reached more cheaply
+            settled[(x, y)] = steps[(x, y)]
+            for dx, dy in self._DIRECTIONS:
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < grid_width and 0 <= ny < grid_height):
+                    continue
+                new_cost = cost + move_cost(nx, ny)
+                if new_cost > budget or new_cost >= best_cost.get((nx, ny), float("inf")):
+                    continue
+                if not can_enter(nx, ny):
+                    continue
+                best_cost[(nx, ny)] = new_cost
+                steps[(nx, ny)] = steps[(x, y)] + 1
+                if came_from is not None:
+                    came_from[(nx, ny)] = (x, y)
+                seq += 1
+                heapq.heappush(heap, (new_cost, seq, nx, ny))
+        del settled[start]
+        return settled
+
+    def _find_paths_uniform(self, grid_width, grid_height, can_enter, came_from=None):
+        """``find_paths`` with every step costing 1: a plain BFS (the fast default)."""
+        reachable = {}
+        visited = {(self.x, self.y)}
+        queue = deque([(self.x, self.y, 0)])
 
         while queue:
             curr_x, curr_y, distance = queue.popleft()
 
             if distance > 0:
-                reachable.append((curr_x, curr_y))
+                reachable[(curr_x, curr_y)] = distance
 
             if distance < self.movement_range:
-                for dx, dy in directions:
+                for dx, dy in self._DIRECTIONS:
                     new_x = curr_x + dx
                     new_y = curr_y + dy
 
                     if (new_x, new_y) not in visited:
                         if 0 <= new_x < grid_width and 0 <= new_y < grid_height:
-                            if can_move_to_func(new_x, new_y):
+                            if can_enter(new_x, new_y):
                                 visited.add((new_x, new_y))
                                 queue.append((new_x, new_y, distance + 1))
+                                if came_from is not None:
+                                    came_from[(new_x, new_y)] = (curr_x, curr_y)
 
         return reachable
 
@@ -232,6 +308,7 @@ class Unit:
                   False if the turn actually ended
         """
         # If hasted and not forcing end, consume haste and refresh for another action
+        self.haste_refreshed = False
         if self.is_hasted and not force_end:
             self.is_hasted = False
             self.can_move = True
@@ -302,17 +379,40 @@ class Unit:
             "attack_buff_turns": self.attack_buff_turns,
             "original_x": self.original_x,
             "original_y": self.original_y,
+            # end_turn resets a structure the unit stepped off only if it
+            # has_moved, so a mid-turn save must keep it.
+            "has_moved": self.has_moved,
+            # Fog of war: the enemies it may attack this action (those in
+            # sight when the action began); None = not captured yet.
+            "visible_enemies_at_action_start": (
+                sorted([x, y] for x, y in self.visible_enemies_at_action_start)
+                if self.visible_enemies_at_action_start is not None
+                else None
+            ),
+            # An ambushed move can't be cancelled, after a reload too.
+            "ambushed": self.ambushed,
+            # Refreshed by haste this action: the GUI's end_unit_turn right
+            # after it keeps the extra action, after a reload too.
+            "haste_refreshed": self.haste_refreshed,
         }
 
     @classmethod
-    def from_dict(cls, data):
-        """Create unit from dictionary."""
-        unit = cls(data["type"], data["x"], data["y"], data["player"])
+    def from_dict(cls, data, stats=None):
+        """Create unit from dictionary.
+
+        Args:
+            data: A dict written by :meth:`to_dict`
+            stats: The stat block to build the unit with, as in ``__init__``.
+                ``GameState.from_dict`` passes its game's (engine-override)
+                table; ``None`` uses the module defaults. Saved health is
+                capped at the resulting ``max_health``.
+        """
+        unit = cls(data["type"], data["x"], data["y"], data["player"], stats=stats)
         # ``None`` for old saves that pre-date the unit_id field; the
         # owning GameState restores ``_next_unit_id`` so newly-created
         # units after load still get fresh non-colliding ids.
         unit.unit_id = data.get("unit_id")
-        unit.health = data["health"]
+        unit.health = min(data["health"], unit.max_health)
         unit.paralyzed_turns = data.get("paralyzed_turns", 0)
         unit.paralyze_cooldown = data.get("paralyze_cooldown", 0)
         unit.can_move = data.get("can_move", True)
@@ -326,4 +426,11 @@ class Unit:
         unit.attack_buff_turns = data.get("attack_buff_turns", 0)
         unit.original_x = data.get("original_x", unit.x)
         unit.original_y = data.get("original_y", unit.y)
+        # Saves before has_moved was recorded: a unit away from where its
+        # action started has moved (the only case end_turn acts on).
+        unit.has_moved = data.get("has_moved", (unit.x, unit.y) != (unit.original_x, unit.original_y))
+        snapshot = data.get("visible_enemies_at_action_start")
+        unit.visible_enemies_at_action_start = {(x, y) for x, y in snapshot} if snapshot is not None else None
+        unit.ambushed = data.get("ambushed", False)
+        unit.haste_refreshed = data.get("haste_refreshed", False)
         return unit

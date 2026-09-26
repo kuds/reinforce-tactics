@@ -20,8 +20,21 @@ Everything is written under ``--output-dir`` (default
 
 When a GCS destination is configured (``--gcs-output gs://...`` or, on Vertex,
 the ``GCS_OUTPUT_URI`` / ``AIP_MODEL_DIR`` env), the whole output directory is
-uploaded there at the end — including on a stall — so the charts and videos
-survive the ephemeral job.
+uploaded there at the end — including on a stall, a failure, or a SIGTERM
+(Vertex cancel/preemption, ``docker stop``) — so the charts and videos survive
+the ephemeral job. Under the image's entrypoint (scripts/cloud/vertex_train.py),
+whose final sync after this script exits covers the same destination, the
+script leaves that upload to the entrypoint (``GCS_WRAPPER_SYNC``).
+
+Exit codes (so a scheduler can tell the outcomes apart):
+
+    0    every curriculum stage promoted
+    1    failure (an exception, or a bad --config / --set value)
+    2    command-line usage error (argparse)
+    3    the curriculum stalled: a stage used its budget without promoting.
+         Partial artifacts are still post-processed and uploaded.
+    130  interrupted with Ctrl-C (SIGINT)
+    143  terminated by SIGTERM; the output directory is uploaded on the way out
 
 Examples:
     python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --device cuda
@@ -31,9 +44,12 @@ Examples:
 
 import argparse
 import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 # Force headless rendering BEFORE anything imports pygame or matplotlib. SDL and
 # matplotlib both pick their backend at import time, so these must be set first.
@@ -42,6 +58,13 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 # Make the package importable when run as a script from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+# Exit codes; see the module docstring. 130/143 follow the shell's 128+signal
+# convention, which scripts/cloud/vertex_train.py also uses when it reports a
+# child killed by a signal.
+EXIT_OK = 0
+EXIT_STALLED = 3
+EXIT_TERMINATED = 128 + signal.SIGTERM
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -132,6 +155,7 @@ def _bc_build(cfg, output_dir: Path, args):
     """Build a BC warm-start checkpoint and point cfg.warm_start_path at it."""
     from reinforcetactics.rl import load_scenarios_from_yaml, make_maskable_env, make_warm_started_model
     from reinforcetactics.rl.bootstrap import _resolve_policy_kwargs
+    from reinforcetactics.rl.callbacks import save_model_atomically
 
     if cfg.env.action_space_type != "multi_discrete":
         raise SystemExit(
@@ -168,7 +192,7 @@ def _bc_build(cfg, output_dir: Path, args):
     )
 
     checkpoint = output_dir / "bc_warmstart.zip"
-    bc_model.save(str(checkpoint))
+    save_model_atomically(bc_model, checkpoint)
     cfg.warm_start_path = str(checkpoint)
     if bc_stats:
         f = bc_stats[-1]
@@ -207,10 +231,27 @@ def _bc_sanity_eval(cfg, bc_model) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _snapshot_stage_checkpoints(result, cfg, output_dir: Path):
-    """Flatten per-stage checkpoints and build the stage_checkpoints map (section 4b)."""
+def _copy_atomically(src: Path, dst: Path) -> None:
+    """``shutil.copy2`` via a ``.partial`` sibling, so ``dst`` is never a partial copy.
+
+    A SIGTERM mid-copy raises SystemExit here, and the final upload would
+    otherwise store the truncated zip (see ``save_model_atomically``).
+    """
     import shutil
 
+    from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
+
+    partial = dst.with_name(dst.name + PARTIAL_SUFFIX)
+    try:
+        shutil.copy2(src, partial)
+        os.replace(partial, dst)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+
+def _snapshot_stage_checkpoints(result, cfg, output_dir: Path):
+    """Flatten per-stage checkpoints and build the stage_checkpoints map (section 4b)."""
     checkpoints_dir = output_dir / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     stage_checkpoints = {}
@@ -220,9 +261,9 @@ def _snapshot_stage_checkpoints(result, cfg, output_dir: Path):
         flat_final = checkpoints_dir / f"{stage_name}.zip"
         flat_best = checkpoints_dir / f"{stage_name}_best.zip"
         if (stage_dir / "stage_final.zip").exists():
-            shutil.copy2(stage_dir / "stage_final.zip", flat_final)
+            _copy_atomically(stage_dir / "stage_final.zip", flat_final)
         if (stage_dir / "best_model.zip").exists():
-            shutil.copy2(stage_dir / "best_model.zip", flat_best)
+            _copy_atomically(stage_dir / "best_model.zip", flat_best)
         stage_checkpoints[stage_name] = {
             "map_file": next(s.map_file for s in cfg.curriculum.stages if s.name == stage_name),
             "opponent": next(s.opponent for s in cfg.curriculum.stages if s.name == stage_name),
@@ -342,19 +383,52 @@ def _individual_game_stats(video_summary, charts_dir: Path, plt) -> None:
 
 def _maybe_upload(output_dir: Path, args) -> None:
     """Upload the run directory to GCS when configured (final, runs even on stall)."""
-    from reinforcetactics.cloud.storage import resolve_output_base, upload_tree
+    from reinforcetactics.cloud.storage import resolve_output_base, synced_by_wrapper, upload_tree
 
     base = args.gcs_output or (None if args.no_gcs else resolve_output_base())
     if not base:
         return
     dest = f"{base.rstrip('/')}/{output_dir.name}"
+    if synced_by_wrapper(output_dir, dest):
+        # Under scripts/cloud/vertex_train.py, whose final sync (after this
+        # process exits) writes these same objects and skips the files its
+        # periodic syncs already stored. Uploading here too re-sent every file,
+        # checkpoints included, and on a SIGTERM spent Vertex's shutdown grace
+        # period doing so before the files that had changed got their turn.
+        print(f"Leaving {output_dir} to the entrypoint's final sync -> {dest}")
+        return
     print(f"Uploading {output_dir} -> {dest} ...")
     count = upload_tree(str(output_dir), dest)
     print(f"Uploaded {count} file(s) to {dest}" if count else f"No files uploaded to {dest}")
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> NoReturn:
+    """Turn SIGTERM into ``SystemExit`` so ``main``'s ``finally`` upload runs.
+
+    Python's default SIGTERM action ends the process on the spot, skipping
+    every ``finally`` block, so a cancelled or preempted Vertex job
+    (vertex_train.py forwards Vertex's SIGTERM here) lost its whole run
+    directory. Raising unwinds the stack instead. The handler disarms itself
+    first: a repeated SIGTERM must not abort the upload it is waiting for.
+    SIGKILL at the end of the grace period still ends the process, which is
+    why vertex_train.py also syncs the run directory periodically.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    # os.write rather than print: the signal may have interrupted a print,
+    # and re-entering the buffered stdout from here raises RuntimeError
+    # ("reentrant call"), which would replace the SystemExit below.
+    try:
+        os.write(2, f"\n🛑 Received signal {signum}; stopping, then uploading the output directory.\n".encode())
+    except OSError:
+        pass
+    raise SystemExit(EXIT_TERMINATED)
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Installed first so a SIGTERM at any point after startup reaches the
+    # finally block below instead of killing the process outright.
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    args = build_parser().parse_args(argv)
 
     # Heavy imports are deferred until after arg parsing so --help works without
     # torch / sb3 / the rest of the package installed.
@@ -392,6 +466,7 @@ def main() -> int:
     print(f"Output dir: {output_dir}")
     _print_stage_table(cfg)
 
+    exit_code = EXIT_OK
     try:
         if args.build_bc:
             bc_model, bc_dataset, bc_stats = _bc_build(cfg, output_dir, args)
@@ -404,6 +479,10 @@ def main() -> int:
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()
+            # A stall used to exit 0, so schedulers (and Vertex, which marks a
+            # job failed only on a non-zero exit) recorded it as a success.
+            # The partial result is still post-processed and uploaded below.
+            exit_code = EXIT_STALLED
 
         if result is not None:
             stage_checkpoints = _snapshot_stage_checkpoints(result, cfg, output_dir)
@@ -413,11 +492,21 @@ def main() -> int:
             video_summary = [] if args.skip_videos else _record_videos(result, cfg, output_dir, stage_checkpoints)
             if not args.skip_plots:
                 _individual_game_stats(video_summary, charts_dir, plt)
-            print(f"\n✅ Done. Final model: {result.get('final_model_path')}")
+            if exit_code == EXIT_STALLED:
+                print(f"\n⚠️  Stalled (exit code {EXIT_STALLED}). Final model: {result.get('final_model_path')}")
+            else:
+                print(f"\n✅ Done. Final model: {result.get('final_model_path')}")
     finally:
+        # Runs on success, on a stall, when an exception propagates (the
+        # interpreter then exits 1), and on SIGTERM via _exit_on_sigterm.
+        # The run is over by now, so a SIGTERM from here on (a cancel that
+        # lands while a finished run uploads) is ignored rather than raised
+        # inside upload_tree, which cut the upload short. The exit code then
+        # still reports how the run ended; SIGKILL remains the hard stop.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         _maybe_upload(output_dir, args)
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

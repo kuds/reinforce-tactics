@@ -2,7 +2,7 @@
 
 import pygame
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_DATA
+from reinforcetactics.rules import ALL_UNIT_TYPES, UNIT_DATA
 from reinforcetactics.ui.menus.base import Menu
 from reinforcetactics.utils.language import get_language
 from reinforcetactics.utils.settings import get_settings

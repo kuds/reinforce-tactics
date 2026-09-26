@@ -13,6 +13,9 @@ matplotlib
 pandas
 Pillow
 PyYAML
+# Progress bar for SB3's model.learn(progress_bar=True); see pyproject.toml.
+tqdm
+rich
 
 # Optional: LLM bot dependencies
 # Uncomment the ones you need for your LLM provider:

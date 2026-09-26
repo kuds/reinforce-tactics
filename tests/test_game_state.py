@@ -1,5 +1,7 @@
 """Tests for GameState class, specifically win conditions."""
 
+import random
+
 import numpy as np
 import pytest
 
@@ -90,8 +92,8 @@ class TestLegalActionSanity:
         game = simple_game
         game.current_player = 1
         self._fund(game)
-        mage = game.create_unit("M", 5, 5, player=1)
-        enemy = game.create_unit("W", 5, 6, player=2)  # adjacent (distance 1)
+        mage = game.place_unit("M", 5, 5, player=1)
+        enemy = game.place_unit("W", 5, 6, player=2)  # adjacent (distance 1)
         self._ready(mage)
         game._invalidate_cache()
 
@@ -112,8 +114,8 @@ class TestLegalActionSanity:
         game = simple_game
         game.current_player = 1
         self._fund(game)
-        attacker = game.create_unit("W", 5, 5, player=1)
-        enemy = game.create_unit("W", 5, 6, player=2)
+        attacker = game.place_unit("W", 5, 5, player=1)
+        enemy = game.place_unit("W", 5, 6, player=2)
         self._ready(attacker)
 
         enemy.health = 0  # corpse left in self.units
@@ -125,7 +127,7 @@ class TestLegalActionSanity:
         game = simple_game
         game.current_player = 1
         self._fund(game)
-        unit = game.create_unit("W", 5, 5, player=1)
+        unit = game.place_unit("W", 5, 5, player=1)
         self._ready(unit)
 
         unit.health = 0  # corpse left in self.units
@@ -135,14 +137,103 @@ class TestLegalActionSanity:
         assert all(a["attacker"] is not unit for a in actions["attack"])
 
 
+class TestLegalActionCacheCoherence:
+    """Every engine-level state change must invalidate the legal-action cache.
+
+    Regression for end_turn() leaving the cache valid: a turn in which nothing
+    else mutated state handed the next player the actions cached at the end
+    of its previous turn (e.g. RandomBot's empty list), freezing it.
+    """
+
+    def _ready(self, unit):
+        unit.can_move = True
+        unit.can_attack = True
+
+    def _spend(self, unit):
+        """A placed unit starts ready; make it look like one that already acted."""
+        unit.can_move = False
+        unit.can_attack = False
+
+    def _unit_moves(self, game, unit):
+        return [a for a in game.get_legal_actions(player=unit.player)["move"] if a["unit"] is unit]
+
+    def test_end_turn_refreshes_cached_actions(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.place_unit("W", 5, 5, player=1)
+        self._spend(unit)
+        # A spent unit can't act, so player 1's cached set has no moves.
+        assert self._unit_moves(game, unit) == []
+
+        # Pass both turns without any other state change.
+        game.end_turn()
+        game.end_turn()
+        assert game.current_player == 1
+
+        moves = self._unit_moves(game, unit)
+        assert moves, "unit's moves must reappear after its turn comes round again"
+        assert game.get_legal_actions(player=1) == game._compute_legal_actions(1)
+
+    def test_end_turn_refreshes_other_players_stale_entry(self, simple_game):
+        game = simple_game
+        game.player_gold[2] = 1000
+        game.current_player = 2
+        unit = game.place_unit("W", 6, 6, player=2)
+        self._spend(unit)
+        # Cache player 2's (move-less) set, then pass to player 1 and back.
+        game.get_legal_actions(player=2)
+        game.end_turn()
+        game.get_legal_actions(player=1)
+        game.end_turn()
+        assert game.current_player == 2
+        assert self._unit_moves(game, unit)
+
+    def test_end_unit_turn_wrapper_invalidates(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.place_unit("W", 5, 5, player=1)
+        self._ready(unit)
+        game._invalidate_cache()
+        assert self._unit_moves(game, unit)
+
+        assert game.end_unit_turn(unit) is False
+        assert self._unit_moves(game, unit) == []
+
+    def test_end_unit_turn_wrapper_consumes_haste(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.place_unit("W", 5, 5, player=1)
+        self._spend(unit)
+        unit.is_hasted = True
+        game._invalidate_cache()
+        assert self._unit_moves(game, unit) == []
+
+        assert game.end_unit_turn(unit) is True
+        assert self._unit_moves(game, unit), "haste refresh must be visible to get_legal_actions"
+
+    def test_cancel_move_wrapper_invalidates(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.place_unit("W", 5, 5, player=1)
+        self._ready(unit)
+        game._invalidate_cache()
+        assert game.move_unit(unit, 5, 6)
+        assert self._unit_moves(game, unit) == []
+
+        assert game.cancel_move(unit) is True
+        assert (unit.x, unit.y) == (5, 5)
+        assert self._unit_moves(game, unit)
+        assert game.cancel_move(unit) is False
+
+
 class TestUnitEliminationWinCondition:
     """Test that eliminating all enemy units results in a win."""
 
     def test_game_ends_when_target_player_loses_last_unit(self, simple_game):
         """Test game ends when target is killed and they have no remaining units."""
         # Create attacker for player 1 and a single target for player 2
-        attacker = simple_game.create_unit("W", 5, 5, player=1)
-        target = simple_game.create_unit("C", 6, 5, player=2)  # Cleric: 10 HP, 4 def
+        attacker = simple_game.place_unit("W", 5, 5, player=1)
+        target = simple_game.place_unit("C", 6, 5, player=2)  # Cleric: 10 HP, 4 def
         # Pre-damage so the warrior's 8 dmg one-shots. Post-buff cleric
         # would otherwise survive a single warrior hit (10 - 8 = 2 HP).
         target.health = 8
@@ -166,8 +257,8 @@ class TestUnitEliminationWinCondition:
     def test_game_ends_when_attacker_player_loses_last_unit(self, simple_game):
         """Test game ends when attacker dies via counter-attack and they have no remaining units."""
         # Create a weak attacker for player 1 and a strong defender for player 2
-        attacker = simple_game.create_unit("C", 5, 5, player=1)  # Cleric has 8 HP, 2 attack
-        defender = simple_game.create_unit("W", 6, 5, player=2)  # Warrior has 15 HP, 10 attack
+        attacker = simple_game.place_unit("C", 5, 5, player=1)  # Cleric has 8 HP, 2 attack
+        defender = simple_game.place_unit("W", 6, 5, player=2)  # Warrior has 15 HP, 10 attack
 
         # Pre-damage the Cleric so it will die from counter-attack
         # Warrior counter does 6 damage (10 * 0.8 counter * 0.8 defense reduction)
@@ -196,11 +287,11 @@ class TestUnitEliminationWinCondition:
         simple_game.player_gold[2] = 500
 
         # Create attacker for player 1 and two units for player 2
-        attacker = simple_game.create_unit("W", 5, 5, player=1)
-        target = simple_game.create_unit("C", 6, 5, player=2)  # Will be killed
+        attacker = simple_game.place_unit("W", 5, 5, player=1)
+        target = simple_game.place_unit("C", 6, 5, player=2)  # Will be killed
         # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
         target.health = 8
-        _survivor = simple_game.create_unit("W", 7, 7, player=2)  # Will survive
+        _survivor = simple_game.place_unit("W", 7, 7, player=2)  # Will survive
 
         # Verify initial state
         assert simple_game.game_over is False
@@ -224,8 +315,8 @@ class TestUnitEliminationWinCondition:
         simple_game.player_gold[1] = 300
 
         # Create two units - a weak attacker and strong defender to ensure counter-kill
-        attacker = simple_game.create_unit("C", 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
-        defender = simple_game.create_unit("W", 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
+        attacker = simple_game.place_unit("C", 5, 5, player=1)  # 8 HP, 2 attack, 3 defense
+        defender = simple_game.place_unit("W", 6, 5, player=2)  # 15 HP, 10 attack, 6 defense
 
         # Damage attacker so counter-attack will kill it
         # Warrior counter: 10 attack - 3 defense = 7 damage * 0.9 = 6.3 -> 6 damage
@@ -253,8 +344,8 @@ class TestUnitEliminationWinCondition:
     def test_unit_elimination_with_hq_still_owned(self, simple_game):
         """Test that losing all units ends the game even if player owns HQ."""
         # Player 2 owns HQ at (9,9) but will lose their only unit
-        attacker = simple_game.create_unit("W", 5, 5, player=1)
-        target = simple_game.create_unit("C", 6, 5, player=2)
+        attacker = simple_game.place_unit("W", 5, 5, player=1)
+        target = simple_game.place_unit("C", 6, 5, player=2)
         # Pre-damage post-buff cleric (10 HP) so warrior's 8 dmg one-shots.
         target.health = 8
 
@@ -298,9 +389,10 @@ class TestEngineRngInjection:
         map_data[0][0] = "h_1"
         map_data[9][9] = "h_2"
         gs = GameState(map_data, num_players=2, rng=rng)
-        rogue = Unit("R", 5, 5, 1)
-        target = Unit("W", 6, 5, 2)
-        gs.units.extend([rogue, target])
+        # place_unit, not a bare Unit: a bare Unit starts with its actions
+        # spent, and the engine now refuses an attack from a spent unit.
+        rogue = gs.place_unit("R", 5, 5, 1)
+        target = gs.place_unit("W", 6, 5, 2)
         return gs, gs.attack(rogue, target)
 
     def test_injected_rng_forces_evade(self):
@@ -323,12 +415,15 @@ class TestEngineRngInjection:
         gs.reset(np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object))
         assert gs.rng is rng
 
-    def test_default_rng_is_none_module_global_fallback(self):
-        # No rng -> legacy behaviour (module-global random); the attribute
-        # must exist and be None so mechanics falls back cleanly.
+    def test_default_rng_is_a_seeded_game_owned_generator(self):
+        # No rng -> the game owns random.Random(seed) with the seed drawn
+        # from entropy and recorded (review core-10). This used to assert
+        # ``rng is None`` (the module-global ``random`` fallback), which made
+        # tournaments and AlphaZero/BC games irreproducible.
         map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
         gs = GameState(map_data, num_players=2)
-        assert gs.rng is None
+        assert isinstance(gs.rng, random.Random)
+        assert isinstance(gs.seed, int)
 
 
 class TestStructureAutoHealAccumulator:
