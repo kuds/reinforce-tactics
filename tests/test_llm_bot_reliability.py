@@ -1397,3 +1397,129 @@ class TestGUIFallback:
             assert pygame.event.get() == []
         finally:
             pygame.quit()
+
+
+class FakeOpenAIQuotaError(FakeHTTPError):
+    """Mimics openai's RateLimitError for an exhausted account: 429 with code/type ``insufficient_quota``."""
+
+    def __init__(self):
+        super().__init__(429)
+        self.code = "insufficient_quota"
+        self.type = "insufficient_quota"
+
+
+def _gemini_quota_error(quota_id: str) -> FakeGenaiAPIError:
+    return FakeGenaiAPIError(
+        429,
+        {
+            "error": {
+                "code": 429,
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [{"quotaMetric": "generate_content_requests", "quotaId": quota_id}],
+                    }
+                ],
+            }
+        },
+    )
+
+
+class TestIntegrationFollowUps:
+    """Findings from the final review of the LLM workstream (quota, Retry-After, GUI limits)."""
+
+    def test_openai_insufficient_quota_fails_fast(self, game, sleeps):
+        _start_player2_turn(game)
+        bot = ScriptedBot(game, player=2, api_key="k", script=[FakeOpenAIQuotaError()] * 5)
+
+        with pytest.raises(llm_bot.LLMBotError) as excinfo:
+            bot.take_turn()
+
+        assert excinfo.value.retryable is False
+        assert "quota" in str(excinfo.value)
+        assert bot.calls == 1 and sleeps == []
+
+    def test_gemini_daily_quota_fails_fast(self, game, sleeps):
+        _start_player2_turn(game)
+        daily = _gemini_quota_error("GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+        bot = ScriptedBot(game, player=2, api_key="k", script=[daily] * 5)
+
+        with pytest.raises(llm_bot.LLMBotError):
+            bot.take_turn()
+
+        assert bot.calls == 1 and sleeps == []
+
+    def test_gemini_per_minute_quota_is_still_retried(self, game, sleeps):
+        _start_player2_turn(game)
+        per_minute = _gemini_quota_error("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=3, script=[per_minute, END_TURN_REPLY])
+
+        bot.take_turn()
+
+        assert bot.calls == 2
+        assert bot.consecutive_failed_turns == 0
+
+    def test_retry_after_past_the_budget_gives_up_instead_of_sleeping(self, game, sleeps):
+        _start_player2_turn(game)
+        busy = FakeHTTPError(429, {"retry-after": "60"})
+        bot = ScriptedBot(game, player=2, api_key="k", retry_budget_s=15.0, script=[busy] * 5)
+
+        bot.take_turn()
+
+        assert bot.calls == 1
+        assert sleeps == []  # the old code slept 60 s, twice, on the GUI thread
+        assert game.current_player == 1  # the turn is passed
+
+    def test_short_retry_after_within_the_budget_is_honoured(self, game, sleeps):
+        _start_player2_turn(game)
+        busy = FakeHTTPError(429, {"retry-after": "5"})
+        bot = ScriptedBot(game, player=2, api_key="k", retry_budget_s=15.0, script=[busy, END_TURN_REPLY])
+
+        bot.take_turn()
+
+        assert bot.calls == 2
+        assert sleeps and sleeps[0] >= 5
+
+    def test_streak_error_names_the_last_failure(self, game, sleeps):
+        _start_player2_turn(game)
+        bot = ScriptedBot(
+            game,
+            player=2,
+            api_key="k",
+            max_retries=1,
+            retry_budget_s=None,
+            max_consecutive_failed_turns=1,
+            script=[FakeHTTPError(503)] * 3,
+        )
+
+        with pytest.raises(llm_bot.LLMBotError) as excinfo:
+            bot.take_turn()
+
+        assert "HTTP 503" in str(excinfo.value)
+        assert "1 turns in a row" in str(excinfo.value)
+
+    def test_gui_builds_llm_bots_with_tight_retry_limits(self, game, fake_anthropic):
+        from reinforcetactics.app import bot_factory
+
+        settings = Mock()
+        settings.get_api_key.return_value = "sk-ant-test"
+
+        bot = bot_factory.create_bot(game, 2, "ClaudeBot", settings)
+
+        assert bot.retry_budget_s == bot_factory.GUI_LLM_RETRY_BUDGET_S
+        assert bot.max_consecutive_failed_turns == bot_factory.GUI_LLM_MAX_FAILED_TURNS
+        assert bot.retry_budget_s < llm_bot.DEFAULT_RETRY_BUDGET_S
+
+    def test_gui_dialog_leads_with_the_cause(self, game, fake_anthropic, sleeps, monkeypatch):
+        fake_anthropic.default_response = FakeHTTPError(401)
+        handler, dialogs = TestGUIFallback._handler(game, ClaudeBot(game, player=2, api_key="sk-ant-bad"), monkeypatch)
+
+        game.end_turn()
+        handler._process_bot_turns()
+
+        title, message = dialogs[0]
+        assert "Player 2" in title
+        # The cause comes first, not the "ClaudeBot (model-id):" prefix that
+        # used to push it out of the dialog on small maps.
+        assert message.startswith("HTTP 401")

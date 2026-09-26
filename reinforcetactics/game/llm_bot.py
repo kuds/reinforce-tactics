@@ -348,6 +348,32 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
 _CONNECTION_ERROR_CLASS_NAMES = frozenset({"NetworkError", "RemoteProtocolError"})
 
 
+def _quota_exhausted(exc: BaseException) -> bool:
+    """Whether a 429 means the account is out of quota, not rate-limited.
+
+    Waiting doesn't clear these, so retrying them only stalls the game: an
+    OpenAI ``insufficient_quota`` 429 took 21 requests and ~131 s of backoff
+    over three turns before the failed-turn limit named the wrong cause.
+    OpenAI marks them with code/type ``insufficient_quota``; Gemini's daily
+    limits carry a QuotaFailure whose ``quotaId`` says ``PerDay`` (per-minute
+    quotas stay retryable).
+    """
+    if "insufficient_quota" in (getattr(exc, "code", None), getattr(exc, "type", None)):
+        return True
+    if "insufficient_quota" in str(exc):
+        return True
+
+    def quota_ids(node: Any) -> list[str]:
+        if isinstance(node, dict):
+            found = [str(node["quotaId"])] if "quotaId" in node else []
+            return found + [q for value in node.values() for q in quota_ids(value)]
+        if isinstance(node, list):
+            return [q for value in node for q in quota_ids(value)]
+        return []
+
+    return any("PerDay" in quota_id for quota_id in quota_ids(getattr(exc, "details", None)))
+
+
 def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
     """Sort a failed LLM request into retryable or not.
 
@@ -370,6 +396,8 @@ def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
         reason = f"HTTP {status}"
         if status in _HTTP_STATUS_REASONS:
             reason += f" {_HTTP_STATUS_REASONS[status]}"
+        if status == 429 and _quota_exhausted(exc):
+            return _LLMErrorInfo(False, f"{reason} (quota exhausted; retrying won't help)")
         if status in _RETRYABLE_HTTP_STATUSES or status >= 500:
             return _LLMErrorInfo(True, reason, _retry_after_seconds(exc), transient=True)
         if 400 <= status < 500:
@@ -540,6 +568,8 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         )
         self.max_consecutive_failed_turns = max_consecutive_failed_turns
         self.consecutive_failed_turns = 0
+        # Why the most recent unanswered call failed, for the streak LLMBotError.
+        self._last_failure_reason = ""
         self.retry_budget_s = retry_budget_s
 
         # Resolve system prompt - can be a name or a full prompt string
@@ -932,9 +962,12 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         self._record("llm_failed_turn")
         limit = self.max_consecutive_failed_turns
         if limit is not None and self.consecutive_failed_turns >= limit:
+            last = self._last_failure_reason
             message = (
-                f"{self.__class__.__name__} ({self.model}) got no response from the API for "
-                f"{self.consecutive_failed_turns} turns in a row; stopping instead of passing more turns"
+                f"{self.__class__.__name__} ({self.model}) got no usable reply from the API for "
+                f"{self.consecutive_failed_turns} turns in a row"
+                + (f" (last error: {last})" if last else "")
+                + "; stopping instead of passing more turns"
             )
             logger.error(message)
             raise LLMBotError(message, retryable=True)
@@ -967,9 +1000,15 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         quick attempts (about 3 s of backoff) gave up on a short overload,
         and three such turns raise LLMBotError.
         """
+        over_budget = self.retry_budget_s is not None and spent_after_delay > self.retry_budget_s
+        if info.retry_after is not None and over_budget:
+            # The server asked for a wait that alone takes this call past its
+            # budget. Sleeping through it (up to _RETRY_AFTER_CAP_S, even
+            # within max_retries) froze a GUI game for minutes per turn.
+            return False
         if attempts_made < max(1, self.max_retries):
             return True
-        return info.transient and self.retry_budget_s is not None and spent_after_delay <= self.retry_budget_s
+        return info.transient and self.retry_budget_s is not None and not over_budget
 
     def _call_llm_with_retry(self, system_prompt: str, user_prompt: str) -> str | None:
         """
@@ -1021,6 +1060,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
                     raise LLMBotError(message, retryable=False) from exc
                 delay = self._retry_delay(attempts_made - 1, info.retry_after)
                 if not self._should_retry(attempts_made, info, spent + delay):
+                    self._last_failure_reason = f"{info.reason}: {exc}"[:300]
                     logger.warning(
                         "LLM request failed (%s), attempt %d after %.0fs; giving up for this turn: %s",
                         info.reason,

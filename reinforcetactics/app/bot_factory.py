@@ -7,6 +7,10 @@ eliminating duplication between start_new_game() and load_saved_game().
 
 from pathlib import Path
 
+# Retry limits for LLM bots created for GUI games (see create_bot_instance).
+GUI_LLM_RETRY_BUDGET_S = 15.0
+GUI_LLM_MAX_FAILED_TURNS = 2
+
 
 def get_player_name(bot, bot_type, model_path=None):
     """
@@ -73,15 +77,21 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
     from reinforcetactics.game.bot_registry import build_scripted, canonical_name
     from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, OpenAIBot
 
+    # LLM turns run on the GUI thread, so an outage must give up quickly: the
+    # library defaults (60 s of transient retries per call, 3 failed turns)
+    # suit unattended tournaments but froze the window for minutes. After
+    # GUI_LLM_MAX_FAILED_TURNS unanswered turns the bot raises LLMBotError
+    # and InputHandler hands the seat to SimpleBot.
+    llm_kwargs = {"retry_budget_s": GUI_LLM_RETRY_BUDGET_S, "max_consecutive_failed_turns": GUI_LLM_MAX_FAILED_TURNS}
     if bot_type == "OpenAIBot":
         api_key = settings.get_api_key("openai") or None
-        return OpenAIBot(game, player=player_num, api_key=api_key)
+        return OpenAIBot(game, player=player_num, api_key=api_key, **llm_kwargs)
     if bot_type == "ClaudeBot":
         api_key = settings.get_api_key("anthropic") or None
-        return ClaudeBot(game, player=player_num, api_key=api_key)
+        return ClaudeBot(game, player=player_num, api_key=api_key, **llm_kwargs)
     if bot_type == "GeminiBot":
         api_key = settings.get_api_key("google") or None
-        return GeminiBot(game, player=player_num, api_key=api_key)
+        return GeminiBot(game, player=player_num, api_key=api_key, **llm_kwargs)
     if bot_type == "ModelBot":
         from reinforcetactics.game.model_bot import ModelBot
 

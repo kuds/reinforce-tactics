@@ -470,11 +470,18 @@ class InputHandler:
         print(f"   SimpleBot takes over Player {player} for the rest of the game")
         self.bots[player] = SimpleBot(self.game, player=player)
 
+        # Lead with the cause: the window is sized to the map, and on small
+        # maps a "ClaudeBot (model-id):" prefix pushed the actual reason
+        # (e.g. "HTTP 401 authentication failed") out of the dialog.
+        reason = str(exc)
+        prefix = f"{type(bot).__name__} ({getattr(bot, 'model', 'unknown model')}): "
+        if reason.startswith(prefix):
+            reason = reason[len(prefix) :]
         try:
             self._show_bot_replaced_dialog(
-                f"Player {player}'s LLM bot stopped",
-                str(exc),
-                f"SimpleBot takes over Player {player}.",
+                f"Player {player}: LLM stopped",
+                reason,
+                f"{bot_name}. SimpleBot takes over Player {player}.",
             )
         except Exception as dialog_error:  # noqa: BLE001
             # The notice is best-effort: failing to draw it must not end the
