@@ -7,9 +7,17 @@ eliminating duplication between start_new_game() and load_saved_game().
 
 from pathlib import Path
 
-# Retry limits for LLM bots created for GUI games (see create_bot_instance).
+# Retry limits for LLM bots created for GUI games (see create_bot).
 GUI_LLM_RETRY_BUDGET_S = 15.0
 GUI_LLM_MAX_FAILED_TURNS = 2
+# One request may take this long before it counts as a (transient) timeout.
+# The library default ("auto", up to 300 s) is sized for unattended runs of
+# slow reasoning models; in the GUI a hung endpoint blocked the window for
+# ~15 minutes per turn. 60 s still leaves room for a slow legitimate reply.
+GUI_LLM_REQUEST_TIMEOUT_S = 60.0
+# Attempts guaranteed whatever the budget; fast transient failures (429/5xx)
+# are still retried within GUI_LLM_RETRY_BUDGET_S after this.
+GUI_LLM_MAX_RETRIES = 1
 
 
 def get_player_name(bot, bot_type, model_path=None):
@@ -82,7 +90,12 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
     # suit unattended tournaments but froze the window for minutes. After
     # GUI_LLM_MAX_FAILED_TURNS unanswered turns the bot raises LLMBotError
     # and InputHandler hands the seat to SimpleBot.
-    llm_kwargs = {"retry_budget_s": GUI_LLM_RETRY_BUDGET_S, "max_consecutive_failed_turns": GUI_LLM_MAX_FAILED_TURNS}
+    llm_kwargs = {
+        "retry_budget_s": GUI_LLM_RETRY_BUDGET_S,
+        "max_consecutive_failed_turns": GUI_LLM_MAX_FAILED_TURNS,
+        "request_timeout": GUI_LLM_REQUEST_TIMEOUT_S,
+        "max_retries": GUI_LLM_MAX_RETRIES,
+    }
     if bot_type == "OpenAIBot":
         api_key = settings.get_api_key("openai") or None
         return OpenAIBot(game, player=player_num, api_key=api_key, **llm_kwargs)

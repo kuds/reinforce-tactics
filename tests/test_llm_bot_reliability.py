@@ -1510,6 +1510,35 @@ class TestIntegrationFollowUps:
         assert bot.retry_budget_s == bot_factory.GUI_LLM_RETRY_BUDGET_S
         assert bot.max_consecutive_failed_turns == bot_factory.GUI_LLM_MAX_FAILED_TURNS
         assert bot.retry_budget_s < llm_bot.DEFAULT_RETRY_BUDGET_S
+        assert bot.request_timeout == bot_factory.GUI_LLM_REQUEST_TIMEOUT_S
+        assert bot.max_retries == bot_factory.GUI_LLM_MAX_RETRIES
+
+    def test_gui_bot_gives_up_on_a_hung_endpoint_after_one_timeout(self, game, monkeypatch, sleeps):
+        """A request that hangs until its timeout must not be retried in the GUI (it cost ~15 min per turn)."""
+        from reinforcetactics.app import bot_factory
+
+        clock = [0.0]
+        monkeypatch.setattr(llm_bot.time, "monotonic", lambda: clock[0])
+
+        class HungBot(ScriptedBot):
+            def _call_llm(self, messages):
+                clock[0] += bot_factory.GUI_LLM_REQUEST_TIMEOUT_S  # hangs until the request timeout
+                return super()._call_llm(messages)
+
+        _start_player2_turn(game)
+        bot = HungBot(
+            game,
+            player=2,
+            api_key="k",
+            retry_budget_s=bot_factory.GUI_LLM_RETRY_BUDGET_S,
+            max_retries=bot_factory.GUI_LLM_MAX_RETRIES,
+            script=[TimeoutError()] * 5,
+        )
+
+        bot.take_turn()
+
+        assert bot.calls == 1
+        assert game.current_player == 1
 
     def test_gui_dialog_leads_with_the_cause(self, game, fake_anthropic, sleeps, monkeypatch):
         fake_anthropic.default_response = FakeHTTPError(401)
