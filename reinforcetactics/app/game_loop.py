@@ -92,10 +92,15 @@ class GameSession:  # pylint: disable=too-few-public-methods
             # 1, a save loaded on a bot's turn, or an all-bot game. Bot turns
             # used to run only from the End Turn handlers, so these games sat
             # at turn 0 and the human could play the bot's units (pygame-5).
+            # One bot turn per frame, then this frame's events, drawing and
+            # clock tick as usual: running bot turns instead of the frame left
+            # a game with only bots to move (all-bot, or after the human
+            # resigned or was eliminated) unable to be paused or closed.
             if self._bot_should_act():
                 self._render_frame()  # show the board before a possibly slow bot turn
                 self._run_pending_bot_turns()
-                continue
+                if self.game.game_over:
+                    break
 
             # Get mouse position once per frame
             mouse_pos = pygame.mouse.get_pos()
@@ -106,6 +111,18 @@ class GameSession:  # pylint: disable=too-few-public-methods
                     pause_result = self._handle_pause()
                     if pause_result:
                         return pause_result
+
+                elif self.game.current_player in self.bots:
+                    # A bot's seat is to move: the board is not the human's
+                    # to play. Only pausing and saving answer.
+                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_s):
+                        result = self.input_handler.handle_keyboard_event(event)
+                        if result == "pause":
+                            pause_result = self._handle_pause()
+                            if pause_result:
+                                return pause_result
+                        elif result == "save":
+                            self._handle_save_game()
 
                 elif event.type == pygame.KEYDOWN:
                     result = self.input_handler.handle_keyboard_event(event)
@@ -156,19 +173,22 @@ class GameSession:  # pylint: disable=too-few-public-methods
         return (self.game.turn_number, self.game.current_player) != self._stalled_bot_state
 
     def _run_pending_bot_turns(self):
-        """Play bot turns until a human is to move (or the input handler's cap).
+        """Play one bot turn; the frame loop calls this once per frame while a bot is to move.
 
-        Called once per frame, so events are pumped and the board redrawn
-        between batches of bot turns. A bot that returns without ending its
-        turn (and without raising, which the input handler already contains)
-        is not re-run every frame: the state is marked stalled and the human
-        is told, until something changes it.
+        A bot that returns without ending its turn (and without raising,
+        which the input handler already contains) has its turn ended for it,
+        as a crashed bot's is, and the human is told. Its seat used to be
+        left current and handed to the human's input, who could then move
+        the bot's units, spend its gold and end its turn. Only if even ending
+        the turn fails is the state marked stalled, so the bot is not re-run
+        every frame.
         """
         before = (self.game.turn_number, self.game.current_player)
-        self.input_handler._process_bot_turns()
+        self.input_handler._process_bot_turns(max_turns=1)
         if not self.game.game_over and (self.game.turn_number, self.game.current_player) == before:
-            self._stalled_bot_state = before
-            self.input_handler.show_notice(f"Player {before[1]}'s bot did not finish its turn")
+            self.input_handler.show_notice(f"Player {before[1]}'s bot did not finish its turn, so it was ended")
+            if not self.input_handler._end_crashed_bot_turn(before[1]):
+                self._stalled_bot_state = before
 
     def _handle_pause(self):
         """

@@ -421,8 +421,8 @@ class InputHandler:
         self.selected_unit = None
         return "continue"
 
-    def _process_bot_turns(self):
-        """Process consecutive bot turns.
+    def _process_bot_turns(self, max_turns=None):
+        """Process consecutive bot turns (at most ``max_turns`` of them if given).
 
         A bot that raises must not end the game: the exception used to
         unwind through GameSession.run, dropping the player to the main menu
@@ -430,7 +430,7 @@ class InputHandler:
         reported on screen, and the bot's turn is ended so play continues.
         """
         # Safety counter to prevent infinite loops
-        max_bot_turns = self.num_players * 2
+        max_bot_turns = self.num_players * 2 if max_turns is None else max_turns
         bot_turn_count = 0
 
         while self.game.current_player in self.bots and not self.game.game_over and bot_turn_count < max_bot_turns:

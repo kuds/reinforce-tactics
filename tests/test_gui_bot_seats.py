@@ -72,7 +72,7 @@ def test_bot_in_seat_one_moves_before_the_human(monkeypatch):
     assert any(a.get("player") == 1 and a.get("type") == "create_unit" for a in game.action_history)
 
 
-def test_a_bot_that_never_ends_its_turn_is_not_rerun_every_frame(monkeypatch):
+def test_a_bot_that_never_ends_its_turn_has_it_ended_not_handed_to_the_human(monkeypatch):
     game = _game()
     idle_bot = Mock()  # take_turn() returns without ending the turn
     session, _frames = _session(game, {1: idle_bot}, monkeypatch)
@@ -80,6 +80,59 @@ def test_a_bot_that_never_ends_its_turn_is_not_rerun_every_frame(monkeypatch):
 
     session.run()
 
-    # One batch of attempts (the input handler caps it), not one per frame.
-    assert 1 <= idle_bot.take_turn.call_count <= 2 * 2
+    # Its turn was ended for it once, so the human (player 2) is to move and
+    # the bot is not re-run every frame. The seat used to stay the bot's
+    # while the human's clicks played its units.
+    assert idle_bot.take_turn.call_count == 1
+    assert game.current_player == 2
     assert "did not finish its turn" in session.input_handler.notice_text
+
+
+def _only_bots_left_games():
+    all_bots = _game()
+    yield "all-bot 1v1", all_bots, {1: SimpleBot(all_bots, player=1), 2: SimpleBot(all_bots, player=2)}
+    ffa = GameState(FileIO.load_map("maps/1v1v1/triangle_arena.csv"), num_players=3)
+    ffa.resign(3)  # the human left a free-for-all; the two bots play on
+    ffa.end_turn() if ffa.current_player == 3 else None
+    yield "1v1v1 after the human resigned", ffa, {1: SimpleBot(ffa, player=1), 2: SimpleBot(ffa, player=2)}
+
+
+@pytest.mark.parametrize("case", ["all-bot 1v1", "1v1v1 after the human resigned"])
+def test_a_game_with_only_bots_to_move_can_still_be_quit(monkeypatch, case):
+    """Bot turns used to run instead of the frame, so no QUIT was ever read (and nothing ends a GUI game)."""
+    name, game, bots = next(g for g in _only_bots_left_games() if g[0] == case)
+    session, frames = _session(game, bots, monkeypatch)
+    calls = [0]
+
+    def events():
+        calls[0] += 1
+        return [pygame.event.Event(pygame.QUIT)] if calls[0] == 3 else []
+
+    monkeypatch.setattr(pygame.event, "get", events)
+    monkeypatch.setattr(session, "_handle_pause", lambda: "quit")
+
+    assert session.run() == "quit", name
+    assert frames[0] < MAX_FRAMES and not game.game_over
+
+
+def test_human_input_is_ignored_while_a_bot_seat_is_to_move(monkeypatch):
+    game = GameState(FileIO.load_map("maps/1v1v1/triangle_arena.csv"), num_players=3)
+    bots = {1: SimpleBot(game, player=1), 2: SimpleBot(game, player=2)}  # player 3 is the human
+    session, _frames = _session(game, bots, monkeypatch)
+    handler = session.input_handler
+    seen = []
+    monkeypatch.setattr(handler, "handle_mouse_click", lambda pos: seen.append(("click", game.current_player)))
+    monkeypatch.setattr(handler, "handle_keyboard_event", lambda ev: seen.append(("key", game.current_player)))
+
+    def events():
+        if len(seen) >= 6:
+            session.running = False
+        return [
+            pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(40, 40)),
+            pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE, mod=0, unicode=" "),
+        ]
+
+    monkeypatch.setattr(pygame.event, "get", events)
+    session.run()
+
+    assert seen and all(player == 3 for _kind, player in seen)
