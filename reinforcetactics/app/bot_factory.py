@@ -99,9 +99,15 @@ def create_bot(game, player_num, bot_type, settings, model_path=None):
     return SimpleBot(game, player=player_num)
 
 
-def create_bots_from_config(game, player_configs, settings):
+def create_bots_from_config(game, player_configs, settings, notices=None):
     """
     Create bots based on player configurations.
+
+    A bot that cannot be built is replaced by SimpleBot rather than aborting
+    the game, whatever the reason: a missing API key or unknown type
+    (ValueError), a missing optional dependency (ImportError), or a ModelBot
+    whose model file has moved since the game was saved (FileNotFoundError,
+    which used to escape and abort loading the save).
 
     Updates player_configs with:
     - 'player_name': Display name for the player
@@ -118,6 +124,9 @@ def create_bots_from_config(game, player_configs, settings):
         game: The GameState instance
         player_configs: List of player configuration dictionaries
         settings: Settings instance for API keys
+        notices: Optional list that receives one player-facing message per
+            fallback, so the GUI can show it on screen (stdout is invisible
+            to a GUI player).
 
     Returns:
         Dictionary mapping player numbers to bot instances
@@ -144,16 +153,12 @@ def create_bots_from_config(game, player_configs, settings):
                     config["max_tokens"] = getattr(bot, "max_tokens", None)
 
                 print(f"Bot created for Player {player_num} ({bot_type})")
-            except ValueError as e:
-                print(f"❌ Error creating {bot_type} for Player {player_num}: {e}")
+            except Exception as e:
+                reason = f"missing dependency: {e}" if isinstance(e, ImportError) else str(e)
+                print(f"❌ Error creating {bot_type} for Player {player_num}: {reason}")
                 print("   Falling back to SimpleBot")
-                bot = create_bot(game, player_num, "SimpleBot", settings)
-                bots[player_num] = bot
-                config["player_name"] = "SimpleBot"
-                config["player_type"] = "bot"
-            except ImportError as e:
-                print(f"❌ Missing dependency for {bot_type}: {e}")
-                print("   Falling back to SimpleBot")
+                if notices is not None:
+                    notices.append(f"Player {player_num}: {bot_type} unavailable ({reason}); using SimpleBot")
                 bot = create_bot(game, player_num, "SimpleBot", settings)
                 bots[player_num] = bot
                 config["player_name"] = "SimpleBot"

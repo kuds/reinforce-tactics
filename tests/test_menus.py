@@ -527,7 +527,8 @@ class TestPlayerConfigMenu:
             PlayerConfigMenu(game_mode="3v3")
 
         assert "Invalid game_mode" in str(excinfo.value)
-        assert "Must be '1v1' or '2v2'" in str(excinfo.value)
+        # 1v1v1 is now a supported mode, so the message lists all three.
+        assert "Must be one of '1v1', '1v1v1', '2v2'" in str(excinfo.value)
 
     def test_player_config_modelbot_available_check(self, pygame_init):
         """Test that ModelBot availability is checked."""

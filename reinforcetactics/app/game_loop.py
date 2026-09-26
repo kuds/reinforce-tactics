@@ -5,12 +5,15 @@ This module manages the main game loop, game session, and game modes.
 """
 # pylint: disable=cyclic-import
 
-import pandas as pd
+import logging
+from datetime import datetime
+
 import pygame
 
 from reinforcetactics.app.bot_factory import create_bots_from_config
 from reinforcetactics.app.input_handler import InputHandler
 from reinforcetactics.core.game_state import GameState
+from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus import (
     GameOverMenu,
     LoadGameMenu,
@@ -19,10 +22,15 @@ from reinforcetactics.ui.menus import (
     ReplaySelectionMenu,
     SaveGameMenu,
 )
+from reinforcetactics.ui.menus.game_setup.modes import GAME_MODE_PLAYER_COUNTS
 from reinforcetactics.ui.renderer import Renderer
+from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.file_io import FileIO
+from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.replay_player import ReplayPlayer
 from reinforcetactics.utils.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class GameSession:  # pylint: disable=too-few-public-methods
@@ -191,7 +199,30 @@ class GameSession:  # pylint: disable=too-few-public-methods
         if self.input_handler.active_menu:
             self.input_handler.active_menu.draw(self.renderer.screen)
 
+        self._draw_notice()
+
         pygame.display.flip()
+
+    def _draw_notice(self):
+        """Draw the input handler's transient notice, if one is showing."""
+        handler = self.input_handler
+        if not handler.notice_text:
+            return
+        if pygame.time.get_ticks() >= handler.notice_expires_at:
+            handler.notice_text = None
+            return
+
+        screen = self.renderer.screen
+        font = get_font(theme.FONT_SIZE_BODY)
+        padding = 12
+        text = ellipsize(handler.notice_text, font, max(1, screen.get_width() - 4 * padding))
+        text_surface = font.render(text, True, theme.STATUS_WARNING)
+        box = text_surface.get_rect().inflate(2 * padding, 2 * padding)
+        box.midtop = (screen.get_width() // 2, padding)
+        backdrop = pygame.Surface(box.size, pygame.SRCALPHA)
+        backdrop.fill((0, 0, 0, 200))
+        screen.blit(backdrop, box)
+        screen.blit(text_surface, text_surface.get_rect(center=box.center))
 
     def _handle_game_over(self):
         """
@@ -214,7 +245,72 @@ class GameSession:  # pylint: disable=too-few-public-methods
         return result if result else "quit"
 
 
-def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=None, fog_of_war=False):
+def _save_crash_artifacts(game):
+    """
+    Best-effort autosave of a game whose session crashed.
+
+    Writes the replay (as a normal mid-game quit does) and, for an unfinished
+    game, a crash save the player can resume from Load Game. Each write is
+    attempted on its own and a failure is only logged: this runs while
+    another exception is being handled, and must not replace it.
+
+    Args:
+        game: The GameState of the crashed session
+
+    Returns:
+        List of the file paths that were written
+    """
+    written = []
+    if game.action_history:
+        try:
+            replay_path = game.save_replay_to_file()
+        except Exception:
+            logger.exception("Could not save the replay of the crashed game")
+        else:
+            if replay_path:
+                print(f"📼 Replay saved to {replay_path}")
+                written.append(replay_path)
+
+    if not game.game_over:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            save_path = game.save_to_file(f"saves/crash_{timestamp}.json")
+        except Exception:
+            logger.exception("Could not write a crash save")
+        else:
+            if save_path:
+                print(f"💾 Crash save written to {save_path} (open it from Load Game)")
+                written.append(save_path)
+
+    return written
+
+
+def _run_session(session):
+    """
+    Run a game session, containing any exception that escapes it.
+
+    An exception in the game loop used to unwind into start_new_game's or
+    load_saved_game's blanket handler, which printed it and returned None:
+    the replay was never written and the game in progress was lost. Now the
+    replay and a crash save are written first, and the player goes back to
+    the main menu. KeyboardInterrupt and SystemExit are not caught.
+
+    Args:
+        session: The GameSession to run
+
+    Returns:
+        The session's result, or 'main_menu' after a crash
+    """
+    try:
+        return session.run()
+    except Exception:
+        logger.exception("Game session crashed")
+        print("❌ The game hit an unexpected error. Saving what we can and returning to the main menu.")
+        _save_crash_artifacts(session.game)
+        return "main_menu"
+
+
+def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=None, fog_of_war=False, num_players=None):
     """
     Start a new game with the specified mode, map, and player configurations.
 
@@ -223,6 +319,16 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
         selected_map: Map file path or 'random'
         player_configs: List of player configuration dictionaries
         fog_of_war: Whether to enable fog of war
+        num_players: Number of player seats. The New Game flow passes the
+            seat count of the chosen mode. When omitted it is the number of
+            player_configs, else the seat count of ``mode``, else 2.
+
+    Returns:
+        'new_game', 'main_menu' or 'quit' for the caller's navigation, or
+        None if map selection was cancelled
+
+    Raises:
+        ValueError: If player_configs does not have one entry per seat
     """
     print(f"\n🎮 Starting new game: {mode}\n")
 
@@ -235,12 +341,14 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
         print("Map selection cancelled")
         return
 
-    # Determine number of players
-    num_players = 2
-    if mode == "2v2":
-        num_players = 4
-    elif player_configs:
-        num_players = len(player_configs)
+    # Determine number of players. The caller now passes the seat count of
+    # the chosen mode; it used to be guessed here from the mode name (only
+    # "2v2" was special-cased). A config list of a different length is a
+    # caller bug, so fail loudly rather than seat the wrong number of players.
+    if num_players is None:
+        num_players = len(player_configs) if player_configs else GAME_MODE_PLAYER_COUNTS.get(mode, 2)
+    if player_configs and len(player_configs) != num_players:
+        raise ValueError(f"Got {len(player_configs)} player configs for a {num_players}-player game")
 
     try:
         # Load or generate map
@@ -255,7 +363,7 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
 
         if map_data is None:
             print("Failed to load map")
-            return
+            return "main_menu"
 
         # Get settings for enabled units
         settings = get_settings()
@@ -287,7 +395,8 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
 
         # Create renderer
         renderer = Renderer(game)
-        bots = create_bots_from_config(game, game.player_configs, settings)
+        bot_notices = []
+        bots = create_bots_from_config(game, game.player_configs, settings, notices=bot_notices)
 
         # Legacy mode: Ensure bot for player 2 in human_vs_computer
         if mode == "human_vs_computer" and 2 not in bots:
@@ -298,42 +407,104 @@ def start_new_game(mode="human_vs_computer", selected_map=None, player_configs=N
 
         # Create and run game session
         session = GameSession(game, renderer, bots, num_players)
-        result = session.run()
-
-        pygame.quit()
+        if bot_notices:
+            session.input_handler.show_notice("; ".join(bot_notices))
 
         # Return result to let caller handle navigation
-        return result
+        return _run_session(session)
 
     except Exception as e:
-        print(f"❌ Error during gameplay: {e}")
-        import traceback
+        # Setup failed before any turn was played, so there is nothing to
+        # autosave; the session itself is guarded by _run_session.
+        logger.exception("Could not start the game")
+        print(f"❌ Could not start the game: {e}")
+        return "main_menu"
 
-        traceback.print_exc()
+    finally:
+        # Restore the display: the renderer sized the window to the map, and
+        # play_mode re-initialises pygame for the main menu.
+        pygame.quit()
 
 
-def load_saved_game():
-    """Load and play a saved game."""
+def _map_data_for_save(save_data):
+    """
+    Rebuild the map a save's unit and structure coordinates refer to.
+
+    The terrain a save records (``GameState.to_dict`` writes ``map_data``) is
+    used first: it is exactly the grid the game was played on. Older saves
+    only name their map file, which is reloaded with the UI padding
+    start_new_game applies. The load check used to be ``"map_file" in
+    save_data``, which is always true (random-map saves write ``null``), so
+    every random-map save failed to load.
+
+    Args:
+        save_data: Parsed save dictionary
+
+    Returns:
+        The map data, or None if the save records neither terrain nor a map
+        file (a random-map save written before the terrain was recorded).
+        A freshly generated random map would put the saved units on
+        different terrain, so there is no such fallback.
+    """
+    map_data = GameState.saved_map_data(save_data)
+    if map_data is not None:
+        return map_data
+
+    map_file = save_data.get("map_file")
+    if map_file:
+        return FileIO.load_map(map_file, for_ui=True, border_size=2)
+
+    return None
+
+
+def restore_saved_game(save_data):
+    """
+    Rebuild the GameState of a parsed save, the way Load Game does.
+
+    Args:
+        save_data: Parsed save dictionary (as returned by LoadGameMenu)
+
+    Returns:
+        The restored GameState, or None if the save's map can't be rebuilt
+    """
+    map_data = _map_data_for_save(save_data)
+    if map_data is None:
+        return None
+    return GameState.from_dict(save_data, map_data)
+
+
+def load_saved_game(save_data=None):
+    """
+    Load and play a saved game.
+
+    Args:
+        save_data: Parsed save dictionary, as returned by LoadGameMenu. When
+            None, the load menu is shown first.
+
+    Returns:
+        'new_game', 'main_menu' or 'quit' for the caller's navigation, or
+        None if loading was cancelled
+    """
     print("\n💾 Loading saved game...\n")
 
-    # Show load menu
-    load_menu = LoadGameMenu()
-    save_data = load_menu.run()
+    # Show load menu unless the caller (the main menu) already picked a save
+    if save_data is None:
+        load_menu = LoadGameMenu()
+        save_data = load_menu.run()
 
     if not save_data:
         print("Load cancelled")
         return
 
     try:
-        # Load map
-        if "map_file" in save_data:
-            map_data = FileIO.load_map(save_data["map_file"], for_ui=True, border_size=2)
-        else:
-            print("⚠️  Map file not in save, reconstructing from tiles...")
-            map_data = FileIO.generate_random_map(20, 20, num_players=save_data.get("num_players", 2))
-
         # Restore game state
-        game = GameState.from_dict(save_data, map_data)
+        game = restore_saved_game(save_data)
+        if game is None:
+            if save_data.get("map_file"):
+                print(f"❌ This save can't be loaded: its map file {save_data['map_file']} could not be read.")
+            else:
+                print("❌ This save can't be loaded: it was made on a random map before saves recorded their terrain.")
+            return "main_menu"
 
         # Initialize visibility for fog of war games
         if game.fog_of_war:
@@ -348,14 +519,14 @@ def load_saved_game():
             print(f"Loaded a completed game. Winner: Player {game.winner}")
             game_over_menu = GameOverMenu(game.winner, game, renderer.screen)
             result = game_over_menu.run()
-            pygame.quit()
             return result if result else "quit"
 
         # Create bots
         settings = get_settings()
         bots = {}
+        bot_notices = []
         if game.player_configs:
-            bots = create_bots_from_config(game, game.player_configs, settings)
+            bots = create_bots_from_config(game, game.player_configs, settings, notices=bot_notices)
         else:
             # Fallback for old saves
             from reinforcetactics.game.bot import SimpleBot
@@ -376,18 +547,20 @@ def load_saved_game():
 
         # Create and run game session
         session = GameSession(game, renderer, bots, game.num_players)
-        result = session.run()
-
-        pygame.quit()
+        if bot_notices:
+            session.input_handler.show_notice("; ".join(bot_notices))
 
         # Return result to let caller handle navigation
-        return result
+        return _run_session(session)
 
     except Exception as e:
+        logger.exception("Could not load the saved game")
         print(f"❌ Error loading game: {e}")
-        import traceback
+        return "main_menu"
 
-        traceback.print_exc()
+    finally:
+        # Restore the display for the main menu (see start_new_game).
+        pygame.quit()
 
 
 def watch_replay(replay_path=None):
@@ -396,6 +569,9 @@ def watch_replay(replay_path=None):
 
     Args:
         replay_path: Path to replay file. If None, shows replay selection menu.
+
+    Returns:
+        'main_menu' once the replay closes, or None if selection was cancelled
     """
     print("\n📼 Loading replay...\n")
 
@@ -414,27 +590,26 @@ def watch_replay(replay_path=None):
 
         if not replay_data:
             print("Failed to load replay")
-            return
+            return "main_menu"
 
-        # Load initial map
+        # Build the starting map from the replay itself: its recorded
+        # initial_map (random-map games included), else its map file. This
+        # used to fall back to a freshly generated random map, which replayed
+        # the actions on the wrong terrain.
         game_info = replay_data.get("game_info", {})
-
-        if "initial_map" in game_info:
-            map_data = pd.DataFrame(game_info["initial_map"])
-            print("✅ Using stored map from replay")
-        else:
-            print("⚠️  Replay doesn't have stored map data. Generating random map...")
-            map_data = FileIO.generate_random_map(20, 20, num_players=game_info.get("num_players", 2))
+        map_data = FileIO.load_replay_map(game_info)
 
         # Create and run replay player
         player = ReplayPlayer(replay_data, map_data)
         player.run()
 
-        pygame.quit()
         return "main_menu"  # Return to main menu after watching replay
 
     except Exception as e:
+        logger.exception("Could not play the replay")
         print(f"❌ Error playing replay: {e}")
-        import traceback
+        return "main_menu"
 
-        traceback.print_exc()
+    finally:
+        # Restore the display for the main menu (see start_new_game).
+        pygame.quit()

@@ -1,6 +1,7 @@
 """Menu for selecting a replay to watch with enhanced preview and info."""
 
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Any
@@ -11,10 +12,22 @@ from reinforcetactics.constants import PLAYER_COLORS
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.components.map_preview import get_tile_color
 from reinforcetactics.ui.menus.list_detail import ListDetailMenu, draw_preview_or_placeholder
-from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
+from reinforcetactics.ui.menus.save_load.utils import (
+    as_dict,
+    as_int,
+    as_list,
+    as_optional_int,
+    as_player_count,
+    extract_date_from_filename,
+    map_display_name,
+    mtime_or_zero,
+    safe_player_display_name,
+)
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
+
+logger = logging.getLogger(__name__)
 
 
 class ReplaySelectionMenu(ListDetailMenu):
@@ -62,7 +75,7 @@ class ReplaySelectionMenu(ListDetailMenu):
                             all_replays.append(filepath)
 
         # Sort by modification time (newest first)
-        all_replays.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+        all_replays.sort(key=mtime_or_zero, reverse=True)
         self.replay_files = all_replays
 
         # Load metadata for each replay
@@ -70,81 +83,98 @@ class ReplaySelectionMenu(ListDetailMenu):
             self._load_replay_metadata(filepath)
 
     def _load_replay_metadata(self, filepath: str) -> None:
-        """Load metadata from a replay file."""
+        """Load metadata from a replay file.
+
+        Never raises for a bad file. This runs for every file when the menu
+        opens, so one replay the menu can't parse used to crash Watch Replay
+        (and the app) on every visit; such a file now gets minimal
+        "Unknown" metadata instead.
+        """
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
+            self.replay_metadata[filepath] = self._parse_replay_metadata(filepath, data)
+        except Exception as e:
+            logger.warning("Could not read replay metadata from %s: %s", filepath, e)
+            self.replay_metadata[filepath] = self._minimal_metadata(filepath)
 
-            game_info = data.get("game_info", {})
-            timestamp_str = data.get("timestamp", "")
+    def _parse_replay_metadata(self, filepath: str, data: Any) -> dict[str, Any]:
+        """Extract the fields the menu draws, coerced to the types it expects."""
+        if not isinstance(data, dict):
+            raise ValueError(f"expected a JSON object, got {type(data).__name__}")
 
-            # Parse timestamp
-            try:
-                timestamp = datetime.fromisoformat(timestamp_str)
-                date_str = timestamp.strftime("%Y-%m-%d")
-            except (ValueError, TypeError):
-                # Try to extract date from filename
-                filename = os.path.basename(filepath)
-                date_str = extract_date_from_filename(filename)
+        game_info = as_dict(data.get("game_info"))
+        timestamp_str = data.get("timestamp", "")
 
-            # Get player info
-            player_configs = game_info.get("player_configs", [])
-            num_players = game_info.get("num_players", 2)
-            player1_name = get_player_display_name(player_configs, 0)
-            player2_name = get_player_display_name(player_configs, 1)
-            player3_name = get_player_display_name(player_configs, 2) if num_players > 2 else None
-            player4_name = get_player_display_name(player_configs, 3) if num_players > 3 else None
+        # Parse timestamp
+        try:
+            timestamp = datetime.fromisoformat(timestamp_str)
+            date_str = timestamp.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            # Try to extract date from filename
+            filename = os.path.basename(filepath)
+            date_str = extract_date_from_filename(filename)
 
-            # Get winner info
-            winner = game_info.get("winner")
-            game_over = game_info.get("game_over", False)
+        # Get player info
+        player_configs = as_list(game_info.get("player_configs"))
+        num_players = as_player_count(game_info.get("num_players"))
+        player1_name = safe_player_display_name(player_configs, 0)
+        player2_name = safe_player_display_name(player_configs, 1)
+        player3_name = safe_player_display_name(player_configs, 2) if num_players > 2 else None
+        player4_name = safe_player_display_name(player_configs, 3) if num_players > 3 else None
 
-            if winner == 0 or not game_over:
-                result = "Draw" if game_over else "Incomplete"
-            else:
-                result = f"P{winner} Wins"
+        # Get winner info
+        winner = as_optional_int(game_info.get("winner"))
+        game_over = bool(game_info.get("game_over", False))
 
-            # Get turn count
-            total_turns = game_info.get("total_turns", 0)
+        if winner == 0 or not game_over:
+            result = "Draw" if game_over else "Incomplete"
+        else:
+            result = f"P{winner} Wins"
 
-            # Get map info
-            map_file = game_info.get("map_file", "Unknown Map")
-            map_name = os.path.basename(map_file).replace(".csv", "").replace("_", " ").title()
+        # Get turn count
+        total_turns = as_int(game_info.get("total_turns"), 0)
 
-            # Store initial map for preview
-            initial_map = game_info.get("initial_map")
+        # Get map info. Random-map games record "map_file": null, which
+        # os.path.basename() used to choke on; they are labelled "Random Map".
+        map_file = game_info.get("map_file")
+        map_name = map_display_name(map_file)
 
-            self.replay_metadata[filepath] = {
-                "date": date_str,
-                "player1": player1_name,
-                "player2": player2_name,
-                "player3": player3_name,
-                "player4": player4_name,
-                "winner": winner,
-                "result": result,
-                "total_turns": total_turns,
-                "map_name": map_name,
-                "map_file": map_file,
-                "initial_map": initial_map,
-                "num_players": num_players,
-                "max_turns": game_info.get("max_turns"),
-            }
+        # Store initial map for preview
+        initial_map = as_list(game_info.get("initial_map")) or None
 
-        except (OSError, json.JSONDecodeError):
-            # Store minimal metadata for failed loads
-            self.replay_metadata[filepath] = {
-                "date": extract_date_from_filename(os.path.basename(filepath)),
-                "player1": "Player 1",
-                "player2": "Player 2",
-                "winner": None,
-                "result": "Unknown",
-                "total_turns": 0,
-                "map_name": "Unknown",
-                "map_file": "",
-                "initial_map": None,
-                "num_players": 2,
-                "max_turns": None,
-            }
+        return {
+            "date": date_str,
+            "player1": player1_name,
+            "player2": player2_name,
+            "player3": player3_name,
+            "player4": player4_name,
+            "winner": winner,
+            "result": result,
+            "total_turns": total_turns,
+            "map_name": map_name,
+            "map_file": map_file if isinstance(map_file, str) else "",
+            "initial_map": initial_map,
+            "num_players": num_players,
+            "max_turns": as_optional_int(game_info.get("max_turns")),
+        }
+
+    @staticmethod
+    def _minimal_metadata(filepath: str) -> dict[str, Any]:
+        """Metadata for a replay file that couldn't be read."""
+        return {
+            "date": extract_date_from_filename(os.path.basename(filepath)),
+            "player1": "Player 1",
+            "player2": "Player 2",
+            "winner": None,
+            "result": "Unknown",
+            "total_turns": 0,
+            "map_name": "Unknown",
+            "map_file": "",
+            "initial_map": None,
+            "num_players": 2,
+            "max_turns": None,
+        }
 
     def _get_display_name(self, filepath: str) -> str:
         """Get user-friendly display name for a replay."""

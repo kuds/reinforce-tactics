@@ -488,6 +488,41 @@ class FileIO:
             return None
 
     @staticmethod
+    def load_replay_map(game_info):
+        """
+        Build the terrain a replay was played on.
+
+        Uses the ``initial_map`` the replay recorded (every GameState replay
+        records one, random-map games included). Replays without it, such as
+        tournament replays whose map could not be inlined, fall back to the
+        recorded ``map_file``, loaded unpadded as the tournament runner
+        records it. There is deliberately no random-map fallback: replaying
+        the actions on freshly generated terrain shows a different game.
+
+        Args:
+            game_info: The replay's ``game_info`` dict
+
+        Returns:
+            pandas DataFrame with the starting map
+
+        Raises:
+            ValueError: If the replay records neither usable terrain nor a
+                loadable map file.
+        """
+        initial_map = game_info.get("initial_map")
+        if initial_map:
+            return pd.DataFrame(initial_map)
+
+        map_file = game_info.get("map_file")
+        if map_file:
+            map_data = FileIO.load_map(map_file)
+            if map_data is not None:
+                return map_data
+            raise ValueError(f"Replay has no recorded map and its map file could not be loaded: {map_file}")
+
+        raise ValueError("Replay has no recorded map ('initial_map') and no map file to rebuild it from")
+
+    @staticmethod
     def list_replays():
         """
         List all available replay files.

@@ -4,11 +4,18 @@ Input Handler for Reinforce Tactics.
 This module manages user input state and event handling for the game loop.
 """
 
+import logging
+
 import pygame
 
 from reinforcetactics.app.action_executor import handle_action_menu_result
 from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
+
+logger = logging.getLogger(__name__)
+
+# How long an on-screen notice stays up.
+NOTICE_DURATION_MS = 6000
 
 
 class InputHandler:
@@ -55,6 +62,17 @@ class InputHandler:
         self.right_click_preview_active = False
         self.preview_unit = None
         self.preview_positions = []
+
+        # Transient on-screen notice, drawn by GameSession. A GUI player
+        # never sees stdout, so problems such as a crashed bot turn are
+        # reported here as well as logged.
+        self.notice_text = None
+        self.notice_expires_at = 0
+
+    def show_notice(self, text, duration_ms=NOTICE_DURATION_MS):
+        """Show ``text`` on screen for ``duration_ms`` milliseconds."""
+        self.notice_text = text
+        self.notice_expires_at = pygame.time.get_ticks() + duration_ms
 
     def handle_keyboard_event(self, event):
         """
@@ -391,15 +409,46 @@ class InputHandler:
         return "continue"
 
     def _process_bot_turns(self):
-        """Process consecutive bot turns."""
+        """Process consecutive bot turns.
+
+        A bot that raises must not end the game: the exception used to
+        unwind through GameSession.run, dropping the player to the main menu
+        with nothing saved. Now the error is logged with its traceback,
+        reported on screen, and the bot's turn is ended so play continues.
+        """
         # Safety counter to prevent infinite loops
         max_bot_turns = self.num_players * 2
         bot_turn_count = 0
 
         while self.game.current_player in self.bots and not self.game.game_over and bot_turn_count < max_bot_turns:
-            current_bot = self.bots[self.game.current_player]
-            print(f"Bot (Player {self.game.current_player}) is thinking...")
-            current_bot.take_turn()
+            player = self.game.current_player
+            current_bot = self.bots[player]
+            print(f"Bot (Player {player}) is thinking...")
+            try:
+                current_bot.take_turn()
+            except Exception:
+                logger.exception("%s (player %d) raised during its turn", type(current_bot).__name__, player)
+                self.show_notice(f"Player {player}'s bot hit an error; its turn was skipped")
+                if not self._end_crashed_bot_turn(player):
+                    break
             # Note: Bots call end_turn() internally, so we don't call it here
             bot_turn_count += 1
             print(f"Bot finished. Player {self.game.current_player}'s turn\n")
+
+    def _end_crashed_bot_turn(self, player):
+        """End ``player``'s turn after its bot raised part-way through it.
+
+        Returns:
+            False if the turn could not be ended; bot processing then stops
+            instead of re-running a bot against a state it can't leave.
+        """
+        # The bot may have raised after its own end_turn() call already
+        # handed the turn on; ending it again would skip the next player.
+        if self.game.game_over or self.game.current_player != player:
+            return True
+        try:
+            self.game.end_turn()
+        except Exception:
+            logger.exception("Could not end player %d's turn after its bot raised", player)
+            return False
+        return True

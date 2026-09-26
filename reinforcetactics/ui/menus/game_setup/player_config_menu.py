@@ -8,6 +8,7 @@ import pygame
 
 from reinforcetactics.ui import theme, widgets
 from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
+from reinforcetactics.ui.menus.game_setup.modes import players_for_mode
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
@@ -34,19 +35,20 @@ class PlayerConfigMenu(ScreenBootstrapMixin):
 
         Args:
             screen: Optional pygame surface. If None, creates its own.
-            game_mode: Game mode ("1v1" or "2v2")
+            game_mode: Game mode ("1v1", "1v1v1" or "2v2")
 
         Raises:
-            ValueError: If game_mode is not "1v1" or "2v2"
+            ValueError: If game_mode is not a mode in GAME_MODE_PLAYER_COUNTS
         """
-        # Validate game_mode
-        if game_mode not in ["1v1", "2v2"]:
-            raise ValueError(f"Invalid game_mode: {game_mode}. Must be '1v1' or '2v2'")
+        # Validate game_mode before touching the display. The seat count
+        # comes from the same table GameModeMenu offers modes from, so every
+        # mode the player can pick has a configuration screen.
+        num_players = players_for_mode(game_mode)
 
         self._init_screen(screen)
 
         self.game_mode = game_mode
-        self.num_players = 2 if game_mode == "1v1" else 4
+        self.num_players = num_players
 
         # Colors (from shared theme)
         self.bg_color = theme.BG
@@ -372,7 +374,10 @@ class PlayerConfigMenu(ScreenBootstrapMixin):
         if self._blocking_reason() is not None:
             return None
 
-        return {"players": self.player_configs, "fog_of_war": self.fog_of_war}
+        # num_players travels with the result so the game loop sizes the
+        # GameState from the chosen mode instead of guessing it from the
+        # mode name (it used to special-case only "2v2").
+        return {"players": self.player_configs, "fog_of_war": self.fog_of_war, "num_players": self.num_players}
 
     def draw(self) -> None:
         """Draw the player configuration menu."""
@@ -398,7 +403,8 @@ class PlayerConfigMenu(ScreenBootstrapMixin):
         # Starting Y position for player configurations. Derived from the
         # title's actual height: the old hardcoded 80 sat *inside* the
         # display-font title, so "Player 1" collided with it.
-        # 2v2 uses tighter row spacing so four players still fit.
+        # 1v1v1 and 2v2 use tighter row spacing so three or four players
+        # still fit above the options and the Start/Back buttons.
         start_y = title_rect.bottom + 16
         spacing_y = 85 if self.num_players > 2 else 100
 
