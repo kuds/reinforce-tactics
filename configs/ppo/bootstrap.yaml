@@ -381,6 +381,10 @@ curriculum:
       # half preview beginner_advanced. Threshold (0.70) matches the
       # flanking stages; budget (4.5M) sits halfway between them,
       # mirroring the simple -> mixed_50 -> medium spacing.
+      #
+      # Not re-validated since the rule-bot legality fixes (review
+      # rulebots-1/6/8/14/19): see beginner_advanced below. Its "hard"
+      # half no longer previews a harder opponent.
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs:
@@ -402,6 +406,15 @@ curriculum:
       # 0.70/5M. The extra ~1M budget accounts for AdvancedBot's
       # tighter play forcing the policy to convert draws into wins on
       # the same map geometry.
+      #
+      # Not re-validated since the rule-bot legality fixes (review
+      # rulebots-1/6/8/14/19): the premise above may no longer hold.
+      # AdvancedBot now loses 45 of 50 seeded 75-turn games to MediumBot
+      # on this map (33 of 50 before the fixes), so this stage and
+      # beginner_mixed_med_adv_50 may now be easier than beginner_medium.
+      # Re-check the ladder before a run relies on them (the curriculum
+      # re-baseline in docs/REVIEW_full_2026-09-26.md §8, week 4; numbers
+      # under rulebots-1 in docs/REVIEW_full_2026-09-26_findings.md).
       map_file: maps/1v1/beginner.csv
       opponent: advanced
       promotion_win_rate: 0.70

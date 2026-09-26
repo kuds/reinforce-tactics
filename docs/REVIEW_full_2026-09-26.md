@@ -351,7 +351,7 @@ The root cause of most of these is one helper. `BotUnitMixin.get_reachable` (`ga
 | Scripted bots see and target units hidden by fog of war | M | `rulebots-12` |
 | Haste re-entry never fires for live units | S | `rulebots-8` |
 
-**Note for RL:** fixing `rulebots-1` makes SimpleBot noticeably stronger. The curriculum thresholds for SimpleBot, MediumBot and AdvancedBot stages will need to be re-baselined, so land this together with the 2.1 validation run rather than in the middle of a sweep.
+**Note for RL:** fixing `rulebots-1` makes SimpleBot noticeably stronger. The curriculum thresholds for SimpleBot, MediumBot and AdvancedBot stages will need to be re-baselined, so land this together with the 2.1 validation run rather than in the middle of a sweep. Measured on the fix, AdvancedBot and MasterBot also fall further behind MediumBot on the beginner and intermediate maps (AdvancedBot loses 45 of 50 seeded games to MediumBot on beginner, up from 33), and MasterBot is weaker on skirmish. So the re-baseline must also re-check the stage order in `bootstrap.yaml`, not only the thresholds. Figures are under `rulebots-1` in the findings file.
 
 ### 4.5 Modes and maps
 
