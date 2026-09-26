@@ -381,13 +381,16 @@ class PeriodicEvalCallback(BaseCallback):
         # of decision points where a capture was legal -- a low value means
         # the policy rarely even reaches a capturable tile (navigation
         # bottleneck) vs. reaches one but declines (reward/exploration).
-        # ``max_legal_actions`` guards the flat_discrete truncation: if it
-        # approaches max_flat_actions, end_turn/seize were being crowded out
-        # before the truncation fix and the cap should be raised.
+        # ``max_legal_actions`` (counted before truncation) and
+        # ``flat_truncated_rate`` (share of decision points whose
+        # flat_discrete table was cut to max_flat_actions) show when the
+        # cap bites and should be raised.
         if "seize_available_rate" in m:
             self.logger.record("eval/seize_available_rate", m["seize_available_rate"])
         if "max_legal_actions" in m:
             self.logger.record("eval/max_legal_actions", m["max_legal_actions"])
+        if "flat_truncated_rate" in m:
+            self.logger.record("eval/flat_truncated_rate", m["flat_truncated_rate"])
         # Army-economy diagnostics: peak/mean army size and unspent gold.
         # A high peak army with near-zero banked gold means the economy is
         # funding mass (convert-all-gold-to-units) -- the "slow-walk a big

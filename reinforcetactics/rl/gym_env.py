@@ -5,6 +5,7 @@ Supports both flat and hierarchical RL training
 
 import logging
 import random
+import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -239,30 +240,229 @@ def build_structured_masks(
     return StructuredActionMasks(atype=atype, source=source, target=target, unit_type=unit_type)
 
 
-def build_flat_actions(
+# ---------------------------------------------------------------------------
+# flat_discrete decode tables
+# ---------------------------------------------------------------------------
+
+# The flat_discrete decode table is part of a checkpoint's contract: a
+# Discrete index means "the i-th entry of the table", so a policy trained on
+# one table layout misreads another. The layout is therefore versioned, and
+# a checkpoint is decoded with the version it was trained on.
+#
+#   1 (legacy): when the legal set exceeds ``max_flat_actions``, keep seize
+#     and end_turn and fill the rest of the budget with the other actions in
+#     ACTION_KEY_MAP order -- so casts, heals and then attacks (which all come
+#     after moves) are dropped first (review rlenv-11 / prior-13). Every
+#     checkpoint trained before versioning existed uses this layout.
+#   2: the same table whenever nothing is truncated. Truncation drops moves
+#     first, round-robin across units so each keeps a spread of its
+#     destinations; then purchases; then attacks, heals and casts; then
+#     seizes. end_turn is always kept, and kept entries stay in their
+#     canonical order.
+#
+# ``StrategyGameEnv`` defaults to FLAT_ACTION_VERSION_LATEST and stamps the
+# version on its Discrete action space (``flat_action_version``), which SB3
+# saves with the model, so ``flat_action_version_of(model)`` recovers it; an
+# unstamped (older) checkpoint reads as FLAT_ACTION_VERSION_LEGACY. The free
+# functions default to the legacy layout so every existing caller keeps its
+# exact behaviour until it passes a version.
+FLAT_ACTION_VERSION_LEGACY = 1
+FLAT_ACTION_VERSION_LATEST = 2
+FLAT_ACTION_VERSIONS: tuple[int, ...] = (FLAT_ACTION_VERSION_LEGACY, FLAT_ACTION_VERSION_LATEST)
+
+# Version 2's truncation order: the action-type groups dropped first come
+# first. end_turn (5) is never dropped.
+_V2_DROP_ORDER: tuple[frozenset[int], ...] = (
+    frozenset({1}),  # move
+    frozenset({0}),  # create_unit
+    frozenset({2, 4, 6, 7, 8, 9}),  # attack, heal/cure, paralyze, haste, the buffs
+    frozenset({3}),  # seize
+)
+
+_END_TURN_ACTION = (5, 0, 0, 0, 0, 0)
+
+
+def _check_flat_action_version(version: int) -> int:
+    if isinstance(version, bool) or not isinstance(version, (int, np.integer)) or int(version) not in FLAT_ACTION_VERSIONS:
+        raise ValueError(f"flat_action_version must be one of {FLAT_ACTION_VERSIONS}, got {version!r}")
+    return int(version)
+
+
+def flat_action_version_of(obj: Any) -> int:
+    """The flat_discrete table version recorded on a model, env or action space.
+
+    Reads the ``flat_action_version`` attribute ``StrategyGameEnv`` stamps on
+    its Discrete action space (for a model or env, on ``obj.action_space``).
+    Checkpoints saved before versioning existed carry no stamp and read as
+    :data:`FLAT_ACTION_VERSION_LEGACY`, which is how they were trained.
+    """
+    space = obj if isinstance(obj, spaces.Space) else getattr(obj, "action_space", None)
+    version = getattr(space, "flat_action_version", FLAT_ACTION_VERSION_LEGACY)
+    return _check_flat_action_version(version)
+
+
+def stamp_flat_action_version(obj: Any, version: int) -> None:
+    """Record ``version`` on a model's, env's or Discrete space's action space.
+
+    For code that loads a checkpoint and keeps training it on envs of a
+    different version (a warm start from an unstamped checkpoint, say):
+    ``flat_action_version_of`` then reports what the policy now plays.
+    """
+    version = _check_flat_action_version(version)
+    space = obj if isinstance(obj, spaces.Space) else getattr(obj, "action_space", None)
+    if not isinstance(space, spaces.Discrete):
+        raise TypeError(f"flat_action_version applies to a Discrete action space, got {space!r}")
+    # A plain instance attribute: gymnasium spaces pickle their __dict__, so
+    # it survives SubprocVecEnv transport and SB3 save/load.
+    setattr(space, "flat_action_version", version)
+
+
+class _RateLimitedWarning:
+    """Log a warning at most once per ``interval_s``, counting the ones held back.
+
+    The flat-action truncation warning fires on every decision point of a
+    large army's turn -- hundreds per episode per worker -- which used to
+    flood the training logs (review rlenv-11). Per process: each
+    SubprocVecEnv worker keeps its own clock.
+    """
+
+    def __init__(self, interval_s: float) -> None:
+        self.interval_s = float(interval_s)
+        self._last: float | None = None
+        self.suppressed = 0
+
+    def __call__(self, msg: str, *args: Any) -> bool:
+        now = time.monotonic()
+        if self._last is not None and now - self._last < self.interval_s:
+            self.suppressed += 1
+            return False
+        if self.suppressed:
+            msg += " (%d similar warnings suppressed in the last %.0fs)"
+            args = (*args, self.suppressed, self.interval_s)
+        logger.warning(msg, *args)
+        self._last = now
+        self.suppressed = 0
+        return True
+
+
+_truncation_warning = _RateLimitedWarning(interval_s=300.0)
+
+
+@dataclass(frozen=True)
+class FlatActionTable:
+    """A flat_discrete decode table with its truncation diagnostics.
+
+    Fields:
+        actions: The decode table (what :func:`build_flat_actions` returns).
+        n_legal: Deduplicated legal actions (end_turn included) before any
+            truncation; ``len(actions)`` when nothing was dropped.
+        truncated: Whether entries were dropped to fit ``max_flat_actions``.
+    """
+
+    actions: list[np.ndarray]
+    n_legal: int
+    truncated: bool
+
+
+def _spread_indices(n: int, k: int) -> list[int]:
+    """``k`` indices into ``range(n)`` spread evenly, both ends included (``k == 1``: the last)."""
+    if k <= 0:
+        return []
+    if k >= n:
+        return list(range(n))
+    if k == 1:
+        return [n - 1]
+    return [(i * (n - 1)) // (k - 1) for i in range(k)]
+
+
+def _round_robin_keep(actions: list[np.ndarray], indices: list[int], budget: int) -> set[int]:
+    """Keep ``budget`` of ``indices``, shared round-robin across their source cells.
+
+    Each source (a unit, or a building for purchases) gets one entry per
+    round until the budget runs out, so every unit keeps some options
+    instead of the units listed last losing all of theirs. Within a source
+    the kept entries are spread across its list (which runs from the
+    nearest destinations the move search reaches to the farthest).
+    """
+    if budget <= 0:
+        return set()
+    if budget >= len(indices):
+        return set(indices)
+    groups: dict[tuple[int, int], list[int]] = {}
+    for i in indices:
+        a = actions[i]
+        groups.setdefault((int(a[2]), int(a[3])), []).append(i)
+    members = list(groups.values())
+    quota = [0] * len(members)
+    remaining = budget
+    while remaining > 0:
+        for g, m in enumerate(members):
+            if remaining == 0:
+                break
+            if quota[g] < len(m):
+                quota[g] += 1
+                remaining -= 1
+    kept: set[int] = set()
+    for m, q in zip(members, quota):
+        kept.update(m[j] for j in _spread_indices(len(m), q))
+    return kept
+
+
+def _truncate_legacy(actions: list[np.ndarray], max_flat_actions: int) -> list[np.ndarray]:
+    """Version 1 truncation, unchanged: every pre-versioning checkpoint was trained on it."""
+    # Naive head-truncation would silently drop the tail of the list
+    # -- which is exactly end_turn (appended last) and seize
+    # (action_type 3, built after create/move/attack). Losing
+    # end_turn can strand the agent for the rest of the game-turn
+    # when ``max_actions_per_turn`` is disabled; losing seize drops
+    # the rare, high-value capture action. So always keep those two
+    # action types and fill the remaining budget with the rest in
+    # their original order.
+    protected = [a for a in actions if int(a[0]) in (3, 5)]
+    others = [a for a in actions if int(a[0]) not in (3, 5)]
+    budget = max(0, max_flat_actions - len(protected))
+    actions = others[:budget] + protected
+    # Pathological fallback: if the protected set alone exceeds the
+    # cap, hard-truncate but keep end_turn (last protected entry) by
+    # trimming from the front of the seize block.
+    if len(actions) > max_flat_actions:
+        actions = actions[-max_flat_actions:]
+    return actions
+
+
+def _truncate_v2(actions: list[np.ndarray], max_flat_actions: int) -> list[np.ndarray]:
+    """Version 2 truncation: drop moves first (round-robin per unit), keep combat and support."""
+    keep = [True] * len(actions)
+    total = len(actions)
+    for group in _V2_DROP_ORDER:
+        if total <= max_flat_actions:
+            break
+        indices = [i for i, a in enumerate(actions) if int(a[0]) in group]
+        budget = max(0, len(indices) - (total - max_flat_actions))
+        kept = _round_robin_keep(actions, indices, budget)
+        for i in indices:
+            if i not in kept:
+                keep[i] = False
+        total -= len(indices) - len(kept)
+    return [a for a, k in zip(actions, keep) if k]
+
+
+def flat_action_table(
     game_state: "GameState",
     player: int,
     max_flat_actions: int,
-) -> list[np.ndarray]:
-    """Build the ordered flat legal-action list for a ``Discrete`` policy.
+    *,
+    version: int = FLAT_ACTION_VERSION_LEGACY,
+) -> FlatActionTable:
+    """Build a flat_discrete decode table and report whether it was truncated.
 
-    Pure-function port of ``StrategyGameEnv._build_flat_actions`` (minus the
-    per-game-turn action-budget gate, which is env state). The returned list
-    is the decode table for ``flat_discrete`` checkpoints: a sampled
-    ``Discrete`` index ``i`` means "execute ``actions[i]``", where each entry
-    is a 6-element int array ``[action_type, unit_type, from_x, from_y,
-    to_x, to_y]`` — the same layout as a MultiDiscrete action.
-
-    Shared by ``StrategyGameEnv`` and ``ModelBot`` so a flat_discrete
-    checkpoint can be played against an arbitrary live ``game_state``
-    (GUI / tournament) without constructing an env around it. The exact
-    per-index legality mask is "first ``len(actions)`` entries True".
-
-    End turn is always present as the last action. When the legal set
-    exceeds ``max_flat_actions``, the list is truncated while preserving
-    seize (action_type 3) and end_turn (action_type 5) — see the inline
-    comment for why naive head-truncation would drop exactly those two.
+    See :func:`build_flat_actions` for the table itself; this also returns
+    the pre-truncation count and a truncated flag, which the env surfaces
+    in ``info`` / ``episode_stats``.
     """
+    version = _check_flat_action_version(version)
+    if max_flat_actions < 1:
+        raise ValueError(f"max_flat_actions must be >= 1, got {max_flat_actions}")
     legal_actions = game_state.get_legal_actions(player=player)
 
     actions: list[np.ndarray] = []
@@ -287,38 +487,71 @@ def build_flat_actions(
                 actions.append(np.array(action_key, dtype=np.int32))
 
     # End turn is always valid (last entry)
-    end_turn_key = (5, 0, 0, 0, 0, 0)
+    end_turn_key = _END_TURN_ACTION
     if end_turn_key not in seen:
         seen.add(end_turn_key)
         actions.append(np.array(end_turn_key, dtype=np.int32))
 
-    if len(actions) > max_flat_actions:
-        logger.warning(
-            "Legal actions (%d) exceed max_flat_actions (%d); truncating "
-            "while preserving seize and end_turn. Consider increasing "
-            "max_flat_actions.",
-            len(actions),
+    n_legal = len(actions)
+    if n_legal <= max_flat_actions:
+        return FlatActionTable(actions=actions, n_legal=n_legal, truncated=False)
+
+    if version == FLAT_ACTION_VERSION_LEGACY:
+        _truncation_warning(
+            "Legal actions (%d) exceed max_flat_actions (%d); truncating (flat_action_version 1: "
+            "seize and end_turn kept, other actions dropped from the end of the list). "
+            "Consider increasing max_flat_actions.",
+            n_legal,
             max_flat_actions,
         )
-        # Naive head-truncation would silently drop the tail of the list
-        # -- which is exactly end_turn (appended last) and seize
-        # (action_type 3, built after create/move/attack). Losing
-        # end_turn can strand the agent for the rest of the game-turn
-        # when ``max_actions_per_turn`` is disabled; losing seize drops
-        # the rare, high-value capture action. So always keep those two
-        # action types and fill the remaining budget with the rest in
-        # their original order.
-        protected = [a for a in actions if int(a[0]) in (3, 5)]
-        others = [a for a in actions if int(a[0]) not in (3, 5)]
-        budget = max(0, max_flat_actions - len(protected))
-        actions = others[:budget] + protected
-        # Pathological fallback: if the protected set alone exceeds the
-        # cap, hard-truncate but keep end_turn (last protected entry) by
-        # trimming from the front of the seize block.
-        if len(actions) > max_flat_actions:
-            actions = actions[-max_flat_actions:]
+        actions = _truncate_legacy(actions, max_flat_actions)
+    else:
+        _truncation_warning(
+            "Legal actions (%d) exceed max_flat_actions (%d); truncating (flat_action_version %d: "
+            "moves dropped first). Consider increasing max_flat_actions.",
+            n_legal,
+            max_flat_actions,
+            version,
+        )
+        actions = _truncate_v2(actions, max_flat_actions)
+    return FlatActionTable(actions=actions, n_legal=n_legal, truncated=True)
 
-    return actions
+
+def build_flat_actions(
+    game_state: "GameState",
+    player: int,
+    max_flat_actions: int,
+    *,
+    version: int = FLAT_ACTION_VERSION_LEGACY,
+) -> list[np.ndarray]:
+    """Build the ordered flat legal-action list for a ``Discrete`` policy.
+
+    Pure-function port of ``StrategyGameEnv._build_flat_actions`` (minus the
+    per-game-turn action-budget gate, which is env state). The returned list
+    is the decode table for ``flat_discrete`` checkpoints: a sampled
+    ``Discrete`` index ``i`` means "execute ``actions[i]``", where each entry
+    is a 6-element int array ``[action_type, unit_type, from_x, from_y,
+    to_x, to_y]`` — the same layout as a MultiDiscrete action.
+
+    Shared by ``StrategyGameEnv`` and ``ModelBot`` so a flat_discrete
+    checkpoint can be played against an arbitrary live ``game_state``
+    (GUI / tournament) without constructing an env around it. The exact
+    per-index legality mask is "first ``len(actions)`` entries True".
+
+    Entries follow ``ACTION_KEY_MAP`` order, each kind in
+    ``get_legal_actions`` order, deduplicated; end turn is always present
+    as the last action. When the legal set exceeds ``max_flat_actions`` the
+    list is truncated as ``version`` prescribes (see
+    :data:`FLAT_ACTION_VERSION_LATEST`); the two versions agree whenever
+    nothing is truncated.
+
+    Args:
+        version: The table layout the checkpoint was trained on. Defaults
+            to the legacy layout (version 1), which is what every caller got
+            before versioning; pass ``flat_action_version_of(model)`` when
+            decoding a checkpoint, or the env's ``flat_action_version``.
+    """
+    return flat_action_table(game_state, player, max_flat_actions, version=version).actions
 
 
 class StrategyGameEnv(gym.Env):
@@ -350,6 +583,10 @@ class StrategyGameEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
+    # ``info["action_type"]`` for a flat_discrete index that names no entry of
+    # the decode table: nothing was executed (see ``step``).
+    INVALID_FLAT_INDEX_ACTION_TYPE = -1
+
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
 
     def __init__(
@@ -374,6 +611,7 @@ class StrategyGameEnv(gym.Env):
         turn_scale: float = TURN_SCALE,  # tanh divisor for turn_number in global_features
         unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
         engine_overrides: dict[str, Any] | None = None,  # sparse overlay over rules.py (balance sweeps)
+        flat_action_version: int = FLAT_ACTION_VERSION_LATEST,  # flat_discrete decode-table layout
     ):
         """
         Initialize environment.
@@ -405,6 +643,16 @@ class StrategyGameEnv(gym.Env):
             action_space_type: 'multi_discrete' (per-dimension masks) or
                 'flat_discrete' (exact per-action masks, eliminates invalid actions)
             max_flat_actions: Upper bound on legal actions per step for flat_discrete
+                (the Discrete action-space size, >= 1).
+            flat_action_version: The flat_discrete decode-table layout
+                (:data:`FLAT_ACTION_VERSIONS`); decides which actions are
+                dropped when the legal set exceeds ``max_flat_actions``.
+                Default :data:`FLAT_ACTION_VERSION_LATEST`; pass
+                :data:`FLAT_ACTION_VERSION_LEGACY` (or
+                ``flat_action_version_of(model)``) to keep training or
+                evaluating a checkpoint on the table it was trained on.
+                Stamped on the Discrete action space, so SB3 saves it with
+                the model.
             opponent_kwargs: Extra constructor kwargs for a scripted
                 opponent; validated against that bot's constructor (see
                 :func:`validate_opponent_kwargs`).
@@ -447,6 +695,9 @@ class StrategyGameEnv(gym.Env):
         # at construction rather than as a silently different MDP.
         validate_opponent_kwargs(opponent, opponent_kwargs)
         validate_reward_config(reward_config)
+        self.flat_action_version = _check_flat_action_version(flat_action_version)
+        if isinstance(max_flat_actions, bool) or not isinstance(max_flat_actions, (int, np.integer)) or max_flat_actions < 1:
+            raise ValueError(f"max_flat_actions must be an integer >= 1, got {max_flat_actions!r}")
 
         # Load or generate map
         if map_file:
@@ -543,13 +794,19 @@ class StrategyGameEnv(gym.Env):
 
         # Action space configuration
         self.action_space_type = action_space_type
-        self.max_flat_actions = max_flat_actions
+        self.max_flat_actions = int(max_flat_actions)
         # Legal action list for flat_discrete mode. Each entry is a 6-element
         # int array [action_type, unit_type, from_x, from_y, to_x, to_y] --
         # the same layout as a MultiDiscrete action -- built by
         # ``_build_flat_actions`` (not a dict, despite the per-action dict
-        # used elsewhere).
+        # used elsewhere). ``_flat_actions_key`` records the decision point
+        # it was built for (see ``_flat_state_key``); step() rebuilds it when
+        # it describes another one (review rlenv-6). ``_flat_n_legal`` /
+        # ``_flat_truncated`` are its truncation diagnostics.
         self._current_actions: list[np.ndarray] = []
+        self._flat_actions_key: tuple[int, int, int] | None = None
+        self._flat_n_legal = 0
+        self._flat_truncated = False
 
         # Grid dimensions
         self.grid_height = self.game_state.grid.height
@@ -630,8 +887,10 @@ class StrategyGameEnv(gym.Env):
             )
         elif action_space_type == "flat_discrete":
             # Flat Discrete: each index maps to a specific legal action.
-            # Exact masking eliminates invalid actions entirely.
-            self.action_space = spaces.Discrete(max_flat_actions)
+            # Exact masking eliminates invalid actions entirely. The table
+            # layout version rides on the space so it is saved with a model.
+            self.action_space = spaces.Discrete(self.max_flat_actions)
+            stamp_flat_action_version(self.action_space, self.flat_action_version)
         else:
             # MultiDiscrete: per-dimension masks (over-approximation)
             self.action_space = spaces.MultiDiscrete(
@@ -686,17 +945,23 @@ class StrategyGameEnv(gym.Env):
             "units_lost": 0,
             "structures_lost_neutral": 0,
             "structures_lost_owned": 0,
-            # Action-space diagnostics (see step()):
+            # Action-space diagnostics (see step()), all taken at the decision
+            # point the action was chosen at:
             #   ``seize_available_steps`` counts steps where a seize action
             #     was legal -- divided by episode length downstream it gives
             #     the "could the agent have captured" rate, which separates
             #     "never reaches a capturable tile" (navigation) from
             #     "reaches one but doesn't seize" (reward/exploration).
             #   ``max_legal_actions`` is the peak legal-action-set size seen
-            #     this episode -- a guardrail for the flat_discrete
-            #     max_flat_actions truncation and a proxy for army bloat.
+            #     this episode, counted *before* flat_discrete truncation (so
+            #     it can exceed max_flat_actions) -- a guardrail for that
+            #     truncation and a proxy for army bloat.
+            #   ``truncated_steps`` counts decision points whose flat_discrete
+            #     table was truncated to max_flat_actions (always 0 for
+            #     multi_discrete).
             "seize_available_steps": 0,
             "max_legal_actions": 0,
+            "truncated_steps": 0,
             # Army-economy diagnostics (see step()): these separate "the agent
             # wins by massing a big slow army" from "the agent wins with a
             # small precise force". ``peak_own_units`` / ``own_units_sum``
@@ -911,6 +1176,15 @@ class StrategyGameEnv(gym.Env):
         """Pack a sampled autoregressive tuple into the env's 6-vector action."""
         return np.array([atype, unit_type_idx, sx, sy, tx, ty], dtype=np.int32)
 
+    def _flat_state_key(self) -> tuple[int, int, int]:
+        """Identifies the decision point a flat_discrete table was built for.
+
+        The env step count (the action budget gate depends only on it), the
+        live game and how many actions that game has recorded: an action
+        the caller applied to ``game_state`` directly moves the key too.
+        """
+        return (self.current_step, id(self.game_state), len(self.game_state.action_history))
+
     def _build_flat_actions(self):
         """
         Build flat list of all legal actions for Discrete action space mode.
@@ -918,15 +1192,23 @@ class StrategyGameEnv(gym.Env):
         Each action is stored as a numpy array [action_type, unit_type, from_x,
         from_y, to_x, to_y] — the same format as MultiDiscrete actions — so that
         ``_encode_action`` and ``_execute_action`` work unchanged. The list
-        itself comes from the shared :func:`build_flat_actions` (also used by
-        ``ModelBot`` to decode flat_discrete checkpoints); only the per-turn
-        action-budget gate (``_budget_exhausted``) is env-specific.
+        itself comes from the shared :func:`flat_action_table` in this env's
+        ``flat_action_version`` (``ModelBot`` decodes flat_discrete
+        checkpoints with the same function); only the per-turn action-budget
+        gate (``_budget_exhausted``) is env-specific.
         """
         if self._budget_exhausted():
-            self._current_actions = [np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)]
-            return
-
-        self._current_actions = build_flat_actions(self.game_state, self.agent_player, self.max_flat_actions)
+            self._current_actions = [np.array(_END_TURN_ACTION, dtype=np.int32)]
+            self._flat_n_legal = 1
+            self._flat_truncated = False
+        else:
+            table = flat_action_table(
+                self.game_state, self.agent_player, self.max_flat_actions, version=self.flat_action_version
+            )
+            self._current_actions = table.actions
+            self._flat_n_legal = table.n_legal
+            self._flat_truncated = table.truncated
+        self._flat_actions_key = self._flat_state_key()
 
     def _get_action_mask(self) -> np.ndarray:
         """
@@ -1378,46 +1660,100 @@ class StrategyGameEnv(gym.Env):
 
         return reward, breakdown
 
+    def _decision_point_diagnostics(self) -> tuple[int, int, bool, bool]:
+        """Legal-action diagnostics for the decision point the agent acts at.
+
+        Taken *before* the action runs, in both action-space modes (the
+        multi_discrete path used to count the post-step state's actions
+        while flat_discrete counted the pre-step table). Once the action
+        budget is spent the agent is offered end_turn alone, and that is
+        what is reported.
+
+        Returns:
+            ``(n_offered, n_legal, truncated, seize_available)``: actions
+            offered to the policy, legal actions before flat_discrete
+            truncation, whether the table was truncated, and whether a seize
+            was on offer.
+        """
+        if self.action_space_type == "flat_discrete":
+            n_offered = len(self._current_actions)
+            seize_available = any(int(a[0]) == 3 for a in self._current_actions)
+            return n_offered, max(self._flat_n_legal, n_offered), self._flat_truncated, seize_available
+        if self._budget_exhausted():
+            return 1, 1, False, False
+        legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
+        # get_legal_actions returns lists of action dicts plus a boolean
+        # "end_turn" flag — count list lengths, then +1 for end_turn.
+        n_legal = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
+        return n_legal, n_legal, False, bool(legal_actions.get("seize"))
+
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         """
         Execute one step.
 
+        For ``flat_discrete``, ``action`` is an index into the legal-action
+        table for the current decision point -- the table ``action_masks()``
+        built, or a fresh one if the state has moved on since (or it was
+        never asked for). An index outside the table is an invalid action:
+        nothing is executed and the ``invalid_action`` penalty applies
+        (it used to execute end_turn for free).
+
         Returns:
             observation, reward, terminated, truncated, info
         """
-        self.current_step += 1
-        self.episode_stats["length"] = self.current_step
-
         # In hierarchical mode, extract the primitive action from the Dict
         if self.hierarchical and isinstance(action, dict):
             action = action["primitive"]
 
-        # For flat_discrete, map the integer index to the actual action array
+        # For flat_discrete, map the integer index to the actual action array.
+        # The table must describe *this* decision point (review rlenv-6):
+        # rebuild it when the last one was built for another.
+        flat_index_invalid = False
         if self.action_space_type == "flat_discrete":
+            if self._flat_actions_key != self._flat_state_key():
+                self._build_flat_actions()
             action_idx = int(action)
             if 0 <= action_idx < len(self._current_actions):
                 action = self._current_actions[action_idx]
             else:
-                # Out-of-range index — fallback to end_turn
-                action = np.array([5, 0, 0, 0, 0, 0])
+                flat_index_invalid = True
 
-        # Decode and execute action
-        action_dict = self._encode_action(action)
+        # Diagnostics describe the decision point the action was chosen at,
+        # so they are taken before it runs.
+        n_legal_actions, n_legal_pre_truncation, flat_truncated, seize_available = self._decision_point_diagnostics()
 
-        # Bump / reset the per-game-turn action counter that drives the
-        # mask-narrowing safety net (see ``_build_flat_actions``). The
-        # update happens *before* dispatch so that an end_turn step
-        # clears the counter for the next agent turn, while non-end_turn
-        # steps see the post-increment value reflected on the next
-        # mask query. ``_execute_action`` handles the opponent's turn
-        # internally for action_type=5, so the counter doesn't need to
-        # be touched again afterward.
-        if action_dict["action_type"] == 5:
-            self._actions_this_turn = 0
-        else:
+        self.current_step += 1
+        self.episode_stats["length"] = self.current_step
+
+        if flat_index_invalid:
+            action_dict: dict[str, Any] = {
+                "action_type": self.INVALID_FLAT_INDEX_ACTION_TYPE,
+                "unit_type": None,
+                "from_pos": None,
+                "to_pos": None,
+            }
+            # A spent step like any other invalid action: it counts against
+            # the per-turn budget and pays the invalid-action penalty.
             self._actions_this_turn += 1
+            action_reward, is_valid = 0.0, False
+        else:
+            # Decode and execute action
+            action_dict = self._encode_action(action)
 
-        action_reward, is_valid = self._execute_action(action_dict)
+            # Bump / reset the per-game-turn action counter that drives the
+            # mask-narrowing safety net (see ``_budget_exhausted``). The
+            # update happens *before* dispatch so that an end_turn step
+            # clears the counter for the next agent turn, while non-end_turn
+            # steps see the post-increment value reflected on the next
+            # mask query. ``_execute_action`` handles the opponent's turn
+            # internally for action_type=5, so the counter doesn't need to
+            # be touched again afterward.
+            if action_dict["action_type"] == 5:
+                self._actions_this_turn = 0
+            else:
+                self._actions_this_turn += 1
+
+            action_reward, is_valid = self._execute_action(action_dict)
 
         # Determine terminal status BEFORE shaping so potential-based shaping
         # can charge ``-Phi(s_prev)`` on a real termination (where
@@ -1445,6 +1781,7 @@ class StrategyGameEnv(gym.Env):
         elif truncated:
             end_reason = "max_steps_truncate"
 
+        rc = self.reward_config
         terminal_bonus = 0.0
         if terminated:
             if self.game_state.winner == self.agent_player:
@@ -1453,7 +1790,6 @@ class StrategyGameEnv(gym.Env):
                 # to bigger maps). Falls back to the unified "win" key when
                 # the per-reason keys aren't configured, preserving
                 # backwards-compatibility with older reward_config dicts.
-                rc = self.reward_config
                 if end_reason == "hq_capture" and "win_by_hq_capture" in rc:
                     terminal_bonus = rc["win_by_hq_capture"]
                 elif end_reason == "elimination" and "win_by_elimination" in rc:
@@ -1473,10 +1809,10 @@ class StrategyGameEnv(gym.Env):
                 self.episode_stats["winner"] = self.agent_player
             elif self.game_state.winner is None:
                 # Draw (e.g. max_turns reached)
-                terminal_bonus = self.reward_config["draw"]
+                terminal_bonus = rc["draw"]
                 self.episode_stats["winner"] = None
             else:
-                terminal_bonus = self.reward_config["loss"]
+                terminal_bonus = rc["loss"]
                 self.episode_stats["winner"] = self.game_state.winner
         elif truncated:
             # Step-limit truncation. ``truncated=True`` is the correct
@@ -1494,37 +1830,21 @@ class StrategyGameEnv(gym.Env):
             # the default charge is 0. Set ``reward_config['truncation']`` to
             # reinstate an explicit penalty -- but note it stacks with the
             # bootstrap rather than replacing it.
-            terminal_bonus = self.reward_config["truncation"]
+            terminal_bonus = rc["truncation"]
             self.episode_stats["winner"] = None
 
         reward += terminal_bonus
         breakdown["terminal"] = float(terminal_bonus)
 
-        # Mask coverage diagnostic — count of legal actions visible to the
-        # policy at this step. For flat_discrete this is the number of bits
-        # set in the mask; for multi_discrete it's the size of the legal
-        # action set returned by the game state.
-        # ``seize_available`` records whether a capture action was legal at
-        # this decision point, computed from the same legal-action source as
-        # ``n_legal_actions`` so the two stay consistent. Aggregated per
-        # episode into ``seize_available_steps`` for the "can-vs-won't
-        # capture" diagnostic.
-        if self.action_space_type == "flat_discrete":
-            n_legal_actions = len(self._current_actions)
-            seize_available = any(int(a[0]) == 3 for a in self._current_actions)
-        else:
-            legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
-            # get_legal_actions returns lists of action dicts plus a boolean
-            # "end_turn" flag — count list lengths, then +1 for end_turn.
-            n_legal_actions = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
-            seize_available = bool(legal_actions.get("seize"))
-
         # Accumulate the action-space diagnostics into episode_stats so the
         # eval pipeline (which only reads the terminal info dict) can surface
-        # per-stage seize-availability and peak legal-action-set size.
-        self.episode_stats["max_legal_actions"] = max(self.episode_stats["max_legal_actions"], int(n_legal_actions))
+        # per-stage seize-availability, peak legal-action-set size and how
+        # often the flat_discrete table was truncated.
+        self.episode_stats["max_legal_actions"] = max(self.episode_stats["max_legal_actions"], int(n_legal_pre_truncation))
         if seize_available:
             self.episode_stats["seize_available_steps"] += 1
+        if flat_truncated:
+            self.episode_stats["truncated_steps"] += 1
 
         # Army-economy diagnostics: sample the agent's army size and unspent
         # gold at every decision point. Sampling per-action (not per game-turn)
@@ -1562,6 +1882,8 @@ class StrategyGameEnv(gym.Env):
             "end_reason": end_reason,
             "turn": self.game_state.turn_number,
             "valid_action": is_valid,
+            # INVALID_FLAT_INDEX_ACTION_TYPE (-1) when a flat_discrete index
+            # named no table entry and nothing ran.
             "action_type": action_dict["action_type"],
             # Surface unit_type only for create_unit (action_type=0) actions —
             # so per-game diagnostics can break the create_unit bar down by
@@ -1571,7 +1893,13 @@ class StrategyGameEnv(gym.Env):
             # field describing the moving unit, but that's a different thing).
             "unit_type": action_dict.get("unit_type") if action_dict["action_type"] == 0 and is_valid else None,
             "reward_breakdown": breakdown,
+            # Mask coverage at the decision point the action was chosen at:
+            # the actions offered to the policy (flat_discrete: the table
+            # length; multi_discrete: the engine's legal set), the legal set
+            # before flat_discrete truncation, and whether it was truncated.
             "n_legal_actions": int(n_legal_actions),
+            "n_legal_actions_pre_truncation": int(n_legal_pre_truncation),
+            "flat_actions_truncated": bool(flat_truncated),
             "seize_available": bool(seize_available),
         }
 
@@ -1617,6 +1945,12 @@ class StrategyGameEnv(gym.Env):
         )
         self.current_step = 0
         self._actions_this_turn = 0
+        # The flat_discrete table described the previous game; it is rebuilt
+        # for this one on the next action_masks() / step() (review rlenv-6).
+        self._current_actions = []
+        self._flat_actions_key = None
+        self._flat_n_legal = 0
+        self._flat_truncated = False
 
         # Reset opponent.
         #

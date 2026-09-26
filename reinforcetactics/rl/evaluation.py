@@ -180,6 +180,9 @@ def evaluate_model(
     seize_available_steps_total = 0
     steps_total = 0
     max_legal_actions = 0
+    # Decision points whose flat_discrete table was truncated to
+    # max_flat_actions (``episode_stats["truncated_steps"]``).
+    truncated_steps_total = 0
 
     # Army-economy diagnostics aggregated from ``info["episode_stats"]``.
     # Peaks take the max across the eval set; the *_sum totals are divided
@@ -352,6 +355,7 @@ def evaluate_model(
         seize_available_steps_total += int(episode_stats.get("seize_available_steps", 0) or 0)
         steps_total += ep_len
         max_legal_actions = max(max_legal_actions, int(episode_stats.get("max_legal_actions", 0) or 0))
+        truncated_steps_total += int(episode_stats.get("truncated_steps", 0) or 0)
 
         peak_own_units = max(peak_own_units, int(episode_stats.get("peak_own_units", 0) or 0))
         own_units_sum_total += int(episode_stats.get("own_units_sum", 0) or 0)
@@ -384,6 +388,7 @@ def evaluate_model(
         "captures_by_type": captures_by_type,
         "seize_available_rate": (seize_available_steps_total / steps_total) if steps_total > 0 else 0.0,
         "max_legal_actions": int(max_legal_actions),
+        "flat_truncated_rate": (truncated_steps_total / steps_total) if steps_total > 0 else 0.0,
         "peak_own_units": int(peak_own_units),
         "mean_own_units": (own_units_sum_total / steps_total) if steps_total > 0 else 0.0,
         "peak_gold_banked": float(peak_gold_banked),

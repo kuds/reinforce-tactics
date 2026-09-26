@@ -632,7 +632,9 @@ class SelfPlayEnv(gym.Wrapper):
         try:
             obs = self._build_obs_for_player(player)
             if base_env.action_space_type == "flat_discrete":
-                actions = build_flat_actions(base_env.game_state, player, base_env.max_flat_actions)
+                actions = build_flat_actions(
+                    base_env.game_state, player, base_env.max_flat_actions, version=base_env.flat_action_version
+                )
                 mask = np.zeros(base_env.max_flat_actions, dtype=bool)
                 mask[: len(actions)] = True
                 raw = self._predict_opponent(policy, obs, mask if accepts_masks else None)
@@ -695,7 +697,9 @@ class SelfPlayEnv(gym.Wrapper):
         base_env = self._base_env
         if player is None:
             player = 3 - self.agent_player
-        actions = build_flat_actions(base_env.game_state, player, base_env.max_flat_actions)
+        actions = build_flat_actions(
+            base_env.game_state, player, base_env.max_flat_actions, version=base_env.flat_action_version
+        )
         idx = int(base_env.np_random.integers(len(actions)))
         return np.array(actions[idx])
 

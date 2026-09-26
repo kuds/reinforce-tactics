@@ -97,6 +97,78 @@ class TestEndReasonComesFromTheEngine:
 
 
 # ---------------------------------------------------------------------------
+# rlenv-6
+# ---------------------------------------------------------------------------
+
+
+def _flat_env(**kwargs) -> StrategyGameEnv:
+    kwargs.setdefault("action_space_type", "flat_discrete")
+    return _env(**kwargs)
+
+
+class TestFlatDecodeTable:
+    """rlenv-6: flat_discrete decodes against a table for the current decision point.
+
+    step() used to decode against whatever the last action_masks() call
+    built (kept across reset()), and an out-of-range index was executed as
+    a free end_turn.
+    """
+
+    def test_step_without_a_fresh_mask_call_decodes_against_the_current_state(self):
+        env = _flat_env()
+        env.action_masks()
+        first = [tuple(int(v) for v in a) for a in env._current_actions]
+        assert first[0][0] == 0  # a purchase at the first building
+        _, _, _, _, info = env.step(0)
+        assert info["valid_action"]
+        # No action_masks() call in between: index 0 of the *previous*
+        # table repeats the purchase on the now-occupied building.
+        expected = build_flat_actions(env.game_state, env.agent_player, env.max_flat_actions, version=env.flat_action_version)
+        _, _, _, _, info = env.step(0)
+        assert info["valid_action"], "decoded against the stale table"
+        assert [tuple(int(v) for v in a) for a in env._current_actions] == [tuple(int(v) for v in a) for a in expected]
+        env.close()
+
+    def test_state_changed_behind_the_env_rebuilds_the_table(self):
+        env = _flat_env()
+        env.action_masks()
+        stale = [tuple(int(v) for v in a) for a in env._current_actions]
+        gs = env.game_state
+        x, y, unit_type = stale[0][4], stale[0][5], "W"
+        assert gs.apply_action("create_unit", {"unit_type": unit_type, "x": x, "y": y, "player": 1}).accepted
+        _, _, _, _, info = env.step(0)
+        assert info["valid_action"]
+        env.close()
+
+    @pytest.mark.parametrize("index", [-1, 511])
+    def test_out_of_range_index_is_an_invalid_no_op(self, index):
+        env = _flat_env(reward_config={"invalid_action": -7.5, **_ISOLATE})
+        env.action_masks()
+        gs = env.game_state
+        n_history, turn, player = len(gs.action_history), gs.turn_number, gs.current_player
+        _, reward, _, _, info = env.step(index)
+        assert info["valid_action"] is False
+        assert info["action_type"] == StrategyGameEnv.INVALID_FLAT_INDEX_ACTION_TYPE
+        assert info["reward_breakdown"]["invalid_penalty"] == pytest.approx(-7.5)
+        assert reward == pytest.approx(-7.5)
+        # Nothing ran: in particular the turn did not end.
+        assert (len(gs.action_history), gs.turn_number, gs.current_player) == (n_history, turn, player)
+        assert env.episode_stats["invalid_actions"] == 1
+        env.close()
+
+    def test_reset_clears_the_table(self):
+        env = _flat_env()
+        env.action_masks()
+        assert env._current_actions
+        env.reset(seed=1)
+        assert env._current_actions == []
+        # And the first step of the new episode decodes against the new game.
+        _, _, _, _, info = env.step(0)
+        assert info["valid_action"]
+        env.close()
+
+
+# ---------------------------------------------------------------------------
 # rlenv-8
 # ---------------------------------------------------------------------------
 
