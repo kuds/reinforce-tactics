@@ -269,3 +269,52 @@ scenarios:
         path.write_text("scenarios: []\n")
         with pytest.raises(ValueError, match="non-empty"):
             load_scenarios_from_yaml(str(path))
+
+
+class TestRecorderKeepsOnlyAcceptedActions:
+    """Refused bot moves must not become demonstrations (review critic-integration-1)."""
+
+    def _recorder(self):
+        import numpy as np
+
+        from reinforcetactics.core.game_state import GameState
+        from reinforcetactics.rl.imitation import _ActionRecorder
+
+        map_data = np.array([["p"] * 10 for _ in range(10)], dtype=object)
+        map_data[0][0] = "h_1"
+        map_data[9][9] = "h_2"
+        game = GameState(map_data, num_players=2)
+        recorder = _ActionRecorder(game, 1, 10, 10, list(game.enabled_units), fog_of_war=False)
+        recorder.install()
+        return game, recorder
+
+    # The recorder already drops actions its per-dimension masks rule out
+    # (e.g. a target far outside every range). These cases pass those union
+    # masks, which is how 18-53% refused demos got through: the engine
+    # refuses them, but each coordinate is legal for *some* action.
+
+    def test_move_onto_an_ally_records_nothing(self):
+        game, recorder = self._recorder()
+        unit = game.place_unit("W", 2, 2, player=1)
+        game.place_unit("W", 2, 3, player=1)
+
+        assert game.move_unit(unit, 2, 3) is False  # occupied by an ally
+        assert recorder.demos == []
+
+        assert game.move_unit(unit, 1, 2) is True
+        assert len(recorder.demos) == 1
+        assert list(recorder.demos[0].action[2:]) == [2, 2, 1, 2]
+
+    def test_second_attack_by_a_spent_unit_records_nothing(self):
+        game, recorder = self._recorder()
+        attacker = game.place_unit("W", 2, 2, player=1)
+        game.place_unit("W", 4, 2, player=1)  # can also attack the enemy
+        game.place_unit("W", 2, 6, player=1)  # keeps x=2 a legal source
+        enemy = game.place_unit("B", 3, 2, player=2)
+
+        game.attack(attacker, enemy)
+        assert len(recorder.demos) == 1
+        assert enemy in game.units
+
+        game.attack(attacker, enemy)  # attacker's action is spent: refused
+        assert len(recorder.demos) == 1

@@ -428,6 +428,25 @@ class _ActionRecorder:
             )
         )
 
+    def _record_if_accepted(self, action: np.ndarray, call: Callable[[], Any]) -> Any:
+        """Snapshot ``action`` before ``call`` and keep it only if the engine carried it out.
+
+        The observation must be taken before the action runs, but the engine
+        refuses illegal actions (unreachable moves, spent units, ...) without
+        changing anything. Scripted bots do attempt such moves, and 18-53% of
+        recorded demonstrations were refused ones: the same observation then
+        got labelled again with the bot's next attempt, i.e. contradictory
+        supervision (review critic-integration-1). Every action the engine
+        carries out appends to ``action_history``; a refusal appends nothing.
+        """
+        demos_before = len(self.demos)
+        history_before = len(self.game_state.action_history)
+        self._snapshot(action)
+        result = call()
+        if len(self.game_state.action_history) == history_before:
+            del self.demos[demos_before:]
+        return result
+
     def _is_demonstrator_turn(self) -> bool:
         return self.game_state.current_player == self.demonstrator_player
 
@@ -447,7 +466,9 @@ class _ActionRecorder:
             target_player = player if player is not None else self.game_state.current_player
             if target_player == self.demonstrator_player:
                 ut_idx = UNIT_TYPE_TO_IDX.get(unit_type, 0)
-                self._snapshot(np.array([0, ut_idx, x, y, x, y], dtype=np.int64))
+                return self._record_if_accepted(
+                    np.array([0, ut_idx, x, y, x, y], dtype=np.int64), lambda: original(unit_type, x, y, player=player)
+                )
             return original(unit_type, x, y, player=player)
 
         return wrapped
@@ -457,11 +478,12 @@ class _ActionRecorder:
 
         def wrapped(unit, to_x, to_y):
             if self._is_demonstrator_turn() and unit.player == self.demonstrator_player:
-                self._snapshot(
+                return self._record_if_accepted(
                     np.array(
                         [1, self._default_unit_idx(), unit.x, unit.y, to_x, to_y],
                         dtype=np.int64,
-                    )
+                    ),
+                    lambda: original(unit, to_x, to_y),
                 )
             return original(unit, to_x, to_y)
 
@@ -472,11 +494,12 @@ class _ActionRecorder:
 
         def wrapped(attacker, target):
             if self._is_demonstrator_turn() and attacker.player == self.demonstrator_player:
-                self._snapshot(
+                return self._record_if_accepted(
                     np.array(
                         [2, self._default_unit_idx(), attacker.x, attacker.y, target.x, target.y],
                         dtype=np.int64,
-                    )
+                    ),
+                    lambda: original(attacker, target),
                 )
             return original(attacker, target)
 
@@ -487,11 +510,12 @@ class _ActionRecorder:
 
         def wrapped(unit):
             if self._is_demonstrator_turn() and unit.player == self.demonstrator_player:
-                self._snapshot(
+                return self._record_if_accepted(
                     np.array(
                         [3, self._default_unit_idx(), unit.x, unit.y, unit.x, unit.y],
                         dtype=np.int64,
-                    )
+                    ),
+                    lambda: original(unit),
                 )
             return original(unit)
 
@@ -502,11 +526,12 @@ class _ActionRecorder:
 
         def wrapped(src, target):
             if self._is_demonstrator_turn() and getattr(src, "player", None) == self.demonstrator_player:
-                self._snapshot(
+                return self._record_if_accepted(
                     np.array(
                         [action_type, self._default_unit_idx(), src.x, src.y, target.x, target.y],
                         dtype=np.int64,
-                    )
+                    ),
+                    lambda: original(src, target),
                 )
             return original(src, target)
 
@@ -520,7 +545,7 @@ class _ActionRecorder:
 
         def wrapped():
             if self._is_demonstrator_turn():
-                self._snapshot(np.array([5, self._default_unit_idx(), 0, 0, 0, 0], dtype=np.int64))
+                return self._record_if_accepted(np.array([5, self._default_unit_idx(), 0, 0, 0, 0], dtype=np.int64), original)
             return original()
 
         return wrapped
