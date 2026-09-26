@@ -51,14 +51,16 @@ class TestNoopBotBasics:
     def test_take_turn_does_not_move_existing_units(self, map_data):
         """Any existing player-2 units must be in the same position after the turn."""
         gs = GameState(map_data, num_players=2)
-        # Manufacture a unit for player 2 if none exist on the random map.
-        # We use a corner tile so it doesn't conflict with terrain.
+        # Manufacture a unit for player 2 if none exist on the random map,
+        # on one of its own (walkable) structures. place_unit is test setup,
+        # not a purchase: create_unit refuses a player-2 unit during player
+        # 1's turn, which left this test comparing two empty lists.
         if not any(u.player == 2 for u in gs.units):
-            for tile in gs.grid.get_capturable_tiles(player=2):
-                if gs.create_unit("W", tile.x, tile.y, player=2):
-                    break
+            tile = next(t for t in gs.grid.get_capturable_tiles(player=2) if gs.get_unit_at_position(t.x, t.y) is None)
+            gs.place_unit("W", tile.x, tile.y, 2)
         gs.current_player = 2
         before = [(u.x, u.y, u.health) for u in gs.units if u.player == 2]
+        assert before, "setup must give player 2 a unit, or the check below proves nothing"
 
         NoopBot(gs, player=2).take_turn()
 

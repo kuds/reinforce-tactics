@@ -317,7 +317,11 @@ class SimpleBot(BotUnitMixin, BaseBot):
             affordable.sort(key=lambda a: (self.UNIT_PRIORITIES.get(a["unit_type"], 99), UNIT_DATA[a["unit_type"]]["cost"]))
 
             action = affordable[0]
-            self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+            # Stop if the engine refuses (e.g. called outside this bot's
+            # turn or after game over): the legal list would not change,
+            # so the loop would otherwise spin on the same action forever.
+            if self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player) is None:
+                break
             self._record(f"buy_{action['unit_type']}")
 
     def move_and_act_units(self):
@@ -848,7 +852,9 @@ class MediumBot(BotUnitMixin, BaseBot):
 
             # Buy the top priority affordable unit
             action = affordable_actions[0]
-            self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+            # Stop if the engine refuses (see SimpleBot.purchase_units).
+            if self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player) is None:
+                break
             self._record(f"buy_{action['unit_type']}")
             if counter_unit is not None and action["unit_type"] == counter_unit:
                 self._record("counter_unit_bought")
@@ -1016,11 +1022,10 @@ class MediumBot(BotUnitMixin, BaseBot):
         for attacker in attackers:
             if self.game_state.game_over:
                 return
-            # Skip attackers killed by an earlier counterattack -- the
-            # engine doesn't refuse ``attack()`` on a dead unit, so a
-            # stale reference here would land a phantom hit live but
-            # no-op on replay (replay looks up the attacker by position
-            # and finds nothing), making the rebuilt state diverge.
+            # Skip attackers killed by an earlier counterattack. The
+            # engine refuses ``attack()`` from a unit no longer in play,
+            # so this only saves a wasted call (and the move-then-attack
+            # path below from planning around a corpse).
             if attacker.health <= 0:
                 continue
             if not (attacker.can_move or attacker.can_attack):
@@ -1790,7 +1795,12 @@ class AdvancedBot(MediumBot):
                     best_action = action
 
             if best_action and best_priority > -1:
-                self.game_state.create_unit(best_action["unit_type"], best_action["x"], best_action["y"], self.bot_player)
+                # Stop if the engine refuses (see SimpleBot.purchase_units).
+                created = self.game_state.create_unit(
+                    best_action["unit_type"], best_action["x"], best_action["y"], self.bot_player
+                )
+                if created is None:
+                    break
                 self._record(f"buy_{best_action['unit_type']}")
                 unit_counts[best_action["unit_type"]] = unit_counts.get(best_action["unit_type"], 0) + 1
                 total_units += 1
@@ -1802,7 +1812,8 @@ class AdvancedBot(MediumBot):
                     self._maybe_shuffle(affordable_actions)
                     affordable_actions.sort(key=lambda a: UNIT_DATA[a["unit_type"]]["cost"])
                     action = affordable_actions[0]
-                    self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player)
+                    if self.game_state.create_unit(action["unit_type"], action["x"], action["y"], self.bot_player) is None:
+                        break
                     self._record(f"buy_{action['unit_type']}")
                     self._record("buy_fallback")
                     unit_counts[action["unit_type"]] = unit_counts.get(action["unit_type"], 0) + 1
@@ -2135,12 +2146,30 @@ class AdvancedBot(MediumBot):
 
         if best_charge and best_value > 0:
             pos, enemy, _ = best_charge
-            self.game_state.move_unit(unit, pos[0], pos[1])
-            self.game_state.attack(unit, enemy)
+            # get_reachable lists ally-occupied tiles and ignores a spent
+            # can_move, so the engine can refuse this move. Attacking anyway
+            # swung at the enemy from wherever the knight stood -- an
+            # out-of-range melee hit the engine used to apply, ~9 per
+            # Advanced/Master game (review rulebots-2). Only a knight that
+            # landed and hit counts as a charge; otherwise the caller can
+            # still use whatever action the knight has left.
+            if not self.game_state.move_unit(unit, pos[0], pos[1]):
+                return False
+            if not self._attack_if_in_reach(unit, enemy):
+                return False
             self._record("knight_charge")
             return True
 
         return False
+
+    def _attack_if_in_reach(self, unit, enemy) -> bool:
+        """Attack ``enemy`` only if ``unit`` can reach it now; True if the attack landed."""
+        attackable = self.game_state.mechanics.get_attackable_enemies(unit, [enemy], self.game_state.grid)
+        if enemy not in attackable:
+            return False
+        # The engine can still refuse (e.g. fog of war); an executed attack
+        # always deals at least 1 damage.
+        return self.game_state.attack(unit, enemy)["damage"] > 0
 
     def _try_rogue_flank(self, unit) -> bool:
         """Attempt Rogue flank attack for +50% damage (target adjacent to ally)."""
@@ -2163,7 +2192,8 @@ class AdvancedBot(MediumBot):
                 self._maybe_shuffle(list(attackable)),
                 key=lambda e: self.calculate_attack_value(unit, e),
             )
-            self.game_state.attack(unit, best_target)
+            if not self._attack_if_in_reach(unit, best_target):
+                return False
             self._record("rogue_flank")
             return True
 
@@ -2190,8 +2220,12 @@ class AdvancedBot(MediumBot):
                         best_target = enemy
 
         if best_flank_pos and best_target:
-            self.game_state.move_unit(unit, best_flank_pos[0], best_flank_pos[1])
-            self.game_state.attack(unit, best_target)
+            # Same failure mode as _try_knight_charge: a refused move must
+            # not turn into an attack from the Rogue's old tile.
+            if not self.game_state.move_unit(unit, best_flank_pos[0], best_flank_pos[1]):
+                return False
+            if not self._attack_if_in_reach(unit, best_target):
+                return False
             self._record("rogue_flank")
             return True
 
