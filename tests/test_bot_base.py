@@ -308,17 +308,49 @@ class TestActingThroughTheEngine:
         assert (unit.x, unit.y) != (3, 0)
         assert not (unit.can_move or unit.can_attack)
 
-    def test_haste_gives_exactly_one_more_action(self):
+    @pytest.mark.parametrize(
+        "bot_cls,entry",
+        [
+            (SimpleBot, "act_with_unit"),
+            (SimpleBot, "move_and_act_units"),
+            (MediumBot, "act_with_unit"),
+            (MediumBot, "move_and_act_units"),
+            (AdvancedBot, "act_with_unit_enhanced"),
+            (AdvancedBot, "move_and_act_units_enhanced"),
+            (MasterBot, "act_with_unit_enhanced"),
+            (MasterBot, "move_and_act_units_enhanced"),
+        ],
+    )
+    def test_haste_gives_exactly_one_more_action(self, bot_cls, entry):
         game = _open_game()
         warrior = game.place_unit("W", 3, 3, 1)
         game.place_unit("W", 3, 4, 2).health = 30  # survives two hits
         warrior.is_hasted = True
-        bot = SimpleBot(game, player=1)
+        bot = bot_cls(game, player=1)
 
-        bot.act_with_unit(warrior)
+        act = getattr(bot, entry)
+        if entry.startswith("act_with_unit"):
+            act(warrior)
+        else:
+            act()
 
         assert [a["type"] for a in game.action_history].count("attack") == 2
         assert not (warrior.can_move or warrior.can_attack or warrior.is_hasted)
+
+    @pytest.mark.parametrize("bot_cls", [AdvancedBot, MasterBot])
+    def test_a_hasted_knight_acts_again_after_its_charge(self, bot_cls):
+        """The charge branch continues a hasted unit instead of returning."""
+        game = _open_game()
+        knight = game.place_unit("K", 0, 3, 1)
+        game.place_unit("W", 4, 3, 2).health = 60  # survives the charge and the second hit
+        knight.is_hasted = True
+        bot = bot_cls(game, player=1)
+
+        bot.act_with_unit_enhanced(knight)
+
+        assert bot.get_capabilities_fired().get("knight_charge") == 1
+        assert [a["type"] for a in game.action_history].count("attack") == 2
+        assert not (knight.can_move or knight.can_attack or knight.is_hasted)
 
     def test_try_action_asks_the_engine_first(self, monkeypatch):
         game = _open_game()
@@ -332,6 +364,94 @@ class TestActingThroughTheEngine:
         assert bot.try_mage_paralyze(mage) is False
         assert sent == []  # nothing out of range reached the engine
         assert "mage_paralyze" not in bot.get_capabilities_fired()
+
+
+# Fog-of-war scenarios for TestFogOfWarTargets: player 1's units next to (or
+# within a move of) player 2's, on a 7x7 grass map. Each entry is
+# (unit type, x, y, player, health or None for full), and each scenario
+# leads the tiers to attack or paralyze by a different path.
+FOG_SCENARIOS = {
+    # Value trade in reach (MediumBot priority 2, AdvancedBot priority 7).
+    "adjacent": [("W", 3, 3, 1, None), ("W", 3, 4, 2, 30)],
+    # One hit kills: coordinated focus fire.
+    "killable": [("W", 3, 3, 1, None), ("W", 2, 4, 1, None), ("W", 3, 4, 2, 1)],
+    # An enemy seizing a neutral tower: the interrupt priority, after a move.
+    "capturing": [("W", 3, 1, 1, None), ("W", 3, 4, 2, 30)],
+    # A Knight three tiles out: the charge.
+    "charge": [("K", 0, 3, 1, None), ("W", 4, 3, 2, 30)],
+    # A Rogue beside an enemy a friend is next to: the flank, in place and after a move.
+    "flank": [("W", 3, 3, 1, None), ("R", 2, 4, 1, None), ("W", 3, 4, 2, 30)],
+    "flank_move": [("W", 3, 3, 1, None), ("R", 0, 5, 1, None), ("W", 3, 4, 2, 30)],
+    # A Mage two tiles from an enemy a hit would not kill: paralyze.
+    "mage": [("M", 3, 1, 1, None), ("W", 3, 3, 2, 30)],
+    # An Archer in range: the ranged attack.
+    "archer": [("A", 3, 1, 1, None), ("W", 3, 3, 2, None)],
+}
+# The capability each scenario's own path records (AdvancedBot and MasterBot).
+FOG_SCENARIO_CAPABILITY = {
+    "charge": "knight_charge",
+    "flank": "rogue_flank",
+    "flank_move": "rogue_flank",
+    "mage": "mage_paralyze",
+}
+# No attack path of that tier leads there: SimpleBot walks at the tower rather
+# than the enemy on it, and MediumBot's own units only attack what they can
+# already reach.
+FOG_SCENARIO_NO_ATTACK = {("simple", "capturing"), ("medium", "charge")}
+
+
+def _fog_game(scenario):
+    grid = np.full((7, 7), "p", dtype=object)
+    grid[0, 0], grid[6, 6] = "h_1", "h_2"
+    if scenario == "capturing":
+        grid[4, 3] = "t"
+    game = GameState(grid, num_players=2, fog_of_war=True)
+    game.player_gold[1] = 0
+    for unit_type, x, y, player, health in FOG_SCENARIOS[scenario]:
+        unit = game.place_unit(unit_type, x, y, player)
+        if health is not None:
+            unit.health = health
+    # A friend on the enemy HQ: no structure draws the others off to capture.
+    game.place_unit("W", 6, 6, 1)
+    if scenario == "capturing":
+        game.grid.get_tile(3, 4).health -= 10
+    return game
+
+
+class TestFogOfWarTargets:
+    """Under fog of war a unit attacks or paralyzes only enemies its side saw when its action began.
+
+    The rare fog conflicts of whole games left most of the bots' attack
+    paths untested: each scenario here reaches one of them, and hides
+    every enemy from player 1's attack snapshots (``visible_enemies_at_action_start``,
+    what its side saw when each unit's action began), so the engine would
+    refuse any attack or paralyze. The same scenario with the snapshots
+    left alone must lead to one, or it tests nothing.
+    """
+
+    @pytest.mark.parametrize("scenario", FOG_SCENARIOS)
+    @pytest.mark.parametrize("tier", ["simple", "medium", "advanced", "master"])
+    def test_a_unit_attacks_only_enemies_its_snapshot_holds(self, tier, scenario):
+        for hidden in (False, True):
+            game = _fog_game(scenario)
+            if hidden:
+                for unit in game.units:
+                    if unit.player == 1:
+                        game.fog._set_attack_snapshot(unit, set())
+            sent = []
+            for name in ("attack", "paralyze"):
+                method = getattr(game, name)
+                setattr(game, name, lambda *args, _method=method, _name=name: sent.append(_name) or _method(*args))
+            bot = build_scripted(tier, game, player=1)
+
+            bot.take_turn()
+
+            if hidden:
+                assert sent == [], f"{tier} sent {sent} at enemies hidden from the snapshot"
+            elif (tier, scenario) not in FOG_SCENARIO_NO_ATTACK:
+                assert sent, f"{tier} sent nothing in {scenario}: the scenario does not reach an attack"
+                if tier in ("advanced", "master") and scenario in FOG_SCENARIO_CAPABILITY:
+                    assert FOG_SCENARIO_CAPABILITY[scenario] in bot.get_capabilities_fired()
 
 
 class TestTurnContext:
