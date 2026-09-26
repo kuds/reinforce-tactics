@@ -228,3 +228,67 @@ def test_a_deepcopy_binds_the_copied_fog_to_the_copy(fog_game):
     copied = copy.deepcopy(fog_game)
     assert copied.fog.game is copied and copied.fog.maps[1] is not fog_game.fog.maps[1]
     assert _views(copied) == _views(fog_game)
+
+
+# --- Re-selecting a unit re-takes its attack snapshot ---------------------------
+# The GUI takes a unit's fog-of-war attack snapshot every time a unit that
+# has not moved is selected. The snapshot decides which enemies it may
+# attack, so rewriting it must drop the cached legal actions: otherwise the
+# action menu, built from them, lists an attack the engine refuses or hides
+# one it accepts.
+
+FOREST = [
+    "h_1 b_1 p p p p",
+    "p p p p f p",
+    "p p p p p p",
+    "p p p p p p",
+    "p p p p p p",
+    "p p p p b_2 h_2",
+]
+
+
+def _forest_game(scout_at: tuple[int, int]):
+    """An Archer in range of an enemy hidden in a forest (seen only from next to it) and a scout."""
+    game = _board(FOREST, fog_of_war=True, engine_overrides={"forest_concealment": True})
+    archer = game.place_unit("A", 2, 1, 1)
+    scout = game.place_unit("W", *scout_at, 1)
+    enemy = game.place_unit("W", 4, 1, 2)
+    return game, archer, scout, enemy
+
+
+def _listed_as_legal(game, archer, enemy) -> bool:
+    """Whether the (cached) legal actions list the shot, checked against a fresh enumeration and is_legal."""
+    cached = game.get_legal_actions()
+    assert cached == game._compute_legal_actions(game.current_player), "stale legal-action cache"
+    listed = any(a["attacker"] is archer and a["target"] is enemy for a in cached["attack"])
+    assert listed == game.is_legal("attack", {"attacker": archer, "target": enemy})
+    return listed
+
+
+def test_reselecting_after_an_enemy_is_revealed_offers_the_attack():
+    game, archer, scout, enemy = _forest_game(scout_at=(4, 3))
+    game.capture_visible_enemies_for_unit(archer)  # the enemy is hidden in the forest
+    assert game.move_unit(scout, 4, 2)  # next to the forest: the enemy is revealed
+    assert not _listed_as_legal(game, archer, enemy)  # the archer's action began before
+
+    game.capture_visible_enemies_for_unit(archer)  # the archer is selected again
+    assert _listed_as_legal(game, archer, enemy)
+
+
+def test_reselecting_after_vision_shrinks_withdraws_the_attack():
+    game, archer, scout, enemy = _forest_game(scout_at=(4, 2))
+    game.capture_visible_enemies_for_unit(archer)  # the scout next to the forest sees the enemy
+    assert _listed_as_legal(game, archer, enemy)
+    assert game.move_unit(scout, 4, 4)  # the scout walks off: the enemy is hidden again
+    assert _listed_as_legal(game, archer, enemy)  # the archer's snapshot still has it
+
+    game.capture_visible_enemies_for_unit(archer)  # the archer is selected again
+    assert not _listed_as_legal(game, archer, enemy)
+
+
+def test_reselecting_without_a_change_keeps_the_cache():
+    game, archer, _scout, enemy = _forest_game(scout_at=(4, 2))
+    game.capture_visible_enemies_for_unit(archer)
+    assert _listed_as_legal(game, archer, enemy)
+    game.capture_visible_enemies_for_unit(archer)  # the same snapshot again
+    assert game._legal_actions_cache_valid

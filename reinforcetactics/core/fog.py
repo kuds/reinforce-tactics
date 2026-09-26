@@ -202,7 +202,7 @@ class FogOfWar:
         (``before_move``) for callers that move a unit directly.
         """
         if not self.enabled:
-            unit.visible_enemies_at_action_start = None
+            self._set_attack_snapshot(unit, None)
             return
 
         # The snapshot is taken once, when the action begins. A unit that has
@@ -219,7 +219,24 @@ class FogOfWar:
                 if self.is_visible(enemy.x, enemy.y, unit.player):
                     visible_positions.add((enemy.x, enemy.y))
 
-        unit.visible_enemies_at_action_start = visible_positions
+        self._set_attack_snapshot(unit, visible_positions)
+
+    def _set_attack_snapshot(self, unit: Unit, snapshot: set[tuple[int, int]] | None) -> None:
+        """Write ``unit``'s attack snapshot, dropping the legal-action cache if that changes it.
+
+        The snapshot decides which enemies the unit may attack, so a new one
+        is a legality change. The GUI re-takes it every time a unit that has
+        not moved is selected: without the invalidation its action menu,
+        built from the cached legal actions, kept an attack the engine now
+        refused after the unit's side lost sight of the enemy, and missed
+        one it now accepted after another unit revealed an enemy. Only a
+        change invalidates, so re-selecting a unit while nothing changed
+        keeps the cache.
+        """
+        changed = unit.visible_enemies_at_action_start != snapshot
+        unit.visible_enemies_at_action_start = snapshot
+        if changed:
+            self.game._invalidate_cache()
 
     def is_enemy_attackable(self, unit: Unit, enemy: Unit) -> bool:
         """Whether fog of war lets ``unit`` attack ``enemy`` (always, without fog of war).
