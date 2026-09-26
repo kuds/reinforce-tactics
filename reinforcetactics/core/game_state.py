@@ -28,12 +28,25 @@ from reinforcetactics.constants import (
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics
 from reinforcetactics.core.unit import Unit
-from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
+from reinforcetactics.core.visibility import (
+    UNEXPLORED,
+    VISIBLE,
+    StructureSnapshot,
+    VisibilityMap,
+    get_visible_units,
+)
 
 # Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
 # recomputed and compared, so a mutator that forgets to invalidate fails
 # loudly instead of handing bots and masks a stale action set.
 _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
+
+# Version of the save format written by ``GameState.to_dict``. Saves without
+# the field are version 1 (everything before it existed) and still load.
+# 2: adds the fields ``from_dict`` needs to resume a game exactly
+# (winning_action_index, healing_totals, per-unit has_moved and fog-of-war
+# attack snapshot, padding metadata, original_map_data, the fog-of-war state).
+SAVE_FORMAT_VERSION = 2
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -290,10 +303,8 @@ class GameState:
         # Current options: 'simple_radius' (Option A from proposal)
         # Future options: 'line_of_sight', 'hybrid'
         self.fog_of_war_method: str = "simple_radius" if fog_of_war else "none"
+        # Built (and first computed) by _init_visibility at the end of __init__
         self.visibility_maps: dict[int, VisibilityMap] = {}
-        if fog_of_war:
-            for player in range(1, num_players + 1):
-                self.visibility_maps[player] = VisibilityMap(self.grid.width, self.grid.height, player)
 
         # Enabled unit types (defaults to all if not specified)
         self.enabled_units: list[str] = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
@@ -336,6 +347,11 @@ class GameState:
         self._unit_count_cache_valid: bool = False
         self._legal_actions_cache: dict[int, dict[str, list[Any]]] = {}
         self._legal_actions_cache_valid: bool = False
+
+        # Every player starts with a computed fog-of-war view. Callers used to
+        # have to call update_visibility() after construction, and a game
+        # built without it showed nothing at all until the first move.
+        self._init_visibility()
 
     def reset(self, map_data) -> None:
         """Reset the game state."""
@@ -443,15 +459,48 @@ class GameState:
                 if len(active_players) == 1:
                     self._set_game_over(winner=active_players.pop(), end_reason="elimination")
 
+    def _init_visibility(self) -> None:
+        """Build every player's fog-of-war map from scratch and compute it.
+
+        Each player starts knowing where every HQ is and who owns it: the
+        HQs are recorded in the last-seen memory at the current turn (and
+        their tiles count as explored), so observations, the renderer and
+        LLM prompts all show them, as the rules say ("enemy HQ is always
+        known"). Their later HP and owner are only learnt by seeing them.
+        """
+        self.visibility_maps = {}
+        if not self.fog_of_war:
+            return
+        hq_tiles = [
+            self.grid.tiles[y][x]
+            for x, y in self.grid.structure_positions
+            if self.grid.tiles[y][x].type == TileType.HEADQUARTERS.value
+        ]
+        for player in range(1, self.num_players + 1):
+            vis_map = VisibilityMap(self.grid.width, self.grid.height, player)
+            for tile in hq_tiles:
+                vis_map.remember_structure(tile, self.turn_number)
+            self.visibility_maps[player] = vis_map
+        self.update_visibility()
+
     def update_visibility(self, player: int | None = None) -> None:
         """
         Update visibility maps for fog of war.
+
+        The engine calls this itself whenever a player's vision can change
+        (construction and load, moves, unit creation and placement, captures,
+        deaths, turn changes), so callers never need to.
 
         Args:
             player: Specific player to update, or None to update all players
         """
         if not self.fog_of_war:
             return
+
+        # Legality under fog of war reads visibility (attackable targets, and
+        # the units a player's pathfinding may treat as obstacles), so a
+        # visibility change is a legality change.
+        self._invalidate_cache()
 
         if player is not None:
             if player in self.visibility_maps:
@@ -516,6 +565,47 @@ class GameState:
             return True
 
         return vis_map.is_explored(x, y)
+
+    def known_structure(self, player: int, x: int, y: int) -> StructureSnapshot | None:
+        """What ``player`` knows about the structure at ``(x, y)``.
+
+        The one view of structures under fog of war: ``to_numpy(for_player)``,
+        the renderer and the LLM prompt all read it, so none of them can show
+        a player more than it knows (review core-5, critic-integration-3,
+        pygame-12).
+
+        Returns:
+            None when there is no structure at ``(x, y)`` or ``player`` has
+            never seen it. Otherwise a snapshot with ``owner``, ``health``
+            and ``turn_seen``: the live state (``turn_seen`` = this turn)
+            without fog of war or while ``player`` can see the tile, else
+            the state when ``player`` last saw it. Every HQ is known from
+            the start of the game (see ``_init_visibility``).
+        """
+        tile = self.grid.get_tile(x, y)
+        if tile is None or not tile.is_capturable():
+            return None
+        vis_map = self.visibility_maps.get(player) if self.fog_of_war else None
+        if vis_map is None or vis_map.is_visible(x, y):
+            return StructureSnapshot(
+                tile_type=tile.type, owner=tile.player, health=tile.health, position=(x, y), turn_seen=self.turn_number
+            )
+        return vis_map.get_last_seen_structure(x, y)
+
+    def _pathing_units(self, player: int) -> list[Unit]:
+        """The units ``player``'s pathfinding treats as present: its blocking view.
+
+        Without fog of war that is every unit. Under fog of war it is the
+        player's own units plus the units on tiles it can see. Letting a
+        hidden enemy block paths and destinations would reveal it through
+        the move mask (review core-5), so pathfinding plans around the units
+        the player knows of and ``move_unit`` resolves a collision with a
+        hidden unit when the move is carried out (the ambush rule, see
+        ``_resolve_ambush``).
+        """
+        if not self.fog_of_war:
+            return self.units
+        return [u for u in self.units if u.player == player or self.is_position_visible(u.x, u.y, player)]
 
     def capture_visible_enemies_for_unit(self, unit: Unit) -> None:
         """
@@ -695,22 +785,54 @@ class GameState:
     def _can_afford(self, player: int, unit_type: str) -> bool:
         return self.player_gold[player] >= self.unit_data[unit_type]["cost"]
 
-    def _move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
+    def _move_destinations(
+        self, unit: Unit, came_from: dict[tuple[int, int], tuple[int, int]] | None = None
+    ) -> list[tuple[int, int]]:
         """Tiles ``unit`` may end a move on, in BFS order.
 
         Reachable within its movement over walkable tiles (it can pass
-        through friendly units, never enemies) and not occupied by anyone.
+        through friendly units, never enemies) and not occupied by anyone,
+        judged by the units its player knows of (``_pathing_units``: all of
+        them without fog of war). ``came_from`` receives the BFS path tree.
         """
+        known_units = self._pathing_units(unit.player)
         reachable = unit.get_reachable_positions(
             self.grid.width,
             self.grid.height,
-            lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=unit),
+            lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, known_units, moving_unit=unit),
+            came_from=came_from,
         )
         # Reachable tiles are already walkable and enemy-free, so "can end
         # here" only adds "no friendly unit either"; a set keeps that O(1)
         # per tile instead of a scan of every unit.
-        occupied = {(u.x, u.y) for u in self.units}
+        occupied = {(u.x, u.y) for u in known_units}
         return [pos for pos in reachable if pos not in occupied]
+
+    def _resolve_ambush(self, unit: Unit, path: list[tuple[int, int]]) -> tuple[tuple[int, int], Unit | None]:
+        """Walk ``unit`` along its planned ``path`` and return where it really stops.
+
+        The ambush rule (fog of war only). The path (start tile first) was
+        planned around the units the player can see, so a hidden unit may
+        stand on it. The first tile the unit cannot pass (a hidden enemy) or
+        end on (a hidden unit on the destination) stops it on the last tile
+        before that one where no unit stands, at worst its start tile.
+
+        Returns:
+            ``(stop_tile, blocker)``; ``blocker`` is None when the path is clear.
+        """
+        last = len(path) - 1
+        for i in range(1, last + 1):
+            x, y = path[i]
+            blocker = self.get_unit_at_position(x, y)
+            if blocker is None:
+                continue
+            if i < last and self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=unit):
+                continue  # a unit it may pass through
+            for j in range(i - 1, 0, -1):
+                if self.get_unit_at_position(*path[j]) is None:
+                    return path[j], blocker
+            return path[0], blocker
+        return path[last], None
 
     def _can_attack_target(self, unit: Unit, target: Unit) -> bool:
         """A living enemy within ``unit``'s reach that fog of war lets it attack.
@@ -900,6 +1022,8 @@ class GameState:
         self._next_unit_id += 1
         self.units.append(unit)
         self._invalidate_cache()
+        # The new unit sees from its first moment (review core-12).
+        self.update_visibility(player)
 
         # Record action. unit_id lets the replay player rebuild its
         # id -> Unit map on the fly (v3 schema), so subsequent
@@ -913,13 +1037,23 @@ class GameState:
         """
         Move a unit to a new position.
 
+        Under fog of war the destination only has to be legal by what the
+        player can see (see ``_pathing_units``), and the unit takes the
+        shortest such path the breadth-first search finds first (it tries
+        up, down, left, right from each tile). If a hidden unit stands on
+        that path or on the destination the unit is ambushed: it stops on
+        the last free tile before it (possibly where it started), the move
+        is spent and is recorded to where the unit really stopped (with
+        ``ambushed: True``), and the ambusher comes into view. Read
+        ``unit.x``/``unit.y`` for where it ended up.
+
         Args:
             unit: Unit to move
             to_x: Target x coordinate
             to_y: Target y coordinate
 
         Returns:
-            bool: True if move successful
+            bool: True if the move happened (ambushed or not)
         """
         from_x, from_y = unit.x, unit.y
 
@@ -933,7 +1067,8 @@ class GameState:
         if not self._may_act("move", unit):
             return False
 
-        if (to_x, to_y) not in self._move_destinations(unit):
+        came_from: dict[tuple[int, int], tuple[int, int]] = {}
+        if (to_x, to_y) not in self._move_destinations(unit, came_from):
             logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
             return False
 
@@ -944,11 +1079,26 @@ class GameState:
         if self.fog_of_war and unit.visible_enemies_at_action_start is None:
             self.capture_visible_enemies_for_unit(unit)
 
+        # FOW ambush rule: without fog of war the path was planned around
+        # every unit, so it is always clear.
+        ambusher = None
+        if self.fog_of_war:
+            path = [(to_x, to_y)]
+            while path[-1] != (from_x, from_y):
+                path.append(came_from[path[-1]])
+            path.reverse()
+            (to_x, to_y), ambusher = self._resolve_ambush(unit, path)
+            if ambusher is not None:
+                logger.debug(
+                    f"{unit.type} ambushed by {ambusher.type} at ({ambusher.x}, {ambusher.y}); stopped at ({to_x}, {to_y})"
+                )
+
         # Execute move
         unit.move_to(to_x, to_y)
         unit.can_move = False  # Consume move action
 
-        # Record action
+        # Record action (where the unit really went, so replays need no
+        # knowledge of the ambush rule)
         self.record_action(
             "move",
             unit_type=unit.type,
@@ -958,6 +1108,7 @@ class GameState:
             to_y=to_y,
             player=unit.player,
             actor_unit_id=unit.unit_id,
+            **({"ambushed": True} if ambusher is not None else {}),
         )
 
         logger.debug(f"Moved {unit.type} from ({from_x}, {from_y}) to ({to_x}, {to_y})")
@@ -1030,6 +1181,8 @@ class GameState:
             defeated_player = target.player
             self.units.remove(target)
             self._invalidate_cache()
+            # A dead unit stops giving its owner vision (review core-12).
+            self.update_visibility(defeated_player)
             self._check_player_eliminated(defeated_player)
 
         if not result["attacker_alive"]:
@@ -1040,6 +1193,7 @@ class GameState:
             if attacker in self.units:
                 self.units.remove(attacker)
             self._invalidate_cache()
+            self.update_visibility(defeated_player)
             self._check_player_eliminated(defeated_player)
 
         # Disable attacker actions after combat (only if still alive)
@@ -1244,6 +1398,11 @@ class GameState:
         unit.can_move = False
         unit.can_attack = False
         self._invalidate_cache()
+
+        # A captured structure gives its vision to the capturer and takes it
+        # from the previous owner (review core-12).
+        if result["captured"]:
+            self.update_visibility()
 
         return result
 
@@ -1625,12 +1784,23 @@ class GameState:
         return legal_actions
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert game state to dictionary for serialization."""
+        """Convert game state to dictionary for serialization.
+
+        Records everything ``from_dict`` needs to resume the game exactly:
+        ``from_dict(json(to_dict(g))).to_dict()`` equals ``json(to_dict(g))``,
+        and both games offer every player the same legal actions (see
+        tests/test_save_roundtrip_core.py). Not recorded: the engine RNG
+        (``rng``; a loaded game rolls Rogue evades from the module-global
+        ``random`` unless given a new one), the legal-action caches, and the
+        UI-only ``Unit.selected``. Mutable containers are copied, so the
+        result shares nothing with the live game.
+        """
         return {
+            "save_format_version": SAVE_FORMAT_VERSION,
             "timestamp": self.game_start_time.strftime("%Y-%m-%d %H-%M-%S"),
             "current_player": self.current_player,
             "num_players": self.num_players,
-            "player_gold": self.player_gold,
+            "player_gold": dict(self.player_gold),
             "turn_number": self.turn_number,
             "game_over": self.game_over,
             "winner": self.winner,
@@ -1639,6 +1809,11 @@ class GameState:
             # lost how it ended.
             "end_reason": self.end_reason,
             "max_turns": self.max_turns,
+            # The index of the action that ended the game, and the
+            # game-lifetime auto-heal totals: both feed the replay's
+            # integrity fields, which were wrong for continued games.
+            "winning_action_index": self.game_over_action_index,
+            "healing_totals": {p: dict(t) for p, t in self.healing_totals.items()},
             "map_file": self.map_file_used,
             # The exact tile codes the grid was built from (after any UI
             # padding), written for every save, not only map-file-less ones.
@@ -1650,19 +1825,35 @@ class GameState:
             # short string per tile: a fixed ~7 KB for the usual 24x24 padded
             # map at the save writer's indent=2, about a quarter of an
             # early-game save and a shrinking share as action_history grows.
-            "map_data": self.initial_map_data,
-            "player_configs": self.player_configs,
-            "enabled_units": self.enabled_units,
+            "map_data": [list(row) for row in self.initial_map_data],
+            # Padding metadata: the replay written from a continued game
+            # stores the unpadded map and original coordinates.
+            "original_map_width": self.original_map_width,
+            "original_map_height": self.original_map_height,
+            "map_padding_offset_x": self.map_padding_offset_x,
+            "map_padding_offset_y": self.map_padding_offset_y,
+            "original_map_data": (
+                [list(row) for row in self.original_map_data] if self.original_map_data is not None else None
+            ),
+            "player_configs": copy.deepcopy(self.player_configs),
+            "enabled_units": list(self.enabled_units),
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
+            # What each player has explored and remembers. Without it a
+            # reloaded fog-of-war game re-fogged every tile out of current
+            # sight and forgot every structure (critic-integration-11).
+            # Keyed by str(player) so the dict is the same before and after
+            # a JSON round trip.
+            "fog_of_war_state": {str(p): vis_map.to_dict() for p, vis_map in self.visibility_maps.items()},
             # Persist the engine-constant overlay so a reloaded game runs under
             # the same balance (damage_model, structure HP, economy, unit cap)
             # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
             # back to {} (== module defaults), preserving backward-compat.
-            "engine_overrides": self.engine_overrides,
+            "engine_overrides": copy.deepcopy(self.engine_overrides),
             "units": [unit.to_dict() for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
-            "action_history": self.action_history,
+            # Records are never edited once written, so a new list suffices.
+            "action_history": list(self.action_history),
             # Restore the per-game unit-id counter on reload so newly
             # created units after load don't reuse retired ids
             # (which would let the replay v3 dispatch route an action
@@ -1718,15 +1909,20 @@ class GameState:
         # Visibility mask for FOW
         visibility_state = np.full((self.grid.height, self.grid.width), VISIBLE, dtype=np.uint8)
 
+        # The player whose knowledge filters the arrays: set only under fog
+        # of war when it has a visibility map (otherwise everything counts as
+        # visible, as is_position_visible has it).
+        fog_player: int | None = None
         if self.fog_of_war and for_player is not None:
             vis_map = self.visibility_maps.get(for_player)
             if vis_map is not None:
                 visibility_state = vis_map.to_numpy()
+                fog_player = for_player
 
         for unit in self.units:
             # FOW: Only show units that are visible or owned by the player
-            if self.fog_of_war and for_player is not None:
-                if unit.player != for_player and visibility_state[unit.y, unit.x] != VISIBLE:
+            if fog_player is not None:
+                if unit.player != fog_player and visibility_state[unit.y, unit.x] != VISIBLE:
                     continue
 
             unit_state[unit.y, unit.x, 0] = unit_type_encoding.get(unit.type, 0)
@@ -1740,19 +1936,25 @@ class GameState:
             unit_state[unit.y, unit.x, 6] = float(getattr(unit, "defence_buff_turns", 0))
             unit_state[unit.y, unit.x, 7] = float(getattr(unit, "attack_buff_turns", 0))
 
-        # FOW: Mask grid ownership for non-visible tiles
-        if self.fog_of_war and for_player is not None:
-            # For shrouded/unexplored tiles, hide current ownership updates
-            # (they keep their last-seen state in the visibility map)
-            for y in range(self.grid.height):
-                for x in range(self.grid.width):
-                    if visibility_state[y, x] != VISIBLE:
-                        # Hide structure ownership for non-visible tiles
-                        # Keep terrain type visible if explored
-                        if visibility_state[y, x] == 0:  # UNEXPLORED
-                            grid_state[y, x, 0] = 0  # Hide terrain type
-                            grid_state[y, x, 1] = 0  # Hide owner
-                            grid_state[y, x, 2] = 0  # Hide health
+        # FOW: show only what for_player knows of the board (review core-5)
+        if fog_player is not None:
+            # Never-explored tiles: terrain, owner and HP all unknown.
+            grid_state[visibility_state == UNEXPLORED] = 0
+            # Structures out of sight show their owner and HP as the player
+            # last saw them (known_structure), not live: a capture or seize
+            # made out of sight must not reach the observation. Only
+            # structures have owner/HP that change, so plain terrain needs
+            # nothing beyond the mask above.
+            for x, y in self.grid.structure_positions:
+                if visibility_state[y, x] == VISIBLE:
+                    continue
+                known = self.known_structure(fog_player, x, y)
+                tile = self.grid.tiles[y][x]
+                if known is None:
+                    grid_state[y, x, 1:] = 0
+                else:
+                    grid_state[y, x, 1] = known.owner or 0
+                    grid_state[y, x, 2] = (known.health / tile.max_health) * 100 if tile.max_health else 0
 
         result = {
             "grid": grid_state,
@@ -1935,6 +2137,11 @@ class GameState:
         """
         Restore game state from dictionary.
 
+        Loads every save format version up to ``SAVE_FORMAT_VERSION``; a
+        field an older save lacks takes the value a new game would have (a
+        version 1 fog-of-war save, for one, gets fog rebuilt from the
+        current board).
+
         Args:
             save_data: Dictionary with saved game data
             map_data: Map data (2D array). ``None`` rebuilds the grid from the
@@ -1952,8 +2159,20 @@ class GameState:
             if map_data is None:
                 raise ValueError("Save has no recorded terrain ('map_data'); pass the map explicitly")
 
+        # Every container read from save_data is copied: the caller keeps its
+        # dict, and a game must not share lists with it (or with the
+        # class-level ALL_UNIT_TYPES) that either side could mutate.
+        version = save_data.get("save_format_version", 1)
+        if version > SAVE_FORMAT_VERSION:
+            logger.warning(
+                "Save format version %s is newer than this version of the game (%s); loading what it recognises",
+                version,
+                SAVE_FORMAT_VERSION,
+            )
+
         # Extract enabled_units from save data (default to all if not present for backward compatibility)
-        enabled_units = save_data.get("enabled_units", cls.ALL_UNIT_TYPES)
+        saved_units = save_data.get("enabled_units")
+        enabled_units = list(saved_units) if saved_units is not None else list(cls.ALL_UNIT_TYPES)
 
         # Extract fog_of_war from save data (default to False for backward compatibility)
         fog_of_war = save_data.get("fog_of_war", False)
@@ -1965,7 +2184,7 @@ class GameState:
         # Restore the engine-constant overlay (damage_model / structure HP /
         # economy / unit cap). Absent in pre-0.3.3 saves -> {} == module
         # defaults, byte-identical to the old load behaviour.
-        engine_overrides = save_data.get("engine_overrides") or {}
+        engine_overrides = copy.deepcopy(save_data.get("engine_overrides") or {})
         game = cls(
             map_data,
             save_data.get("num_players", 2),
@@ -1978,6 +2197,10 @@ class GameState:
         # Restore the fog of war method
         game.fog_of_war_method = fog_of_war_method
 
+        try:
+            game.game_start_time = datetime.strptime(save_data["timestamp"], "%Y-%m-%d %H-%M-%S")
+        except (KeyError, TypeError, ValueError):
+            pass  # keep "now" for saves without a usable timestamp
         game.current_player = save_data.get("current_player", 1)
         game.turn_number = save_data.get("turn_number", 0)
         game.game_over = save_data.get("game_over", False)
@@ -1993,15 +2216,29 @@ class GameState:
         saved_gold = save_data.get("player_gold", {})
         game.player_gold = {int(k): v for k, v in saved_gold.items()}
 
+        # Game-lifetime auto-heal totals (version 2+; older saves restart at 0)
+        for p, totals in (save_data.get("healing_totals") or {}).items():
+            game.healing_totals[int(p)] = {"hp": int(totals.get("hp", 0)), "gold": int(totals.get("gold", 0))}
+
         game.map_file_used = save_data.get("map_file")
 
-        # Restore player_configs (backward compatible with old saves)
-        game.player_configs = save_data.get("player_configs", [])
+        # Padding metadata (version 2+; older saves keep the unpadded defaults)
+        game.original_map_width = save_data.get("original_map_width", game.original_map_width)
+        game.original_map_height = save_data.get("original_map_height", game.original_map_height)
+        game.map_padding_offset_x = save_data.get("map_padding_offset_x", 0)
+        game.map_padding_offset_y = save_data.get("map_padding_offset_y", 0)
+        original_map_data = save_data.get("original_map_data")
+        game.original_map_data = [list(row) for row in original_map_data] if original_map_data else None
 
-        # Restore units
+        # Restore player_configs (backward compatible with old saves)
+        game.player_configs = copy.deepcopy(save_data.get("player_configs", []))
+
+        # Restore units, with this game's stats (engine_overrides may change
+        # them) rather than the module defaults, so max_health and attack
+        # match the game the save was made in.
         game.units = []
         for unit_data in save_data.get("units", []):
-            unit = Unit.from_dict(unit_data)
+            unit = Unit.from_dict(unit_data, stats=game.unit_data[unit_data["type"]])
             game.units.append(unit)
 
         # Restore tile states
@@ -2009,7 +2246,7 @@ class GameState:
             x, y = tile_data["x"], tile_data["y"]
             if 0 <= x < game.grid.width and 0 <= y < game.grid.height:
                 tile = game.grid.tiles[y][x]
-                if tile_data.get("player"):
+                if "player" in tile_data:
                     tile.player = tile_data["player"]
                 if tile_data.get("health") is not None:
                     tile.health = tile_data["health"]
@@ -2017,7 +2254,21 @@ class GameState:
                     tile.regenerating = tile_data["regenerating"]
 
         # Restore action history (for continuing replay recording from a loaded save)
-        game.action_history = save_data.get("action_history", [])
+        game.action_history = copy.deepcopy(save_data.get("action_history", []))
+
+        # Fog of war: restore what each player had explored and remembers.
+        # The maps __init__ computed describe the fresh map, not this game.
+        # A version 1 save has no such state, so its fog is rebuilt from the
+        # current board (anything explored before the save is lost).
+        if game.fog_of_war:
+            saved_fog = save_data.get("fog_of_war_state") or {}
+            if all(str(p) in saved_fog for p in range(1, game.num_players + 1)):
+                game.visibility_maps = {
+                    p: VisibilityMap.from_dict(saved_fog[str(p)], game.grid.width, game.grid.height, p)
+                    for p in range(1, game.num_players + 1)
+                }
+            else:
+                game._init_visibility()
 
         game._invalidate_cache()
         return game

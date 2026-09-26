@@ -156,7 +156,7 @@ class Unit:
         """Check if this unit is currently paralyzed."""
         return self.paralyzed_turns > 0
 
-    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func):
+    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func, came_from=None):
         """
         Get all positions reachable within movement range using BFS.
 
@@ -164,6 +164,10 @@ class Unit:
             grid_width: Width of the grid
             grid_height: Height of the grid
             can_move_to_func: Function to check if a position is valid for movement
+            came_from: Optional dict filled with each reachable position's
+                predecessor on the path the search found to it, so a caller
+                can rebuild the route a move takes (the fog-of-war ambush
+                rule walks it)
 
         Returns:
             List of (x, y) tuples for all reachable positions
@@ -191,6 +195,8 @@ class Unit:
                             if can_move_to_func(new_x, new_y):
                                 visited.add((new_x, new_y))
                                 queue.append((new_x, new_y, distance + 1))
+                                if came_from is not None:
+                                    came_from[(new_x, new_y)] = (curr_x, curr_y)
 
         return reachable
 
@@ -302,17 +308,35 @@ class Unit:
             "attack_buff_turns": self.attack_buff_turns,
             "original_x": self.original_x,
             "original_y": self.original_y,
+            # end_turn resets a structure the unit stepped off only if it
+            # has_moved, so a mid-turn save must keep it.
+            "has_moved": self.has_moved,
+            # Fog of war: the enemies it may attack this action (those in
+            # sight when the action began); None = not captured yet.
+            "visible_enemies_at_action_start": (
+                sorted([x, y] for x, y in self.visible_enemies_at_action_start)
+                if self.visible_enemies_at_action_start is not None
+                else None
+            ),
         }
 
     @classmethod
-    def from_dict(cls, data):
-        """Create unit from dictionary."""
-        unit = cls(data["type"], data["x"], data["y"], data["player"])
+    def from_dict(cls, data, stats=None):
+        """Create unit from dictionary.
+
+        Args:
+            data: A dict written by :meth:`to_dict`
+            stats: The stat block to build the unit with, as in ``__init__``.
+                ``GameState.from_dict`` passes its game's (engine-override)
+                table; ``None`` uses the module defaults. Saved health is
+                capped at the resulting ``max_health``.
+        """
+        unit = cls(data["type"], data["x"], data["y"], data["player"], stats=stats)
         # ``None`` for old saves that pre-date the unit_id field; the
         # owning GameState restores ``_next_unit_id`` so newly-created
         # units after load still get fresh non-colliding ids.
         unit.unit_id = data.get("unit_id")
-        unit.health = data["health"]
+        unit.health = min(data["health"], unit.max_health)
         unit.paralyzed_turns = data.get("paralyzed_turns", 0)
         unit.paralyze_cooldown = data.get("paralyze_cooldown", 0)
         unit.can_move = data.get("can_move", True)
@@ -326,4 +350,9 @@ class Unit:
         unit.attack_buff_turns = data.get("attack_buff_turns", 0)
         unit.original_x = data.get("original_x", unit.x)
         unit.original_y = data.get("original_y", unit.y)
+        # Saves before has_moved was recorded: a unit away from where its
+        # action started has moved (the only case end_turn acts on).
+        unit.has_moved = data.get("has_moved", (unit.x, unit.y) != (unit.original_x, unit.original_y))
+        snapshot = data.get("visible_enemies_at_action_start")
+        unit.visible_enemies_at_action_start = {(x, y) for x, y in snapshot} if snapshot is not None else None
         return unit

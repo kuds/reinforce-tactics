@@ -611,8 +611,6 @@ def _play_episode(
         enabled_units=units,
         fog_of_war=fog_of_war,
     )
-    if fog_of_war:
-        game_state.update_visibility()
 
     width = game_state.grid.width
     height = game_state.grid.height

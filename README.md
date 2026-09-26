@@ -23,7 +23,7 @@ A turn-based strategy game built with Pygame and Gymnasium for reinforcement lea
 - **Action Masking**: MaskablePPO and legal-action masking across all bot types
 - **Self-Play**: Train agents against copies of themselves with safe weight swapping
 - **Tournament System**: Round-robin tournaments with ELO ratings, Docker support, and result tracking
-- **Fog of War**: Line-of-sight visibility with terrain bonuses
+- **Fog of War**: Radius-based vision with terrain bonuses, remembered structures and ambushes
 - **Map Editor**: In-game editor for creating and modifying maps
 - **Multi-Player Modes**: 1v1, 1v1v1 (free-for-all), and 2v2 (team) maps
 - **Replay System**: Record games, replay them, and export to video
@@ -158,7 +158,11 @@ See the `examples/` directory for more, including an action-masking training dem
 
 **Terrain**: Grass, forest (stealth bonus), mountains (vision/range bonus), roads (fast movement), water/ocean (impassable)
 
-**Fog of War**: Enemy HQ is always visible; buildings and towers are hidden until scouted
+**Fog of War** (optional, off by default): each player sees a square around its own units (2-4 tiles; Archers and Rogues see farthest, +1 on a mountain) and structures (HQ 4, building 3, tower 5).
+- Every HQ's location and owner are known from the start. Other buildings and towers are unknown until scouted; out of sight, a structure shows its owner and HP as you last saw them, so captures made out of sight stay hidden.
+- Enemies you can't see never block your move options. A move whose path runs into a hidden enemy is *ambushed*: the unit stops on the last free tile before it, the move is spent, and the enemy is revealed. The unit takes a shortest route by what you can see (the same route every time).
+- A unit can only attack enemies that were in sight when its action began, so it can't attack an enemy it found by moving (or by being ambushed).
+- Saves keep each player's explored map and memory.
 
 ## Project Structure
 

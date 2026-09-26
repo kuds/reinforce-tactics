@@ -202,6 +202,35 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Forest evade: 30% dodge chance (+15% bonus)
 - This bonus is automatically applied when calculating counter-attack outcomes
 
+## Fog of War
+
+Fog of war is optional and off by default. When it is on, each player sees only part of the board.
+
+### Vision
+- Each player sees a square (Chebyshev distance) around each of its units and structures
+- Unit vision: Barbarian 2; Warrior, Mage, Cleric, Knight and Sorcerer 3; Archer and Rogue 4 (the scouts); +1 on a mountain
+- Structure vision: Building 3, HQ 4, Tower 5
+- A tile is **unexplored** until the player has seen it, **visible** while in sight, and **shrouded** once it has been seen and is out of sight again
+
+### What a Player Knows
+- Enemy units are shown only on visible tiles
+- **Every HQ's location and owner are known from the start** of the game
+- Other buildings and towers are unknown until scouted
+- A structure out of sight shows its owner and HP **as last seen**, the moment it left sight. A capture or seize made out of sight stays hidden until the structure is seen again
+- The RL observation, the game window and the LLM bots' prompt all show the same knowledge (`GameState.known_structure`)
+
+### Ambushes
+- Enemies a player cannot see never block that player's movement options, so the move options reveal nothing hidden
+- A unit moves along a shortest route through the tiles its player knows to be passable (the same route every time)
+- If a hidden enemy stands on that route, or on the destination, the unit is **ambushed**: it stops on the last free tile before the enemy (possibly where it started), its move is spent, and the enemy comes into view. The move is recorded (and replayed) to where the unit actually stopped
+- Without fog of war nothing changes: every enemy blocks movement as usual
+
+### Attacks Under Fog
+- A unit can only attack enemies that were in sight when its action began. An enemy it discovered by moving, including an ambusher, cannot be attacked by that unit this action; units whose action begins after it was revealed can attack it
+
+### Saving
+- Saves keep each player's explored tiles and last-seen memory, so a loaded game shows exactly what each player knew
+
 ## Game Rules
 
 ### Victory Conditions

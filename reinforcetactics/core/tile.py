@@ -69,13 +69,22 @@ class Tile:
 
     def get_color(self):
         """Calculate the final color for this tile based on type and player ownership."""
-        base_color = TILE_COLORS.get(self.type, (0, 0, 0))
+        return self.color_for(self.type, self.player)
+
+    @staticmethod
+    def color_for(tile_type, owner):
+        """The color of a ``tile_type`` tile owned by player ``owner`` (None = neutral).
+
+        Separate from :meth:`get_color` so the renderer can draw a structure
+        under fog of war with the owner its viewer knows, not the live one.
+        """
+        base_color = TILE_COLORS.get(tile_type, (0, 0, 0))
 
         # For structures (buildings, HQ, towers), emphasize player color more
-        if self.player and self.player in PLAYER_COLORS:
-            player_color = PLAYER_COLORS[self.player]
+        if owner and owner in PLAYER_COLORS:
+            player_color = PLAYER_COLORS[owner]
 
-            if self.type in ["h", "b", "t"]:
+            if tile_type in ["h", "b", "t"]:
                 # Structures: 70% player color, 30% base color
                 return tuple(min(int(base * 0.3 + player * 0.7), 255) for base, player in zip(base_color, player_color))
             else:
