@@ -107,27 +107,10 @@ class RandomBot(BotUnitMixin, BaseBot):
             self.game_state.end_turn()
 
     def _execute(self, action_key: str, action: dict[str, Any]) -> None:
-        """Dispatch a sampled action to the appropriate game-state method."""
+        """Apply a sampled legal action (listed for this bot's player) through the engine."""
         if action_key == "create_unit":
-            self.game_state.create_unit(action["unit_type"], action["x"], action["y"], player=self.bot_player)
-        elif action_key == "move":
-            self.game_state.move_unit(action["unit"], action["to_x"], action["to_y"])
-        elif action_key == "attack":
-            self.game_state.attack(action["attacker"], action["target"])
-        elif action_key == "seize":
-            self.game_state.seize(action["unit"])
-        elif action_key == "paralyze":
-            self.game_state.paralyze(action["paralyzer"], action["target"])
-        elif action_key == "heal":
-            self.game_state.heal(action["healer"], action["target"])
-        elif action_key == "cure":
-            self.game_state.cure(action["curer"], action["target"])
-        elif action_key == "haste":
-            self.game_state.haste(action["sorcerer"], action["target"])
-        elif action_key == "defence_buff":
-            self.game_state.defence_buff(action["sorcerer"], action["target"])
-        elif action_key == "attack_buff":
-            self.game_state.attack_buff(action["sorcerer"], action["target"])
+            action = {**action, "player": self.bot_player}
+        self.game_state.apply_action(action_key, action)
 
 
 class BalancedRandomBot(RandomBot):

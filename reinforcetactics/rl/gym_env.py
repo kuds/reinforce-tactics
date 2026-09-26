@@ -6,6 +6,7 @@ Supports both flat and hierarchical RL training
 import logging
 import random
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +14,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from reinforcetactics.core.actions import ACTOR_KEYS
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import NoopBot
 from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS
@@ -85,6 +87,20 @@ ACTION_KEY_MAP = {
     "haste": (7, "sorcerer", "target"),
     "defence_buff": (8, "sorcerer", "target"),
     "attack_buff": (9, "sorcerer", "target"),
+}
+
+
+# Encoded action types that name one targeted engine action (type 4 picks
+# heal or cure), with the check the env makes on (unit, target, player)
+# before the engine sees the action. The engine validates every action
+# itself; these checks are older and stay so that what counts as an invalid
+# action (and pays the invalid-action penalty) does not change.
+_TARGETED_ACTION_TYPES: dict[int, tuple[str, Callable[[Any, Any, int], bool]]] = {
+    2: ("attack", lambda unit, target, player: unit.player == player and target.player != player),
+    6: ("paralyze", lambda unit, target, player: unit.type == "M" and target.player != player),
+    7: ("haste", lambda unit, target, player: unit.type == "S" and target.player == player),
+    8: ("defence_buff", lambda unit, target, player: unit.type == "S" and target.player == player),
+    9: ("attack_buff", lambda unit, target, player: unit.type == "S" and target.player == player),
 }
 
 
@@ -1026,112 +1042,67 @@ class StrategyGameEnv(gym.Env):
         to_pos = action_dict["to_pos"]
         result_info: dict[str, Any] = {"action_type": action_type}
         is_valid = True
+        gs = self.game_state
 
         try:
             if action_type == 0:  # Create unit
-                unit_type = action_dict["unit_type"]
-                unit = self.game_state.create_unit(unit_type, to_pos[0], to_pos[1], player=player)
-                if not unit:
-                    is_valid = False
+                create = {"unit_type": action_dict["unit_type"], "x": to_pos[0], "y": to_pos[1], "player": player}
+                is_valid = gs.apply_action("create_unit", create).accepted
 
             elif action_type == 1:  # Move
-                unit = self.game_state.get_unit_at_position(*from_pos)
+                unit = gs.get_unit_at_position(*from_pos)
                 if unit and unit.player == player and unit.can_move:
-                    if not self.game_state.move_unit(unit, to_pos[0], to_pos[1]):
-                        is_valid = False
-                else:
-                    is_valid = False
-
-            elif action_type == 2:  # Attack
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.player == player and target.player != player:
-                    result = self.game_state.attack(unit, target)
-                    result_info["damage"] = result["damage"]
-                    result_info["target_alive"] = result["target_alive"]
-                    # The engine refuses an illegal attack (spent or paralyzed
-                    # attacker, out of range, hidden by fog, wrong turn) with
-                    # damage 0; an executed attack always deals at least 1.
-                    # multi_discrete per-dimension masks over-approximate the
-                    # legal set, so these combinations are sampled and must
-                    # be penalised, not rewarded (review rlenv-2).
-                    if result["damage"] <= 0:
-                        is_valid = False
+                    is_valid = gs.apply_action("move", {"unit": unit, "to_x": to_pos[0], "to_y": to_pos[1]}).accepted
                 else:
                     is_valid = False
 
             elif action_type == 3:  # Seize
-                unit = self.game_state.get_unit_at_position(*from_pos)
+                unit = gs.get_unit_at_position(*from_pos)
                 if unit and unit.player == player:
-                    result = self.game_state.seize(unit)
-                    result_info["seize_damage"] = result.get("damage", 0)
-                    result_info["captured"] = result.get("captured", False)
+                    seized = gs.apply_action("seize", {"unit": unit})
+                    result_info["seize_damage"] = seized.result.get("damage", 0)
+                    result_info["captured"] = seized.result.get("captured", False)
                     # Forward structure_type so the reward path can break
                     # captures down by tile type (tower / building / HQ).
-                    result_info["structure_type"] = result.get("structure_type")
-                    if result.get("damage", 0) <= 0:
-                        is_valid = False
+                    result_info["structure_type"] = seized.result.get("structure_type")
+                    is_valid = seized.accepted
                 else:
                     is_valid = False
 
-            elif action_type == 4:  # Heal/Cure (Cleric)
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
+            elif action_type == 4:  # Heal/Cure (Cleric): cure a paralyzed target, else heal it
+                unit = gs.get_unit_at_position(*from_pos)
+                target = gs.get_unit_at_position(*to_pos)
                 if unit and target and unit.type == "C" and unit.player == player:
-                    action_performed = False
-                    if target.is_paralyzed():
-                        cure_ok = self.game_state.cure(unit, target)
-                        if cure_ok:
-                            result_info["cured"] = True
-                            action_performed = True
-
-                    if not action_performed:
-                        heal_amount = self.game_state.heal(unit, target)
-                        if heal_amount > 0:
-                            result_info["heal_amount"] = heal_amount
-                            action_performed = True
-
-                    if not action_performed:
-                        is_valid = False
+                    if target.is_paralyzed() and gs.apply_action("cure", {"curer": unit, "target": target}).accepted:
+                        result_info["cured"] = True
+                    else:
+                        healed = gs.apply_action("heal", {"healer": unit, "target": target})
+                        if healed.accepted:
+                            result_info["heal_amount"] = healed.result
+                        else:
+                            is_valid = False
                 else:
                     is_valid = False
 
             elif action_type == 5:  # End turn
-                self.game_state.end_turn()
+                gs.apply_action("end_turn", {})
 
-            elif action_type == 6:  # Paralyze (Mage/Sorcerer)
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "M" and target.player != player:
-                    if not self.game_state.paralyze(unit, target):
-                        is_valid = False
-                else:
-                    is_valid = False
-
-            elif action_type == 7:  # Haste (Sorcerer only)
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == player:
-                    if not self.game_state.haste(unit, target):
-                        is_valid = False
-                else:
-                    is_valid = False
-
-            elif action_type == 8:  # Defence Buff (Sorcerer only)
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == player:
-                    if not self.game_state.defence_buff(unit, target):
-                        is_valid = False
-                else:
-                    is_valid = False
-
-            elif action_type == 9:  # Attack Buff (Sorcerer only)
-                unit = self.game_state.get_unit_at_position(*from_pos)
-                target = self.game_state.get_unit_at_position(*to_pos)
-                if unit and target and unit.type == "S" and target.player == player:
-                    if not self.game_state.attack_buff(unit, target):
-                        is_valid = False
+            elif action_type in _TARGETED_ACTION_TYPES:  # Attack, paralyze, haste, the buffs
+                kind, env_check = _TARGETED_ACTION_TYPES[action_type]
+                unit = gs.get_unit_at_position(*from_pos)
+                target = gs.get_unit_at_position(*to_pos)
+                if unit and target and env_check(unit, target, player):
+                    outcome = gs.apply_action(kind, {ACTOR_KEYS[kind]: unit, "target": target})
+                    if kind == "attack":
+                        result_info["damage"] = outcome.result["damage"]
+                        result_info["target_alive"] = outcome.result["target_alive"]
+                    # The engine refuses an illegal action (spent or paralyzed
+                    # unit, out of range, hidden by fog, wrong turn) and
+                    # changes nothing. multi_discrete per-dimension masks
+                    # over-approximate the legal set, so such combinations are
+                    # sampled and must be penalised, not rewarded (review
+                    # rlenv-2).
+                    is_valid = outcome.accepted
                 else:
                     is_valid = False
 
