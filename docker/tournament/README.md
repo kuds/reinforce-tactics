@@ -110,7 +110,7 @@ You can mix both formats:
 | Provider | Environment Variable | Supported Models |
 |----------|---------------------|------------------|
 | `openai` | `OPENAI_API_KEY` | gpt-5.2, gpt-5-mini, gpt-5-nano |
-| `anthropic` | `ANTHROPIC_API_KEY` | claude-opus-4-6, claude-sonnet-4-5, claude-haiku-4-5 |
+| `anthropic` | `ANTHROPIC_API_KEY` | claude-haiku-4-5-20251001, claude-sonnet-4-6, claude-opus-4-6, claude-sonnet-5, claude-opus-5, claude-fable-5-1 (full list: `ANTHROPIC_MODELS` in `reinforcetactics/game/llm_bot.py`) |
 | `google` | `GOOGLE_API_KEY` | gemini-3-flash-preview, gemini-2.5-flash, gemini-2.5-pro |
 
 ## Example Configurations

@@ -104,7 +104,7 @@ class BotDescriptor:
         Args:
             name: Display name
             provider: LLM provider (openai, anthropic, google)
-            model: Model name (e.g., "gpt-4", "claude-3-sonnet")
+            model: Model name (e.g., "gpt-5-mini-2025-08-07", "claude-sonnet-4-6")
             temperature: Sampling temperature
             max_tokens: Max response tokens
             api_key: Optional API key

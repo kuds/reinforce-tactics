@@ -51,7 +51,11 @@ class BaseBot(ABC):
 
       * ``take_turn()`` must terminate. It must call
         ``game_state.end_turn()`` (or return without acting once
-        ``game_state.game_over`` is True).
+        ``game_state.game_over`` is True), unless it raises because the bot
+        can't play at all: an LLM bot raises ``LLMBotError`` when its API
+        is unreachable or misconfigured, leaving the turn un-ended for the
+        caller. The tournament runner then records an errored game; the
+        GUI hands the seat to SimpleBot.
       * ``self.game_state`` and ``self.bot_player`` must be set before
         ``take_turn()`` runs. ``BaseBot.__init__`` handles this; subclasses
         that override ``__init__`` should either call ``super().__init__``
@@ -67,7 +71,7 @@ class BaseBot(ABC):
 
     @abstractmethod
     def take_turn(self) -> None:
-        """Execute one full turn for ``self.bot_player`` and end it."""
+        """Execute one full turn for ``self.bot_player`` and end it (see the class contract for when it may raise)."""
 
     # ------------------------------------------------------------------
     # Capability telemetry

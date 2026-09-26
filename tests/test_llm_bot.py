@@ -279,7 +279,7 @@ class TestClaudeBot:
 
     def test_supported_models(self):
         """Test that supported models list is configured."""
-        from reinforcetactics.game.llm_bot import ANTHROPIC_MODELS
+        from reinforcetactics.game.llm_bot import ANTHROPIC_MODELS, ANTHROPIC_UNAVAILABLE_MODELS
         from reinforcetactics.game.llm_bot import ClaudeBot as TestBot  # pylint: disable=import-outside-toplevel
 
         assert TestBot._supported_model_list is ANTHROPIC_MODELS  # pylint: disable=protected-access
@@ -287,7 +287,10 @@ class TestClaudeBot:
         assert "claude-opus-4-6" in ANTHROPIC_MODELS
         assert "claude-sonnet-4-5-20250929" in ANTHROPIC_MODELS
         assert "claude-haiku-4-5-20251001" in ANTHROPIC_MODELS
-        assert "claude-sonnet-4-20250514" in ANTHROPIC_MODELS
+        # The deprecated Sonnet 4 used to be listed here; retired and
+        # deprecated IDs are now only in the "don't use" notes.
+        assert "claude-sonnet-4-20250514" not in ANTHROPIC_MODELS
+        assert "claude-sonnet-4-20250514" in ANTHROPIC_UNAVAILABLE_MODELS
 
 
 class TestGeminiBot:

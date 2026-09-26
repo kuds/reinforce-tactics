@@ -127,11 +127,14 @@ Automatically included if:
 - GPT-5: `gpt-5-mini-2025-08-07` (recommended for cost-effectiveness)
 - GPT-4o family: `gpt-4o`, `gpt-4o-mini`
 - O-series: `o1`, `o1-mini`, `o3-mini`
+- `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, the `-pro` models and the o-series only accept the default temperature, so OpenAIBot ignores `temperature` for them
 
 **Anthropic Claude (Default: claude-haiku-4-5-20251001)**
-- Claude 4.5: `claude-haiku-4-5-20251001` (recommended), `claude-sonnet-4-5-20250929`
-- Claude 4: `claude-sonnet-4-20250514`
-- Claude 3.5: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- Claude 5.x: `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5`
+- Claude 4.6–4.8: `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`
+- Claude 4.5: `claude-haiku-4-5-20251001` (recommended), `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`
+- Opus 4.7, Opus 4.8 and the 5.x models reject sampling parameters, so ClaudeBot ignores `temperature` for them
+- Don't use `claude-opus-4-1-20250805` (retired 2026-08-05) or the deprecated `claude-sonnet-4-20250514` / `claude-opus-4-20250514`
 
 **Google Gemini (Default: gemini-2.5-flash)**
 - Gemini 2.5: `gemini-2.5-flash` (recommended)
@@ -150,6 +153,12 @@ Configure API keys in `settings.json`:
 ```
 
 You can also specify custom models by setting environment variables or modifying bot initialization code.
+
+#### When an LLM bot can't play
+
+Rate limits, overloads, timeouts and connection errors are retried with jittered backoff (honouring `Retry-After`): at least 3 attempts, and more while the request has taken less than 60 seconds in all; a turn whose retries run out is passed. An LLM bot raises `LLMBotError` instead of passing turns when the failure can't fix itself (missing SDK, rejected API key, unknown model, malformed request) or after 3 turns in a row in which the API gave no reply at all. The tournament then ends that game as an error: it is reported with an `error` message in the results JSON, counted under `errors` in the standings, and left out of wins, losses, draws and Elo.
+
+A reply that arrives but holds no usable actions (an empty reply, a refusal or safety block, prose, or JSON cut off at `max_tokens`) is the model's own play, not an infrastructure failure: the turn is passed, the game goes on and is scored normally, and the reply is counted as `llm_empty_reply` or `llm_unparseable_reply` in the replay's `game_info.capabilities_p1` / `capabilities_p2`. Actions that aren't legal at the moment they would run are skipped and counted as `llm_illegal_action` (and `llm_illegal_<type>`).
 
 ### Model Bots
 Automatically discovered from the `models/` directory:
