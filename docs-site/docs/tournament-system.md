@@ -129,9 +129,11 @@ Automatically included if:
 - O-series: `o1`, `o1-mini`, `o3-mini`
 
 **Anthropic Claude (Default: claude-haiku-4-5-20251001)**
-- Claude 4.5: `claude-haiku-4-5-20251001` (recommended), `claude-sonnet-4-5-20250929`
-- Claude 4: `claude-sonnet-4-20250514`
-- Claude 3.5: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- Claude 5.x: `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-sonnet-5`
+- Claude 4.6–4.8: `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`
+- Claude 4.5: `claude-haiku-4-5-20251001` (recommended), `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`
+- Opus 4.7, Opus 4.8 and the 5.x models reject sampling parameters, so ClaudeBot ignores `temperature` for them
+- Don't use `claude-opus-4-1-20250805` (retired 2026-08-05) or the deprecated `claude-sonnet-4-20250514` / `claude-opus-4-20250514`
 
 **Google Gemini (Default: gemini-2.5-flash)**
 - Gemini 2.5: `gemini-2.5-flash` (recommended)

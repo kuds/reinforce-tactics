@@ -8,7 +8,7 @@ Game mechanics module.
 from reinforcetactics.core.mechanics import GameMechanics
 from reinforcetactics.game.bot import NoopBot, RandomBot, SimpleBot
 from reinforcetactics.game.bot_base import ABILITY_PROVIDERS, BaseBot, BotUnitMixin
-from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, LLMBot, OpenAIBot
+from reinforcetactics.game.llm_bot import ClaudeBot, GeminiBot, LLMBot, LLMBotError, OpenAIBot
 from reinforcetactics.game.llm_prompts import (
     PROMPT_BASIC,
     PROMPT_STRATEGIC,
@@ -29,6 +29,7 @@ __all__ = [
     "RandomBot",
     "SimpleBot",
     "LLMBot",
+    "LLMBotError",
     "OpenAIBot",
     "ClaudeBot",
     "GeminiBot",
