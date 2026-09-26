@@ -85,7 +85,12 @@ def record_game_to_video(
         renderer = None
         total = len(game_states)
         for i, state_dict in enumerate(game_states):
-            gs = GameState.from_dict(state_dict, state_dict.get("map_data") if "map_data" in state_dict else map_df)
+            # to_dict() records the terrain under "map_data" (as a list of
+            # rows, which from_dict turns back into a grid), so snapshots of
+            # random-map games render on their own terrain; map_file only
+            # serves snapshots from before the terrain was recorded.
+            snapshot_map = GameState.saved_map_data(state_dict)
+            gs = GameState.from_dict(state_dict, snapshot_map if snapshot_map is not None else map_df)
             if renderer is None:
                 renderer = Renderer(gs, replay_mode=True, headless=True, pixel_art=use_pixel_art)
             else:
@@ -350,15 +355,14 @@ def record_replay_to_video(
     _ensure_headless_pygame()
     from reinforcetactics.core.game_state import GameState
     from reinforcetactics.ui.renderer import Renderer
+    from reinforcetactics.utils.file_io import FileIO
 
     actions = replay_data.get("actions", [])
     game_info = replay_data.get("game_info", {})
-    initial_map = game_info.get("initial_map")
 
-    if initial_map is None:
-        raise ValueError("Replay data missing 'initial_map' in game_info")
-
-    map_df = pd.DataFrame(initial_map)
+    # Same terrain source as the interactive ReplayPlayer: the recorded
+    # initial_map, else the recorded map file; raises rather than guessing.
+    map_df = FileIO.load_replay_map(game_info)
 
     # Add an ocean border for framing. Unlike the interactive ReplayPlayer,
     # no MIN_MAP_SIZE padding is applied: that padding exists to leave room

@@ -5,11 +5,12 @@ import os
 import pygame
 
 from reinforcetactics.ui.menus.base import Menu
+from reinforcetactics.ui.menus.game_setup.modes import GAME_MODE_PLAYER_COUNTS
 from reinforcetactics.utils.language import get_language
 
 
 class GameModeMenu(Menu):
-    """Menu for selecting game mode (1v1 or 2v2)."""
+    """Menu for selecting game mode (1v1, 1v1v1 or 2v2)."""
 
     def __init__(self, screen: pygame.Surface | None = None, maps_dir: str = "maps") -> None:
         """
@@ -26,9 +27,15 @@ class GameModeMenu(Menu):
         self._setup_options()
 
     def _load_modes(self) -> None:
-        """Discover available game mode folders."""
+        """Discover the supported game modes that have at least one map.
+
+        Only modes in ``GAME_MODE_PLAYER_COUNTS`` are offered. Listing every
+        ``maps/`` subfolder used to offer folders the rest of the New Game
+        flow could not start (``1v1v1`` crashed PlayerConfigMenu), and would
+        do the same for any future non-mode folder such as scenarios.
+        """
         if os.path.exists(self.maps_dir):
-            for item in os.listdir(self.maps_dir):
+            for item in GAME_MODE_PLAYER_COUNTS:
                 item_path = os.path.join(self.maps_dir, item)
                 if os.path.isdir(item_path):
                     # Check if folder contains .csv maps
@@ -55,6 +62,6 @@ class GameModeMenu(Menu):
         Run game mode selection menu.
 
         Returns:
-            Selected game mode string (e.g., "1v1" or "2v2"), or None if cancelled
+            Selected game mode string (e.g., "1v1", "1v1v1" or "2v2"), or None if cancelled
         """
         return super().run()

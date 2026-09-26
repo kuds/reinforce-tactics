@@ -1493,7 +1493,23 @@ class GameState:
             "turn_number": self.turn_number,
             "game_over": self.game_over,
             "winner": self.winner,
+            # from_dict has always read these two back; without them a
+            # turn-limited game reloaded as unlimited and a finished game
+            # lost how it ended.
+            "end_reason": self.end_reason,
+            "max_turns": self.max_turns,
             "map_file": self.map_file_used,
+            # The exact tile codes the grid was built from (after any UI
+            # padding), written for every save, not only map-file-less ones.
+            # "tiles" below holds only capturable tiles, so without this a
+            # random-map save could never be reloaded, and a save that
+            # points at a map file breaks silently if that file is later
+            # edited, renamed or padded differently: unit and structure
+            # coordinates would land on different terrain. The cost is one
+            # short string per tile: a fixed ~7 KB for the usual 24x24 padded
+            # map at the save writer's indent=2, about a quarter of an
+            # early-game save and a shrinking share as action_history grows.
+            "map_data": self.initial_map_data,
             "player_configs": self.player_configs,
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
@@ -1760,18 +1776,41 @@ class GameState:
 
         return FileIO.save_replay(self.action_history, game_info, filepath)
 
+    @staticmethod
+    def saved_map_data(save_data: dict[str, Any]) -> pd.DataFrame | None:
+        """Return the terrain a save recorded via ``to_dict``, or None.
+
+        Saves written before the terrain was recorded return None; their
+        callers fall back to reloading ``save_data["map_file"]``.
+        """
+        terrain = save_data.get("map_data")
+        if not terrain:
+            return None
+        # TileGrid indexes a 2D frame/array, not a list of lists.
+        return pd.DataFrame(terrain)
+
     @classmethod
-    def from_dict(cls, save_data: dict[str, Any], map_data) -> GameState:
+    def from_dict(cls, save_data: dict[str, Any], map_data=None) -> GameState:
         """
         Restore game state from dictionary.
 
         Args:
             save_data: Dictionary with saved game data
-            map_data: Map data (2D array)
+            map_data: Map data (2D array). ``None`` rebuilds the grid from the
+                terrain ``to_dict`` records under ``"map_data"``.
 
         Returns:
             Restored GameState instance
+
+        Raises:
+            ValueError: If ``map_data`` is None and the save predates recorded
+                terrain (it only names a map file, or none for random maps).
         """
+        if map_data is None:
+            map_data = cls.saved_map_data(save_data)
+            if map_data is None:
+                raise ValueError("Save has no recorded terrain ('map_data'); pass the map explicitly")
+
         # Extract enabled_units from save data (default to all if not present for backward compatibility)
         enabled_units = save_data.get("enabled_units", cls.ALL_UNIT_TYPES)
 

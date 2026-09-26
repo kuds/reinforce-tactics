@@ -1,6 +1,7 @@
 """Menu for loading saved games with enhanced preview and info."""
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -11,10 +12,22 @@ from reinforcetactics.ui import theme
 from reinforcetactics.ui.components.map_preview import get_tile_color
 from reinforcetactics.ui.menus.in_game.confirmation_dialog import ConfirmationDialog
 from reinforcetactics.ui.menus.list_detail import ListDetailMenu, draw_preview_or_placeholder
-from reinforcetactics.ui.menus.save_load.utils import extract_date_from_filename, get_player_display_name
+from reinforcetactics.ui.menus.save_load.utils import (
+    as_dict,
+    as_int,
+    as_list,
+    as_optional_int,
+    as_player_count,
+    extract_date_from_filename,
+    map_display_name,
+    mtime_or_zero,
+    safe_player_display_name,
+)
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.fonts import get_font
 from reinforcetactics.utils.language import get_language
+
+logger = logging.getLogger(__name__)
 
 
 class LoadGameMenu(ListDetailMenu):
@@ -52,7 +65,7 @@ class LoadGameMenu(ListDetailMenu):
                     all_saves.append(filepath)
 
             # Sort by modification time (newest first)
-            all_saves.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+            all_saves.sort(key=mtime_or_zero, reverse=True)
             self.save_files = all_saves
 
             # Load metadata for each save
@@ -60,118 +73,136 @@ class LoadGameMenu(ListDetailMenu):
                 self._load_save_metadata(filepath)
 
     def _load_save_metadata(self, filepath: str) -> None:
-        """Load metadata from a save file."""
+        """Load metadata from a save file.
+
+        Never raises for a bad file. This runs for every file when the menu
+        opens, so one save the menu can't parse (a JSON list, a list where
+        a dict belongs, ...) used to crash Load Game; such a file now gets
+        minimal "Unknown" metadata instead.
+        """
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
+            self.save_metadata[filepath] = self._parse_save_metadata(data)
+        except Exception as e:
+            logger.warning("Could not read save metadata from %s: %s", filepath, e)
+            self.save_metadata[filepath] = self._minimal_metadata(filepath)
 
-            # Parse timestamp
-            timestamp_str = data.get("timestamp", "")
+    @staticmethod
+    def _parse_save_metadata(data: Any) -> dict[str, Any]:
+        """Extract the fields the menu draws, coerced to the types it expects."""
+        if not isinstance(data, dict):
+            raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+
+        # Parse timestamp (our format is "YYYY-MM-DD HH-MM-SS")
+        timestamp_str = data.get("timestamp", "")
+        if not isinstance(timestamp_str, str):
+            timestamp_str = ""
+        date_str = timestamp_str.split(" ")[0] if timestamp_str else "Unknown"
+
+        # Get player info
+        player_configs = as_list(data.get("player_configs"))
+        player1_name = safe_player_display_name(player_configs, 0)
+        player2_name = safe_player_display_name(player_configs, 1)
+
+        # Get turn info
+        turn_number = as_int(data.get("turn_number"), 0)
+        current_player = as_int(data.get("current_player"), 1)
+
+        # Get gold for each player. JSON serializes dict keys as strings, so
+        # convert them back to ints, skipping any that aren't numbers.
+        player_gold: dict[int, int | float] = {}
+        for key, gold in as_dict(data.get("player_gold")).items():
             try:
-                # Try parsing our format "YYYY-MM-DD HH-MM-SS"
-                date_str = timestamp_str.split(" ")[0] if timestamp_str else "Unknown"
-            except (ValueError, TypeError):
-                date_str = extract_date_from_filename(os.path.basename(filepath))
+                player_num = int(key)
+            except (TypeError, ValueError):
+                continue
+            is_number = isinstance(gold, (int, float)) and not isinstance(gold, bool)
+            player_gold[player_num] = gold if is_number else 0
 
-            # Get player info
-            player_configs = data.get("player_configs", [])
-            player1_name = get_player_display_name(player_configs, 0)
-            player2_name = get_player_display_name(player_configs, 1)
+        # Get map info ("map_file": null means a random map)
+        map_file = data.get("map_file")
+        map_name = map_display_name(map_file)
 
-            # Get turn info
-            turn_number = data.get("turn_number", 0)
-            current_player = data.get("current_player", 1)
+        # Count units per player
+        units = [unit for unit in as_list(data.get("units")) if isinstance(unit, dict)]
+        unit_counts: dict[int, int] = {}
+        unit_types_per_player: dict[int, dict[str, int]] = {}
+        total_health_per_player: dict[int, int] = {}
 
-            # Get gold for each player
-            player_gold = data.get("player_gold", {})
-            # Convert keys to int if they are strings (JSON serializes dict keys as strings)
-            player_gold = {int(k): v for k, v in player_gold.items()}
+        for unit in units:
+            player = as_int(unit.get("player"), 0)
+            unit_type = unit.get("type", "W")
+            if not isinstance(unit_type, str):
+                unit_type = "?"
+            health = as_int(unit.get("health"), 0)
 
-            # Get map info
-            map_file = data.get("map_file", "Unknown Map")
-            map_name = os.path.basename(map_file).replace(".csv", "").replace("_", " ").title() if map_file else "Unknown Map"
+            unit_counts[player] = unit_counts.get(player, 0) + 1
 
-            # Count units per player
-            units = data.get("units", [])
-            unit_counts: dict[int, int] = {}
-            unit_types_per_player: dict[int, dict[str, int]] = {}
-            total_health_per_player: dict[int, int] = {}
+            if player not in unit_types_per_player:
+                unit_types_per_player[player] = {}
+            unit_types_per_player[player][unit_type] = unit_types_per_player[player].get(unit_type, 0) + 1
 
-            for unit in units:
-                player = unit.get("player", 0)
-                unit_type = unit.get("type", "W")
-                health = unit.get("health", 0)
+            if player not in total_health_per_player:
+                total_health_per_player[player] = 0
+            total_health_per_player[player] += health
 
-                unit_counts[player] = unit_counts.get(player, 0) + 1
+        # Get tile data for preview
+        tiles = [tile for tile in as_list(data.get("tiles")) if isinstance(tile, dict)]
 
-                if player not in unit_types_per_player:
-                    unit_types_per_player[player] = {}
-                unit_types_per_player[player][unit_type] = unit_types_per_player[player].get(unit_type, 0) + 1
+        # Determine map dimensions from tiles
+        map_width = 0
+        map_height = 0
+        for tile in tiles:
+            map_width = max(map_width, as_int(tile.get("x"), 0) + 1)
+            map_height = max(map_height, as_int(tile.get("y"), 0) + 1)
 
-                if player not in total_health_per_player:
-                    total_health_per_player[player] = 0
-                total_health_per_player[player] += health
+        return {
+            "date": date_str,
+            "timestamp": timestamp_str,
+            "player1": player1_name,
+            "player2": player2_name,
+            "turn_number": turn_number,
+            "current_player": current_player,
+            "player_gold": player_gold,
+            "map_name": map_name,
+            "map_file": map_file if isinstance(map_file, str) else "",
+            "tiles": tiles,
+            "units": units,
+            "unit_counts": unit_counts,
+            "unit_types_per_player": unit_types_per_player,
+            "total_health_per_player": total_health_per_player,
+            "map_width": map_width,
+            "map_height": map_height,
+            "game_over": bool(data.get("game_over", False)),
+            "winner": as_optional_int(data.get("winner")),
+            "num_players": as_player_count(data.get("num_players")),
+        }
 
-            # Get tile data for preview
-            tiles = data.get("tiles", [])
-
-            # Determine map dimensions from tiles
-            map_width = 0
-            map_height = 0
-            for tile in tiles:
-                map_width = max(map_width, tile.get("x", 0) + 1)
-                map_height = max(map_height, tile.get("y", 0) + 1)
-
-            # Get game state
-            game_over = data.get("game_over", False)
-            winner = data.get("winner")
-            num_players = data.get("num_players", 2)
-
-            self.save_metadata[filepath] = {
-                "date": date_str,
-                "timestamp": timestamp_str,
-                "player1": player1_name,
-                "player2": player2_name,
-                "turn_number": turn_number,
-                "current_player": current_player,
-                "player_gold": player_gold,
-                "map_name": map_name,
-                "map_file": map_file,
-                "tiles": tiles,
-                "units": units,
-                "unit_counts": unit_counts,
-                "unit_types_per_player": unit_types_per_player,
-                "total_health_per_player": total_health_per_player,
-                "map_width": map_width,
-                "map_height": map_height,
-                "game_over": game_over,
-                "winner": winner,
-                "num_players": num_players,
-            }
-
-        except (OSError, json.JSONDecodeError):
-            # Store minimal metadata for failed loads
-            self.save_metadata[filepath] = {
-                "date": extract_date_from_filename(os.path.basename(filepath)),
-                "timestamp": "",
-                "player1": "Player 1",
-                "player2": "Player 2",
-                "turn_number": 0,
-                "current_player": 1,
-                "player_gold": {},
-                "map_name": "Unknown",
-                "map_file": "",
-                "tiles": [],
-                "units": [],
-                "unit_counts": {},
-                "unit_types_per_player": {},
-                "total_health_per_player": {},
-                "map_width": 0,
-                "map_height": 0,
-                "game_over": False,
-                "winner": None,
-                "num_players": 2,
-            }
+    @staticmethod
+    def _minimal_metadata(filepath: str) -> dict[str, Any]:
+        """Metadata for a save file that couldn't be read."""
+        return {
+            "date": extract_date_from_filename(os.path.basename(filepath)),
+            "timestamp": "",
+            "player1": "Player 1",
+            "player2": "Player 2",
+            "turn_number": 0,
+            "current_player": 1,
+            "player_gold": {},
+            "map_name": "Unknown",
+            "map_file": "",
+            "tiles": [],
+            "units": [],
+            "unit_counts": {},
+            "unit_types_per_player": {},
+            "total_health_per_player": {},
+            "map_width": 0,
+            "map_height": 0,
+            "game_over": False,
+            "winner": None,
+            "num_players": 2,
+        }
 
     def _get_display_name(self, filepath: str) -> str:
         """Get user-friendly display name for a save."""
@@ -466,11 +497,15 @@ class LoadGameMenu(ListDetailMenu):
                     self.running = True
                     continue
 
-            # Load the actual save data from the file
+            # Load the actual save data from the file. ValueError covers
+            # JSONDecodeError and a non-UTF-8 file's UnicodeDecodeError.
             try:
                 with open(selected_path, encoding="utf-8") as f:
                     save_data = json.load(f)
-                return save_data
-            except (OSError, FileNotFoundError, json.JSONDecodeError) as e:
+            except (OSError, ValueError) as e:
                 print(f"Error loading save file: {e}")
                 return None
+            if not isinstance(save_data, dict):
+                print(f"Error loading save file: {selected_path} is not a saved game")
+                return None
+            return save_data

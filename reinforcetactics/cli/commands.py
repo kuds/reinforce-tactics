@@ -9,7 +9,13 @@ This module contains the command implementations for different modes:
 """
 
 import sys
+import traceback
 from pathlib import Path
+
+# play_mode returns to the main menu after an unexpected error, but gives up
+# after this many failures in a row: an error the menu hits on every attempt
+# (no display, a broken first frame) would otherwise loop forever.
+MAX_CONSECUTIVE_PLAY_ERRORS = 3
 
 
 def train_mode(args):
@@ -247,41 +253,59 @@ def play_mode(_args):
         return
 
     # Main game loop - keep showing menu until user quits
+    consecutive_errors = 0
     while True:
         # Initialize/reinitialize Pygame (needed after game sessions quit pygame)
         pygame.init()
 
-        # Show main menu
-        main_menu = MainMenu()
-        menu_result = main_menu.run()
+        # Any exception from a menu or a session lands here instead of
+        # closing the app. Sessions already autosave their replay and a
+        # crash save before returning (app.game_loop._run_session); this
+        # catches everything else, e.g. a menu bug like the old 1v1v1
+        # PlayerConfigMenu crash. KeyboardInterrupt and SystemExit are not
+        # Exceptions, so Ctrl+C still quits.
+        try:
+            menu_result = MainMenu().run()
 
-        if not menu_result or menu_result["type"] == "exit":
-            print("Exiting...")
+            if not menu_result or menu_result["type"] == "exit":
+                print("Exiting...")
+                pygame.quit()
+                return
+
+            # Handle menu selection
+            game_result = None
+            if menu_result["type"] == "new_game":
+                game_result = start_new_game(
+                    mode=menu_result.get("mode", "human_vs_computer"),
+                    selected_map=menu_result.get("map"),
+                    player_configs=menu_result.get("players"),
+                    fog_of_war=menu_result.get("fog_of_war", False),
+                    num_players=menu_result.get("num_players"),
+                )
+            elif menu_result["type"] == "load_game":
+                # The main menu already let the player pick (and parsed) the
+                # save; don't make them pick it again.
+                game_result = load_saved_game(menu_result.get("save_data"))
+            elif menu_result["type"] == "watch_replay":
+                game_result = watch_replay(menu_result.get("replay_path"))
+        except Exception:
             pygame.quit()
-            return
-
-        # Handle menu selection
-        game_result = None
-        if menu_result["type"] == "new_game":
-            game_result = start_new_game(
-                mode=menu_result.get("mode", "human_vs_computer"),
-                selected_map=menu_result.get("map"),
-                player_configs=menu_result.get("players"),
-                fog_of_war=menu_result.get("fog_of_war", False),
-            )
-        elif menu_result["type"] == "load_game":
-            game_result = load_saved_game()
-        elif menu_result["type"] == "watch_replay":
-            game_result = watch_replay(menu_result.get("replay_path"))
+            consecutive_errors += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_PLAY_ERRORS:
+                print("❌ The game keeps failing; exiting.")
+                raise
+            print("❌ Unexpected error; returning to the main menu:")
+            traceback.print_exc()
+            continue
+        consecutive_errors = 0
 
         # Handle game result
-        # - 'main_menu': Continue loop to show menu again
-        # - 'new_game': Continue loop to show menu again (user can start new game from menu)
-        # - 'quit' or None: Exit completely
+        # - 'quit': Exit completely
+        # - anything else ('main_menu', 'new_game', None for a cancelled
+        #   selection): continue the loop and show the menu again
         if game_result == "quit":
             print("Exiting...")
             return
-        # For 'main_menu' or 'new_game', continue to next iteration
 
 
 def stats_mode(_args):
