@@ -390,3 +390,51 @@ class TestTurnContext:
         monkeypatch.setattr(BotUnitMixin, "planning_turn", no_context)
         assert play() == cached
         assert any(a["type"] == "attack" for a in cached)
+
+
+class TestPurchasesListOnlyCreates:
+    """The purchase loops ask for the purchases alone, not every legal action (review rulebots-9).
+
+    ``get_legal_actions`` also searches every unit's moves, and the loops
+    asked for it once per unit bought: about 40% of SimpleBot's turn.
+    """
+
+    def test_get_create_actions_is_the_create_list_of_get_legal_actions(self):
+        game = GameState(FileIO.load_map("maps/1v1/skirmish.csv"), num_players=2, max_turns=10, seed=2)
+        bots = {p: build_scripted("simple", game, player=p, rng=random.Random(p)) for p in (1, 2)}
+        offered = 0
+        while not game.game_over:
+            for player in (1, 2):
+                held = game.player_gold[player]
+                for gold in (0, 250, held):
+                    game.player_gold[player] = gold
+                    game._invalidate_cache()
+                    creates = game.get_create_actions(player)
+                    assert creates == game.get_legal_actions(player)["create_unit"]
+                    offered += len(creates)
+                game.player_gold[player] = held
+                game._invalidate_cache()
+            bots[game.current_player].take_turn()
+        assert offered > 0
+
+    @pytest.mark.parametrize(
+        "bot_cls,method",
+        [
+            (SimpleBot, "purchase_units"),
+            (MediumBot, "purchase_units"),
+            (AdvancedBot, "purchase_units_enhanced"),
+            (MasterBot, "purchase_units_enhanced"),
+        ],
+    )
+    def test_a_purchase_loop_enumerates_no_moves(self, bot_cls, method, monkeypatch):
+        game = GameState(FileIO.load_map("maps/1v1/beginner.csv"), num_players=2)
+        game.player_gold[1] = 1000
+        bot = bot_cls(game, player=1)
+
+        def full_enumeration(*args, **kwargs):
+            raise AssertionError("a purchase loop enumerated every legal action")
+
+        monkeypatch.setattr(game, "get_legal_actions", full_enumeration)
+        getattr(bot, method)()
+
+        assert any(a["type"] == "create_unit" for a in game.action_history)

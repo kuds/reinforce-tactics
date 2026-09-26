@@ -1864,6 +1864,18 @@ class GameState:
         """Enumerate ``player``'s legal actions from the current state (uncached; ``enumerate_legal_actions``)."""
         return legal_actions.enumerate_legal_actions(self, player)
 
+    def get_create_actions(self, player: int | None = None) -> list[dict[str, Any]]:
+        """``get_legal_actions(player)["create_unit"]`` without enumerating the other kinds.
+
+        The same entries in the same order, computed fresh (it neither reads
+        nor fills the cache): a purchase loop, which changes the state with
+        every unit it buys, needs only these and would otherwise search
+        every unit's moves once per purchase.
+        """
+        if player is None:
+            player = self.current_player
+        return legal_actions.enumerate_create_actions(self, player)
+
     # How clone_for_search treats each attribute (review core-18). Shared:
     # fixed for the whole game (configuration, terrain source, stateless
     # helpers), so the clone references the original's object. Dropped:

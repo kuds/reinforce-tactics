@@ -287,9 +287,10 @@ class SimpleBot(BotUnitMixin, BaseBot):
     def purchase_units(self):
         """Purchase units based on priority from enabled types."""
         while True:
-            legal_actions = self.game_state.get_legal_actions(self.bot_player)
-            create_actions = legal_actions["create_unit"]
-            # Note: legal_actions already filters by enabled_units
+            # Only the purchases: the full enumeration also searches every
+            # unit's moves, once per unit bought (review rulebots-9).
+            create_actions = self.game_state.get_create_actions(self.bot_player)
+            # Note: the engine's list already filters by enabled_units
 
             if not create_actions:
                 break
@@ -719,9 +720,10 @@ class MediumBot(BotUnitMixin, BaseBot):
         if counter_unit is not None:
             self._record("counter_unit_rule_fired")
         while True:
-            legal_actions = self.game_state.get_legal_actions(self.bot_player)
-            create_actions = legal_actions["create_unit"]
-            # Note: legal_actions already filters by enabled_units
+            # Only the purchases: the full enumeration also searches every
+            # unit's moves, once per unit bought (review rulebots-9).
+            create_actions = self.game_state.get_create_actions(self.bot_player)
+            # Note: the engine's list already filters by enabled_units
 
             if not create_actions:
                 break
@@ -1651,9 +1653,10 @@ class AdvancedBot(MediumBot):
 
         # Enhanced composition: buy units to match target ratios
         while True:
-            legal_actions = self.game_state.get_legal_actions(self.bot_player)
-            create_actions = legal_actions["create_unit"]
-            # Note: legal_actions already filters by enabled_units
+            # Only the purchases: the full enumeration also searches every
+            # unit's moves, once per unit bought (review rulebots-9).
+            create_actions = self.game_state.get_create_actions(self.bot_player)
+            # Note: the engine's list already filters by enabled_units
 
             if not create_actions:
                 break
