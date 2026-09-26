@@ -221,12 +221,24 @@ class TestSelfPlayEnv:
         assert isinstance(info, dict)
 
     def test_action_masks_method(self, self_play_env):
-        """Test that action_masks method works."""
+        """action_masks() returns the concatenated 1-D mask MaskablePPO expects.
+
+        This test used to assert the per-dimension tuple, which locked in the
+        contract that made MaskablePPO crash on its first rollout
+        (sb3-contrib stacks ``action_masks()`` across envs into one array).
+        The tuple is still available under ``get_action_masks_tuple()``.
+        """
         self_play_env.reset()
         masks = self_play_env.action_masks()
 
-        assert isinstance(masks, tuple)
-        assert len(masks) == 6
+        assert isinstance(masks, np.ndarray)
+        assert masks.dtype == np.bool_
+        assert masks.shape == (int(sum(self_play_env.action_space.nvec)),)
+
+        per_dim = self_play_env.get_action_masks_tuple()
+        assert isinstance(per_dim, tuple)
+        assert len(per_dim) == 6
+        np.testing.assert_array_equal(masks, np.concatenate(per_dim))
 
     def test_stats_tracking(self, self_play_env):
         """Test that self-play stats are tracked."""

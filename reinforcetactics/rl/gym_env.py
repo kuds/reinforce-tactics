@@ -64,10 +64,10 @@ class StructuredActionMasks:
 # more resilient stepping stone between ``"noop"`` and ``"random"``;
 # see configs/ppo/bootstrap.yaml.
 # ``"self"`` is included so ``_opponent_turn`` calls ``self.opponent.take_turn()``
-# in self-play training. The training script provides the opponent bot itself
-# (a snapshot of the agent under training, typically wrapped by ModelBot)
-# via ``set_self_play_opponent_factory`` so reset() can rebind a fresh bot
-# to the new game_state on every episode.
+# in self-play training. The opponent itself (a snapshot of the agent under
+# training) is supplied via ``set_self_play_opponent_factory`` -- by
+# ``rl.self_play.SelfPlayEnv`` -- so reset() can rebind a fresh opponent to
+# the new game_state on every episode.
 _BOT_OPPONENT_TYPES = frozenset({"bot", "simple", "medium", "mixed", "advanced", "random", "balanced_random", "noop", "self"})
 
 
@@ -486,8 +486,16 @@ class StrategyGameEnv(gym.Env):
         self.hierarchical = hierarchical
         self.goal_space_size = goal_space_size
 
-        # Which player the RL agent controls (1 or 2). SelfPlayEnv may set to 2.
+        # Which player the RL agent controls (1 or 2). Change it with
+        # ``set_agent_seat`` (or by assigning ``env.unwrapped.agent_player``)
+        # *before* reset(): reset() binds the opponent to the other seat and,
+        # when the agent is player 2, plays player 1's opening turn so that
+        # the first observation, mask and shaping potential belong to the
+        # agent's own turn. SelfPlayEnv uses the "random" seat mode.
         self.agent_player = 1
+        # When True, reset() draws ``agent_player`` from np_random every
+        # episode (see ``set_agent_seat``).
+        self._random_agent_seat = False
 
         # Reward configuration with defaults.
         #
@@ -874,6 +882,28 @@ class StrategyGameEnv(gym.Env):
         """
         self._self_play_opponent_factory = factory
 
+    def set_agent_seat(self, seat: int | str) -> None:
+        """Choose which player the agent controls, starting with the next reset().
+
+        Args:
+            seat: ``1`` or ``2`` for a fixed seat, or ``"random"`` to draw the
+                seat from ``np_random`` on every reset (SelfPlayEnv's
+                ``swap_players``). A fixed seat is written to
+                ``agent_player`` immediately, but the game only becomes
+                consistent with it after ``reset()``: that is where the
+                opponent is rebuilt for the other seat and, for seat 2,
+                player 1's opening turn is played.
+        """
+        if isinstance(seat, str):
+            if seat != "random":
+                raise ValueError(f"agent seat must be 1, 2 or 'random'; got {seat!r}")
+            self._random_agent_seat = True
+            return
+        if seat not in (1, 2):
+            raise ValueError(f"agent seat must be 1, 2 or 'random'; got {seat!r}")
+        self._random_agent_seat = False
+        self.agent_player = int(seat)
+
     @staticmethod
     def encode_structured_action(
         atype: int,
@@ -1178,9 +1208,10 @@ class StrategyGameEnv(gym.Env):
                 # game_state, and ``_opponent_turn`` runs its take_turn() here.
                 # With no factory bound, ``self.opponent`` is None,
                 # ``_opponent_turn`` no-ops, and the safety net below hands the
-                # turn straight back to the agent. (The SelfPlayEnv wrapper is
-                # unaffected: it constructs the base env with ``opponent=None``
-                # and executes the opponent turn itself after step() returns.)
+                # turn straight back to the agent. The SelfPlayEnv wrapper
+                # plays through this same path (it registers the factory), so
+                # opponent-turn penalties and opponent-turn terminals are
+                # scored identically in self-play and bot training.
                 if self.opponent_type:
                     if not self.game_state.game_over:
                         # Snapshot agent unit HP by id() so we can attribute
@@ -1255,8 +1286,8 @@ class StrategyGameEnv(gym.Env):
         if self.opponent_type in _BOT_OPPONENT_TYPES and self.opponent is not None:
             self.opponent.take_turn()
         # 'self' with no factory leaves ``self.opponent`` as None, so this
-        # safely no-ops (the SelfPlayEnv wrapper drives its own opponent and
-        # constructs the base env with ``opponent=None`` instead).
+        # safely no-ops (SelfPlayEnv registers a factory whose opponent plays
+        # the policy snapshot for its own seat).
 
     def _compute_potential(self) -> float:
         """
@@ -1576,6 +1607,13 @@ class StrategyGameEnv(gym.Env):
         """Reset environment."""
         super().reset(seed=seed)
 
+        # Seat draw for the "random" seat mode (self-play swaps). Drawn first
+        # and only in that mode, so reset(seed=...) fixes the seat and
+        # fixed-seat episode streams stay byte-identical with the historic
+        # behaviour.
+        if self._random_agent_seat:
+            self.agent_player = int(self.np_random.integers(1, 3))
+
         # Engine-side combat RNG (currently only the Rogue evade roll in
         # mechanics.attack_unit). Derived from np_random so reset(seed=...)
         # controls combat stochasticity the same way it controls bot
@@ -1601,11 +1639,6 @@ class StrategyGameEnv(gym.Env):
         # Initialize visibility at game start
         if self.fog_of_war:
             self.game_state.update_visibility()
-
-        # Initialize prev potential to Phi(s_0) so the first step's shaping
-        # delta is Phi(s_1) - Phi(s_0), preserving the policy-invariance
-        # property of potential-based reward shaping (Ng et al., 1999).
-        self._prev_potential = self._compute_potential()
 
         # Reset opponent.
         #
@@ -1654,6 +1687,27 @@ class StrategyGameEnv(gym.Env):
                 self.opponent = None
         else:
             self.opponent = None
+
+        # Player 1 always moves first. With the agent in seat 2, play the
+        # opponent's opening turn here so the episode starts on the agent's
+        # own turn. Without this the agent would be offered (and execute)
+        # moves during player 1's turn, and player 1 would never get its
+        # first turn. Gated on ``opponent_type`` exactly like the end_turn
+        # branch of ``_execute_action``: with no opponent (manual mode) the
+        # caller drives player 1 itself. The trailing end_turn is the same
+        # safety net as there, for an opponent whose take_turn() (or an
+        # empty self-play slot) did not hand the turn over.
+        if self.opponent_type and self.game_state.current_player != self.agent_player:
+            self._opponent_turn()
+            if not self.game_state.game_over and self.game_state.current_player != self.agent_player:
+                self.game_state.end_turn()
+
+        # Initialize prev potential to Phi(s_0) so the first step's shaping
+        # delta is Phi(s_1) - Phi(s_0), preserving the policy-invariance
+        # property of potential-based reward shaping (Ng et al., 1999).
+        # Computed after the opening turn above: s_0 is the first state the
+        # agent observes, not the pre-opening board.
+        self._prev_potential = self._compute_potential()
 
         # Reset renderer
         if self.render_mode == "human" and self.renderer:
