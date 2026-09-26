@@ -11,12 +11,12 @@ from collections import deque
 
 import pygame
 
-from reinforcetactics.constants import (
+from reinforcetactics.ui.assets import (
     ANIMATION_CONFIG,
     BASE_SPRITE_COLORS,
     TEAM_PALETTES,
     TILE_SIZE,
-    UNIT_DATA,
+    UNIT_ASSETS,
 )
 
 
@@ -97,8 +97,8 @@ class SpriteAnimator:
         if not self.sprites_path:
             return
 
-        for unit_type, unit_data in UNIT_DATA.items():
-            animation_path = unit_data.get("animation_path", "")
+        for unit_type, unit_assets in UNIT_ASSETS.items():
+            animation_path = unit_assets.get("animation_path", "")
             if animation_path:
                 self._load_sprite_sheet(unit_type, animation_path)
 

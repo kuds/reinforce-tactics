@@ -3,8 +3,8 @@
 import pandas as pd
 import pygame
 
-from reinforcetactics.constants import PLAYER_COLORS, TILE_COLORS
 from reinforcetactics.ui import theme
+from reinforcetactics.ui.assets import PLAYER_COLORS, TILE_COLORS
 from reinforcetactics.utils.fonts import get_font
 
 

@@ -19,16 +19,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.constants import (
-    ALL_UNIT_TYPES,
-    BUILDING_INCOME,
-    HEADQUARTERS_INCOME,
-    MAX_UNITS_PER_PLAYER,
-    STARTING_GOLD,
-    TOWER_INCOME,
-    UNIT_DATA,
-    TileType,
-)
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics, same_side
 from reinforcetactics.core.terrain_rules import TERRAIN_RULE_KEYS, TerrainRules
@@ -39,6 +29,16 @@ from reinforcetactics.core.visibility import (
     StructureSnapshot,
     VisibilityMap,
     get_visible_units,
+)
+from reinforcetactics.rules import (
+    ALL_UNIT_TYPES,
+    BUILDING_INCOME,
+    HEADQUARTERS_INCOME,
+    MAX_UNITS_PER_PLAYER,
+    STARTING_GOLD,
+    TOWER_INCOME,
+    UNIT_DATA,
+    TileType,
 )
 
 # Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
@@ -300,7 +300,7 @@ class GameState:
 
     # YAML override key -> structure tile-type code. Lets a balance sweep tune
     # capture difficulty (e.g. ``headquarters_health: 30`` halves a Warrior's
-    # HQ-capture time) from the config surface instead of editing constants.py.
+    # HQ-capture time) from the config surface instead of editing rules.py.
     _STRUCTURE_HEALTH_KEYS = {
         "tower_health": "t",
         "building_health": "b",
@@ -312,7 +312,7 @@ class GameState:
         """Resolve per-structure max-HP overrides into ``{tile_code: hp}``.
 
         Only keys present in ``overrides`` appear in the result; absent
-        structures keep their ``constants.py`` defaults. Non-positive values
+        structures keep their ``rules.py`` defaults. Non-positive values
         fail loud (a structure with <=0 HP would be captured on the first
         seize / be nonsensical for regen).
         """
@@ -373,7 +373,7 @@ class GameState:
     def _apply_structure_health_overrides(self) -> None:
         """Overlay resolved structure-HP overrides onto the freshly-built grid.
 
-        ``TileGrid`` constructs structure tiles at the ``constants.py`` HP, so
+        ``TileGrid`` constructs structure tiles at the ``rules.py`` HP, so
         this runs right after grid creation while every structure is at full
         health -- setting both ``max_health`` and ``health`` keeps the tile
         consistent (regen scales off ``max_health``; capture resets to it).
@@ -424,7 +424,7 @@ class GameState:
                 episode seed, the tournament runner one derived from
                 ``rng_seed`` and the game id.
             engine_overrides: Optional sparse overlay over the non-YAML
-                engine constants (``constants.py``), so balance can be
+                engine constants (``rules.py``), so balance can be
                 varied/recorded as config instead of a code edit. Shape::
 
                     {
@@ -501,7 +501,7 @@ class GameState:
         self.damage_model: str = self._resolve_damage_model(self.engine_overrides)
         # Per-structure max-HP overrides (capture-difficulty lever). Resolved
         # from engine_overrides and overlaid onto the grid built above; absent
-        # keys keep constants.py defaults. Snapshotted into config.json via the
+        # keys keep rules.py defaults. Snapshotted into config.json via the
         # verbatim engine_overrides log, same as damage_model / economy.
         self.structure_health: dict[str, int] = self._resolve_structure_health(self.engine_overrides)
         self._apply_structure_health_overrides()

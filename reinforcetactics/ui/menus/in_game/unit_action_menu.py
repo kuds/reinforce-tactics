@@ -4,8 +4,8 @@ from typing import Any
 
 import pygame
 
-from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.ui import theme, widgets
+from reinforcetactics.ui.assets import TILE_SIZE
 from reinforcetactics.utils.fonts import get_display_font, get_font
 
 

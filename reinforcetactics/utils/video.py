@@ -439,7 +439,7 @@ def _draw_video_hud(screen, game_state) -> None:
     """
     import pygame
 
-    from reinforcetactics.constants import PLAYER_COLORS
+    from reinforcetactics.ui.assets import PLAYER_COLORS
     from reinforcetactics.utils.fonts import get_font
 
     turn_text = f"Turn {game_state.turn_number + 1}"

@@ -9,9 +9,9 @@ import logging
 import pygame
 
 from reinforcetactics.app.action_executor import apply_targeted_action, handle_action_menu_result
-from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.game.llm_bot import LLMBotError
 from reinforcetactics.ui import widgets
+from reinforcetactics.ui.assets import TILE_SIZE
 from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
 from reinforcetactics.ui.menus.base import drain_events
 from reinforcetactics.ui.widgets.dialog import Dialog

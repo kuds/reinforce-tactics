@@ -66,29 +66,29 @@ def _engine_economy() -> dict[str, Any]:
     """Snapshot the engine economy constants that are NOT YAML-settable.
 
     STARTING_GOLD / *_INCOME and the per-unit stat block live in
-    constants.py and silently change across commits (e.g. f4dc50e
-    bumped Knight defence, 6f64745 cut HQ income, a596c15 nerfed
-    Warrior + cut starting gold). None of these were captured in any
-    run artifact, so historical runs had hidden economy confounds
-    only recoverable via ``git show <sha>:reinforcetactics/constants.py``.
-    Recording them here makes every future run's economy auditable
-    from its own config.json -- the same gap that was closed for
-    enabled_units.
+    rules.py (constants.py before the rules/UI split) and silently
+    change across commits (e.g. f4dc50e bumped Knight defence, 6f64745
+    cut HQ income, a596c15 nerfed Warrior + cut starting gold). None of
+    these were captured in any run artifact, so historical runs had
+    hidden economy confounds only recoverable via
+    ``git show <sha>:reinforcetactics/constants.py``. Recording them
+    here makes every future run's economy auditable from its own
+    config.json -- the same gap that was closed for enabled_units.
     """
     try:
-        from reinforcetactics import constants as _c
+        from reinforcetactics import rules as _r
 
         return {
-            "starting_gold": getattr(_c, "STARTING_GOLD", None),
-            "headquarters_income": getattr(_c, "HEADQUARTERS_INCOME", None),
-            "building_income": getattr(_c, "BUILDING_INCOME", None),
-            "tower_income": getattr(_c, "TOWER_INCOME", None),
+            "starting_gold": getattr(_r, "STARTING_GOLD", None),
+            "headquarters_income": getattr(_r, "HEADQUARTERS_INCOME", None),
+            "building_income": getattr(_r, "BUILDING_INCOME", None),
+            "tower_income": getattr(_r, "TOWER_INCOME", None),
             # Per-unit stat block: cost/health/attack/defence/movement
             # for every unit code. Attack may be an int or a dict
             # ({adjacent, range}) for ranged units -- stored as-is.
             "unit_data": {
                 code: {k: spec.get(k) for k in ("cost", "health", "attack", "defence", "movement")}
-                for code, spec in (getattr(_c, "UNIT_DATA", {}) or {}).items()
+                for code, spec in (getattr(_r, "UNIT_DATA", {}) or {}).items()
             },
         }
     except Exception:
@@ -124,21 +124,27 @@ def _full_engine_constants_hash() -> str | None:
     """Verbatim hash of the *entire* engine constant surface.
 
     ``_engine_economy`` only enumerates 5 unit fields + 4 economy
-    scalars; an ability magnitude or any other ``constants.py`` value
+    scalars; an ability magnitude or any other ``rules.py`` value
     could still drift unrecorded. This hashes the COMPLETE ``UNIT_DATA``
     (every key, not the projection) plus the economy scalars, so *any*
     engine-constant change flips one auditable field with zero
     enumeration to maintain. sha256, first 16 hex; None on failure.
+
+    ``UNIT_DATA`` carried each unit's sprite paths and colour until they
+    moved to ``ui.assets.UNIT_ASSETS``; they are merged back in here so
+    the hash stays comparable with runs recorded before the move.
     """
     try:
-        from reinforcetactics import constants as _c
+        from reinforcetactics import rules as _r
+        from reinforcetactics.ui.assets import UNIT_ASSETS
 
+        unit_data = {code: {**spec, **UNIT_ASSETS.get(code, {})} for code, spec in _r.UNIT_DATA.items()}
         blob = {
-            "STARTING_GOLD": getattr(_c, "STARTING_GOLD", None),
-            "HEADQUARTERS_INCOME": getattr(_c, "HEADQUARTERS_INCOME", None),
-            "BUILDING_INCOME": getattr(_c, "BUILDING_INCOME", None),
-            "TOWER_INCOME": getattr(_c, "TOWER_INCOME", None),
-            "UNIT_DATA": getattr(_c, "UNIT_DATA", {}),
+            "STARTING_GOLD": getattr(_r, "STARTING_GOLD", None),
+            "HEADQUARTERS_INCOME": getattr(_r, "HEADQUARTERS_INCOME", None),
+            "BUILDING_INCOME": getattr(_r, "BUILDING_INCOME", None),
+            "TOWER_INCOME": getattr(_r, "TOWER_INCOME", None),
+            "UNIT_DATA": unit_data,
         }
         canon = json.dumps(blob, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
@@ -251,7 +257,7 @@ def build_run_config(
             "created_at": datetime.now(UTC).isoformat(),
             "git": _git_meta(),
             "libraries": _lib_versions(),
-            # Engine *defaults* (constants.py as imported).
+            # Engine *defaults* (rules.py as imported).
             "engine_economy": _econ,
             "balance_profile_hash": _balance_profile_hash(_econ),
             # Sparse overlay from config + the resolved economy the env

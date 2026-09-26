@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import pygame
 
-from reinforcetactics.constants import MIN_MAP_SIZE
+from reinforcetactics.rules import MIN_MAP_SIZE
 from reinforcetactics.ui import theme
 from reinforcetactics.ui.menus.base import ScreenBootstrapMixin
 from reinforcetactics.ui.menus.game_setup.modes import mode_for_player_count

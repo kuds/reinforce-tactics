@@ -4,15 +4,19 @@ Tile class representing a single tile in the game grid.
 
 import logging
 
-from reinforcetactics.constants import (
+from reinforcetactics.rules import (
     BUILDING_MAX_HEALTH,
     HEADQUARTERS_MAX_HEALTH,
-    PLAYER_COLORS,
-    TILE_COLORS,
     TOWER_MAX_HEALTH,
+    TileType,
 )
 
 logger = logging.getLogger(__name__)
+
+# Tile codes a map may use; anything else loads as ocean.
+_VALID_TILE_CODES = frozenset(tile_type.value for tile_type in TileType)
+_IMPASSABLE_TILE_CODES = frozenset(tile_type.value for tile_type in TileType if not tile_type.is_walkable())
+_CAPTURABLE_TILE_CODES = frozenset(tile_type.value for tile_type in TileType if tile_type.is_capturable())
 
 
 class Tile:
@@ -44,8 +48,7 @@ class Tile:
         self.y = y
 
         # Validate tile type - if invalid, default to ocean (impassable)
-        valid_types = ["p", "w", "m", "f", "r", "b", "h", "t", "o"]
-        if self.type not in valid_types:
+        if self.type not in _VALID_TILE_CODES:
             logger.warning("Invalid tile type %r at (%d, %d), defaulting to ocean", self.type, x, y)
             self.type = "o"
 
@@ -71,39 +74,13 @@ class Tile:
             self.original_player = None
             self.regenerating = False
 
-    def get_color(self):
-        """Calculate the final color for this tile based on type and player ownership."""
-        return self.color_for(self.type, self.player)
-
-    @staticmethod
-    def color_for(tile_type, owner):
-        """The color of a ``tile_type`` tile owned by player ``owner`` (None = neutral).
-
-        Separate from :meth:`get_color` so the renderer can draw a structure
-        under fog of war with the owner its viewer knows, not the live one.
-        """
-        base_color = TILE_COLORS.get(tile_type, (0, 0, 0))
-
-        # For structures (buildings, HQ, towers), emphasize player color more
-        if owner and owner in PLAYER_COLORS:
-            player_color = PLAYER_COLORS[owner]
-
-            if tile_type in ["h", "b", "t"]:
-                # Structures: 70% player color, 30% base color
-                return tuple(min(int(base * 0.3 + player * 0.7), 255) for base, player in zip(base_color, player_color))
-            else:
-                # Regular terrain with owner: 60% base, 40% player
-                return tuple(min(int(base * 0.6 + player * 0.4), 255) for base, player in zip(base_color, player_color))
-
-        return base_color
-
     def is_walkable(self):
         """Check if this tile can be walked on."""
-        return self.type != "w" and self.type != "o"  # Water is not walkable
+        return self.type not in _IMPASSABLE_TILE_CODES  # Water and ocean
 
     def is_capturable(self):
         """Check if this tile can be captured."""
-        return self.type in ["t", "h", "b"]
+        return self.type in _CAPTURABLE_TILE_CODES
 
     def to_dict(self):
         """Convert tile to dictionary for serialization."""

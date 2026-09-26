@@ -36,7 +36,7 @@ Observation contract (1v1 only, agent-relative):
         channel  12   paralyzed_turns / (PARALYZE_DURATION + 1) (Mage
                       debuff; the counter, normalised to [0, 1]: it
                       starts at PARALYZE_DURATION + 1 when cast -- see
-                      constants.py -- so values are unchanged from when
+                      rules.py -- so values are unchanged from when
                       the constant was 3).
         channel  13   is_hasted (Sorcerer haste buff; 1.0 iff the unit has
                       an extra action queued this turn, 0.0 otherwise).
@@ -76,7 +76,7 @@ from typing import Any
 
 import numpy as np
 
-from reinforcetactics.constants import (
+from reinforcetactics.rules import (
     ALL_UNIT_TYPES,
     PARALYZE_DURATION,
     SORCERER_BUFF_DURATION,

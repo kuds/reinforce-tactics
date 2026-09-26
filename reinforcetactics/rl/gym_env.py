@@ -13,7 +13,6 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import NoopBot
 from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS
@@ -28,6 +27,7 @@ from reinforcetactics.rl.observation import (
     UNIT_COUNT_SCALE,
     build_observation,
 )
+from reinforcetactics.rules import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
 from reinforcetactics.utils.file_io import FileIO
 
 logger = logging.getLogger(__name__)
@@ -365,7 +365,7 @@ class StrategyGameEnv(gym.Env):
         gold_scale: float = GOLD_SCALE,  # tanh divisor for own_gold/opp_gold in global_features
         turn_scale: float = TURN_SCALE,  # tanh divisor for turn_number in global_features
         unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
-        engine_overrides: dict[str, Any] | None = None,  # sparse overlay over constants.py (balance sweeps)
+        engine_overrides: dict[str, Any] | None = None,  # sparse overlay over rules.py (balance sweeps)
     ):
         """
         Initialize environment.
@@ -706,7 +706,7 @@ class StrategyGameEnv(gym.Env):
             "captures": 0,
             # Per-structure capture breakdown so eval_results.json can
             # distinguish tower / building / HQ progression. Tile codes
-            # come from constants.TileType ("h"=HQ, "b"=Building, "t"=Tower).
+            # come from rules.TileType ("h"=HQ, "b"=Building, "t"=Tower).
             "captures_by_type": {"tower": 0, "building": 0, "hq": 0},
             "kills": 0,
             "attacks": 0,

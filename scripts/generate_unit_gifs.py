@@ -26,7 +26,7 @@ except ImportError:
     print("Error: Pillow is required. Install with: pip install Pillow")
     sys.exit(1)
 
-# Unit names matching the animation_path values in constants.py
+# Unit names matching the animation_path values in reinforcetactics/ui/assets.py
 UNIT_NAMES = [
     "warrior",
     "mage",

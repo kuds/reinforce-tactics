@@ -5,7 +5,8 @@ AI bots for computer opponents with support for all unit types.
 import random
 from typing import Any
 
-from reinforcetactics.constants import (
+from reinforcetactics.game.bot_base import BaseBot, BotUnitMixin
+from reinforcetactics.rules import (
     CHARGE_BONUS,
     CHARGE_MIN_DISTANCE,
     COUNTER_ATTACK_MULTIPLIER,
@@ -14,7 +15,6 @@ from reinforcetactics.constants import (
     ROGUE_FOREST_EVADE_BONUS,
     UNIT_DATA,
 )
-from reinforcetactics.game.bot_base import BaseBot, BotUnitMixin
 
 # Maximum recursion depth for haste-triggered re-actions
 MAX_RECURSION_DEPTH = 10

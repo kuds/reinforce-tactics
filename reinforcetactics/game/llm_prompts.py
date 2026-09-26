@@ -636,7 +636,7 @@ def get_dynamic_prompt(base_prompt_name: str, enabled_units: list) -> str:
     disabled_units_note = ""
     disabled = [u for u in all_units if u not in enabled_units]
     if disabled:
-        from reinforcetactics.constants import UNIT_DATA
+        from reinforcetactics.rules import UNIT_DATA
 
         disabled_names: list[str] = [str(UNIT_DATA[u]["name"]) for u in disabled]
         disabled_units_note = (

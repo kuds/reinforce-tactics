@@ -5,7 +5,7 @@ Core game mechanics including combat, movement, income, and structure capture.
 import random
 from collections.abc import Mapping
 
-from reinforcetactics.constants import (
+from reinforcetactics.rules import (
     BUILDING_INCOME,
     CHARGE_BONUS,
     CHARGE_MIN_DISTANCE,
@@ -616,7 +616,7 @@ class GameMechanics:
         # ticks it before that lost turn is played: +1 makes it cost exactly
         # PARALYZE_DURATION of the victim's own turns, and keeps it paralyzed
         # (no counter-attacks, no re-paralysis) until its first free turn
-        # starts. See the constant's comment in constants.py.
+        # starts. See the constant's comment in rules.py.
         target.paralyzed_turns = PARALYZE_DURATION + 1
         paralyzer.paralyze_cooldown = PARALYZE_COOLDOWN
         return True
@@ -805,7 +805,7 @@ class GameMechanics:
         counter is the duration itself (unchanged behaviour). A teammate's
         unit is buffed outside its owner's turn and would lose one covered
         turn to its owner's next turn start, so it is stored one higher --
-        the same rule a paralysis follows (see constants.PARALYZE_DURATION).
+        the same rule a paralysis follows (see rules.PARALYZE_DURATION).
         """
         return SORCERER_BUFF_DURATION + (0 if target.player == sorcerer.player else 1)
 

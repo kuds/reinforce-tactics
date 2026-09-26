@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from reinforcetactics.constants import MIN_MAP_SIZE, MIN_STRIP_SIZE
+from reinforcetactics.rules import MIN_MAP_SIZE, MIN_STRIP_SIZE
 
 
 class FileIO:

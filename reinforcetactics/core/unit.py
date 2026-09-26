@@ -5,7 +5,7 @@ Unit class representing a game unit.
 import heapq
 from collections import deque
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.rules import UNIT_DATA
 
 
 class Unit:
@@ -23,7 +23,7 @@ class Unit:
             player: Player number who owns this unit
             stats: Optional resolved stat block (cost/health/attack/defence/
                 movement) for this unit type. When ``None`` the global
-                :data:`reinforcetactics.constants.UNIT_DATA` entry is used,
+                :data:`reinforcetactics.rules.UNIT_DATA` entry is used,
                 preserving behaviour for direct/legacy callers. ``GameState``
                 passes its per-game resolved table so engine-override sweeps
                 (balance experiments) flow through here without mutating the
