@@ -4,6 +4,20 @@
 
 **Companion file:** [`REVIEW_full_2026-09-26_findings.md`](REVIEW_full_2026-09-26_findings.md) has all 351 verified findings, each with its location, impact and fix. IDs in this document (for example `core-1`) point there.
 
+## Status
+
+| Section | State | Where |
+|---|---|---|
+| §1 P0 (1.1–1.9) | **Done.** Each item implemented with regression tests that fail on the old code, adversarially reviewed, and merged. | 1.1 `57036e2`; 1.2 merge `8d3e114`; 1.3 `1b946be`; 1.4–1.5 `666e0c7`; 1.6–1.8 `64f3741`; 1.9 `0944446`; integration fixes `ac6f999` (GUI offers only legal actions) and `f462e62` (LLM quota/retry follow-ups) |
+| Core engine findings (`core-4`…`core-25`) | In progress | — |
+
+Behaviour changes from §1 that matter when comparing against older runs:
+
+- **Opponents no longer freeze.** A passing agent no longer freezes RandomBot / MixedBot(random), which changes every random-opponent curriculum stage. Archived results predate this.
+- **The engine refuses illegal actions.** It checks turn, action budget, paralysis, range, ownership and game over. `multi_discrete` policies now see those refusals as invalid actions.
+- **No more phantom counterattacks.** Out-of-range defenders no longer deal 1 damage back.
+- **Tests and scenarios set up units with `GameState.place_unit()`,** not `create_unit()`.
+
 ---
 
 ## How the review was done
