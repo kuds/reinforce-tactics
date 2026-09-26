@@ -532,10 +532,11 @@ class BotUnitMixin:
         it) keeps its tile rather than stepping sideways or back. Since
         ``get_reachable`` returns only legal destinations (friends' tiles
         and the unit's own excluded), comparing against nothing sent such a
-        unit away from its target, a quarter of SimpleBot's moves. Before,
-        the nearest candidate there was usually a friend's tile, which the
-        engine refused, so the unit stayed: this keeps that outcome without
-        the refused move. Every caller treats None as "no move".
+        unit away from its target: over a fifth of SimpleBot's moves ended
+        farther from it than they began. Before that, the nearest candidate
+        there was usually a friend's tile, which the engine refused, so the
+        unit stayed: this keeps that outcome without the refused move.
+        Every caller treats None as "no move".
         """
         reachable = self.get_reachable(unit)
 
