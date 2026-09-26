@@ -6,6 +6,8 @@ fog of war, everything the move revealed stayed visible, so a player could
 scout for free by moving and cancelling.
 """
 
+import json
+
 import numpy as np
 import pytest
 
@@ -115,3 +117,56 @@ class TestFogOfWar:
         assert not game.cancel_move(scout)
         assert (scout.x, scout.y) == (2, 5)
         assert game.cancel_move(striker)  # the latest move still can be
+
+
+class TestFogOfWarCancelLeavesNoTrace:
+    """Review follow-ups: what a cancelled move revealed must not survive through other state."""
+
+    @staticmethod
+    def _strip(extra=None):
+        grid = np.full((5, 20), "p", dtype=object)
+        grid[4, 0], grid[4, 19] = "h_1", "h_2"
+        for (x, y), code in (extra or {}).items():
+            grid[y, x] = code
+        return GameState(grid, num_players=2, fog_of_war=True, seed=1)
+
+    def test_another_units_attack_snapshot_forgets_what_the_move_revealed(self):
+        """Scout with A, move B (its snapshot sees E), cancel B then A: B must not attack E."""
+        game = self._strip()
+        scout = game.place_unit("W", 5, 0, 1)
+        striker = game.place_unit("W", 6, 2, 1)
+        enemy = game.place_unit("W", 10, 2, 2)
+        game.move_unit(scout, 8, 0)
+        assert game.is_position_visible(enemy.x, enemy.y, 1)
+        game.move_unit(striker, 6, 3)
+        assert game.cancel_move(striker) and game.cancel_move(scout)
+
+        assert game.move_unit(striker, 9, 2)
+        assert game.attack(striker, enemy)["damage"] == 0  # found by moving: not attackable
+
+    def test_a_cancel_after_save_and_load_still_takes_back_what_the_move_revealed(self):
+        game = self._strip({(11, 0): "b_2"})
+        scout = game.place_unit("W", 5, 0, 1)
+        game.place_unit("W", 18, 2, 2)
+        game.move_unit(scout, 8, 0)
+        assert game.known_structure(1, 11, 0) is not None
+
+        game = GameState.from_dict(json.loads(json.dumps(game.to_dict())))
+        scout = game.get_unit_at_position(8, 0)
+        assert game.cancel_move(scout)
+
+        assert game.known_structure(1, 11, 0) is None
+        assert not game.is_position_explored(11, 0, 1)
+
+    def test_without_a_saved_pre_move_view_the_cancel_is_refused(self):
+        """A save written before the pre-move view was saved can't restore it, so it can't cancel."""
+        game = self._strip()
+        scout = game.place_unit("W", 5, 0, 1)
+        game.move_unit(scout, 8, 0)
+        data = json.loads(json.dumps(game.to_dict()))
+        for unit_data in data["units"]:
+            unit_data.pop("pre_move_visibility", None)
+
+        game = GameState.from_dict(data)
+        scout = game.get_unit_at_position(8, 0)
+        assert not game.can_cancel_move(scout) and not game.cancel_move(scout)

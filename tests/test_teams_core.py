@@ -174,6 +174,23 @@ class TestAlliesInEveryRule:
         blocked.place_unit("W", 2, 1, 2)
         assert (4, 1) not in blocked.get_move_destinations(runner)
 
+    def test_under_fog_a_teammate_on_the_path_is_passed_not_an_ambush(self):
+        # A one-tile corridor through the teammate: the only way to (5, 5).
+        grid = np.full((12, 12), "w", dtype=object)
+        grid[:, 5] = "p"
+        grid[0, 5], grid[11, 5], grid[1, 5], grid[10, 5] = "h_1", "h_2", "h_3", "h_4"
+        game = GameState(grid, num_players=4, fog_of_war=True, teams={1: 1, 3: 1, 2: 2, 4: 2}, seed=1)
+        mover = game.place_unit("W", 5, 3, 1)
+        game.place_unit("W", 5, 4, 3)  # player 1's teammate, in the corridor
+        game.place_unit("W", 5, 9, 2)
+        game.place_unit("W", 5, 8, 4)
+
+        assert game.move_unit(mover, 5, 5)
+
+        assert (mover.x, mover.y) == (5, 5) and not mover.ambushed
+        assert "ambushed" not in game.action_history[-1]
+        assert game.can_cancel_move(mover)
+
     def test_a_teammates_structure_cannot_be_seized(self):
         game = GameState(_four_player_map({(5, 5): "b_3", (6, 6): "b_2"}), num_players=4)
         on_mate = game.place_unit("W", 5, 5, 1)

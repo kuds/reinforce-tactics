@@ -51,7 +51,8 @@ _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
 # 2: adds the fields ``from_dict`` needs to resume a game exactly
 # (winning_action_index, healing_totals, per-unit has_moved, fog-of-war
 # attack snapshot and ambushed flag, padding metadata, original_map_data, the
-# fog-of-war state).
+# fog-of-war state). Later additions, optional on load: per-unit
+# haste_refreshed and the fog-of-war pre-move view cancel_move restores.
 SAVE_FORMAT_VERSION = 2
 
 # Unit attribute types a search clone can share with the original unit.
@@ -1219,9 +1220,10 @@ class GameState:
 
         The ambush rule (fog of war only). The path (start tile first) was
         planned around the units the player can see, so a hidden unit may
-        stand on it. The first tile the unit cannot pass (a hidden enemy) or
-        end on (a hidden unit on the destination) stops it on the last tile
-        before that one where no unit stands, at worst its start tile.
+        stand on it. The first tile the unit cannot pass (a hidden enemy; a
+        teammate's unit, like its own, is passed through) or end on (a
+        hidden unit on the destination) stops it on the last tile before
+        that one where no unit stands, at worst its start tile.
 
         Returns:
             ``(stop_tile, blocker)``; ``blocker`` is None when the path is clear.
@@ -1232,7 +1234,9 @@ class GameState:
             blocker = self.get_unit_at_position(x, y)
             if blocker is None:
                 continue
-            if i < last and self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=unit):
+            if i < last and self.mechanics.can_move_to_position(
+                x, y, self.grid, self.units, moving_unit=unit, teams=self.teams
+            ):
                 continue  # a unit it may pass through
             for j in range(i - 1, 0, -1):
                 if self.get_unit_at_position(*path[j]) is None:
@@ -2194,7 +2198,9 @@ class GameState:
         is spent (see ``move_unit``). Under fog of war only the latest action
         can be cancelled: once another action followed the move, it may have
         used what the move revealed (another unit's attack on an enemy the
-        move uncovered), which no restore can take back.
+        move uncovered), which no restore can take back. It also needs the
+        side's view from before the move (``pre_move_visibility``) to put
+        back; a save written before that was saved has none.
         """
         if (
             self.game_over
@@ -2208,7 +2214,7 @@ class GameState:
         occupant = self.get_unit_at_position(unit.original_x, unit.original_y)
         if occupant is not None and occupant is not unit:
             return False
-        return not (self.fog_of_war and not self._move_is_latest_action(unit))
+        return not (self.fog_of_war and (unit.pre_move_visibility is None or not self._move_is_latest_action(unit)))
 
     def _move_is_latest_action(self, unit: Unit) -> bool:
         """Whether the last recorded action is ``unit``'s move to where it stands."""
@@ -2261,6 +2267,14 @@ class GameState:
         if self.fog_of_war:
             if snapshot is not None:
                 self.visibility_maps[unit.player] = snapshot
+            # Any attack snapshot taken since the move (by this unit or
+            # another one yet to move, e.g. one that moved and was cancelled
+            # in turn) may hold enemies only the move revealed; drop them so
+            # they are taken again from the restored view. Units that moved
+            # took theirs before this move, the latest action.
+            for other in self.units:
+                if other.player == unit.player and not other.has_moved:
+                    other.visible_enemies_at_action_start = None
             # Re-derive what the side sees from where its units stand now
             # (the unit back on its origin, any later mover where it went).
             # Without this the tiles it saw from where it moved to stayed
@@ -2472,6 +2486,19 @@ class GameState:
                 setattr(clone, name, copy.deepcopy(value))
         return clone
 
+    @staticmethod
+    def _unit_to_save_dict(unit: Unit) -> dict[str, Any]:
+        """``unit.to_dict()`` plus, under fog of war, the view ``cancel_move`` restores.
+
+        A unit whose move can still be cancelled carries its side's
+        visibility map from before the move, so a game saved at that point
+        can cancel it after loading, taking back what the move revealed.
+        """
+        data = unit.to_dict()
+        if unit.pre_move_visibility is not None:
+            data["pre_move_visibility"] = unit.pre_move_visibility.to_dict()
+        return data
+
     def to_dict(self) -> dict[str, Any]:
         """Convert game state to dictionary for serialization.
 
@@ -2548,7 +2575,7 @@ class GameState:
             # agree; this also carries ones passed as GameState(teams=...).
             "teams": self.teams,
             "eliminated_players": sorted(self.eliminated_players),
-            "units": [unit.to_dict() for unit in self.units],
+            "units": [self._unit_to_save_dict(unit) for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
             # Records are never edited once written, so a new list suffices.
             "action_history": list(self.action_history),
@@ -2970,6 +2997,10 @@ class GameState:
         game.units = []
         for unit_data in save_data.get("units", []):
             unit = Unit.from_dict(unit_data, stats=game.unit_data[unit_data["type"]])
+            if game.fog_of_war and unit_data.get("pre_move_visibility") is not None:
+                unit.pre_move_visibility = VisibilityMap.from_dict(
+                    unit_data["pre_move_visibility"], game.grid.width, game.grid.height, unit.player
+                )
             game.units.append(unit)
 
         # Restore tile states

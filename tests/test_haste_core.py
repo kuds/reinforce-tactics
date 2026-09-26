@@ -99,6 +99,21 @@ class TestEnginePath:
         assert game.end_unit_turn(warrior) is False
         assert not (warrior.can_move or warrior.can_attack)
 
+    def test_the_refresh_survives_a_save_and_load(self, game):
+        """end_unit_turn right after a haste-refreshed action keeps the extra action after a reload too."""
+        import json
+
+        sorcerer, warrior, enemy = _setup(game)
+        game.haste(sorcerer, warrior)
+        game.move_unit(warrior, 4, 4)
+        game.attack(warrior, enemy)
+
+        game = GameState.from_dict(json.loads(json.dumps(game.to_dict())))
+        warrior = game.get_unit_at_position(4, 4)
+
+        assert game.end_unit_turn(warrior) is True
+        assert warrior.can_move and warrior.can_attack
+
     def test_waiting_spends_the_first_action(self, game):
         """GUI Wait after a move: the haste refreshes the unit for a second move."""
         sorcerer, warrior, _enemy = _setup(game)

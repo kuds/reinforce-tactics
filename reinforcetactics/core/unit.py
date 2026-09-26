@@ -396,6 +396,9 @@ class Unit:
             ),
             # An ambushed move can't be cancelled, after a reload too.
             "ambushed": self.ambushed,
+            # Refreshed by haste this action: the GUI's end_unit_turn right
+            # after it keeps the extra action, after a reload too.
+            "haste_refreshed": self.haste_refreshed,
         }
 
     @classmethod
@@ -434,4 +437,5 @@ class Unit:
         snapshot = data.get("visible_enemies_at_action_start")
         unit.visible_enemies_at_action_start = {(x, y) for x, y in snapshot} if snapshot is not None else None
         unit.ambushed = data.get("ambushed", False)
+        unit.haste_refreshed = data.get("haste_refreshed", False)
         return unit
