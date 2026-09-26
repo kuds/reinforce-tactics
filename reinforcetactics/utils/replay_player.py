@@ -85,7 +85,9 @@ class ReplayPlayer:
         # Create initial game state with padded map
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(padded_map, num_players=self.game_info.get("num_players", 2))
+        self.game_state = GameState(
+            padded_map, num_players=self.game_info.get("num_players", 2), max_turns=self.game_info.get("max_turns")
+        )
 
         # Create renderer (replay mode hides End Turn and Resign buttons)
         from reinforcetactics.ui.renderer import Renderer
@@ -284,7 +286,9 @@ class ReplayPlayer:
         """
         from reinforcetactics.core.game_state import GameState
 
-        self.game_state = GameState(self.initial_map_data, num_players=self.game_info.get("num_players", 2))
+        self.game_state = GameState(
+            self.initial_map_data, num_players=self.game_info.get("num_players", 2), max_turns=self.game_info.get("max_turns")
+        )
         self.renderer.game_state = self.game_state
 
     def toggle_pause(self):

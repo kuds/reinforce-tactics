@@ -124,9 +124,8 @@ Automatically included if:
 #### Supported Models
 
 **OpenAI (Default: gpt-5-mini-2025-08-07)**
-- GPT-5: `gpt-5-mini-2025-08-07` (recommended for cost-effectiveness)
-- GPT-4o family: `gpt-4o`, `gpt-4o-mini`
-- O-series: `o1`, `o1-mini`, `o3-mini`
+- GPT-5.2: `gpt-5.2`
+- GPT-5: `gpt-5-2025-08-07`, `gpt-5-mini-2025-08-07` (recommended for cost-effectiveness), `gpt-5-nano-2025-08-07`
 - `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, the `-pro` models and the o-series only accept the default temperature, so OpenAIBot ignores `temperature` for them
 
 **Anthropic Claude (Default: claude-haiku-4-5-20251001)**
@@ -137,9 +136,8 @@ Automatically included if:
 - Don't use `claude-opus-4-1-20250805` (retired 2026-08-05) or the deprecated `claude-sonnet-4-20250514` / `claude-opus-4-20250514`
 
 **Google Gemini (Default: gemini-2.5-flash)**
-- Gemini 2.5: `gemini-2.5-flash` (recommended)
-- Gemini 2.0: `gemini-2.0-flash`
-- Gemini 1.5: `gemini-1.5-pro`, `gemini-1.5-flash`
+- Gemini 3 (preview): `gemini-3-pro-preview`, `gemini-3-flash-preview`
+- Gemini 2.5: `gemini-2.5-flash` (recommended), `gemini-2.5-pro`, `gemini-2.5-flash-lite`
 
 Configure API keys in `settings.json`:
 ```json

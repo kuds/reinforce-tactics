@@ -549,6 +549,33 @@ class TestReplayPadding:
             assert player.padding_offset_y == original_offset_y
 
 
+class TestReplayHonoursMaxTurns:
+    """ReplayPlayer built its GameState without max_turns, so a max-turns draw
+    never ended on playback and ran one extra start-of-turn heal phase."""
+
+    def test_max_turns_draw_ends_the_replay_game(self, simple_map):
+        import pandas as pd
+
+        from reinforcetactics.utils.replay_player import ReplayPlayer
+
+        game = GameState(simple_map, num_players=2, max_turns=2)
+        while not game.game_over:
+            game.end_turn()
+        assert game.end_reason == "max_turns_draw"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            replay_path = game.save_replay_to_file(filepath=str(Path(tmpdir) / "draw.json"))
+            replay_data = FileIO.load_replay(replay_path)
+            player = ReplayPlayer(replay_data, pd.DataFrame(replay_data["game_info"]["initial_map"]))
+
+            assert player.game_state.max_turns == 2
+            while player.current_action_index < len(player.actions):
+                player.step_forward()
+
+            assert player.game_state.game_over
+            assert player.game_state.end_reason == "max_turns_draw"
+
+
 class TestReplayVideoExport:
     """Test replay video export functionality."""
 

@@ -375,7 +375,7 @@ def record_replay_to_video(
     offset_x, offset_y = border, border
 
     # Create game state and headless renderer
-    game_state = GameState(bordered, num_players=game_info.get("num_players", 2))
+    game_state = GameState(bordered, num_players=game_info.get("num_players", 2), max_turns=game_info.get("max_turns"))
     renderer = Renderer(game_state, replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
     # Helper to translate coordinates
