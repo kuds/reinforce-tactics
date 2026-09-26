@@ -206,26 +206,30 @@ def sync_directories(
     credentials_file: str | None = None,
     client: Any = None,
     manifest: Manifest | None = None,
+    remote_prefixes: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     """Upload local output directories to ``base_uri/<dir>/``.
 
     Each entry in ``dirs`` is uploaded (if it exists locally) to a same-named
-    folder under ``base_uri``. Returns a mapping of directory name to the number
-    of files uploaded. A no-op (empty dict) when ``base_uri`` is falsy or the
-    ``google-cloud-storage`` dependency is missing — callers can treat this as
-    "ran locally, nothing synced". Pass a shared ``manifest`` across repeated
-    calls to skip unchanged files.
+    folder under ``base_uri``, or to ``remote_prefixes[dir]`` when given (``""``
+    uploads the directory's contents straight under ``base_uri``). Returns a
+    mapping of directory name to the number of files uploaded. A no-op (empty
+    dict) when ``base_uri`` is falsy or the ``google-cloud-storage`` dependency
+    is missing — callers can treat this as "ran locally, nothing synced". Pass
+    a shared ``manifest`` across repeated calls to skip unchanged files.
     """
     uploader = _make_uploader(base_uri, credentials_file, client)
     if uploader is None:
         return {}
 
+    prefixes = remote_prefixes or {}
     results: dict[str, int] = {}
     for name in dirs:
         local_dir = os.path.join(root, name)
         if not os.path.isdir(local_dir):
             continue
-        count = uploader.upload_directory(local_dir, remote_prefix=name, manifest=manifest)
+        remote_prefix = prefixes.get(name, name)
+        count = uploader.upload_directory(local_dir, remote_prefix=remote_prefix, manifest=manifest)
         if count:
             results[name] = count
     return results

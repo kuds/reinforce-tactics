@@ -20,8 +20,19 @@ Everything is written under ``--output-dir`` (default
 
 When a GCS destination is configured (``--gcs-output gs://...`` or, on Vertex,
 the ``GCS_OUTPUT_URI`` / ``AIP_MODEL_DIR`` env), the whole output directory is
-uploaded there at the end — including on a stall — so the charts and videos
-survive the ephemeral job.
+uploaded there at the end — including on a stall, a failure, or a SIGTERM
+(Vertex cancel/preemption, ``docker stop``) — so the charts and videos survive
+the ephemeral job.
+
+Exit codes (so a scheduler can tell the outcomes apart):
+
+    0    every curriculum stage promoted
+    1    failure (an exception, or a bad --config / --set value)
+    2    command-line usage error (argparse)
+    3    the curriculum stalled: a stage used its budget without promoting.
+         Partial artifacts are still post-processed and uploaded.
+    130  interrupted with Ctrl-C (SIGINT)
+    143  terminated by SIGTERM; the output directory was uploaded first
 
 Examples:
     python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --device cuda
@@ -31,9 +42,12 @@ Examples:
 
 import argparse
 import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
 # Force headless rendering BEFORE anything imports pygame or matplotlib. SDL and
 # matplotlib both pick their backend at import time, so these must be set first.
@@ -42,6 +56,13 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 # Make the package importable when run as a script from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+# Exit codes; see the module docstring. 130/143 follow the shell's 128+signal
+# convention, which scripts/cloud/vertex_train.py also uses when it reports a
+# child killed by a signal.
+EXIT_OK = 0
+EXIT_STALLED = 3
+EXIT_TERMINATED = 128 + signal.SIGTERM
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -353,8 +374,27 @@ def _maybe_upload(output_dir: Path, args) -> None:
     print(f"Uploaded {count} file(s) to {dest}" if count else f"No files uploaded to {dest}")
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> NoReturn:
+    """Turn SIGTERM into ``SystemExit`` so ``main``'s ``finally`` upload runs.
+
+    Python's default SIGTERM action ends the process on the spot, skipping
+    every ``finally`` block, so a cancelled or preempted Vertex job
+    (vertex_train.py forwards Vertex's SIGTERM here) lost its whole run
+    directory. Raising unwinds the stack instead. The handler disarms itself
+    first: a repeated SIGTERM must not abort the upload it is waiting for.
+    SIGKILL at the end of the grace period still ends the process, which is
+    why vertex_train.py also syncs the run directory periodically.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    print(f"\n🛑 Received signal {signum}; stopping and uploading the output directory.", flush=True)
+    raise SystemExit(EXIT_TERMINATED)
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Installed first so a SIGTERM at any point after startup reaches the
+    # finally block below instead of killing the process outright.
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    args = build_parser().parse_args(argv)
 
     # Heavy imports are deferred until after arg parsing so --help works without
     # torch / sb3 / the rest of the package installed.
@@ -392,6 +432,7 @@ def main() -> int:
     print(f"Output dir: {output_dir}")
     _print_stage_table(cfg)
 
+    exit_code = EXIT_OK
     try:
         if args.build_bc:
             bc_model, bc_dataset, bc_stats = _bc_build(cfg, output_dir, args)
@@ -404,6 +445,10 @@ def main() -> int:
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()
+            # A stall used to exit 0, so schedulers (and Vertex, which marks a
+            # job failed only on a non-zero exit) recorded it as a success.
+            # The partial result is still post-processed and uploaded below.
+            exit_code = EXIT_STALLED
 
         if result is not None:
             stage_checkpoints = _snapshot_stage_checkpoints(result, cfg, output_dir)
@@ -413,11 +458,16 @@ def main() -> int:
             video_summary = [] if args.skip_videos else _record_videos(result, cfg, output_dir, stage_checkpoints)
             if not args.skip_plots:
                 _individual_game_stats(video_summary, charts_dir, plt)
-            print(f"\n✅ Done. Final model: {result.get('final_model_path')}")
+            if exit_code == EXIT_STALLED:
+                print(f"\n⚠️  Stalled (exit code {EXIT_STALLED}). Final model: {result.get('final_model_path')}")
+            else:
+                print(f"\n✅ Done. Final model: {result.get('final_model_path')}")
     finally:
+        # Runs on success, on a stall, when an exception propagates (the
+        # interpreter then exits 1), and on SIGTERM via _exit_on_sigterm.
         _maybe_upload(output_dir, args)
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

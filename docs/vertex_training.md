@@ -8,9 +8,12 @@ days), streams logs, and tears the machine down afterwards.
 
 Because that machine is ephemeral, the image's entrypoint
 ([`scripts/cloud/vertex_train.py`](../scripts/cloud/vertex_train.py)) uploads the
-output directories (`models/`, `checkpoints/`, `tensorboard/`, `logs/`) to Google
-Cloud Storage **periodically and on exit**, so your trained model survives the
-job ending (or being preempted/cancelled).
+output directories (`models/`, `checkpoints/`, `tensorboard/`, `logs/`, and the
+curriculum runs under `benchmarks/bootstrap/`) to Google Cloud Storage
+**periodically and on exit**, so your trained model survives the job ending (or
+being preempted/cancelled). A preempted or cancelled job keeps everything up to
+its last periodic sync (every `SYNC_INTERVAL` seconds) plus whatever the final
+upload manages in Vertex's shutdown grace period.
 
 > Prefer the managed approach below over the legacy GCE-VM launcher
 > (`scripts/gcp_launch.sh`), which manages raw Compute Engine instances by hand.
@@ -116,14 +119,35 @@ The script writes everything under one run directory
 (`benchmarks/bootstrap/<timestamp>/` by default) — `charts/`, `videos/`,
 `checkpoints/`, the config snapshot, `bootstrap_results.csv`, `final_model.zip` —
 and uploads that whole tree to `gs://BUCKET/jobs/<JOB_NAME>/<timestamp>/` at the
-end (including on a stall). Useful flags: `--skip-videos`, `--skip-plots`,
-`--sanity-episodes N`, `--set dotted.key=value` (config overrides), `--gcs-output gs://...`
+end: on success, on a stall, on an error, and on the `SIGTERM` Vertex sends when
+a job is cancelled or preempted. While the run is in progress, the entrypoint's
+periodic sync mirrors `benchmarks/bootstrap/` to that same location. A custom
+`--output-dir` outside the synced directories needs `SYNC_DIRS` (see the table
+below), or only the final upload covers it.
+
+Useful flags: `--skip-videos`, `--skip-plots`, `--sanity-episodes N`,
+`--set dotted.key=value` (config overrides), `--gcs-output gs://...`
 (explicit destination). Run `python3 scripts/train/train_bootstrap.py --help`
 for the full list. Fetch the results with:
 
 ```bash
 gcloud storage cp -r gs://YOUR_BUCKET/jobs/JOB_NAME ./bootstrap_run
 ```
+
+#### Exit codes
+
+`train_bootstrap.py` exits with a code that says how the run ended. Vertex marks
+a job **Failed** for any non-zero exit, so a stalled curriculum no longer shows
+up as a success; the entrypoint passes the code through unchanged.
+
+| Code | Meaning | Artifacts |
+|---|---|---|
+| `0` | Every curriculum stage promoted | Complete, uploaded |
+| `1` | Failure: an exception during the run (see the traceback in the log), or an invalid `--config` / `--set` value at startup | Whatever the run wrote, uploaded (nothing for a startup error) |
+| `2` | Command-line usage error (argparse) | None; the run never started |
+| `3` | **Stalled**: a stage used its `max_timesteps` budget without reaching its promotion win rate | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
+| `130` | Interrupted with Ctrl-C (`SIGINT`) | Uploaded |
+| `143` | Terminated by `SIGTERM` (Vertex cancel/preemption, `docker stop`) | Uploaded before exit, within the grace period |
 
 ### Configuration (environment variables)
 
@@ -139,6 +163,7 @@ gcloud storage cp -r gs://YOUR_BUCKET/jobs/JOB_NAME ./bootstrap_run
 | `ACCELERATOR_COUNT` | `1` | GPUs per replica (`0` = CPU-only) |
 | `REPLICA_COUNT` | `1` | Worker replicas |
 | `SYNC_INTERVAL` | `300` | Seconds between GCS syncs (`0` = only on exit) |
+| `SYNC_DIRS` | *(unset)* | Extra local dirs to sync, comma-separated: `dir` goes to `gs://.../jobs/<name>/dir/`, `dir=prefix` to `.../prefix/` (sets `GCS_SYNC_DIRS` in the container) |
 | `SERVICE_ACCOUNT` | *(unset)* | Run the job as this service account |
 | `WANDB_API_KEY` | *(unset)* | Passed through to the container when set |
 
@@ -181,9 +206,16 @@ The wrapper:
    locally — the same image works on your laptop.
 2. Runs the training command as a child process.
 3. Every `GCS_SYNC_INTERVAL` seconds, uploads `models/`, `checkpoints/`,
-   `tensorboard/`, and `logs/` to `gs://.../jobs/<name>/<dir>/`.
+   `tensorboard/`, and `logs/` to `gs://.../jobs/<name>/<dir>/`, each run
+   directory under `benchmarks/bootstrap/` to `gs://.../jobs/<name>/<run>/` (the
+   same place `train_bootstrap.py`'s own final upload writes it), and any
+   `GCS_SYNC_DIRS` entries. Unchanged files are skipped.
 4. Forwards `SIGTERM`/`SIGINT` (Vertex sends `SIGTERM` on cancel/preemption) to
    the trainer so it can checkpoint, then performs a **final sync** before exit.
+   `train_bootstrap.py` turns the `SIGTERM` into a clean exit (code 143) that
+   uploads its run directory first.
+5. Exits with the trainer's exit code, or `128 + N` when the trainer was killed by
+   signal `N`.
 
 Uploads are best-effort: a transient storage hiccup is logged, never fatal.
 
@@ -206,6 +238,7 @@ gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
 |---|---|
 | `google-cloud-storage not installed; skipping GCS sync` | The image wasn't built with the `[cloud]` extra. Rebuild with `build_image.sh` (the `Dockerfile` installs it). |
 | Job runs but bucket stays empty | Service account lacks `storage.objectAdmin` on the bucket (see IAM above). |
+| Bootstrap job marked *Failed* with exit code 3 | The curriculum stalled (see [Exit codes](#exit-codes)); the partial run is in the bucket. |
 | `Quota exceeded` on submit | Request GPU quota for the region, or set `ACCELERATOR_COUNT=0` for a CPU smoke test. |
 | Cloud Build times out | Raise `BUILD_TIMEOUT` (e.g. `BUILD_TIMEOUT=7200s`). |
 | Want a shell in the image | `docker run --entrypoint bash -it IMAGE_URI` (bypasses the wrapper). |
