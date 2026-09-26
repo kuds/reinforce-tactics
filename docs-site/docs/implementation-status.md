@@ -97,9 +97,13 @@ from reinforcetactics.utils.file_io import FileIO
 map_data = FileIO.load_map("maps/1v1/beginner.csv")
 game = GameState(map_data)
 
-# Create some units
-game.create_unit("W", 5, 5, player=1)
-game.create_unit("M", 6, 5, player=1)
+# Buy a Warrior on one of player 1's buildings. create_unit is a game
+# action: it returns None unless the purchase is legal (the player's own
+# empty building, on their turn, with enough gold).
+game.create_unit("W", 1, 0, player=1)
+
+# Set up a unit anywhere, free and unrecorded (tests and scenarios)
+game.place_unit("M", 3, 1, player=1)
 
 print(f"Player 1 units: {len([u for u in game.units if u.player == 1])}")
 print(f"Player 1 gold: ${game.player_gold[1]}")

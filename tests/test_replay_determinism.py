@@ -445,12 +445,17 @@ def test_dead_unit_cannot_move(tmp_path):
     g = _make_game()
     attacker = _place(g, "W", 2, 1, 1)
     defender = _place(g, "W", 2, 2, 2)
+    # A second player-1 unit keeps the game running after the counter-kill,
+    # so the refusal below comes from the stale-reference guard and not
+    # from the engine's game-over gate (checked first).
+    _place(g, "W", 1, 4, 1)
     _enable(attacker)
     _enable(defender)
     attacker.health = 1  # guarantees counter-kill
 
     g.attack(attacker, defender)
     assert attacker not in g.units, "expected attacker to be counter-killed"
+    assert not g.game_over
 
     log_len_before = len(g.action_history)
     moved = g.move_unit(attacker, 3, 1)  # bot still holds stale ref
@@ -877,3 +882,164 @@ def test_haste_double_move_replay_through_v3(tmp_path):
         f"{replayed_knight.y}) instead of (3, 1). Pre-fix this used to be (3, 3) because "
         f"the replay player rejected the hasted second move on can_move=False."
     )
+
+
+def _unit_by_id(game: GameState, unit_id: int):
+    return next(u for u in game.units if u.unit_id == unit_id)
+
+
+def test_hasted_mage_attack_then_paralyze_replays_through_v3(tmp_path):
+    """A hasted unit's second action survives the v3 round trip when it is an
+    ability the replay re-runs through the engine.
+
+    v3 applies the recorded attack outcome directly, which spends the Mage's
+    action. The haste refresh that re-armed it in the original game
+    (``end_unit_turn``) is not recorded, and paralyze is re-executed by the
+    engine, which refuses a unit whose action is spent -- so the replay
+    dropped the paralyze and the Knight was never paralyzed.
+    """
+    g = _make_game()
+    sorcerer = _place(g, "S", 2, 2, 1)
+    mage = _place(g, "M", 3, 3, 1)
+    warrior = _place(g, "W", 4, 2, 2)  # 2 tiles from the Mage: no counter
+    knight = _place(g, "K", 2, 4, 2)  # 2 tiles from the Mage
+
+    assert g.haste(sorcerer, mage)
+    assert g.attack(mage, warrior)["damage"] > 0
+    assert g.end_unit_turn(mage) is True  # haste consumed: the Mage acts again
+    assert g.paralyze(mage, knight)
+    assert knight.paralyzed_turns > 0
+
+    path = _save_replay(g, tmp_path)
+    replay_game, _ = _replay(path)
+
+    replayed_knight = _unit_by_id(replay_game, knight.unit_id)
+    replayed_mage = _unit_by_id(replay_game, mage.unit_id)
+    assert replayed_knight.paralyzed_turns == knight.paralyzed_turns
+    assert replayed_mage.paralyze_cooldown == mage.paralyze_cooldown
+    assert _unit_by_id(replay_game, warrior.unit_id).health == warrior.health
+    _assert_replay_matches(g, path)
+
+
+def test_hasted_cleric_heal_then_cure_replays_through_v3(tmp_path):
+    """Same gap for a hasted Cleric: v3 applies the heal outcome directly,
+    then re-runs the cure through the engine after the unrecorded haste
+    refresh. The paralysis being cured is inflicted in-game (player 2's
+    Mage) so the replay reproduces it from the action log."""
+    g = _make_game()
+    sorcerer = _place(g, "S", 2, 2, 1)
+    cleric = _place(g, "C", 1, 3, 1)
+    wounded = _place(g, "W", 1, 4, 1)
+    frozen = _place(g, "W", 2, 3, 1)
+    enemy_mage = _place(g, "M", 3, 3, 2)
+    _place(g, "W", 4, 1, 2)
+
+    g.end_turn()  # player 2
+    assert g.paralyze(enemy_mage, frozen)
+    g.end_turn()  # player 1
+    assert frozen.is_paralyzed()
+
+    # Not reproduced on replay, and need not be: v3 applies the heal's
+    # recorded HP-after directly.
+    wounded.health = 5
+    assert g.haste(sorcerer, cleric)
+    assert g.heal(cleric, wounded) > 0
+    assert g.end_unit_turn(cleric) is True
+    assert g.cure(cleric, frozen)
+    assert not frozen.is_paralyzed()
+
+    path = _save_replay(g, tmp_path)
+    replay_game, _ = _replay(path)
+
+    replayed_frozen = _unit_by_id(replay_game, frozen.unit_id)
+    assert replayed_frozen.paralyzed_turns == 0
+    assert replayed_frozen.can_move and replayed_frozen.can_attack
+    assert _unit_by_id(replay_game, wounded.unit_id).health == wounded.health
+    _assert_replay_matches(g, path)
+
+
+def test_hasted_seize_then_walk_off_resets_the_structure_on_v3_replay(tmp_path):
+    """The unrecorded haste refresh also restarts the unit's move
+    bookkeeping, which end_turn reads to reset a structure its unit seized
+    and walked off. v3 applies moves and seizes directly, so the replay has
+    to reproduce the refresh there too or the building keeps its damage."""
+    g = _make_game()
+    sorcerer = _place(g, "S", 3, 3, 1)
+    warrior = _place(g, "W", 4, 2, 1)
+    _place(g, "W", 1, 4, 2)  # keeps the game running
+
+    assert g.haste(sorcerer, warrior)
+    assert g.move_unit(warrior, 4, 3)  # onto player 2's building
+    assert "damage" in g.seize(warrior)
+    building = g.grid.get_tile(4, 3)
+    assert building.health < building.max_health
+    assert g.end_unit_turn(warrior) is True
+    assert g.move_unit(warrior, 4, 2)  # and off it again
+    g.end_turn()
+    assert building.health == building.max_health  # vacated: reset
+
+    path = _save_replay(g, tmp_path)
+    replay_game, _ = _replay(path)
+    replayed_building = replay_game.grid.get_tile(4, 3)
+    assert (replayed_building.health, replayed_building.player) == (building.health, building.player)
+    _assert_replay_matches(g, path)
+
+
+def test_rehaste_after_consumed_haste_replays_through_v3(tmp_path):
+    """Haste is refused on a unit that is still hasted. Once the Warrior's
+    first haste is consumed (unrecorded ``end_unit_turn``), a second
+    Sorcerer may haste it again; the replay must consume the stale haste
+    too, or it refuses the second haste and the cooldown diverges."""
+    g = _make_game()
+    first = _place(g, "S", 4, 2, 1)
+    second = _place(g, "S", 1, 3, 1)
+    warrior = _place(g, "W", 3, 3, 1)
+    enemy = _place(g, "W", 1, 4, 2)
+
+    assert g.haste(first, warrior)
+    assert g.move_unit(warrior, 2, 4)  # next to the enemy
+    assert g.attack(warrior, enemy)["damage"] > 0
+    assert g.end_unit_turn(warrior) is True  # first haste consumed
+    assert g.haste(second, warrior)
+    assert second.haste_cooldown > 0
+
+    path = _save_replay(g, tmp_path)
+    replay_game, _ = _replay(path)
+    assert _unit_by_id(replay_game, second.unit_id).haste_cooldown == second.haste_cooldown
+    assert _unit_by_id(replay_game, warrior.unit_id).is_hasted is True
+    _assert_replay_matches(g, path)
+
+
+def test_cancelled_move_does_not_spend_the_haste_on_v3_replay(tmp_path):
+    """``cancel_move`` is not recorded either: it re-arms the move but keeps
+    the haste. The replay tells it apart from a haste refresh by where the
+    next recorded move starts (the cancelled unit is back on its origin,
+    the replayed one still stands on the cancelled destination), so the
+    haste stays available for the Cleric's second action."""
+    g = _make_game()
+    sorcerer = _place(g, "S", 2, 2, 1)
+    cleric = _place(g, "C", 1, 3, 1)
+    wounded = _place(g, "W", 1, 4, 1)
+    frozen = _place(g, "W", 2, 3, 1)
+    enemy_mage = _place(g, "M", 3, 3, 2)
+    _place(g, "W", 4, 1, 2)
+
+    g.end_turn()  # player 2
+    assert g.paralyze(enemy_mage, frozen)
+    g.end_turn()  # player 1
+
+    wounded.health = 5
+    assert g.haste(sorcerer, cleric)
+    assert g.move_unit(cleric, 2, 4)
+    assert g.cancel_move(cleric)  # back to (1, 3), still hasted
+    assert g.move_unit(cleric, 2, 4)
+    assert g.heal(cleric, wounded) > 0
+    assert g.end_unit_turn(cleric) is True
+    assert g.cure(cleric, frozen)
+
+    path = _save_replay(g, tmp_path)
+    replay_game, _ = _replay(path)
+    assert _unit_by_id(replay_game, frozen.unit_id).paralyzed_turns == 0
+    replayed_cleric = _unit_by_id(replay_game, cleric.unit_id)
+    assert (replayed_cleric.x, replayed_cleric.y) == (2, 4)
+    _assert_replay_matches(g, path)

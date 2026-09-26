@@ -1022,11 +1022,10 @@ class MediumBot(BotUnitMixin, BaseBot):
         for attacker in attackers:
             if self.game_state.game_over:
                 return
-            # Skip attackers killed by an earlier counterattack -- the
-            # engine doesn't refuse ``attack()`` on a dead unit, so a
-            # stale reference here would land a phantom hit live but
-            # no-op on replay (replay looks up the attacker by position
-            # and finds nothing), making the rebuilt state diverge.
+            # Skip attackers killed by an earlier counterattack. The
+            # engine refuses ``attack()`` from a unit no longer in play,
+            # so this only saves a wasted call (and the move-then-attack
+            # path below from planning around a corpse).
             if attacker.health <= 0:
                 continue
             if not (attacker.can_move or attacker.can_attack):

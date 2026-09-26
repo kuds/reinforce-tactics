@@ -352,27 +352,20 @@ class TestReplayActionHandlers:
         cleric = game.place_unit("C", 1, 1, player=1)
         ally = game.place_unit("W", 2, 1, player=1)
 
-        if cleric and ally:
-            # Paralyze the ally first
-            ally.paralysis_turns = 2
-            cure_result = game.cure(cleric, ally)
+        # Paralyze the ally first. This used to set a misspelled
+        # ``paralysis_turns``, so the cure was always refused and the test
+        # fell back to recording a cure by hand, checking nothing.
+        ally.paralyzed_turns = 2
+        assert game.cure(cleric, ally)
 
-            # Only check if cure was successful
-            if cure_result:
-                # Check that action was recorded
-                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
-                assert len(cure_actions) > 0
+        # Check that action was recorded
+        cure_actions = [a for a in game.action_history if a["type"] == "cure"]
+        assert len(cure_actions) == 1
 
-                # Verify action structure
-                action = cure_actions[0]
-                assert "curer_pos" in action
-                assert "target_pos" in action
-            else:
-                # If cure didn't work, at least verify the structure would be correct
-                # by recording action manually
-                game.record_action("cure", curer_pos=(1, 1), target_pos=(2, 1))
-                cure_actions = [a for a in game.action_history if a["type"] == "cure"]
-                assert len(cure_actions) > 0
+        # Verify action structure
+        action = cure_actions[0]
+        assert "curer_pos" in action
+        assert "target_pos" in action
 
     def test_resign_action_handler(self, simple_map):
         """Test that resign actions are handled in replay."""

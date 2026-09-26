@@ -694,12 +694,29 @@ class TestRuleBotsCheckTheMove:
         "bot_cls,method",
         [(SimpleBot, "purchase_units"), (MediumBot, "purchase_units"), (AdvancedBot, "purchase_units_enhanced")],
     )
-    def test_purchase_loop_stops_when_the_engine_refuses(self, bot_cls, method):
+    def test_purchase_loop_stops_when_the_engine_refuses(self, bot_cls, method, monkeypatch):
         """Out of turn the engine refuses every create; the purchase loop,
         which re-reads an unchanged legal list, must stop instead of spin."""
         gs = _game()  # player 1's turn
         bot = bot_cls(gs, player=2)
+
+        # A regression would spin forever, and nothing bounds a test's run
+        # time here (no pytest-timeout), so fail fast instead of hanging CI.
+        # pytest.fail raises a BaseException, which a bot's
+        # ``except Exception`` cannot swallow.
+        attempts = 0
+        create_unit = gs.create_unit
+
+        def counting_create_unit(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts > 20:
+                pytest.fail(f"{bot_cls.__name__}.{method} kept retrying a refused create_unit")
+            return create_unit(*args, **kwargs)
+
+        monkeypatch.setattr(gs, "create_unit", counting_create_unit)
         getattr(bot, method)()
+        assert attempts >= 1  # the loop did try to buy
         assert gs.units == []
         assert gs.player_gold[2] == 5000
 
@@ -764,3 +781,30 @@ def test_replay_warns_when_the_engine_refuses_a_recorded_action(caplog):
     assert len(refused) == 1
     hq = gs.grid.get_tile(9, 9)
     assert hq.health == hq.max_health - 15 and hq.player == 2
+
+
+def test_v1_replay_reproduces_a_hasted_units_second_attack(caplog):
+    """A v1 replay re-runs every attack through the engine. The haste
+    refresh between a hasted unit's two attacks (``end_unit_turn``) is not
+    in the log, so the replay has to reproduce it rather than have the
+    engine refuse the second attack as a spent unit's; a unit that is not
+    hasted still gets its repeat refused (see the test above)."""
+    gs = _game()
+    sorcerer = gs.place_unit("S", 4, 3, 1)
+    mage = gs.place_unit("M", 4, 4, 1)
+    first = gs.place_unit("W", 4, 6, 2)
+    second = gs.place_unit("W", 6, 4, 2)
+    initial = [(u.type, u.x, u.y, u.player) for u in gs.units]
+    assert gs.haste(sorcerer, mage)
+    assert gs.attack(mage, first)["damage"] > 0
+    assert gs.end_unit_turn(mage) is True
+    assert gs.attack(mage, second)["damage"] > 0
+
+    replay = _game()
+    for unit_type, x, y, player in initial:
+        replay.place_unit(unit_type, x, y, player)
+    with caplog.at_level(logging.WARNING, logger="reinforcetactics.utils.replay_actions"):
+        for action in gs.action_history:
+            execute_replay_action(replay, dict(action), lambda x, y: (x, y), schema_version=1)
+    assert not [r for r in caplog.records if "refused" in r.getMessage()]
+    assert sorted((u.x, u.y, u.health) for u in replay.units) == sorted((u.x, u.y, u.health) for u in gs.units)
