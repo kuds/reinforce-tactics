@@ -21,8 +21,10 @@ Usage:
     # Mixed training (half the workers against SimpleBot, half self-play)
     python train_self_play.py --mode mixed --bot-ratio 0.5
 
-    # From a config file (env / ppo / self_play / eval sections are honoured)
-    python train_self_play.py --config configs/self_play/self_play.yaml
+    # From a config file (env / ppo / self_play / eval / logging sections are
+    # honoured; fields this script does not read are reported, and are an
+    # error with --strict)
+    python train_self_play.py --config configs/self_play/self_play.yaml --strict
 
     # Resume from checkpoint
     python train_self_play.py --resume-from logs/self_play_xxx/checkpoints/model_100000.zip
@@ -45,7 +47,14 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.rl.callbacks import AtomicCheckpointCallback, SaveModelAtomicallyCallback, save_model_atomically
+from reinforcetactics.rl.gym_env import (
+    FLAT_ACTION_VERSIONS,
+    flat_action_version_of,
+    resolve_flat_action_version,
+    stamp_flat_action_version,
+)
 from reinforcetactics.rl.masking import make_maskable_env
 
 # Local imports
@@ -61,7 +70,15 @@ logger = logging.getLogger(__name__)
 
 
 def build_env_kwargs(args) -> dict[str, Any]:
-    """StrategyGameEnv parameters shared by the training and evaluation envs."""
+    """StrategyGameEnv parameters shared by the training and evaluation envs.
+
+    Every EnvConfig field self-play honours. ``engine_overrides``, the
+    observation scales and ``fog_of_war`` used to be dropped between the
+    config and the env, so a config's balance overlay or fog of war trained
+    the default game without a word. ``flat_action_version`` is resolved
+    here: an explicit value wins, else a ``--resume-from`` flat_discrete
+    checkpoint keeps the table it was trained on, else the latest.
+    """
     enabled_units = args.enabled_units
     if isinstance(enabled_units, str):
         enabled_units = [u.strip() for u in enabled_units.split(",") if u.strip()]
@@ -79,6 +96,16 @@ def build_env_kwargs(args) -> dict[str, Any]:
         # trainer's own discount.
         "gamma": args.gamma,
         "pad_to_size": pad_to_size,
+        "fog_of_war": args.fog_of_war,
+        "engine_overrides": args.engine_overrides,
+        "gold_scale": args.gold_scale,
+        "turn_scale": args.turn_scale,
+        "unit_count_scale": args.unit_count_scale,
+        "flat_action_version": resolve_flat_action_version(
+            args.flat_action_version,
+            action_space_type=args.action_space_type,
+            checkpoint_path=getattr(args, "resume_from", None),
+        ),
     }
 
 
@@ -138,6 +165,8 @@ def train_self_play(args) -> Path:
         swap_players=args.swap_players,
         bot_ratio=bot_ratio,
         bot_opponent=args.bot_opponent,
+        bot_opponent_kwargs=args.bot_opponent_kwargs,
+        latest_opponent_prob=args.latest_opponent_prob,
         **env_kwargs,
     )
 
@@ -165,7 +194,22 @@ def train_self_play(args) -> Path:
     if args.resume_from:
         logger.info("Resuming from checkpoint: %s", args.resume_from)
         model = MaskablePPO.load(args.resume_from, env=vec_env, device=args.device)
+        # The loaded model keeps the checkpoint's action space. If the envs
+        # now use another flat_discrete table (an explicit
+        # --flat-action-version), record that on the model so the
+        # checkpoints saved from here on decode (ModelBot) with the table
+        # the policy actually plays.
+        env_version = env_kwargs["flat_action_version"]
+        if args.action_space_type == "flat_discrete" and flat_action_version_of(model) != env_version:
+            logger.info(
+                "Checkpoint was trained on flat_action_version %d; continuing on version %d",
+                flat_action_version_of(model),
+                env_version,
+            )
+            stamp_flat_action_version(model, env_version)
     else:
+        from reinforcetactics.rl.bootstrap import _resolve_policy_kwargs
+
         model = MaskablePPO(
             "MultiInputPolicy",
             vec_env,
@@ -182,6 +226,9 @@ def train_self_play(args) -> Path:
             verbose=1,
             tensorboard_log=str(log_dir / "tensorboard"),
             device=args.device,
+            # ppo.policy_kwargs (net_arch, features extractor); dotted class
+            # names resolved the way the curriculum runner resolves them.
+            policy_kwargs=_resolve_policy_kwargs(args.policy_kwargs),
         )
 
     # Create callbacks
@@ -277,11 +324,20 @@ _ARG_TO_CONFIG_PATH = {
     "map_file": "env.map_file",
     "action_space_type": "env.action_space_type",
     "max_flat_actions": "env.max_flat_actions",
+    "flat_action_version": "env.flat_action_version",
     "max_turns": "env.max_turns",
     "max_actions_per_turn": "env.max_actions_per_turn",
     "reward_config": "env.reward_config",
     "pad_to_size": "env.pad_to_size",
     "enabled_units": "env.enabled_units",
+    "fog_of_war": "env.fog_of_war",
+    "engine_overrides": "env.engine_overrides",
+    "gold_scale": "env.gold_scale",
+    "turn_scale": "env.turn_scale",
+    "unit_count_scale": "env.unit_count_scale",
+    # The scripted opponent of the bot workers in mixed mode.
+    "bot_opponent": "env.opponent",
+    "bot_opponent_kwargs": "env.opponent_kwargs",
     "subprocess": "env.use_subprocess",
     "max_steps": "env.max_steps",
     "n_envs": "env.n_envs",
@@ -298,6 +354,7 @@ _ARG_TO_CONFIG_PATH = {
     "ent_coef": "ppo.ent_coef",
     "vf_coef": "ppo.vf_coef",
     "max_grad_norm": "ppo.max_grad_norm",
+    "policy_kwargs": "ppo.policy_kwargs",
     "swap_players": "self_play.swap_players",
     "opponent_update_freq": "self_play.opponent_update_freq",
     "use_opponent_pool": "self_play.use_opponent_pool",
@@ -305,6 +362,7 @@ _ARG_TO_CONFIG_PATH = {
     "pool_strategy": "self_play.pool_strategy",
     "add_to_pool_freq": "self_play.add_to_pool_freq",
     "min_win_rate_for_pool": "self_play.min_win_rate_for_pool",
+    "latest_opponent_prob": "self_play.latest_opponent_prob",
     "bot_ratio": "self_play.bot_ratio",
     "eval_freq": "eval.eval_freq",
     "n_eval_episodes": "eval.n_eval_episodes",
@@ -315,11 +373,42 @@ _ARG_TO_CONFIG_PATH = {
     "wandb_entity": "logging.wandb_entity",
 }
 
+# Every config field this script reads: the argparse-mapped ones, plus
+# ``self_play.mixed_training`` (selects --mode mixed). Anything else a
+# --config sets away from its default is reported (an error with --strict).
+CONSUMED_CONFIG_FIELDS: frozenset[str] = frozenset(_ARG_TO_CONFIG_PATH.values()) | {"self_play.mixed_training"}
+CONSUMED_ALGORITHMS: tuple[str, ...] = ("self_play", "mixed", "maskable_ppo")
+IGNORED_FIELD_HINTS: dict[str, str] = {
+    "algorithm": "this script trains MaskablePPO by self-play",
+    "warm_start_path": "use --resume-from to continue a checkpoint",
+    "curriculum.*": "read only by train_bootstrap.py",
+    "ppo.use_action_masking": "self-play always trains MaskablePPO with masks",
+    "ppo.lr_schedule": "not implemented for the SB3 trainers; the learning rate is constant",
+    "ppo.purchase_explore_eps": "only the curriculum runner installs the purchase-exploration hook",
+    "self_play.snapshot_freq": "read only by train_feudal_rl.py",
+    "self_play.eval_opponent": "read only by train_feudal_rl.py; use --eval-opponent here",
+    "eval.seed_offset": "read only by train_bootstrap.py",
+    "eval.resample_eval_seeds": "read only by train_bootstrap.py",
+    "eval.best_eligible_after": "read only by train_bootstrap.py",
+    "logging.tensorboard": "TensorBoard logs always go to <log-dir>/tensorboard",
+    "feudal.*": "read only by train_feudal_rl.py",
+    "alphazero.*": "read only by train_alphazero.py",
+}
 
-def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
-    """Build the argument parser, with defaults taken from ``config_path`` if given."""
+
+def build_parser(config_path: str | None = None, *, cfg=None) -> argparse.ArgumentParser:
+    """Build the argument parser, with defaults taken from the config if given.
+
+    ``cfg`` (an already-loaded :class:`TrainingConfig`) takes precedence
+    over ``config_path``.
+    """
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
+    pre_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Make config fields this script does not read an error (default: a warning)",
+    )
 
     parser = argparse.ArgumentParser(
         description="Train RL agents with self-play",
@@ -365,10 +454,29 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
         default=0.55,
         help="Minimum win rate (over the games since the previous pool check) to add the model to the pool",
     )
+    parser.add_argument(
+        "--latest-opponent-prob",
+        type=float,
+        default=0.0,
+        help="Once the pool has entries, the per-episode probability of playing the latest snapshot instead of "
+        "a pool sample. 0.0 (default) plays a pool sample every episode, as before",
+    )
 
     # Mixed training settings
     parser.add_argument("--bot-ratio", type=float, default=0.3, help="Fraction of workers playing a bot (mixed mode)")
-    parser.add_argument("--bot-opponent", type=str, default="bot", help="Opponent of the bot workers (mixed mode)")
+    parser.add_argument(
+        "--bot-opponent",
+        type=str,
+        default="bot",
+        choices=accepted_names(),
+        help="Scripted opponent of the bot workers (mixed mode)",
+    )
+    parser.add_argument(
+        "--bot-opponent-kwargs",
+        type=json.loads,
+        default=None,
+        help="Constructor kwargs for --bot-opponent as a JSON object (e.g. '{\"max_actions\": 10}')",
+    )
 
     # Environment settings
     parser.add_argument("--map-file", type=str, default=None, help="Map CSV (default: random 20x20 map)")
@@ -381,6 +489,13 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
         help="Action space type",
     )
     parser.add_argument("--max-flat-actions", type=int, default=512, help="Action-space size for flat_discrete")
+    parser.add_argument(
+        "--flat-action-version",
+        type=int,
+        default=None,
+        choices=FLAT_ACTION_VERSIONS,
+        help="flat_discrete decode-table layout (default: a --resume-from checkpoint's own, else the latest)",
+    )
     parser.add_argument("--max-turns", type=int, default=None, help="Game-turn limit before a draw (default: none)")
     parser.add_argument(
         "--max-actions-per-turn", type=int, default=None, help="Per-turn action budget for both seats (default: none)"
@@ -405,6 +520,22 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
         help="Run envs in worker processes (SubprocVecEnv); --no-subprocess uses DummyVecEnv",
     )
     parser.add_argument("--enabled-units", type=str, default=None, help="Comma-separated list of enabled unit types")
+    parser.add_argument(
+        "--fog-of-war", action=argparse.BooleanOptionalAction, default=False, help="Partial observability for both seats"
+    )
+    parser.add_argument(
+        "--engine-overrides",
+        type=json.loads,
+        default=None,
+        help="Sparse overlay over the engine constants as a JSON object (see EnvConfig.engine_overrides)",
+    )
+    parser.add_argument("--gold-scale", type=float, default=None, help="Observation tanh divisor for gold (default: env's)")
+    parser.add_argument(
+        "--turn-scale", type=float, default=None, help="Observation tanh divisor for the turn (default: env's)"
+    )
+    parser.add_argument(
+        "--unit-count-scale", type=float, default=None, help="Observation tanh divisor for unit counts (default: env's)"
+    )
 
     # Training settings
     parser.add_argument("--total-timesteps", type=int, default=5000000, help="Total training timesteps")
@@ -423,11 +554,23 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--ent-coef", type=float, default=0.05, help="Entropy coefficient")
     parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
     parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Max gradient norm")
+    parser.add_argument(
+        "--policy-kwargs",
+        type=json.loads,
+        default=None,
+        help="MaskablePPO policy_kwargs as a JSON object (ignored with --resume-from, which keeps the checkpoint's)",
+    )
 
     # Evaluation settings
     parser.add_argument("--eval-freq", type=int, default=10000, help="Evaluation frequency (timesteps)")
     parser.add_argument("--n-eval-episodes", type=int, default=10, help="Number of evaluation episodes")
-    parser.add_argument("--eval-opponent", type=str, default="bot", help="Fixed opponent the model is evaluated against")
+    parser.add_argument(
+        "--eval-opponent",
+        type=str,
+        default="bot",
+        choices=accepted_names(),
+        help="Fixed scripted opponent the model is evaluated against",
+    )
     parser.add_argument("--checkpoint-freq", type=int, default=50000, help="Checkpoint save frequency (timesteps)")
 
     # Logging settings
@@ -439,10 +582,13 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--wandb-project", type=str, default="reinforcetactics-selfplay", help="W&B project name")
     parser.add_argument("--wandb-entity", type=str, default=None, help="W&B entity name")
 
-    if config_path:
-        from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
+    if cfg is None and config_path:
+        from reinforcetactics.rl.config import load_config
 
         cfg = load_config(config_path)
+    if cfg is not None:
+        from reinforcetactics.rl.config import config_to_argparse_defaults
+
         defaults = config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH)
         # ``self_play.mixed_training: true`` selects mixed mode unless
         # --mode is given on the command line.
@@ -454,10 +600,32 @@ def build_parser(config_path: str | None = None) -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the command line; with ``--config``, report the fields this script ignores.
+
+    The report is a warning, or an ``IgnoredConfigFieldError`` with
+    ``--strict``.
+    """
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None)
     pre_args, _ = pre_parser.parse_known_args(argv)
-    return build_parser(pre_args.config).parse_args(argv)
+    cfg = None
+    if pre_args.config:
+        from reinforcetactics.rl.config import load_config
+
+        cfg = load_config(pre_args.config)
+    args = build_parser(cfg=cfg).parse_args(argv)
+    if cfg is not None:
+        from reinforcetactics.rl.config import check_ignored_config_fields
+
+        check_ignored_config_fields(
+            cfg,
+            CONSUMED_CONFIG_FIELDS,
+            entry_point="train_self_play.py",
+            strict=args.strict,
+            algorithms=CONSUMED_ALGORITHMS,
+            hints=IGNORED_FIELD_HINTS,
+        )
+    return args
 
 
 def main(argv: list[str] | None = None):

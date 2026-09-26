@@ -12,11 +12,13 @@
   ``self_play.latest_opponent_prob`` (0.0), documented and validated.
 """
 
+import importlib.util
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
+import yaml
 
 from reinforcetactics.rl.masking import make_maskable_env
 from reinforcetactics.rl.self_play import (
@@ -39,6 +41,15 @@ def _tiny_model(env):
     return MaskablePPO(
         "MultiInputPolicy", env, n_steps=32, batch_size=32, n_epochs=1, policy_kwargs={"net_arch": [32]}, verbose=0, seed=0
     )
+
+
+@pytest.fixture(scope="module")
+def train_script():
+    path = REPO_ROOT / "scripts" / "train" / "train_self_play.py"
+    spec = importlib.util.spec_from_file_location("train_self_play_config_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +109,47 @@ class TestEnvConfigReachesSelfPlayEnvs:
             make_self_play_vec_env(
                 n_envs=2, map_file=MAP, use_subprocess=False, bot_ratio=0.5, bot_opponent=bot, bot_opponent_kwargs=kwargs
             )
+
+    def test_script_maps_every_env_field_from_the_config(self, train_script, tmp_path):
+        config = tmp_path / "sp.yaml"
+        config.write_text(
+            yaml.safe_dump(
+                {
+                    "algorithm": "self_play",
+                    "env": {
+                        "map_file": MAP,
+                        "opponent": "random",
+                        "opponent_kwargs": {"max_actions": 4},
+                        "fog_of_war": True,
+                        "engine_overrides": OVERRIDES,
+                        "gold_scale": 500.0,
+                        "turn_scale": 30.0,
+                        "unit_count_scale": 10.0,
+                        "action_space_type": "flat_discrete",
+                        "flat_action_version": 1,
+                    },
+                    "ppo": {"policy_kwargs": {"net_arch": [16]}},
+                    "self_play": {"latest_opponent_prob": 0.25},
+                }
+            )
+        )
+        args = train_script.parse_args(["--config", str(config), "--strict"])
+        env_kwargs = train_script.build_env_kwargs(args)
+        assert env_kwargs["fog_of_war"] is True
+        assert env_kwargs["engine_overrides"] == OVERRIDES
+        assert (env_kwargs["gold_scale"], env_kwargs["turn_scale"], env_kwargs["unit_count_scale"]) == (500.0, 30.0, 10.0)
+        assert env_kwargs["flat_action_version"] == 1
+        assert (args.bot_opponent, args.bot_opponent_kwargs) == ("random", {"max_actions": 4})
+        assert args.policy_kwargs == {"net_arch": [16]}
+        assert args.latest_opponent_prob == 0.25
+
+    def test_every_env_field_is_mapped(self, train_script):
+        from dataclasses import fields
+
+        from reinforcetactics.rl.config import EnvConfig
+
+        mapped = {p.split(".", 1)[1] for p in train_script._ARG_TO_CONFIG_PATH.values() if p.startswith("env.")}
+        assert mapped == {f.name for f in fields(EnvConfig)}
 
 
 # ---------------------------------------------------------------------------
