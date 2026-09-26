@@ -78,7 +78,7 @@ class InputHandler:
                 if isinstance(self.active_menu, UnitActionMenu):
                     # Cancel move if unit has moved
                     if self.target_selection_unit and self.target_selection_unit.has_moved:
-                        self.target_selection_unit.cancel_move()
+                        self.game.cancel_move(self.target_selection_unit)
                         print(f"Cancelled move for {self.target_selection_unit.type}")
                     self.target_selection_unit = None
                 self.active_menu = None
@@ -203,7 +203,7 @@ class InputHandler:
             self.target_selection_mode = False
             self.target_selection_action = None
             if self.target_selection_unit and self.target_selection_unit.has_moved:
-                self.target_selection_unit.cancel_move()
+                self.game.cancel_move(self.target_selection_unit)
                 print(f"Cancelled move for {self.target_selection_unit.type}")
             self.target_selection_unit = None
             self.active_menu = None
@@ -213,7 +213,7 @@ class InputHandler:
         # Priority 2: Close menu and cancel move if unit has moved
         if self.active_menu and isinstance(self.active_menu, UnitActionMenu):
             if self.target_selection_unit and self.target_selection_unit.has_moved:
-                self.target_selection_unit.cancel_move()
+                self.game.cancel_move(self.target_selection_unit)
                 print(f"Cancelled move for {self.target_selection_unit.type}")
             self.target_selection_unit = None
             self.active_menu = None
@@ -284,7 +284,7 @@ class InputHandler:
                 print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
 
             # End unit's turn and reset selection
-            can_still_act = self.target_selection_unit.end_unit_turn()
+            can_still_act = self.game.end_unit_turn(self.target_selection_unit)
             self.target_selection_mode = False
             self.target_selection_action = None
 

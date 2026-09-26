@@ -79,5 +79,10 @@ jobs:
         # they exercise the same headless path every time instead of relying
         # on whatever driver the runner happens to fall back to.
         SDL_VIDEODRIVER: dummy
+        # Recompute every legal-action cache hit and fail on a mismatch, so a
+        # mutator that forgets to invalidate (as GameState.end_turn once did)
+        # breaks the build instead of silently handing bots and masks stale
+        # actions. Measured at no noticeable cost to suite runtime.
+        RT_CHECK_CACHE: "1"
       run: |
         pytest

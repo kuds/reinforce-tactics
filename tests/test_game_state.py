@@ -135,6 +135,87 @@ class TestLegalActionSanity:
         assert all(a["attacker"] is not unit for a in actions["attack"])
 
 
+class TestLegalActionCacheCoherence:
+    """Every engine-level state change must invalidate the legal-action cache.
+
+    Regression for end_turn() leaving the cache valid: a turn in which nothing
+    else mutated state handed the next player the actions cached at the end
+    of its previous turn (e.g. RandomBot's empty list), freezing it.
+    """
+
+    def _ready(self, unit):
+        unit.can_move = True
+        unit.can_attack = True
+
+    def _unit_moves(self, game, unit):
+        return [a for a in game.get_legal_actions(player=unit.player)["move"] if a["unit"] is unit]
+
+    def test_end_turn_refreshes_cached_actions(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.create_unit("W", 5, 5, player=1)
+        # Freshly created units can't act, so player 1's cached set has no moves.
+        assert self._unit_moves(game, unit) == []
+
+        # Pass both turns without any other state change.
+        game.end_turn()
+        game.end_turn()
+        assert game.current_player == 1
+
+        moves = self._unit_moves(game, unit)
+        assert moves, "unit's moves must reappear after its turn comes round again"
+        assert game.get_legal_actions(player=1) == game._compute_legal_actions(1)
+
+    def test_end_turn_refreshes_other_players_stale_entry(self, simple_game):
+        game = simple_game
+        game.player_gold[2] = 1000
+        game.current_player = 2
+        unit = game.create_unit("W", 6, 6, player=2)
+        # Cache player 2's (move-less) set, then pass to player 1 and back.
+        game.get_legal_actions(player=2)
+        game.end_turn()
+        game.get_legal_actions(player=1)
+        game.end_turn()
+        assert game.current_player == 2
+        assert self._unit_moves(game, unit)
+
+    def test_end_unit_turn_wrapper_invalidates(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.create_unit("W", 5, 5, player=1)
+        self._ready(unit)
+        game._invalidate_cache()
+        assert self._unit_moves(game, unit)
+
+        assert game.end_unit_turn(unit) is False
+        assert self._unit_moves(game, unit) == []
+
+    def test_end_unit_turn_wrapper_consumes_haste(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.create_unit("W", 5, 5, player=1)
+        unit.is_hasted = True
+        game._invalidate_cache()
+        assert self._unit_moves(game, unit) == []
+
+        assert game.end_unit_turn(unit) is True
+        assert self._unit_moves(game, unit), "haste refresh must be visible to get_legal_actions"
+
+    def test_cancel_move_wrapper_invalidates(self, simple_game):
+        game = simple_game
+        game.player_gold[1] = 1000
+        unit = game.create_unit("W", 5, 5, player=1)
+        self._ready(unit)
+        game._invalidate_cache()
+        assert game.move_unit(unit, 5, 6)
+        assert self._unit_moves(game, unit) == []
+
+        assert game.cancel_move(unit) is True
+        assert (unit.x, unit.y) == (5, 5)
+        assert self._unit_moves(game, unit)
+        assert game.cancel_move(unit) is False
+
+
 class TestUnitEliminationWinCondition:
     """Test that eliminating all enemy units results in a win."""
 

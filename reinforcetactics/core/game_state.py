@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 from datetime import datetime
 from typing import Any
 
@@ -27,6 +28,11 @@ from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
+
+# Debug mode: with RT_CHECK_CACHE=1, every legal-action cache hit is
+# recomputed and compared, so a mutator that forgets to invalidate fails
+# loudly instead of handing bots and masks a stale action set.
+_CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -1199,6 +1205,14 @@ class GameState:
         if self.game_over:
             return {"total": 0, "healing": {"total_healed": 0, "total_cost": 0, "units_healed": []}}
 
+        # Everything below changes what is legal (can_move/can_attack resets,
+        # paralysis and cooldown ticks, income, healing, current_player), and
+        # nothing below reads the legal-action cache, so one invalidation up
+        # front covers every exit path. Without it, a turn in which nothing
+        # else mutates state hands the next player the actions cached at the
+        # end of its previous turn (e.g. RandomBot's empty list).
+        self._invalidate_cache()
+
         # Record action
         self.record_action("end_turn", player=self.current_player)
 
@@ -1291,6 +1305,27 @@ class GameState:
                     end_reason="resign",
                 )
 
+    def end_unit_turn(self, unit: Unit, force_end: bool = False) -> bool:
+        """End ``unit``'s turn (or consume its haste) through the engine.
+
+        ``Unit.end_unit_turn`` flips ``can_move``/``can_attack`` on the unit
+        itself, which the legal-action cache cannot see. Callers holding a
+        GameState should go through this wrapper so the cache is invalidated.
+
+        Returns:
+            True if the unit can still act (haste was consumed).
+        """
+        can_still_act = unit.end_unit_turn(force_end=force_end)
+        self._invalidate_cache()
+        return can_still_act
+
+    def cancel_move(self, unit: Unit) -> bool:
+        """Undo ``unit``'s move this action through the engine (see ``end_unit_turn``)."""
+        cancelled = unit.cancel_move()
+        if cancelled:
+            self._invalidate_cache()
+        return cancelled
+
     def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
         """
         Get all legal actions for the current player.
@@ -1303,8 +1338,27 @@ class GameState:
 
         # Return cached actions if available and cache is valid
         if self._legal_actions_cache_valid and player in self._legal_actions_cache:
-            return self._legal_actions_cache[player]
+            cached = self._legal_actions_cache[player]
+            if _CHECK_LEGAL_ACTION_CACHE:
+                fresh = self._compute_legal_actions(player)
+                if fresh != cached:
+                    stale = {k: (len(cached.get(k, [])), len(v)) for k, v in fresh.items() if cached.get(k) != v}
+                    raise AssertionError(
+                        f"Stale legal-action cache for player {player} "
+                        f"(turn {self.turn_number}): (cached, fresh) counts by type {stale}"
+                    )
+            return cached
 
+        legal_actions = self._compute_legal_actions(player)
+
+        # Cache the result
+        self._legal_actions_cache[player] = legal_actions
+        self._legal_actions_cache_valid = True
+
+        return legal_actions
+
+    def _compute_legal_actions(self, player: int) -> dict[str, list[Any]]:
+        """Enumerate ``player``'s legal actions from the current state (uncached)."""
         legal_actions = {
             "create_unit": [],
             "move": [],
@@ -1426,10 +1480,6 @@ class GameState:
                     tile = self.grid.get_tile(unit.x, unit.y)
                     if tile.is_capturable() and tile.player != player:
                         legal_actions["seize"].append({"unit": unit, "tile": tile})
-
-        # Cache the result
-        self._legal_actions_cache[player] = legal_actions
-        self._legal_actions_cache_valid = True
 
         return legal_actions
 

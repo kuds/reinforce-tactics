@@ -22,7 +22,7 @@ def handle_action_menu_result(game, menu_result, active_menu_ref, target_selecti
     if menu_result["type"] == "cancel":
         # Cancel move if unit has moved
         if target_selection_unit_ref[0] and target_selection_unit_ref[0].has_moved:
-            target_selection_unit_ref[0].cancel_move()
+            game.cancel_move(target_selection_unit_ref[0])
             print(f"Cancelled move for {target_selection_unit_ref[0].type}")
         target_selection_unit_ref[0] = None
         active_menu_ref[0] = None
@@ -55,7 +55,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         Tuple of (target_selection_mode, target_selection_action, unit or None)
     """
     if action["type"] == "wait":
-        can_still_act = unit.end_unit_turn()
+        can_still_act = game.end_unit_turn(unit)
         if can_still_act:
             print(f"{unit.type} used haste action (can act again)")
             # Keep unit selected for another action
@@ -66,7 +66,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         return (False, None, None)
 
     if action["type"] == "cancel_move":
-        unit.cancel_move()
+        game.cancel_move(unit)
         print(f"Cancelled move for {unit.type}")
         selected_unit_ref[0] = None
         return (False, None, None)
@@ -75,7 +75,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         result = game.seize(unit)
         if result["captured"]:
             print(f"{unit.type} captured structure!")
-        can_still_act = unit.end_unit_turn()
+        can_still_act = game.end_unit_turn(unit)
         if can_still_act:
             print(f"{unit.type} used haste action (can act again)")
             # Keep unit selected for another action
@@ -111,7 +111,7 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
             elif action["type"] == "attack_buff":
                 game.attack_buff(unit, target)
                 print(f"{unit.type} granted attack buff to {target.type}")
-            can_still_act = unit.end_unit_turn()
+            can_still_act = game.end_unit_turn(unit)
             if can_still_act:
                 print(f"{unit.type} used haste action (can act again)")
                 # Keep unit selected for another action

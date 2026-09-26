@@ -356,7 +356,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
         # behaviour SimpleBot has; routing wounded units to heal tiles is a
         # MediumBot+ feature.
         if unit.health < unit.max_health * 0.5 and self.is_on_heal_tile(unit):
-            unit.end_unit_turn()
+            self.game_state.end_unit_turn(unit)
             return
 
         # Cleric: try to heal damaged allies or cure paralyzed allies
@@ -384,7 +384,7 @@ class SimpleBot(BotUnitMixin, BaseBot):
             elif target_type in ["enemy_tower", "enemy_building", "enemy_hq"]:
                 self.move_to_and_seize(unit, target_obj, _depth)
         else:
-            can_still_act = unit.end_unit_turn()
+            can_still_act = self.game_state.end_unit_turn(unit)
             if can_still_act:
                 self.act_with_unit(unit, _depth + 1)
 
@@ -463,11 +463,11 @@ class SimpleBot(BotUnitMixin, BaseBot):
                     if unit.can_move or unit.can_attack:
                         self.act_with_unit(unit, _depth + 1)
                 else:
-                    can_still_act = unit.end_unit_turn()
+                    can_still_act = self.game_state.end_unit_turn(unit)
                     if can_still_act:
                         self.act_with_unit(unit, _depth + 1)
             else:
-                can_still_act = unit.end_unit_turn()
+                can_still_act = self.game_state.end_unit_turn(unit)
                 if can_still_act:
                     self.act_with_unit(unit, _depth + 1)
 
@@ -491,9 +491,9 @@ class SimpleBot(BotUnitMixin, BaseBot):
             if min_range <= new_distance <= max_range:
                 self.game_state.attack(unit, enemy)
             else:
-                unit.end_unit_turn()
+                self.game_state.end_unit_turn(unit)
         else:
-            unit.end_unit_turn()
+            self.game_state.end_unit_turn(unit)
 
     def _attack_as_ranged_caster(self, unit, enemy, distance):
         """Handle Mage/Sorcerer attacks (range 1-2, prefer distance 2)."""
@@ -510,9 +510,9 @@ class SimpleBot(BotUnitMixin, BaseBot):
             if 1 <= new_distance <= 2:
                 self.game_state.attack(unit, enemy)
             else:
-                unit.end_unit_turn()
+                self.game_state.end_unit_turn(unit)
         else:
-            unit.end_unit_turn()
+            self.game_state.end_unit_turn(unit)
 
     def _find_ranged_attack_position(self, unit, enemy, min_range: int, max_range: int) -> tuple[int, int] | None:
         """Find a position from which unit can attack enemy at valid range."""
@@ -555,11 +555,11 @@ class SimpleBot(BotUnitMixin, BaseBot):
                     if unit.can_move or unit.can_attack:
                         self.act_with_unit(unit, _depth + 1)
                 else:
-                    can_still_act = unit.end_unit_turn()
+                    can_still_act = self.game_state.end_unit_turn(unit)
                     if can_still_act:
                         self.act_with_unit(unit, _depth + 1)
             else:
-                can_still_act = unit.end_unit_turn()
+                can_still_act = self.game_state.end_unit_turn(unit)
                 if can_still_act:
                     self.act_with_unit(unit, _depth + 1)
 
@@ -688,7 +688,7 @@ class MediumBot(BotUnitMixin, BaseBot):
 
         if (unit.x, unit.y) != target:
             self.game_state.move_unit(unit, target[0], target[1])
-        unit.end_unit_turn()
+        self.game_state.end_unit_turn(unit)
         self._record("retreat_to_heal")
         return True
 
@@ -1337,7 +1337,7 @@ class MediumBot(BotUnitMixin, BaseBot):
                     return
 
         # Fallback: End turn
-        can_still_act = unit.end_unit_turn()
+        can_still_act = self.game_state.end_unit_turn(unit)
         if can_still_act:
             self.act_with_unit(unit, _depth + 1)
 
@@ -2095,7 +2095,7 @@ class AdvancedBot(MediumBot):
                     return
 
         # Fallback: End turn
-        can_still_act = unit.end_unit_turn()
+        can_still_act = self.game_state.end_unit_turn(unit)
         if can_still_act:
             self.act_with_unit_enhanced(unit, _depth + 1)
 
