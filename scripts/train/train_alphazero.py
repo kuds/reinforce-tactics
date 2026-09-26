@@ -215,6 +215,12 @@ def parse_args():
         default=None,
         help="Enabled unit types (e.g., W M A). Default: all units.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Base seed for every game's combat RNG (Rogue evade). Default: a fresh seed per game.",
+    )
 
     if pre_args.config:
         from reinforcetactics.rl.config import config_to_argparse_defaults, load_config
@@ -263,6 +269,7 @@ def main():
             checkpoint_dir=args.checkpoint_dir,
             device=args.device,
             enabled_units=args.enabled_units,
+            seed=args.seed,
         )
 
     history = trainer.train()

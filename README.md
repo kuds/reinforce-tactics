@@ -145,20 +145,33 @@ See the `examples/` directory for more, including an action-masking training dem
 |------|------|------|-----|---------|
 | Warrior | 200 | 3 | 15 | High HP melee |
 | Mage | 300 | 2 | 10 | Ranged 1-2, paralyze (3 turns, 2-turn cooldown) |
-| Cleric | 200 | 2 | 8 | Heal/cure allies (range 1-2) |
+| Cleric | 200 | 3 | 10 | Heal (+7 HP) or cure allies (range 1-3) |
 | Archer | 250 | 3 | 15 | Ranged 2-3 tiles (+1 on mountains) |
 | Knight | 350 | 4 | 18 | Charge (+50% dmg if moved 3+ tiles) |
 | Rogue | 350 | 4 | 12 | Flank (+50% dmg), Evade (15% dodge, 30% in forest) |
-| Sorcerer | 400 | 2 | 10 | Haste, Attack/Defence Buff (+35%) |
-| Barbarian | 400 | 5 | 24 | Fast, high-damage melee |
+| Sorcerer | 350 | 2 | 12 | Haste, Attack/Defence Buff (+50%, 3 turns, 2-turn cooldown) |
+| Barbarian | 400 | 5 | 20 | Fast, high-damage melee |
+
+These numbers are the defaults in `reinforcetactics/constants.py` (`tests/test_rules_docs_core.py` fails if they drift apart); `engine_overrides` can change unit stats and the economy per game.
 
 **Win Conditions**: Capture enemy HQ or eliminate all enemy units
 
-**Economy**: Starting gold $200. Income from structures each turn (HQ: $150, Building: $100, Tower: $50)
+**Economy**: Starting gold $250. Income from structures each turn (HQ: $150, Building: $100, Tower: $50)
 
-**Terrain**: Grass, forest (stealth bonus), mountains (vision/range bonus), roads (fast movement), water/ocean (impassable)
+**Movement**: Units move up to their Move value in orthogonal steps, through friendly units but not enemies, and must end on an empty tile. Every walkable tile costs 1 movement.
 
-**Fog of War**: Enemy HQ is always visible; buildings and towers are hidden until scouted
+**Terrain**: Grass, roads and forests are open ground; forests give Rogues +15% evade; mountains give +1 vision and +1 Archer range; water/ocean are impassable
+
+**Fog of War** (optional): Units and structures see a radius around them; enemy units and structures outside it are hidden, the enemy HQ included unless `hq_always_visible` is set
+
+**Optional rules** (`engine_overrides`, all off by default, so the default game is exactly as described above):
+
+| Key | Default | Effect when set |
+|-----|---------|-----------------|
+| `terrain_move_cost` | every tile costs 1 | Movement cost per tile type, e.g. `{"r": 0.5, "f": 2, "m": 2}` for fast roads and slow forests/mountains |
+| `charge_distance` | `"displacement"` | `"path"`: Knight Charge counts the tiles walked, not the straight-line distance |
+| `forest_concealment` | `false` | Under fog of war, a unit in forest is seen only by enemies on or next to its tile |
+| `hq_always_visible` | `false` | Under fog of war, every HQ's position and owner are always known |
 
 ## Project Structure
 

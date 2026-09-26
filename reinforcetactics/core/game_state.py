@@ -5,9 +5,13 @@ Fixed version: removed duplicate methods, added type hints, controlled logging.
 
 from __future__ import annotations
 
+import base64
 import copy
+import hashlib
 import logging
 import os
+import random
+import struct
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -27,6 +31,7 @@ from reinforcetactics.constants import (
 )
 from reinforcetactics.core.grid import TileGrid
 from reinforcetactics.core.mechanics import GameMechanics
+from reinforcetactics.core.terrain_rules import TERRAIN_RULE_KEYS, TerrainRules
 from reinforcetactics.core.unit import Unit
 from reinforcetactics.core.visibility import VISIBLE, VisibilityMap, get_visible_units
 
@@ -39,10 +44,40 @@ _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
 logger = logging.getLogger(__name__)
 
 
+def derive_seed(*parts: object) -> int:
+    """A stable 63-bit seed derived from ``parts`` (e.g. a run seed and a game id).
+
+    SHA-256 rather than ``hash()``, which is salted per process and would
+    give a different seed on every run.
+    """
+    key = "|".join(str(p) for p in parts)
+    return int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big") >> 1
+
+
 class GameState:
     """Manages the core game state without rendering."""
 
     ALL_UNIT_TYPES = ALL_UNIT_TYPES
+
+    # Every engine_overrides key some resolver reads. An unknown key is
+    # rejected: a misspelt rule (``forest_concealement: true``) would
+    # otherwise silently play the default game. New override keys must be
+    # added here.
+    ENGINE_OVERRIDE_KEYS = frozenset(
+        {
+            "starting_gold",
+            "headquarters_income",
+            "building_income",
+            "tower_income",
+            "tower_health",
+            "building_health",
+            "headquarters_health",
+            "damage_model",
+            "max_units_per_player",
+            "unit_data",
+            *TERRAIN_RULE_KEYS,
+        }
+    )
 
     @staticmethod
     def _resolve_engine_overrides(
@@ -66,6 +101,11 @@ class GameState:
         starting_gold = STARTING_GOLD
         if not overrides:
             return unit_data, income_rates, starting_gold
+        unknown = set(overrides) - GameState.ENGINE_OVERRIDE_KEYS
+        if unknown:
+            raise KeyError(
+                f"engine_overrides: unknown key(s) {sorted(unknown)} (valid: {sorted(GameState.ENGINE_OVERRIDE_KEYS)})"
+            )
 
         if "starting_gold" in overrides:
             starting_gold = int(overrides["starting_gold"])
@@ -153,6 +193,51 @@ class GameState:
                 resolved[code] = val
         return resolved
 
+    @staticmethod
+    def _resolve_rng(rng: Any | None, seed: int | None) -> tuple[int | None, Any]:
+        """Return ``(seed, rng)``: the caller's source, or a game-owned ``random.Random``.
+
+        A caller-supplied ``rng`` is used as is, and ``seed`` is recorded
+        only if the caller names one (the engine cannot know how that
+        source was seeded). Otherwise a missing seed is drawn from OS
+        entropy -- not from ``random``, whose state a seeded caller may
+        have fixed for its own purposes.
+        """
+        if seed is not None:
+            seed = int(seed)  # numpy ints are not valid random.Random seeds
+        if rng is not None:
+            return seed, rng
+        if seed is None:
+            seed = int.from_bytes(os.urandom(8), "big") >> 1
+        return seed, random.Random(seed)
+
+    def _rng_state_for_save(self) -> str | None:
+        """The game RNG's exact position, compact enough for a JSON save.
+
+        The seed alone only reproduces a game from turn 0; a mid-game save
+        also needs the stream position so a reload rolls what the unsaved
+        game would have rolled. None for a caller-supplied source whose
+        state cannot be captured.
+        """
+        if not isinstance(self.rng, random.Random):
+            return None
+        try:
+            version, internal, gauss_next = self.rng.getstate()
+        except NotImplementedError:  # e.g. random.SystemRandom
+            return None
+        packed = base64.b64encode(struct.pack(f"<{len(internal)}I", *internal)).decode("ascii")
+        return f"{version}:{gauss_next!r}:{packed}"
+
+    @staticmethod
+    def _rng_from_save(encoded: str) -> random.Random:
+        """Rebuild the RNG ``_rng_state_for_save`` captured."""
+        version, gauss_next, packed = encoded.split(":", 2)
+        raw = base64.b64decode(packed)
+        internal = struct.unpack(f"<{len(raw) // 4}I", raw)
+        rng = random.Random()
+        rng.setstate((int(version), internal, None if gauss_next == "None" else float(gauss_next)))
+        return rng
+
     def _apply_structure_health_overrides(self) -> None:
         """Overlay resolved structure-HP overrides onto the freshly-built grid.
 
@@ -179,6 +264,7 @@ class GameState:
         fog_of_war: bool = False,
         engine_overrides: dict[str, Any] | None = None,
         rng: Any | None = None,
+        seed: int | None = None,
     ) -> None:
         """
         Initialize the game state.
@@ -189,16 +275,20 @@ class GameState:
             max_turns: Maximum turns for the game (None = unlimited)
             enabled_units: List of enabled unit types (default all units enabled)
             fog_of_war: Enable fog of war (default False for backward compatibility)
-            rng: Optional random source exposing ``random()`` (e.g. a seeded
-                ``random.Random``) used for engine-side stochastic outcomes —
-                currently only the Rogue evade roll in
-                ``mechanics.attack_unit``. ``None`` (default) falls back to
-                the module-global ``random``, preserving legacy behaviour.
-                The RL env passes a generator derived from its episode seed
-                so ``reset(seed=...)`` controls combat randomness too.
-                Replays are unaffected either way: they apply recorded
-                outcomes directly instead of re-rolling
-                (``utils/replay_actions.py``).
+            rng: Optional random source exposing ``random()`` used for
+                engine-side stochastic outcomes -- currently only the Rogue
+                evade roll in ``mechanics.attack_unit``. ``None`` (default)
+                gives the game its own ``random.Random(seed)``; the engine
+                never reads the module-global ``random``. Replays are
+                unaffected either way: they apply recorded outcomes
+                directly instead of re-rolling (``utils/replay_actions.py``).
+            seed: Seed for the game's own RNG (ignored for sampling when
+                ``rng`` is given, but still recorded). ``None`` draws one
+                from OS entropy. Kept in ``self.seed`` and written to saves
+                and replays, so any game can be re-run with the same
+                combat rolls. The RL env passes one derived from its
+                episode seed, the tournament runner one derived from
+                ``rng_seed`` and the game id.
             engine_overrides: Optional sparse overlay over the non-YAML
                 engine constants (``constants.py``), so balance can be
                 varied/recorded as config instead of a code edit. Shape::
@@ -214,10 +304,16 @@ class GameState:
                       "damage_model": "flat" | "hp_scaled",  # combat model
                       "max_units_per_player": int,  # per-player unit cap
                       "unit_data": {CODE: {field: value}},  # sparse deltas
+                      # optional terrain rules, see core/terrain_rules.py:
+                      "terrain_move_cost": {TILE_CODE: cost},
+                      "charge_distance": "displacement" | "path",
+                      "forest_concealment": bool,
+                      "hq_always_visible": bool,
                     }
 
                 Every key is optional; absent keys fall back to the module
                 constant, so ``None`` / ``{}`` is byte-identical to today.
+                Unknown keys raise ``KeyError`` (see ``ENGINE_OVERRIDE_KEYS``).
                 The resolved tables (``self.unit_data``, ``self.income_rates``,
                 ``self.starting_gold``) are this game's single source of
                 truth -- units and income read them, never the global
@@ -255,6 +351,10 @@ class GameState:
         # Enforced in both create_unit and get_legal_actions so the cap shows
         # up in the action mask, not just as a rejected action.
         self.max_units_per_player: int = self._resolve_max_units_per_player(self.engine_overrides)
+        # Optional terrain rules (movement costs, path-based Knight Charge,
+        # forest concealment, HQ always known). All off by default, which is
+        # the game as shipped; see core/terrain_rules.py.
+        self.terrain_rules: TerrainRules = TerrainRules.from_overrides(self.engine_overrides)
         self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         # Cumulative structure auto-heal totals per player (HP restored and
         # gold spent by ``heal_units_on_structures`` over the whole game).
@@ -279,10 +379,14 @@ class GameState:
         self.game_over_action_index: int | None = None
         self.turn_number: int = 0
         self.mechanics = GameMechanics()
-        # Engine-side RNG for stochastic combat outcomes (Rogue evade).
-        # ``None`` = module-global ``random`` (legacy / GUI play); seeded
-        # callers (the RL env) inject a ``random.Random`` for reproducibility.
-        self.rng: Any | None = rng
+        # Engine-side RNG for stochastic combat outcomes (Rogue evade). Every
+        # game owns one (review core-10): the old default, the module-global
+        # ``random``, made seeded tournaments, AlphaZero evals and BC datasets
+        # irreproducible and was shared by every thread. The seed is recorded
+        # even when drawn from entropy, so any game can be re-run.
+        self.seed: int | None
+        self.rng: Any
+        self.seed, self.rng = self._resolve_rng(rng, seed)
 
         # Fog of war settings
         self.fog_of_war: bool = fog_of_war
@@ -331,9 +435,7 @@ class GameState:
         self.action_history: list[dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
 
-        # Cached values for performance (separate validity flags to prevent stale cross-reads)
-        self._unit_count_cache: dict[int, int] = {}
-        self._unit_count_cache_valid: bool = False
+        # Cached legal actions per player (see get_legal_actions)
         self._legal_actions_cache: dict[int, dict[str, list[Any]]] = {}
         self._legal_actions_cache_valid: bool = False
 
@@ -347,6 +449,7 @@ class GameState:
             self.fog_of_war,
             engine_overrides=self.engine_overrides,
             rng=self.rng,
+            seed=self.seed,
         )
 
     def set_map_metadata(
@@ -406,8 +509,6 @@ class GameState:
 
     def _invalidate_cache(self) -> None:
         """Invalidate cached values."""
-        self._unit_count_cache_valid = False
-        self._unit_count_cache.clear()
         self._legal_actions_cache_valid = False
         self._legal_actions_cache.clear()
 
@@ -572,17 +673,15 @@ class GameState:
         self.enabled_units = enabled_units
         self._invalidate_cache()
 
-    def get_unit_count(self, player: int) -> int:
-        """Get cached unit count for a player."""
-        if not self._unit_count_cache_valid:
-            self._unit_count_cache = {}
-            for unit in self.units:
-                self._unit_count_cache[unit.player] = self._unit_count_cache.get(unit.player, 0) + 1
-            self._unit_count_cache_valid = True
-        return self._unit_count_cache.get(player, 0)
-
     def get_unit_at_position(self, x: int, y: int) -> Unit | None:
-        """Get the unit at a grid position."""
+        """Get the unit at a grid position.
+
+        A linear scan, deliberately: a persistent position index would go
+        stale whenever a unit is moved or removed outside GameState's own
+        methods, and the replay applier, the rule bots' look-ahead and many
+        tests do exactly that. The hot path (pathfinding) builds its own
+        occupancy set per call instead (review core-20).
+        """
         for unit in self.units:
             if unit.x == x and unit.y == y:
                 return unit
@@ -695,22 +794,56 @@ class GameState:
     def _can_afford(self, player: int, unit_type: str) -> bool:
         return self.player_gold[player] >= self.unit_data[unit_type]["cost"]
 
-    def _move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
-        """Tiles ``unit`` may end a move on, in BFS order.
+    def _find_paths(self, unit: Unit, blocked: set[tuple[int, int]] | None = None) -> dict[tuple[int, int], int]:
+        """Every tile ``unit`` can reach this turn -> tiles stepped, in search order.
 
-        Reachable within its movement over walkable tiles (it can pass
-        through friendly units, never enemies) and not occupied by anyone.
+        Walkable tiles within its movement (under the game's terrain move
+        costs), passing through friendly units but never enemies; tiles
+        holding a friendly unit are included, as a path may cross them. The
+        blockers are collected once per search (or once per
+        ``get_legal_actions`` call, for all of a player's units: pass
+        ``blocked``), so each tile the search examines costs a set lookup
+        rather than a scan of every unit (review core-20).
         """
-        reachable = unit.get_reachable_positions(
+        if blocked is None:
+            blocked = self.mechanics.movement_blockers(self.units, unit)
+        # A per-player view of the board (e.g. fog of war letting a player
+        # path through enemies it cannot see) filters ``blocked`` here.
+        return unit.find_paths(
             self.grid.width,
             self.grid.height,
-            lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=unit),
+            self.mechanics.passability(self.grid, blocked),
+            self.terrain_rules.move_cost_fn(self.grid),
         )
-        # Reachable tiles are already walkable and enemy-free, so "can end
-        # here" only adds "no friendly unit either"; a set keeps that O(1)
-        # per tile instead of a scan of every unit.
-        occupied = {(u.x, u.y) for u in self.units}
-        return [pos for pos in reachable if pos not in occupied]
+
+    def _move_paths(
+        self,
+        unit: Unit,
+        occupied: set[tuple[int, int]] | None = None,
+        blocked: set[tuple[int, int]] | None = None,
+    ) -> dict[tuple[int, int], int]:
+        """``_find_paths`` restricted to tiles ``unit`` may end on (no unit there)."""
+        if occupied is None:
+            occupied = {(u.x, u.y) for u in self.units}
+        return {pos: steps for pos, steps in self._find_paths(unit, blocked).items() if pos not in occupied}
+
+    def get_reachable_positions(self, unit: Unit) -> list[tuple[int, int]]:
+        """Tiles ``unit`` can move through this turn, including ones friends stand on.
+
+        Same result as ``unit.get_reachable_positions`` with
+        ``can_move_to_position`` as its predicate, but under the game's
+        terrain move costs and without scanning every unit per tile: for
+        bots, overlays and anything else that plans paths.
+        """
+        return list(self._find_paths(unit))
+
+    def get_move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
+        """Tiles ``unit`` may legally end a move on (reachable and empty), in search order.
+
+        Ignores whose turn it is and whether the unit may still move; see
+        ``get_legal_actions`` for that.
+        """
+        return list(self._move_paths(unit))
 
     def _can_attack_target(self, unit: Unit, target: Unit) -> bool:
         """A living enemy within ``unit``'s reach that fog of war lets it attack.
@@ -933,7 +1066,8 @@ class GameState:
         if not self._may_act("move", unit):
             return False
 
-        if (to_x, to_y) not in self._move_destinations(unit):
+        steps = self._move_paths(unit).get((to_x, to_y))
+        if steps is None:
             logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
             return False
 
@@ -946,6 +1080,10 @@ class GameState:
 
         # Execute move
         unit.move_to(to_x, to_y)
+        if self.terrain_rules.charge_distance == "path":
+            # Optional rule: the Knight's Charge counts the tiles along the
+            # path, not the straight-line displacement move_to recorded.
+            unit.distance_moved = steps
         unit.can_move = False  # Consume move action
 
         # Record action
@@ -1571,7 +1709,10 @@ class GameState:
                         if self._can_afford(player, unit_type):
                             legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
 
-        # Unit actions
+        # Unit actions. Every move search shares one occupancy set, and one
+        # blocker set: who blocks a unit depends only on its player.
+        occupied = {(u.x, u.y) for u in self.units}
+        blocked: set[tuple[int, int]] | None = None
         for unit in self.units:
             # Guard on health: dead units are normally removed synchronously
             # by ``attack`` (see self.units.remove), but the helpers below all
@@ -1583,7 +1724,9 @@ class GameState:
 
             # Movement: reachable tiles that are also free to end on
             if unit.can_move:
-                for pos in self._move_destinations(unit):
+                if blocked is None:
+                    blocked = self.mechanics.movement_blockers(self.units, unit)
+                for pos in self._move_paths(unit, occupied, blocked):
                     legal_actions["move"].append(
                         {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
                     )
@@ -1624,6 +1767,83 @@ class GameState:
 
         return legal_actions
 
+    # How clone_for_search treats each attribute (review core-18). Shared:
+    # fixed for the whole game (configuration, terrain source, stateless
+    # helpers), so the clone references the original's object. Dropped:
+    # history and caches search never reads, replaced by empty values.
+    # Anything else is deep-copied, so state added later is safe by default.
+    _SEARCH_SHARED_ATTRS = frozenset(
+        {
+            "engine_overrides",
+            "unit_data",
+            "income_rates",
+            "structure_health",
+            "terrain_rules",
+            "mechanics",
+            "enabled_units",
+            "initial_map_data",
+            "original_map_data",
+            "player_configs",
+            "game_start_time",
+        }
+    )
+    _SEARCH_DROPPED_ATTRS: dict[str, Callable[[], Any]] = {
+        "action_history": list,
+        "_legal_actions_cache": dict,
+        "_legal_actions_cache_valid": lambda: False,
+    }
+
+    def clone_for_search(self) -> GameState:
+        """An independent copy of the game for tree search (MCTS), made cheaply.
+
+        Plays exactly like ``copy.deepcopy(self)`` (same legal actions, same
+        outcomes, including the combat RNG's position), and nothing done to
+        the clone touches the original. It drops what search never reads --
+        the action history (which grows all game and dominated deepcopy's
+        cost) and the legal-action cache -- and shares, instead of copying,
+        the terrain tiles, configuration and replay metadata, none of which
+        change during a game. The clone's own ``action_history`` starts
+        empty, so it cannot be saved as a replay of the whole game.
+        """
+        clone = GameState.__new__(GameState)
+        for name, value in vars(self).items():
+            if name in self._SEARCH_SHARED_ATTRS:
+                setattr(clone, name, value)
+            elif name in self._SEARCH_DROPPED_ATTRS:
+                setattr(clone, name, self._SEARCH_DROPPED_ATTRS[name]())
+            elif name == "grid":
+                clone.grid = self._clone_grid_for_search(value)
+            elif name == "units":
+                clone.units = [self._clone_unit_for_search(unit) for unit in value]
+            else:
+                setattr(clone, name, copy.deepcopy(value))
+        return clone
+
+    @staticmethod
+    def _clone_grid_for_search(grid: TileGrid) -> TileGrid:
+        """New row lists and structure tiles; terrain tiles are shared.
+
+        Only structures change during a game (owner, HP, regeneration), so
+        plain terrain tiles are shared between the original and its clones.
+        """
+        clone = copy.copy(grid)
+        clone.tiles = [[copy.copy(tile) if tile.is_capturable() else tile for tile in row] for row in grid.tiles]
+        return clone
+
+    @staticmethod
+    def _clone_unit_for_search(unit: Unit) -> Unit:
+        """A copy of ``unit`` whose containers are its own.
+
+        ``attack_data`` is the unit type's stat entry (never mutated), so it
+        stays shared; any other container (the fog-of-war snapshot today) is
+        copied so mutating it in the clone cannot reach the original.
+        """
+        clone = copy.copy(unit)
+        for name, value in vars(unit).items():
+            if name != "attack_data" and isinstance(value, list | dict | set):
+                setattr(clone, name, copy.deepcopy(value))
+        return clone
+
     def to_dict(self) -> dict[str, Any]:
         """Convert game state to dictionary for serialization."""
         return {
@@ -1660,6 +1880,10 @@ class GameState:
             # it was saved under. Absent in pre-0.3.3 saves -> from_dict falls
             # back to {} (== module defaults), preserving backward-compat.
             "engine_overrides": self.engine_overrides,
+            # The combat RNG (review core-10): its seed, and its position so a
+            # reloaded game rolls exactly what the unsaved game would have.
+            "seed": self.seed,
+            "rng_state": self._rng_state_for_save(),
             "units": [unit.to_dict() for unit in self.units],
             "tiles": self.grid.to_dict()["tiles"],
             "action_history": self.action_history,
@@ -1903,6 +2127,8 @@ class GameState:
             "enabled_units": self.enabled_units,
             "fog_of_war": self.fog_of_war,
             "fog_of_war_method": self.fog_of_war_method,
+            # Seed of the combat RNG, so the game can be re-run (core-10).
+            "seed": self.seed,
             "library_version": _rt_version,
             "replay_schema_version": 3,
             "final_unit_counts": final_counts,
@@ -1973,7 +2199,14 @@ class GameState:
             enabled_units=enabled_units,
             fog_of_war=fog_of_war,
             engine_overrides=engine_overrides,
+            # Saves from before the seed was recorded get a fresh one.
+            seed=save_data.get("seed"),
         )
+        if save_data.get("rng_state"):
+            # Continue the saved stream exactly. The seed stays what the save
+            # recorded (None for a caller-supplied rng), not a fresh draw.
+            game.rng = cls._rng_from_save(save_data["rng_state"])
+            game.seed = save_data.get("seed")
 
         # Restore the fog of war method
         game.fog_of_war_method = fog_of_war_method

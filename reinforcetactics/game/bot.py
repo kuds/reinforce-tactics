@@ -2535,13 +2535,7 @@ class MasterBot(AdvancedBot):
         """Reachable positions for an *enemy* unit. Mirrors get_reachable
         but uses the enemy as the moving unit so the move-validity check
         is correct (our units block, theirs pass through allies, etc.)."""
-        return enemy.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=enemy, is_destination=False
-            ),
-        )
+        return self.game_state.get_reachable_positions(enemy)
 
     def _compute_threat_map(self) -> dict[tuple[int, int], float]:
         """Build a tile -> incoming damage map.

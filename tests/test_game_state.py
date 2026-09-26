@@ -1,5 +1,7 @@
 """Tests for GameState class, specifically win conditions."""
 
+import random
+
 import numpy as np
 import pytest
 
@@ -413,12 +415,15 @@ class TestEngineRngInjection:
         gs.reset(np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object))
         assert gs.rng is rng
 
-    def test_default_rng_is_none_module_global_fallback(self):
-        # No rng -> legacy behaviour (module-global random); the attribute
-        # must exist and be None so mechanics falls back cleanly.
+    def test_default_rng_is_a_seeded_game_owned_generator(self):
+        # No rng -> the game owns random.Random(seed) with the seed drawn
+        # from entropy and recorded (review core-10). This used to assert
+        # ``rng is None`` (the module-global ``random`` fallback), which made
+        # tournaments and AlphaZero/BC games irreproducible.
         map_data = np.array([["p" for _ in range(10)] for _ in range(10)], dtype=object)
         gs = GameState(map_data, num_players=2)
-        assert gs.rng is None
+        assert isinstance(gs.rng, random.Random)
+        assert isinstance(gs.seed, int)
 
 
 class TestStructureAutoHealAccumulator:

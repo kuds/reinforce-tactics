@@ -18,7 +18,7 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 |------|------|------|--------|----------|--------|---------|-------------------|
 | **Warrior** | W | 200 | 15 | 3 | 10 | 6 | Melee only (range 1) |
 | **Mage** | M | 300 | 10 | 2 | 8 (adjacent) / 12 (range) | 4 | Can attack at range 1-2, Can PARALYZE enemies for 3 turns (2-turn cooldown) |
-| **Cleric** | C | 200 | 10 | 3 | 2 | 4 | Can HEAL allies (+5 HP) at range 1-2, Can CURE paralyzed units at range 1-2 |
+| **Cleric** | C | 200 | 10 | 3 | 2 | 4 | Can HEAL allies (+7 HP) at range 1-3, Can CURE paralyzed units at range 1-3 |
 | **Archer** | A | 250 | 15 | 3 | 5 | 1 | Ranged attack (2-3 spaces), **+1 range on mountains (2-4)**, Cannot attack adjacent (distance 1), Melee units cannot counter-attack Archers |
 | **Knight** | K | 350 | 18 | 4 | 8 | 5 | CHARGE: +50% damage if moved 3+ tiles before attacking |
 | **Rogue** | R | 350 | 12 | 4 | 9 | 3 | FLANK: +50% damage if target adjacent to ally, EVADE: 15% dodge (30% in forest) |
@@ -49,10 +49,19 @@ Reinforce Tactics features **8 distinct unit types**, each with unique abilities
 - **Cost**: $200
 - **Stats**: 10 HP, 3 Movement, 2 Attack, 4 Defence
 - **Abilities**:
-  - Can HEAL allies for 5 HP per action (range 1-2)
-  - Can CURE paralyzed units (range 1-2)
+  - Can HEAL allies for 7 HP per action (range 1-3)
+  - Can CURE paralyzed units (range 1-3)
   - Weak combat capabilities (2 attack)
 - **Best for**: Keeping your army healthy and removing status effects
+
+#### Archer (A)
+- **Role**: Indirect ranged attacker
+- **Cost**: $250
+- **Stats**: 15 HP, 3 Movement, 5 Attack, 1 Defence
+- **Abilities**:
+  - Attacks at distance 2-3 only (2-4 when standing on a mountain); cannot attack adjacent enemies
+  - Only Archers, Mages and Sorcerers can counter-attack an Archer
+- **Best for**: Wearing down melee units from safety, especially from mountains
 
 #### Knight (K)
 - **Role**: Heavy cavalry
@@ -116,9 +125,10 @@ Structures provide income and serve as strategic objectives. They can be capture
 - **Eliminate All Units**: If a player loses all their units, they lose the game regardless of how many structures they own
 
 #### Structure Regeneration
-- Abandoned structures (not owned by any player) regenerate **50% of their max HP per turn**
-- This regeneration rate is defined by `STRUCTURE_REGEN_RATE = 0.5`
-- Regeneration stops once a structure is captured by a player
+- A partly seized structure recovers when the seizing stops:
+  - If the seizing unit moves off it, its HP is restored to full at the end of that player's turn
+  - If the seizing unit is killed on it, it regenerates **50% of its max HP** (`STRUCTURE_REGEN_RATE = 0.5`) at the end of every turn until it is back to full; a unit stepping onto it stops the regeneration
+- A captured structure starts at full HP under its new owner
 
 #### Unit Creation
 - Units can be created at owned **Buildings** only
@@ -136,13 +146,13 @@ Structures provide income and serve as strategic objectives. They can be capture
 
 ### Basic Combat
 - Units can attack enemy units within their attack range
-- Damage calculation involves both the attacker's attack stat and the defender's defence stat
-- When a melee unit attacks another melee unit, the defender can counter-attack
+- Damage calculation involves both the attacker's attack stat and the defender's defence stat (each point of defence reduces damage by 5%, at most 90%)
+- A defender that survives and can reach its attacker counter-attacks
 
 ### Counter-Attack Mechanics
-- Counter-attacks occur when a melee unit (range 1) is attacked by another melee unit
+- A surviving defender counter-attacks if the attacker is within its own attack range (a Warrior hit by a Mage from 2 tiles away cannot)
 - Counter-attacks deal **80% of normal damage** (`COUNTER_ATTACK_MULTIPLIER = 0.8`)
-- Archers are special: melee units **cannot counter-attack Archers** even when attacked
+- Archers are special: only Archers, Mages and Sorcerers can counter-attack an Archer
 - Units cannot counter-attack if they are paralyzed
 
 ### Status Effects
@@ -154,8 +164,8 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Clerics can cure paralysis with their CURE ability
 
 #### Healing
-- Clerics can heal friendly units
-- Each heal action restores **5 HP** (`HEAL_AMOUNT = 5`)
+- Clerics can heal friendly units within range 1-3 (`CLERIC_HEAL_RANGE = 3`)
+- Each heal action restores **7 HP** (`HEAL_AMOUNT = 7`)
 - Units cannot be healed above their maximum HP
 
 #### Haste
@@ -164,12 +174,12 @@ Structures provide income and serve as strategic objectives. They can be capture
 - After using Haste, the Sorcerer has a **2 turn cooldown** (`HASTE_COOLDOWN = 2`)
 
 #### Defence Buff
-- Sorcerers can grant Defence Buff to friendly units within range 1-2
+- Sorcerers can grant Defence Buff to friendly units within range 0-2 (including themselves)
 - Buffed units take **50% less damage** for 3 turns (`SORCERER_DEFENCE_BUFF_AMOUNT = 0.50`)
 - After using Defence Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
 #### Attack Buff
-- Sorcerers can grant Attack Buff to friendly units within range 1-2
+- Sorcerers can grant Attack Buff to friendly units within range 0-2 (including themselves)
 - Buffed units deal **50% more damage** for 3 turns (`SORCERER_ATTACK_BUFF_AMOUNT = 0.50`)
 - After using Attack Buff, the Sorcerer has a **2 turn cooldown** (`SORCERER_BUFF_COOLDOWN = 2`)
 
@@ -202,6 +212,21 @@ Structures provide income and serve as strategic objectives. They can be capture
 - Forest evade: 30% dodge chance (+15% bonus)
 - This bonus is automatically applied when calculating counter-attack outcomes
 
+### Movement Cost
+- By default every walkable tile (grass, road, forest, mountain and structures) costs 1 movement, so roads are not faster and forests and mountains are not slower
+- Terrain movement costs can be switched on as an optional rule (below)
+
+## Optional Rules
+
+These rules are set per game through `engine_overrides` (in a training config's `env.engine_overrides`, or `GameState(..., engine_overrides=...)`). All of them are **off by default**, so the default game is exactly as described above. A game's overrides are stored in its saves and in a training run's `config.json`.
+
+| Key | Default | Effect when set |
+|-----|---------|-----------------|
+| `terrain_move_cost` | every tile costs 1 | Movement points to enter each tile type, e.g. `{"r": 0.5, "f": 2, "m": 2}`. A unit may enter a tile while its path's total cost stays within its movement, so roads at 0.5 double the distance travelled along them. Only walkable tile codes (`p`, `r`, `f`, `m`, `b`, `h`, `t`) and positive costs are accepted |
+| `charge_distance` | `"displacement"` | `"path"`: the Knight's Charge counts the tiles along the path of the move (going around a lake counts) instead of the straight-line distance from where the Knight started |
+| `forest_concealment` | `false` | Under fog of war, a unit standing in forest is seen only by an enemy with a unit on or orthogonally next to its tile; the forest tile itself still counts as explored |
+| `hq_always_visible` | `false` | Under fog of war, every HQ counts as explored for every player, so its position and owner are always known; units on it still need normal vision |
+
 ## Game Rules
 
 ### Victory Conditions
@@ -214,15 +239,15 @@ Structures provide income and serve as strategic objectives. They can be capture
 3. **End Turn**: Pass control to the next player
 
 ### Movement Rules
-- Units can move up to their movement range in Manhattan distance (sum of horizontal and vertical movement)
+- Units move up to their movement range in orthogonal steps (each walkable tile costs 1 movement by default; see Optional Rules)
 - Units cannot move through water or ocean tiles
-- Units cannot move through other units (friendly or enemy)
+- Units can move through friendly units but not through enemies, and must end their move on an empty tile
 - After moving, units can still attack if they haven't attacked yet
 
 ### Attack Rules
-- Units can attack before or after moving (but only once per turn)
+- Units can attack without moving, or move first and then attack (once per turn)
 - Each unit type has specific attack range requirements
-- Attacking or moving ends that unit's turn (it cannot move after attacking, and vice versa)
+- Attacking, using an ability or seizing ends that unit's turn: it cannot move afterwards
 
 ## Strategic Tips
 

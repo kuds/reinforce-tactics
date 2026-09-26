@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from reinforcetactics.core.game_state import GameState
+from reinforcetactics.core.game_state import GameState, derive_seed
 from reinforcetactics.rl.alphazero_net import AlphaZeroNet
 from reinforcetactics.rl.mcts import MCTS, _execute_action_on_state, _obs_from_game_state
 from reinforcetactics.utils.file_io import FileIO
@@ -72,6 +72,7 @@ def self_play_game(
     max_steps: int = 400,
     temperature_threshold: int = 30,
     enabled_units: list | None = None,
+    seed: int | None = None,
 ) -> tuple[list[tuple], int]:
     """
     Play a complete game using MCTS for both players.
@@ -85,13 +86,15 @@ def self_play_game(
         max_steps: Maximum actions before truncating.
         temperature_threshold: Number of actions before switching to greedy.
         enabled_units: Optional list of enabled unit types.
+        seed: Seed for the game's combat RNG (``GameState(seed=...)``);
+            None draws one from entropy.
 
     Returns:
         (examples, winner) where examples is a list of
         (grid, units, global_features, action_mask, mcts_policy, current_player)
         tuples, and winner is the game winner (1, 2, or None for draw).
     """
-    game_state = GameState(map_data, num_players=2, enabled_units=enabled_units)
+    game_state = GameState(map_data, num_players=2, enabled_units=enabled_units, seed=seed)
     examples = []
     step = 0
 
@@ -189,8 +192,13 @@ class AlphaZeroTrainer:
         checkpoint_dir: str = "checkpoints/alphazero",
         device: str = "cpu",
         enabled_units: list | None = None,
+        seed: int | None = None,
     ):
         self.map_file = map_file
+        # Base seed for every game's combat RNG (review core-10): each
+        # self-play and evaluation game gets ``derive_seed(seed, ...)``.
+        # None leaves each game to draw its own seed from entropy.
+        self.seed = seed
         self.grid_height = grid_height
         self.grid_width = grid_width
         self.num_simulations = num_simulations
@@ -378,6 +386,7 @@ class AlphaZeroTrainer:
                 max_steps=self.max_game_steps,
                 temperature_threshold=self.temperature_threshold,
                 enabled_units=self.enabled_units,
+                seed=self._game_seed("self_play", game_idx),
             )
 
             all_examples.extend(examples)
@@ -510,7 +519,7 @@ class AlphaZeroTrainer:
             p1_mcts = current_mcts if current_is_p1 else opponent_mcts
             p2_mcts = opponent_mcts if current_is_p1 else current_mcts
 
-            winner = self._play_eval_game(p1_mcts, p2_mcts)
+            winner = self._play_eval_game(p1_mcts, p2_mcts, seed=self._game_seed("eval", game_idx))
 
             if winner is None:
                 draws += 1
@@ -524,12 +533,23 @@ class AlphaZeroTrainer:
             return 0.5
         return wins / total_decided
 
-    def _play_eval_game(self, p1_mcts: MCTS, p2_mcts: MCTS) -> int | None:
+    def _game_seed(self, phase: str, game_idx: int) -> int | None:
+        """Combat-RNG seed for one game of the current iteration, or None.
+
+        Keyed on the completed-iteration count (part of the checkpointed
+        history), so a resumed run does not replay earlier games' seeds.
+        """
+        if self.seed is None:
+            return None
+        return derive_seed(self.seed, phase, len(self.history["iteration"]), game_idx)
+
+    def _play_eval_game(self, p1_mcts: MCTS, p2_mcts: MCTS, seed: int | None = None) -> int | None:
         """Play a single evaluation game. Returns winner (1, 2, or None)."""
         game_state = GameState(
             self.map_data,
             num_players=2,
             enabled_units=self.enabled_units,
+            seed=seed,
         )
 
         for _ in range(self.max_game_steps):
@@ -577,6 +597,7 @@ class AlphaZeroTrainer:
                     "num_simulations": self.num_simulations,
                     "num_res_blocks": self.num_res_blocks,
                     "channels": self.channels,
+                    "seed": self.seed,
                 },
             },
             path,

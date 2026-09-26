@@ -2,6 +2,8 @@
 Tile class representing a single tile in the game grid.
 """
 
+import logging
+
 from reinforcetactics.constants import (
     BUILDING_MAX_HEALTH,
     HEADQUARTERS_MAX_HEALTH,
@@ -9,6 +11,8 @@ from reinforcetactics.constants import (
     TILE_COLORS,
     TOWER_MAX_HEALTH,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Tile:
@@ -28,7 +32,7 @@ class Tile:
 
         # Handle NaN, empty, or invalid values
         if tile_str in ["", "nan", "None", "NaN"]:
-            tile_str = "o"  # Default to grass
+            tile_str = "o"  # Default to ocean (impassable), not open ground
 
         # Split by underscore
         parts = tile_str.split("_")
@@ -39,10 +43,10 @@ class Tile:
         self.x = x
         self.y = y
 
-        # Validate tile type - if invalid, default to grass
+        # Validate tile type - if invalid, default to ocean (impassable)
         valid_types = ["p", "w", "m", "f", "r", "b", "h", "t", "o"]
         if self.type not in valid_types:
-            print(f"⚠️  Invalid tile type '{self.type}' at ({x}, {y}), defaulting to grass")
+            logger.warning("Invalid tile type %r at (%d, %d), defaulting to ocean", self.type, x, y)
             self.type = "o"
 
         # Tower/Headquarters/Building-specific properties

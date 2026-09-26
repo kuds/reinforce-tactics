@@ -63,11 +63,14 @@ class TournamentConfig:
     enabled_units: list[str] | None = None
 
     # Stochastic tiebreak settings. ``rng_seed=None`` keeps every scripted
-    # bot fully deterministic (every replay of the same matchup is byte-
-    # identical -- the historical behaviour). When set, each game is
+    # bot fully deterministic (every replay of the same matchup is
+    # identical unless a Rogue's evade roll differs: the engine then seeds
+    # each game's combat RNG from entropy and records that seed in the
+    # replay -- the historical behaviour). When set, each game is
     # assigned a per-game seed derived from ``(rng_seed, game_id,
     # map_stem, bot1_name, bot2_name)`` and that seed feeds a
-    # ``random.Random`` instance into each bot's constructor. Bots use
+    # ``random.Random`` instance into each bot's constructor and the
+    # game's combat RNG (the Rogue evade roll). Bots use
     # the rng to tiebreak at every sort/max/min site (see
     # ``BotUnitMixin._maybe_shuffle``), so games with the same matchup
     # produce *distinct* episodes while a re-run of the whole tournament

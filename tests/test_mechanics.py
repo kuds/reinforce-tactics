@@ -821,51 +821,42 @@ class TestRogueFlankAbility:
 
 
 class TestRogueEvadeAbility:
-    """Test Rogue's Evade ability (25% dodge counter-attacks)."""
+    """Test Rogue's Evade ability (15% dodge counter-attacks).
 
-    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid, monkeypatch):
-        """Test Rogue evades counter-attack when random roll is below 0.25."""
-        # Mock random.random to return a value below 0.25
-        import reinforcetactics.core.mechanics as mechanics_module
+    The roll comes from an injected rng (``_ScriptedEvadeRng``, below): the
+    mechanics no longer read the module-global ``random`` these tests used
+    to monkeypatch (review core-10).
+    """
 
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.1)
-
+    def test_rogue_evade_triggers_when_random_below_threshold(self, simple_grid):
+        """Test Rogue evades counter-attack when random roll is below 0.15."""
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)  # Warrior can counter-attack
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.1))
 
         assert result["evade"] is True
         assert result["counter_damage"] == 0
         assert rogue.health == 12  # Full health, no counter damage taken
 
-    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid, monkeypatch):
-        """Test Rogue doesn't evade when random roll is above 0.25."""
-        # Mock random.random to return a value above 0.25
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.5)
-
+    def test_rogue_no_evade_when_random_above_threshold(self, simple_grid):
+        """Test Rogue doesn't evade when random roll is above 0.15."""
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)  # Warrior can counter-attack
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.5))
 
         assert result["evade"] is False
         assert result["counter_damage"] > 0
         assert rogue.health < 12  # Took counter damage
 
-    def test_non_rogue_cannot_evade(self, simple_grid, monkeypatch):
+    def test_non_rogue_cannot_evade(self, simple_grid):
         """Test non-Rogue units cannot evade counter-attacks."""
         # Even with favorable random roll, non-Rogues shouldn't evade
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.1)
-
         warrior = Unit("W", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(warrior, target, simple_grid)
+        result = GameMechanics.attack_unit(warrior, target, simple_grid, rng=_ScriptedEvadeRng(0.1))
 
         assert result["evade"] is False
         # Warrior should take counter damage
@@ -1023,51 +1014,39 @@ def forest_grid():
 class TestRogueForestEvadeBonus:
     """Test Rogue's additional evade chance when in forest."""
 
-    def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid, monkeypatch):
+    def test_rogue_evade_in_forest_triggers_at_higher_threshold(self, forest_grid):
         """Test Rogue in forest evades at 0.25 (above 0.15 but below 0.30)."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.25)
-
         # Place rogue on forest tile (5, 5)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, forest_grid)
+        result = GameMechanics.attack_unit(rogue, target, forest_grid, rng=_ScriptedEvadeRng(0.25))
 
         # Should evade because 0.25 < 0.30 (base 0.15 + forest bonus 0.15)
         assert result["evade"] is True
         assert result["counter_damage"] == 0
         assert rogue.health == 12
 
-    def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid, monkeypatch):
+    def test_rogue_evade_in_forest_no_evade_above_threshold(self, forest_grid):
         """Test Rogue in forest doesn't evade when random is above 0.30."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.35)
-
         # Place rogue on forest tile (5, 5)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, forest_grid)
+        result = GameMechanics.attack_unit(rogue, target, forest_grid, rng=_ScriptedEvadeRng(0.35))
 
         # Should NOT evade because 0.35 > 0.30
         assert result["evade"] is False
         assert result["counter_damage"] > 0
         assert rogue.health < 12
 
-    def test_rogue_evade_on_grass_uses_base_chance(self, simple_grid, monkeypatch):
+    def test_rogue_evade_on_grass_uses_base_chance(self, simple_grid):
         """Test Rogue on grass uses base 15% evade chance, not forest bonus."""
-        import reinforcetactics.core.mechanics as mechanics_module
-
-        monkeypatch.setattr(mechanics_module.random, "random", lambda: 0.20)
-
         # Place rogue on grass tile (not forest)
         rogue = Unit("R", 5, 5, 1)
         target = Unit("W", 6, 5, 2)
 
-        result = GameMechanics.attack_unit(rogue, target, simple_grid)
+        result = GameMechanics.attack_unit(rogue, target, simple_grid, rng=_ScriptedEvadeRng(0.20))
 
         # Should NOT evade because 0.20 > 0.15 (base chance without forest bonus)
         assert result["evade"] is False
@@ -1093,8 +1072,8 @@ class TestRogueEvadeRngInjection:
     Regression tests for the roll reading the module-global ``random``
     unconditionally, which made seeded games (env ``reset(seed=...)``)
     non-reproducible whenever a Rogue attacked into a counter. ``rng=None``
-    keeps the module-global fallback (covered by the monkeypatch tests
-    above).
+    rolls with a private unseeded generator, never the module-global
+    ``random`` (see tests/test_rng_core.py).
     """
 
     def test_injected_rng_forces_evade(self, simple_grid):
