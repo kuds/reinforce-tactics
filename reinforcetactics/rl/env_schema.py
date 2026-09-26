@@ -133,14 +133,21 @@ DEFAULT_REWARD_CONFIG: dict[str, float] = {
     "create_unit": 0.5,
     "move": 0.0,
     "damage_scale": 0.05,  # reward per damage point dealt
-    # Penalty per damage point *taken* during the opponent's turn (negative
-    # magnitude). Makes combat shaping net-zero-sum: a mutual trade nets ~0
-    # and only decisive combat (dealing more than you take) pays. Counters
-    # the kill/damage-farm draw attractor where two armies trade blows to the
-    # max-turns clock while collecting only the dealt-damage half of the
-    # exchange. Default 0.0 leaves legacy reward shapes unchanged.
+    # Charge per HP of damage the agent's units *take* (a negative
+    # magnitude): during the opponent's turn, and from the counter-attack on
+    # the agent's own attack step. Makes combat shaping net-zero-sum: a
+    # mutual trade nets ~0 and only decisive combat (dealing more than you
+    # take) pays. Counters the kill/damage-farm draw attractor where two
+    # armies trade blows to the max-turns clock while collecting only the
+    # dealt-damage half of the exchange. Default 0.0 leaves legacy reward
+    # shapes unchanged.
     "damage_taken_scale": 0.0,
     "kill": 5.0,
+    # Charge per agent unit lost (a negative magnitude; the mirror of
+    # ``kill``): a counter-attack that kills the attacker, on the attack
+    # step, and each unit the opponent kills, on the end_turn step. Default
+    # 0.0 (off).
+    "unit_lost": 0.0,
     "seize_progress": 5.0,
     "capture": 200.0,
     "cure": 5.0,

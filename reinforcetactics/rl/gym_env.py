@@ -674,7 +674,16 @@ class StrategyGameEnv(gym.Env):
             "attacks": 0,
             "seize_attempts": 0,
             "damage_dealt": 0.0,
+            # HP the agent's units lost to combat: the opponent's attacks
+            # during its turn (not netted against the agent's turn-start
+            # structure healing, which lands in the same window) plus the
+            # counter-attacks the agent's own attacks drew, which are also
+            # broken out in ``counter_damage_taken``.
             "damage_taken": 0.0,
+            "counter_damage_taken": 0.0,
+            # Agent units that died: to a counter-attack on its own attack,
+            # or to the opponent during its turn.
+            "units_lost": 0,
             "structures_lost_neutral": 0,
             "structures_lost_owned": 0,
             # Action-space diagnostics (see step()):
@@ -763,11 +772,11 @@ class StrategyGameEnv(gym.Env):
             (flat_mask, action_type_mask, unit_type_mask,
              from_x_mask, from_y_mask, to_x_mask, to_y_mask)
         """
-        # Per-turn action budget gate (see ``_build_flat_actions``). When
+        # Per-turn action budget gate (see ``_budget_exhausted``). When
         # the agent has used up its budget, advertise only end_turn at
         # the canonical (0, 0) coordinates so the multi_discrete policy
         # has exactly one legal action.
-        if self.max_actions_per_turn is not None and self._actions_this_turn >= self.max_actions_per_turn:
+        if self._budget_exhausted():
             width = self.grid_width
             height = self.grid_height
             area = width * height
@@ -812,7 +821,20 @@ class StrategyGameEnv(gym.Env):
         do not need a special case.
 
         Masks describe the *agent's* legal actions (see ``_build_masks``).
+        Once the per-turn action budget is spent they offer end_turn alone,
+        exactly like the other two mask builders (review rlenv-8: the
+        feudal autoregressive worker samples from these masks, so without
+        the gate its "never end the turn" safety net was off).
         """
+        if self._budget_exhausted():
+            H, W = self.grid_height, self.grid_width
+            atype = np.zeros(10, dtype=bool)
+            atype[5] = True
+            source = np.zeros((10, H, W), dtype=bool)
+            source[5, 0, 0] = True
+            end_t = np.zeros((H, W), dtype=bool)
+            end_t[0, 0] = True
+            return StructuredActionMasks(atype=atype, source=source, target={(5, 0, 0): end_t}, unit_type={})
         return build_structured_masks(
             self.game_state,
             self.grid_width,
@@ -830,6 +852,20 @@ class StrategyGameEnv(gym.Env):
         existing 6-vector action format.
         """
         return self._build_structured_masks()
+
+    def _budget_exhausted(self) -> bool:
+        """Whether the agent has spent its per-game-turn action budget.
+
+        Once it has taken ``max_actions_per_turn`` actions without ending
+        its turn, every mask builder (flat, per-dimension, structured)
+        offers end_turn alone, at the canonical (0, 0) coordinates. Without
+        the cap a policy that finds a legal-but-unproductive cycle (idle
+        moves, etc.) can spin until ``max_steps`` truncates the episode --
+        which surfaces in eval as len near max_steps with turns very low
+        (the "never end the turn" attractor). The counter is reset by every
+        end_turn the agent executes (see ``step``).
+        """
+        return self.max_actions_per_turn is not None and self._actions_this_turn >= self.max_actions_per_turn
 
     def set_self_play_opponent_factory(self, factory) -> None:
         """Register a callable used to (re)build the opponent in self-play.
@@ -884,16 +920,9 @@ class StrategyGameEnv(gym.Env):
         ``_encode_action`` and ``_execute_action`` work unchanged. The list
         itself comes from the shared :func:`build_flat_actions` (also used by
         ``ModelBot`` to decode flat_discrete checkpoints); only the per-turn
-        action-budget gate below is env-specific.
+        action-budget gate (``_budget_exhausted``) is env-specific.
         """
-        # Per-turn action budget: once the agent has taken
-        # ``max_actions_per_turn`` actions in the current game-turn,
-        # collapse the legal-action set to end_turn only. Without this
-        # cap a policy that finds a legal-but-unproductive cycle (idle
-        # moves, etc.) can spin until ``max_steps`` truncates the
-        # episode -- which surfaces in eval as len near max_steps with
-        # turns very low (the "never end the turn" attractor).
-        if self.max_actions_per_turn is not None and self._actions_this_turn >= self.max_actions_per_turn:
+        if self._budget_exhausted():
             self._current_actions = [np.array([5, 0, 0, 0, 0, 0], dtype=np.int32)]
             return
 
@@ -1042,6 +1071,10 @@ class StrategyGameEnv(gym.Env):
                     if kind == "attack":
                         result_info["damage"] = outcome.result["damage"]
                         result_info["target_alive"] = outcome.result["target_alive"]
+                        # The counter-attack's cost to the attacker (review
+                        # rlenv-9): combat shaping charges it on this step.
+                        result_info["counter_damage"] = outcome.result["counter_damage"]
+                        result_info["attacker_alive"] = outcome.result["attacker_alive"]
                     # The engine refuses an illegal action (spent or paralyzed
                     # unit, out of range, hidden by fog, wrong turn) and
                     # changes nothing. multi_discrete per-dimension masks
@@ -1087,13 +1120,26 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 1:
                 reward += rc["move"]
             elif action_type == 2:
-                damage = result_info.get("damage", 0) or 0
+                damage = result_info["damage"]
                 reward += damage * rc["damage_scale"]
                 self.episode_stats["attacks"] += 1
                 self.episode_stats["damage_dealt"] += float(damage)
-                if not result_info.get("target_alive", True):
+                if not result_info["target_alive"]:
                     reward += rc["kill"]
                     self.episode_stats["kills"] += 1
+                # The exchange's other half (review rlenv-9): the counter-attack
+                # this attack drew is damage taken, charged here rather than
+                # left to the unit_diff potential -- otherwise a trade that
+                # loses more HP to the counter than it deals still pays, and a
+                # suicide attack costs nothing.
+                counter = result_info["counter_damage"]
+                if counter:
+                    reward += counter * rc["damage_taken_scale"]
+                    self.episode_stats["damage_taken"] += float(counter)
+                    self.episode_stats["counter_damage_taken"] += float(counter)
+                if not result_info["attacker_alive"]:
+                    reward += rc["unit_lost"]
+                    self.episode_stats["units_lost"] += 1
             elif action_type == 3:
                 reward += rc["seize_progress"]
                 self.episode_stats["seize_attempts"] += 1
@@ -1141,6 +1187,12 @@ class StrategyGameEnv(gym.Env):
                         # both wounded survivors (HP delta) and units that
                         # died entirely (full remaining HP counted as taken).
                         pre_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
+                        # The agent's turn-start structure healing runs inside
+                        # the opponent's end_turn, i.e. inside this window, and
+                        # used to net the damage down (review rlenv-9). It is
+                        # the only other HP change the agent's units see here,
+                        # so adding it back makes the sum exact.
+                        pre_healed = self._healed_hp(ap)
                         # Snapshot structure ownership before the opponent
                         # moves so any captures the opponent makes during
                         # their turn can be attributed back as a penalty
@@ -1154,7 +1206,10 @@ class StrategyGameEnv(gym.Env):
                             if self.game_state.current_player != self.agent_player:
                                 self.game_state.end_turn()
                         post_hp = {id(u): u.health for u in self.game_state.units if u.player == ap}
-                        damage_taken = sum(max(0, hp - post_hp.get(uid, 0)) for uid, hp in pre_hp.items())
+                        healed = self._healed_hp(ap) - pre_healed
+                        hp_lost = sum(hp - post_hp.get(uid, 0) for uid, hp in pre_hp.items())
+                        damage_taken = max(0, hp_lost + healed)
+                        units_lost = sum(1 for uid in pre_hp if uid not in post_hp)
                         self.episode_stats["damage_taken"] += float(damage_taken)
                         # Symmetric-combat penalty: charge for damage taken so
                         # mutual trading nets ~0 and only decisive combat pays
@@ -1162,6 +1217,9 @@ class StrategyGameEnv(gym.Env):
                         # Attributed to the end_turn step, mirroring how the
                         # opponent-capture penalties below are attributed.
                         reward += damage_taken * rc["damage_taken_scale"]
+                        if units_lost:
+                            reward += units_lost * rc["unit_lost"]
+                            self.episode_stats["units_lost"] += units_lost
                         # Tiered opponent-capture penalty. ``neutral_lost``
                         # fires when the opponent seized an unowned tile
                         # (we lost a race); ``owned_lost`` fires when the
@@ -1202,6 +1260,11 @@ class StrategyGameEnv(gym.Env):
                 reward += rc["attack_buff"]
 
         return reward, is_valid
+
+    def _healed_hp(self, player: int) -> int:
+        """HP structure auto-heal has restored to ``player``'s units this game (``GameState.healing_totals``)."""
+        healing_totals = getattr(self.game_state, "healing_totals", None) or {}
+        return int((healing_totals.get(player) or {}).get("hp", 0))
 
     def _opponent_turn(self):
         """Execute opponent's turn."""
@@ -1366,31 +1429,19 @@ class StrategyGameEnv(gym.Env):
         reward, breakdown = self._calculate_reward(action_reward, is_valid, terminated=terminated)
         self.episode_stats["reward"] += reward
 
-        # Classify how the episode ended so eval/diagnostics can split
-        # win/loss/draw counts by the actual game-over condition, AND so
-        # the terminal bonus can differentiate HQ-capture wins from
-        # elimination wins (the policy should prefer the former). The env
-        # does not track this directly, so reconstruct from observable
-        # state at the terminal step:
-        #   hq_capture     - terminated with a winner and the loser still
-        #                    has units alive (only HQ capture ends the game
-        #                    while both sides have units in play; see
-        #                    mechanics.seize_structure tile.type == "h").
-        #   elimination    - terminated with a winner and the loser has
-        #                    zero units (game_state._check_player_eliminated).
-        #   max_turns_draw - terminated with no winner (game_state.end_turn
-        #                    line 825-827 sets game_over with winner=None).
-        #   max_steps_truncate - env step counter hit max_steps before the
-        #                    game produced a terminal state.
+        # How the episode ended, for eval/diagnostics (win/loss/draw split by
+        # the actual game-over condition) and for the terminal bonus
+        # (HQ-capture wins vs elimination wins). A game that ended says why
+        # itself: ``GameState.end_reason`` (hq_capture / elimination /
+        # max_turns_draw / resign), recorded by ``_set_game_over``. It used
+        # to be guessed from the loser's unit count, which labels an HQ
+        # capture against a side with no units left (a noop opponent) as an
+        # elimination and pays it the wrong terminal (review rlenv-5).
+        # ``max_steps_truncate``: the env step counter hit max_steps before
+        # the game produced a terminal state.
         end_reason: str | None = None
         if terminated:
-            winner = self.game_state.winner
-            if winner is None:
-                end_reason = "max_turns_draw"
-            else:
-                loser = 3 - winner
-                loser_units = sum(1 for u in self.game_state.units if u.player == loser)
-                end_reason = "elimination" if loser_units == 0 else "hq_capture"
+            end_reason = self.game_state.end_reason
         elif truncated:
             end_reason = "max_steps_truncate"
 
