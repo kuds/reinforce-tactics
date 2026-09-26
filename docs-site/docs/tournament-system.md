@@ -156,7 +156,9 @@ You can also specify custom models by setting environment variables or modifying
 
 #### When an LLM bot can't play
 
-Rate limits, overloads, timeouts and connection errors are retried with backoff; a turn whose retries run out is passed. An LLM bot raises `LLMBotError` instead of passing turns when the failure can't fix itself (missing SDK, rejected API key, unknown model, malformed request) or after 3 turns in a row without a usable reply (including replies with no parseable `actions` list). The tournament then ends that game as an error: it is reported with an `error` message in the results JSON, counted under `errors` in the standings, and left out of wins, losses, draws and Elo.
+Rate limits, overloads, timeouts and connection errors are retried with jittered backoff (honouring `Retry-After`): at least 3 attempts, and more while the request has taken less than 60 seconds in all; a turn whose retries run out is passed. An LLM bot raises `LLMBotError` instead of passing turns when the failure can't fix itself (missing SDK, rejected API key, unknown model, malformed request) or after 3 turns in a row in which the API gave no reply at all. The tournament then ends that game as an error: it is reported with an `error` message in the results JSON, counted under `errors` in the standings, and left out of wins, losses, draws and Elo.
+
+A reply that arrives but holds no usable actions (an empty reply, a refusal or safety block, prose, or JSON cut off at `max_tokens`) is the model's own play, not an infrastructure failure: the turn is passed, the game goes on and is scored normally, and the reply is counted as `llm_empty_reply` or `llm_unparseable_reply` in the replay's `game_info.capabilities_p1` / `capabilities_p2`. Actions that aren't legal at the moment they would run are skipped and counted as `llm_illegal_action` (and `llm_illegal_<type>`).
 
 ### Model Bots
 Automatically discovered from the `models/` directory:

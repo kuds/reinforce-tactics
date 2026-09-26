@@ -8,7 +8,16 @@ import pygame
 
 from reinforcetactics.app.action_executor import handle_action_menu_result
 from reinforcetactics.constants import TILE_SIZE
+from reinforcetactics.game.llm_bot import LLMBotError
+from reinforcetactics.ui import widgets
 from reinforcetactics.ui.menus import ConfirmationDialog, UnitActionMenu, UnitPurchaseMenu
+from reinforcetactics.ui.menus.base import drain_events
+from reinforcetactics.ui.widgets.dialog import Dialog
+
+# The bot-replaced dialog shortens the LLM error (which can carry a whole
+# HTTP error body) until the dialog fits the window, but not below this many
+# characters. The full message is printed to the console.
+_MIN_DIALOG_REASON_CHARS = 40
 
 
 class InputHandler:
@@ -397,9 +406,75 @@ class InputHandler:
         bot_turn_count = 0
 
         while self.game.current_player in self.bots and not self.game.game_over and bot_turn_count < max_bot_turns:
-            current_bot = self.bots[self.game.current_player]
-            print(f"Bot (Player {self.game.current_player}) is thinking...")
-            current_bot.take_turn()
+            player = self.game.current_player
+            current_bot = self.bots[player]
+            print(f"Bot (Player {player}) is thinking...")
+            try:
+                current_bot.take_turn()
+            except LLMBotError as exc:
+                # The LLM bot can't reach its model (rejected key, unknown
+                # model, an outage that outlasted its retries) and left its
+                # turn un-ended. Letting this unwind ended the session with
+                # nothing saved; SimpleBot takes the seat instead and plays
+                # the turn on the next pass of this loop.
+                self._replace_failed_llm_bot(player, current_bot, exc)
             # Note: Bots call end_turn() internally, so we don't call it here
             bot_turn_count += 1
             print(f"Bot finished. Player {self.game.current_player}'s turn\n")
+
+    def _replace_failed_llm_bot(self, player, bot, exc):
+        """Hand ``player``'s seat to SimpleBot after its LLM bot raised LLMBotError.
+
+        This is the fallback bot_factory uses when an LLM bot can't be built
+        at all (missing SDK or key). The player is told in a dialog, since a
+        GUI player doesn't see the console.
+        """
+        from reinforcetactics.game.bot import SimpleBot
+
+        bot_name = f"{type(bot).__name__} ({getattr(bot, 'model', 'unknown model')})"
+        print(f"❌ Player {player}'s {bot_name} stopped: {exc}")
+        print(f"   SimpleBot takes over Player {player} for the rest of the game")
+        self.bots[player] = SimpleBot(self.game, player=player)
+
+        try:
+            self._show_bot_replaced_dialog(
+                f"Player {player}'s LLM bot stopped",
+                str(exc),
+                f"SimpleBot takes over Player {player}.",
+            )
+        except Exception as dialog_error:  # noqa: BLE001
+            # The notice is best-effort: failing to draw it must not end the
+            # game this fallback exists to keep going. The console has it.
+            print(f"⚠️  Could not show the bot-replaced dialog: {dialog_error}")
+
+    def _show_bot_replaced_dialog(self, title, reason, footer):
+        """Show ``reason`` and ``footer`` in a modal notice with an OK button.
+
+        Split out so tests can stub it. The game window is sized to the map
+        and an LLM error can carry a whole HTTP error body, so ``reason`` is
+        shortened until the dialog fits the window (on the smallest maps it
+        can't entirely: the dialog stays centred and is clipped a little).
+        """
+        screen = self.renderer.screen
+        while True:
+            dialog = Dialog(
+                screen,
+                title,
+                f"{reason}\n\n{footer}",
+                buttons=[("OK", "ok", widgets.CONFIRM)],
+                keymap={pygame.K_RETURN: "ok", pygame.K_KP_ENTER: "ok"},
+                cancel_value="ok",
+                quit_value="quit",
+                min_width=min(500, screen.get_width() - 40),
+            )
+            if dialog.dialog_rect.height <= screen.get_height() or len(reason) <= _MIN_DIALOG_REASON_CHARS:
+                break
+            reason = reason[: len(reason) * 3 // 4].rstrip() + "…"
+        result = dialog.run()
+        # Drop clicks and keys queued while the dialog was up so they don't
+        # land on the board. A window-close is kept, and one that closed the
+        # dialog itself is re-posted, so the game loop still offers to save
+        # before quitting.
+        drain_events()
+        if result == "quit":
+            pygame.event.post(pygame.event.Event(pygame.QUIT))

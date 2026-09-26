@@ -3,10 +3,12 @@
 Covers the Claude request shape (no assistant prefill, no sampling params
 for models that reject them, temperature via extra_body for the rest, text
 read from every content block), OpenAI temperature handling, client timeouts,
-error classification and retry policy for all three providers, the
-failed-turn limit that raises LLMBotError (unparseable replies included),
-how a tournament records such a game, and the LLM-side legality check that
-stops repeated SEIZEs, friendly fire and repeated attacks.
+error classification and retry policy (including the retry budget and
+unreadable replies) for all three providers, the failed-turn limit that
+raises LLMBotError when the API stops answering (while useless replies are
+the model's own play and never raise), how a tournament and the GUI handle
+LLMBotError, and the LLM-side legality check that stops repeated SEIZEs,
+friendly fire and repeated attacks.
 
 No network: each provider SDK is replaced by a fake module in sys.modules
 (the fake anthropic client takes exactly the anthropic 1.x keywords).
@@ -20,8 +22,10 @@ import sys
 import types
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import numpy as np
+import pygame
 import pytest
 
 from reinforcetactics.core.game_state import GameState
@@ -144,6 +148,40 @@ class APIConnectionError(Exception):
 
 class UnknownApiResponseError(ValueError):
     """Same name and base as google-genai's error for a reply that isn't JSON."""
+
+
+class ValidationError(ValueError):
+    """Same name and base as pydantic's; ``title`` names the model being validated."""
+
+    def __init__(self, title: str):
+        super().__init__(f"1 validation error for {title}")
+        self.title = title
+
+
+# httpx's transport errors, which google-genai raises unwrapped (the OpenAI
+# and Anthropic SDKs wrap them in APIConnectionError). Same names and bases.
+class TransportError(Exception):
+    pass
+
+
+class NetworkError(TransportError):
+    pass
+
+
+class ConnectError(NetworkError):
+    pass
+
+
+class ReadError(NetworkError):
+    pass
+
+
+class ProtocolError(TransportError):
+    pass
+
+
+class RemoteProtocolError(ProtocolError):
+    pass
 
 
 class FakeGenaiAPIError(Exception):
@@ -388,7 +426,7 @@ class TestClaudeRequest:
         assert len(fake_anthropic.calls) == 1
         assert any(u.player == 2 and (u.x, u.y) == (8, 9) for u in game.units)
 
-    def test_empty_content_is_a_failed_turn_not_a_crash(self, game, fake_anthropic, sleeps):
+    def test_empty_content_passes_the_turn_without_a_crash(self, game, fake_anthropic, sleeps):
         _start_player2_turn(game)
         fake_anthropic.script.append(claude_response(stop_reason="max_tokens"))
         bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
@@ -396,23 +434,25 @@ class TestClaudeRequest:
         bot.take_turn()
 
         assert len(fake_anthropic.calls) == 1  # an empty reply isn't an error to retry
-        assert bot.consecutive_failed_turns == 1
         assert game.current_player == 1
+        assert bot.get_capabilities_fired()["llm_empty_reply"] == 1
+        # The API answered: not an outage, so not a step toward LLMBotError.
+        assert bot.consecutive_failed_turns == 0
 
-    def test_replies_truncated_at_max_tokens_hit_the_failed_turn_limit(self, game, fake_anthropic, sleeps):
-        """Without the prefill, a reply cut off mid-JSON has no actions list; it's a failed turn."""
+    def test_replies_truncated_at_max_tokens_pass_turns_without_raising(self, game, fake_anthropic, sleeps):
+        """Without the prefill, a reply cut off mid-JSON has no actions list: a wasted turn, not an outage."""
         _start_player2_turn(game)
         fake_anthropic.default_response = claude_response(CREATE_REPLY[:30], stop_reason="max_tokens")
         bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
 
-        for _ in range(2):
+        for _ in range(5):
             bot.take_turn()
+            assert game.current_player == 1
             game.end_turn()
-        with pytest.raises(llm_bot.LLMBotError, match="3 turns in a row"):
-            bot.take_turn()
 
-        assert len(fake_anthropic.calls) == 3
+        assert len(fake_anthropic.calls) == 5
         assert not any(u.player == 2 for u in game.units)
+        assert bot.get_capabilities_fired()["llm_unparseable_reply"] == 5
 
     def test_retired_model_is_called_out(self, game, fake_anthropic, caplog):
         assert "claude-opus-4-1-20250805" not in llm_bot.ANTHROPIC_MODELS
@@ -605,7 +645,9 @@ class TestErrorHandling:
 
     def test_exhausted_retries_pass_the_turn_once(self, game, sleeps):
         _start_player2_turn(game)
-        bot = ScriptedBot(game, player=2, api_key="k", max_retries=2, script=[TimeoutError(), TimeoutError()])
+        bot = ScriptedBot(
+            game, player=2, api_key="k", max_retries=2, retry_budget_s=None, script=[TimeoutError(), TimeoutError()]
+        )
 
         bot.take_turn()
 
@@ -618,7 +660,7 @@ class TestErrorHandling:
     def test_llm_bot_error_after_consecutive_failed_turns(self, game, sleeps):
         _start_player2_turn(game)
         outage = [FakeHTTPError(503)] * 10
-        bot = ScriptedBot(game, player=2, api_key="k", max_retries=1, script=outage)
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=1, retry_budget_s=None, script=outage)
 
         for _ in range(2):
             bot.take_turn()  # a blip: the turn passes
@@ -635,7 +677,7 @@ class TestErrorHandling:
     def test_a_good_turn_resets_the_failure_streak(self, game, sleeps):
         _start_player2_turn(game)
         script = [TimeoutError(), TimeoutError(), END_TURN_REPLY, TimeoutError(), TimeoutError()]
-        bot = ScriptedBot(game, player=2, api_key="k", max_retries=1, script=script)
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=1, retry_budget_s=None, script=script)
 
         for _ in range(5):
             bot.take_turn()
@@ -646,15 +688,25 @@ class TestErrorHandling:
     def test_failed_turn_limit_can_be_disabled(self, game, sleeps):
         _start_player2_turn(game)
         bot = ScriptedBot(
-            game, player=2, api_key="k", max_retries=1, max_consecutive_failed_turns=None, script=[TimeoutError()] * 5
+            game,
+            player=2,
+            api_key="k",
+            max_retries=1,
+            retry_budget_s=None,
+            max_consecutive_failed_turns=None,
+            script=[TimeoutError()] * 5,
         )
         for _ in range(5):
             bot.take_turn()
             game.end_turn()
         assert bot.consecutive_failed_turns == 5
 
-    def test_gemini_blocked_responses_count_as_failed_turns(self, game, fake_genai, sleeps):
-        """Blocked replies used to become a synthetic END_TURN, passing turns forever."""
+    def test_gemini_blocked_responses_are_counted_not_fatal(self, game, fake_genai, sleeps, caplog):
+        """Blocked replies used to become a synthetic END_TURN that looked like a deliberate pass.
+
+        A safety block is the provider's answer, not an outage: it passes the
+        turn and is counted, but never ends the game.
+        """
         _start_player2_turn(game)
         blocked = SimpleNamespace(
             text="", usage_metadata=None, candidates=[], prompt_feedback=SimpleNamespace(block_reason="SAFETY")
@@ -662,11 +714,15 @@ class TestErrorHandling:
         fake_genai.default_response = blocked
         bot = GeminiBot(game, player=2, api_key="g-test")
 
-        for _ in range(2):
-            bot.take_turn()
-            game.end_turn()
-        with pytest.raises(llm_bot.LLMBotError):
-            bot.take_turn()
+        with caplog.at_level("WARNING", logger="reinforcetactics.game.llm_bot"):
+            for _ in range(4):
+                bot.take_turn()
+                assert game.current_player == 1
+                game.end_turn()
+
+        assert "blocked: SAFETY" in caplog.text
+        assert bot.get_capabilities_fired()["llm_empty_reply"] == 4
+        assert bot.consecutive_failed_turns == 0
 
     @pytest.mark.parametrize(
         "error, retryable",
@@ -695,10 +751,48 @@ class TestErrorHandling:
             # A reply the SDK couldn't decode may be a garbled one-off.
             (json.JSONDecodeError("Expecting value", "<html>", 0), True),
             (UnknownApiResponseError("response is not JSON"), True),
+            # google-genai validates each reply into a GenerateContentResponse
+            # inside the SDK call; a malformed one used to end the game.
+            (ValidationError("GenerateContentResponse"), True),
+            # Validating a request model is local config, as before.
+            (ValidationError("GenerateContentConfig"), False),
         ],
     )
     def test_classification(self, error, retryable):
         assert llm_bot._classify_llm_error(error).retryable is retryable
+
+    @pytest.mark.parametrize(
+        "error, reason",
+        [
+            (FakeHTTPError(429), "HTTP 429 rate limited"),
+            (FakeHTTPError(529), "HTTP 529"),
+            (FakeGenaiAPIError(503), "HTTP 503"),
+            (TimeoutError(), "timeout"),
+            (APIConnectionError("reset"), "connection error"),
+            (ConnectionResetError(), "connection error"),
+            # google-genai surfaces raw httpx errors; these were logged as "unexpected".
+            (ConnectError("connection refused"), "connection error"),
+            (ReadError("connection dropped mid-read"), "connection error"),
+            (RemoteProtocolError("server disconnected"), "connection error"),
+        ],
+    )
+    def test_transient_failures_are_recognised(self, error, reason):
+        info = llm_bot._classify_llm_error(error)
+        assert info.retryable and info.transient
+        assert info.reason == reason
+
+    @pytest.mark.parametrize(
+        "make_error",
+        [
+            lambda: RuntimeError("something unexpected"),
+            # Built lazily: at collection time the name may not exist yet.
+            lambda: llm_bot._UnreadableResponseError("couldn't read the str reply"),
+        ],
+        ids=["unexpected", "unreadable-reply"],
+    )
+    def test_unknown_failures_are_retryable_but_not_transient(self, make_error):
+        info = llm_bot._classify_llm_error(make_error())
+        assert info.retryable and not info.transient
 
     def test_local_sdk_error_fails_fast(self, game, sleeps):
         """A TypeError from the SDK call used to be retried and then passed, turn after turn."""
@@ -714,38 +808,56 @@ class TestErrorHandling:
         assert sleeps == []
         assert game.current_player == 2
 
-    def test_unparseable_replies_count_toward_the_limit(self, game, sleeps):
-        """Prose, truncated or non-object JSON used to reset the streak, so the bot passed forever."""
+    def test_unparseable_replies_pass_turns_but_never_raise(self, game, sleeps):
+        """A model that can't produce the format loses on the board; its games aren't cancelled.
+
+        LLMBotError makes a tournament drop the game from the standings,
+        which suits an outage but would reward a model for breaking the
+        output format instead of playing a lost position out.
+        """
         _start_player2_turn(game)
         replies = [
             "I will build a warrior.",  # no JSON at all
             '{"actions": [{"type": "MOVE", "unit_id": 0, "to": [1',  # cut off at max_tokens
             '["END_TURN"]',  # JSON, but not an object with an actions list
-        ]
+            "",  # an empty reply (a refusal, say)
+        ] * 2
         bot = ScriptedBot(game, player=2, api_key="k", script=replies)
 
-        for _ in range(2):
+        for _ in range(8):
             bot.take_turn()
-            assert game.current_player == 1  # a single bad reply still passes the turn
+            assert game.current_player == 1  # each bad reply passes the turn
             game.end_turn()
-        with pytest.raises(llm_bot.LLMBotError, match="3 turns in a row"):
-            bot.take_turn()
 
-        assert bot.calls == 3  # the requests succeeded, so nothing was retried
+        assert bot.calls == 8  # the requests succeeded, so nothing was retried
         assert sleeps == []
-        assert bot.get_capabilities_fired()["llm_unparseable_reply"] == 3
+        stats = bot.get_capabilities_fired()
+        assert stats["llm_unparseable_reply"] == 6
+        assert stats["llm_empty_reply"] == 2
+        assert "llm_failed_turn" not in stats
 
-    def test_parsed_reply_resets_the_streak_even_if_every_action_is_illegal(self, game):
+    def test_any_reply_ends_an_outage_streak(self, game, sleeps):
+        """The streak counts turns without a reply; any reply shows the API is back."""
         _start_player2_turn(game)
-        illegal_only = json.dumps({"actions": [{"type": "SEIZE", "unit_id": 0}]})  # P2 has no units
-        script = ["no json", "no json", illegal_only, "no json", "no json"]
-        bot = ScriptedBot(game, player=2, api_key="k", script=script)
+        script = [TimeoutError(), TimeoutError(), "no json", TimeoutError(), TimeoutError()]
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=1, retry_budget_s=None, script=script)
 
         for _ in range(5):
             bot.take_turn()
             game.end_turn()
 
         assert bot.consecutive_failed_turns == 2
+        assert bot.get_capabilities_fired()["llm_failed_turn"] == 4
+
+    def test_reply_with_only_illegal_actions_is_counted_not_failed(self, game):
+        _start_player2_turn(game)
+        illegal_only = json.dumps({"actions": [{"type": "SEIZE", "unit_id": 0}]})  # P2 has no units
+        bot = ScriptedBot(game, player=2, api_key="k", script=[illegal_only])
+
+        bot.take_turn()
+
+        assert game.current_player == 1
+        assert bot.consecutive_failed_turns == 0
         assert bot.illegal_action_count == 1
 
     def test_empty_actions_list_is_a_usable_reply(self, game):
@@ -779,6 +891,129 @@ class TestErrorHandling:
         # A long Retry-After wins over the backoff, but is capped.
         assert bot._retry_delay(0, 10.0) >= 10.0
         assert bot._retry_delay(0, 10_000.0) == llm_bot._RETRY_AFTER_CAP_S
+
+
+# ---------------------------------------------------------------------------
+# aibots-4 / aibots-14: how long one call keeps retrying, and garbled replies
+# ---------------------------------------------------------------------------
+
+
+class TestRetryBudget:
+    def test_overload_outlasting_max_retries_is_ridden_out(self, game, fake_anthropic, sleeps):
+        """Five 529s in a row used up the three attempts (about 3 s of backoff) and passed the turn."""
+        _start_player2_turn(game)
+        fake_anthropic.script.extend([FakeHTTPError(529)] * 5 + [claude_response(CREATE_REPLY)])
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test")  # default max_retries=3
+
+        bot.take_turn()
+
+        assert len(fake_anthropic.calls) == 6
+        assert any(u.player == 2 and (u.x, u.y) == (8, 9) for u in game.units)
+        assert bot.consecutive_failed_turns == 0
+        assert sum(sleeps) <= llm_bot.DEFAULT_RETRY_BUDGET_S
+
+    def test_transient_retries_stop_at_the_budget(self, game, fake_anthropic, sleeps):
+        _start_player2_turn(game)
+        fake_anthropic.default_response = FakeHTTPError(503)
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
+
+        bot.take_turn()
+
+        assert game.current_player == 1  # the turn is passed, once
+        assert bot.consecutive_failed_turns == 1
+        # Backoff of 0.5-1 s, 1-2 s, 2-4 s, ... fits 6 to 8 attempts in 60 s.
+        assert 6 <= len(fake_anthropic.calls) <= 9
+        assert len(sleeps) == len(fake_anthropic.calls) - 1
+        assert sum(sleeps) <= llm_bot.DEFAULT_RETRY_BUDGET_S
+
+    def test_budget_counts_time_spent_in_requests(self, game, sleeps, monkeypatch):
+        """Requests that hang until they time out use the budget up: max_retries attempts, no more."""
+        clock = [0.0]
+        monkeypatch.setattr(llm_bot.time, "monotonic", lambda: clock[0])
+
+        class SlowTimeoutBot(ScriptedBot):
+            def _call_llm(self, messages):
+                clock[0] += 45.0  # each request hangs 45 s, then times out
+                return super()._call_llm(messages)
+
+        _start_player2_turn(game)
+        bot = SlowTimeoutBot(game, player=2, api_key="k", script=[TimeoutError()] * 10)
+
+        bot.take_turn()
+
+        assert bot.calls == 3
+        assert game.current_player == 1
+
+    def test_unknown_errors_get_max_retries_attempts_only(self, game, sleeps):
+        _start_player2_turn(game)
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=3, script=[RuntimeError("boom")] * 10)
+
+        bot.take_turn()
+
+        assert bot.calls == 3
+
+    def test_no_budget_means_max_retries_attempts_only(self, game, sleeps):
+        _start_player2_turn(game)
+        bot = ScriptedBot(game, player=2, api_key="k", max_retries=2, retry_budget_s=None, script=[FakeHTTPError(529)] * 10)
+
+        bot.take_turn()
+
+        assert bot.calls == 2
+
+
+def _genai_response(text: str) -> SimpleNamespace:
+    return SimpleNamespace(text=text, usage_metadata=None, candidates=[], prompt_feedback=None)
+
+
+class TestUnreadableReplies:
+    @pytest.mark.parametrize(
+        "bot_class, fixture, good_reply",
+        [
+            (ClaudeBot, "fake_anthropic", lambda: claude_response(CREATE_REPLY)),
+            (OpenAIBot, "fake_openai", lambda: openai_response(CREATE_REPLY)),
+            (GeminiBot, "fake_genai", lambda: _genai_response(CREATE_REPLY)),
+        ],
+        ids=["claude", "openai", "gemini"],
+    )
+    def test_garbled_reply_is_retried_not_fatal(self, game, sleeps, request, bot_class, fixture, good_reply):
+        """A 200 whose body isn't the SDK's reply object (anthropic 1.x hands back a
+        proxy's HTML page as a str) raised AttributeError while being read. That was
+        classed as a local SDK/config error, and one such reply ended the game.
+        """
+        server = request.getfixturevalue(fixture)
+        server.script.extend(["<html>502 Bad Gateway</html>", good_reply()])
+        _start_player2_turn(game)
+        bot = bot_class(game, player=2, api_key="key")
+
+        bot.take_turn()
+
+        assert len(server.calls) == 2
+        assert len(sleeps) == 1
+        assert any(u.player == 2 and (u.x, u.y) == (8, 9) for u in game.units)
+
+    def test_persistently_garbled_replies_pass_the_turn(self, game, fake_anthropic, sleeps):
+        _start_player2_turn(game)
+        fake_anthropic.default_response = "<html>502 Bad Gateway</html>"
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
+
+        bot.take_turn()
+
+        assert len(fake_anthropic.calls) == 3  # max_retries: not a known-transient failure
+        assert game.current_player == 1
+        assert bot.consecutive_failed_turns == 1
+
+    def test_error_building_the_request_is_still_fatal(self, game, fake_anthropic, sleeps):
+        """Only errors from reading the reply are retried; the SDK call's own TypeError isn't."""
+        _start_player2_turn(game)
+        bot = ClaudeBot(game, player=2, api_key="sk-ant-test")
+        # What an SDK without a keyword the bot sends raises, before any request.
+        fake_anthropic.script.append(TypeError("Messages.create() got an unexpected keyword argument 'system'"))
+
+        with pytest.raises(llm_bot.LLMBotError, match="unexpected keyword argument") as excinfo:
+            bot.take_turn()
+
+        assert excinfo.value.retryable is False
+        assert len(fake_anthropic.calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1005,6 +1240,22 @@ class TestTournamentErrors:
         assert standings["Claude"].errors == 2 and standings["Claude"].total_games == 0
         assert results.elo_system.get_rating("Claude") == results.elo_system.get_rating("SimpleBot")
 
+    def test_model_that_never_answers_in_format_is_scored_not_cancelled(self, tmp_path, fake_anthropic, sleeps):
+        """Only infrastructure failures cancel a game; a model's unusable replies are its own play.
+
+        These used to count toward LLMBotError, so a model that answered in
+        prose had its games dropped from the standings instead of scored.
+        """
+        fake_anthropic.default_response = claude_response("I'll rush the enemy HQ with everything I have.")
+
+        results = _run_tournament(tmp_path, _claude_descriptor())
+
+        assert len(results.game_results) == 2
+        assert all(g.error is None for g in results.game_results)
+        standings = {s.bot_name: s for s in results.get_standings()}
+        assert standings["Claude"].errors == 0
+        assert standings["Claude"].total_games == 2
+
     def test_missing_sdk_does_not_abort_a_sequential_tournament(self, tmp_path, monkeypatch):
         """Bot construction ran outside the runner's try, so this ImportError ended the tournament."""
         monkeypatch.setitem(sys.modules, "anthropic", None)
@@ -1025,3 +1276,124 @@ class TestTournamentErrors:
             configs = json.loads(path.read_text(encoding="utf-8"))["game_info"]["player_configs"]
             assert [c["temperature"] for c in configs if c["type"] == "llm"] == [None]
         assert not {"temperature"} & set(fake_anthropic.calls[-1].get("extra_body") or {})
+
+
+# ---------------------------------------------------------------------------
+# aibots-4: the GUI surfaces a broken LLM bot and keeps the game going
+# ---------------------------------------------------------------------------
+
+
+class TestGUIFallback:
+    """InputHandler let LLMBotError unwind GameSession.run: back to the menu, nothing saved."""
+
+    @staticmethod
+    def _handler(game: GameState, bot: LLMBot, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[tuple[str, str]]]:
+        """An InputHandler whose bot-replaced dialog is recorded, as (title, text), instead of shown."""
+        from reinforcetactics.app.input_handler import InputHandler
+
+        dialogs: list[tuple[str, str]] = []
+
+        def record(self, title, reason, footer):
+            dialogs.append((title, f"{reason}\n\n{footer}"))
+
+        # raising=False: on code without the fallback, the test then fails on
+        # the LLMBotError escaping, which is the bug, not on this attribute.
+        monkeypatch.setattr(InputHandler, "_show_bot_replaced_dialog", record, raising=False)
+        return InputHandler(game, Mock(), {2: bot}, num_players=2), dialogs
+
+    def test_rejected_key_hands_the_seat_to_simplebot(self, game, fake_anthropic, sleeps, monkeypatch):
+        from reinforcetactics.game.bot import SimpleBot
+
+        fake_anthropic.default_response = FakeHTTPError(401)
+        handler, dialogs = self._handler(game, ClaudeBot(game, player=2, api_key="sk-ant-bad"), monkeypatch)
+        bots = handler.bots  # the dict GameSession shares
+
+        game.end_turn()  # the human ends turn 1
+        handler._process_bot_turns()
+
+        assert isinstance(bots[2], SimpleBot) and bots[2].bot_player == 2
+        assert game.current_player == 1  # SimpleBot played player 2's turn
+        assert any(u.player == 2 for u in game.units)
+        assert len(fake_anthropic.calls) == 1
+        assert len(dialogs) == 1
+        title, message = dialogs[0]
+        assert "Player 2" in title
+        assert "authentication" in message and "SimpleBot" in message
+
+    def test_outage_hands_the_seat_over_at_the_failed_turn_limit(self, game, fake_anthropic, sleeps, monkeypatch):
+        from reinforcetactics.game.bot import SimpleBot
+
+        fake_anthropic.default_response = FakeHTTPError(503)
+        llm = ClaudeBot(game, player=2, api_key="sk-ant-test", retry_budget_s=None)
+        handler, dialogs = self._handler(game, llm, monkeypatch)
+
+        for turn in range(3):
+            game.end_turn()
+            handler._process_bot_turns()
+            assert game.current_player == 1
+            assert len(dialogs) == (1 if turn == 2 else 0)
+
+        assert isinstance(handler.bots[2], SimpleBot)
+        assert "3 turns in a row" in dialogs[0][1]
+
+    def test_a_dialog_that_cant_be_drawn_does_not_end_the_game(self, game, fake_anthropic, sleeps):
+        """The notice is best-effort; the renderer here is a Mock, so building the dialog raises."""
+        from reinforcetactics.app.input_handler import InputHandler
+        from reinforcetactics.game.bot import SimpleBot
+
+        fake_anthropic.default_response = FakeHTTPError(401)
+        handler = InputHandler(game, Mock(), {2: ClaudeBot(game, player=2, api_key="sk-ant-bad")}, num_players=2)
+
+        game.end_turn()
+        handler._process_bot_turns()
+
+        assert isinstance(handler.bots[2], SimpleBot)
+        assert game.current_player == 1
+
+    def test_dialog_closes_on_enter_and_passes_on_a_window_close(self, monkeypatch):
+        """The real dialog (dummy display): Enter dismisses it; a window-close is re-posted for the game loop."""
+        from reinforcetactics.app import input_handler
+        from reinforcetactics.ui.widgets.dialog import Dialog
+
+        shown: list[Dialog] = []
+
+        class RecordingDialog(Dialog):
+            def run(self):
+                shown.append(self)
+                return super().run()
+
+        monkeypatch.setattr(input_handler, "Dialog", RecordingDialog)
+        # An LLMBotError message can carry a whole HTTP error body.
+        reason = "ClaudeBot (claude-haiku-4-5-20251001): HTTP 401 authentication failed (check the API key): " + (
+            "Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error'}} " * 8
+        )
+        footer = "SimpleBot takes over Player 2."
+        pygame.init()
+        try:
+            # The game window is sized to the map (with a 2-tile border):
+            # 448 px for a 10x10 map, 320 px for 6x6.
+            screen = pygame.display.set_mode((448, 448))
+            handler = input_handler.InputHandler(Mock(), SimpleNamespace(screen=screen), {}, num_players=2)
+
+            pygame.event.clear()
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0, unicode="\r"))
+            handler._show_bot_replaced_dialog("Player 2's LLM bot stopped", reason, footer)
+            assert pygame.event.get() == []
+            # The error is shortened until the dialog fits, keeping its start.
+            assert screen.get_rect().contains(shown[-1].dialog_rect)
+            assert shown[-1].message.startswith("ClaudeBot (claude-haiku-4-5-20251001): HTTP 401")
+            assert shown[-1].message.endswith(footer)
+
+            pygame.event.post(pygame.event.Event(pygame.QUIT))
+            handler._show_bot_replaced_dialog("Player 2's LLM bot stopped", reason, footer)
+            assert [e.type for e in pygame.event.get()] == [pygame.QUIT]
+
+            # The smallest window can't fit it all; the dialog still opens and closes.
+            screen = pygame.display.set_mode((320, 320))
+            handler = input_handler.InputHandler(Mock(), SimpleNamespace(screen=screen), {}, num_players=2)
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE, mod=0, unicode="\x1b"))
+            handler._show_bot_replaced_dialog("Player 2's LLM bot stopped", reason, footer)
+            assert shown[-1].dialog_rect.width <= 320
+            assert pygame.event.get() == []
+        finally:
+            pygame.quit()

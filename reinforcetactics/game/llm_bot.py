@@ -11,6 +11,8 @@ import random
 import re
 import time
 from abc import abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,11 +114,21 @@ def default_request_timeout(max_tokens: int | None) -> float:
     return max(DEFAULT_REQUEST_TIMEOUT_S, (max_tokens or 0) * _TIMEOUT_S_PER_OUTPUT_TOKEN)
 
 
-# Turns in a row the LLM may fail to answer (after retries) before the bot
-# raises LLMBotError. One failed turn is treated as a blip and passed; a
-# streak means an outage or misconfiguration that would otherwise look like a
-# passive opponent and be scored as a loss for the model.
+# Turns in a row the LLM API may fail to answer at all (after retries) before
+# the bot raises LLMBotError. One failed turn is treated as a blip and passed;
+# a streak means an outage or misconfiguration that would otherwise look like
+# a passive opponent and be scored as a loss for the model. A reply that
+# arrives but is useless (prose, truncated JSON, a refusal) is the model's
+# own play, not an outage, and doesn't count (see take_turn).
 DEFAULT_MAX_CONSECUTIVE_FAILED_TURNS = 3
+
+# Seconds one LLM call may spend (requests plus backoff) retrying failures
+# that are known to pass: rate limits, 5xx/overloaded, timeouts and
+# connection errors. These are retried past max_retries while the call is
+# inside this budget, so a minute-long overload is ridden out instead of
+# passing turns (three of which raise LLMBotError). The SDKs' own retries are
+# off (max_retries=0), so this is the whole retry budget for such failures.
+DEFAULT_RETRY_BUDGET_S = 60.0
 
 # Backoff between attempts of one request: exponential from the base,
 # capped, then jittered (see LLMBot._retry_delay).
@@ -187,7 +199,7 @@ def openai_model_accepts_temperature(model: str) -> bool:
 
 
 class LLMBotError(RuntimeError):
-    """An LLM bot can't keep playing, and passing more turns would hide it.
+    """An LLM bot can't reach its model, and passing more turns would hide it.
 
     Raised from ``take_turn()`` in two cases:
 
@@ -196,15 +208,20 @@ class LLMBotError(RuntimeError):
       exist, the request is rejected as malformed, or the SDK call itself
       fails locally (e.g. a TypeError from an SDK version that doesn't take
       an argument) (``retryable=False``);
-    * after ``max_consecutive_failed_turns`` turns in a row where the LLM
-      gave no usable response: every retry of a rate limit, outage or
-      timeout was used up, or the reply held no parseable actions list
-      (``retryable=True``).
+    * after ``max_consecutive_failed_turns`` turns in a row where the API
+      gave no reply at all: every retry of a rate limit, outage, timeout or
+      unreadable response was used up (``retryable=True``).
+
+    Both are infrastructure failures, not the model's play. A reply that
+    arrives but holds no usable actions (prose, JSON cut off at max_tokens,
+    a refusal or a safety block) never raises: the turn passes and the game
+    is scored on the board, like any other bad move.
 
     The turn in progress is *not* ended, so the caller decides what happens
     to the game. The tournament runner ends the game with an error result,
     which TournamentResults leaves out of wins/losses/draws and Elo (it is
-    counted under ``errors``) instead of scoring it as a loss or a draw.
+    counted under ``errors``) instead of scoring it as a loss or a draw. The
+    GUI hands the seat to SimpleBot and tells the player.
     """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
@@ -212,13 +229,45 @@ class LLMBotError(RuntimeError):
         self.retryable = retryable
 
 
+class _UnreadableResponseError(Exception):
+    """The provider answered, but the reply isn't the shape its SDK promises.
+
+    Raised by ``_reading_response`` for an error while reading a reply (e.g.
+    an SDK that hands back a proxy's HTML page as a ``str``), so it is
+    classified apart from local errors raised while building the request.
+    """
+
+
+@contextmanager
+def _reading_response(response: Any) -> Iterator[None]:
+    """Re-raise errors from reading ``response`` as _UnreadableResponseError.
+
+    A TypeError/AttributeError/ValueError from the SDK call itself means the
+    request couldn't be built, which no retry fixes (see _classify_llm_error).
+    The same exceptions raised while reading what came back mean a garbled
+    reply, which may be a one-off; without this wrapper one such reply ended
+    the game.
+    """
+    try:
+        yield
+    except (AttributeError, TypeError, ValueError, KeyError, IndexError) as exc:
+        raise _UnreadableResponseError(f"couldn't read the {type(response).__name__} reply: {exc}") from exc
+
+
 @dataclass(frozen=True)
 class _LLMErrorInfo:
-    """How ``_call_llm_with_retry`` should treat one failed request."""
+    """How ``_call_llm_with_retry`` should treat one failed request.
+
+    ``transient`` marks failures known to pass with time (rate limits,
+    5xx/overloaded, timeouts, connection errors). They are retried within
+    the retry budget even past ``max_retries``; other retryable failures get
+    ``max_retries`` attempts only.
+    """
 
     retryable: bool
     reason: str
     retry_after: float | None = None
+    transient: bool = False
 
 
 def _http_status(exc: BaseException) -> int | None:
@@ -290,6 +339,15 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     return None
 
 
+# Transport-error class names with no "Timeout"/"Connect" in them that still
+# mean the connection failed: httpx's NetworkError family (ReadError,
+# WriteError, CloseError) and RemoteProtocolError (the server hung up
+# mid-reply). google-genai raises these raw, unlike the OpenAI and Anthropic
+# SDKs, which wrap them in APIConnectionError. Other httpx TransportErrors
+# (UnsupportedProtocol, LocalProtocolError) are local and stay "unexpected".
+_CONNECTION_ERROR_CLASS_NAMES = frozenset({"NetworkError", "RemoteProtocolError"})
+
+
 def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
     """Sort a failed LLM request into retryable or not.
 
@@ -297,38 +355,58 @@ def _classify_llm_error(exc: BaseException) -> _LLMErrorInfo:
     key, missing permission, unknown model, malformed request), and local
     TypeError/AttributeError/ValueError from the SDK call (see below). The
     same request would fail the same way, so retrying only burns time and
-    passes turns. Retryable: 408/409/429, 5xx, timeouts, connection errors,
-    and anything unrecognised (the pre-classification behaviour; a streak of
-    those still ends in LLMBotError via the failed-turn limit).
+    passes turns. Retryable and transient (retried within the retry budget):
+    408/409/429, 5xx, timeouts and connection errors. Retryable for
+    ``max_retries`` attempts: an unreadable reply, and anything unrecognised
+    (the pre-classification behaviour; a streak of those still ends in
+    LLMBotError via the failed-turn limit).
     """
     if isinstance(exc, ImportError):
         return _LLMErrorInfo(False, "LLM SDK not installed")
+    if isinstance(exc, _UnreadableResponseError):
+        return _LLMErrorInfo(True, "unreadable reply")
     status = _http_status(exc)
     if status is not None:
         reason = f"HTTP {status}"
         if status in _HTTP_STATUS_REASONS:
             reason += f" {_HTTP_STATUS_REASONS[status]}"
         if status in _RETRYABLE_HTTP_STATUSES or status >= 500:
-            return _LLMErrorInfo(True, reason, _retry_after_seconds(exc))
+            return _LLMErrorInfo(True, reason, _retry_after_seconds(exc), transient=True)
         if 400 <= status < 500:
             return _LLMErrorInfo(False, reason)
     # SDK transport errors carry no status. Match on class names so this
     # works without importing each SDK (APIConnectionError, APITimeoutError,
-    # httpx.ConnectError / ReadTimeout, ...).
+    # httpx.ConnectError / ReadTimeout / ReadError, ...).
     class_names = [cls.__name__ for cls in type(exc).__mro__]
     if isinstance(exc, TimeoutError) or any("Timeout" in name for name in class_names):
-        return _LLMErrorInfo(True, "timeout")
-    if isinstance(exc, ConnectionError) or any("Connection" in name for name in class_names):
-        return _LLMErrorInfo(True, "connection error")
+        return _LLMErrorInfo(True, "timeout", transient=True)
+    if (
+        isinstance(exc, ConnectionError)
+        or any("Connect" in name for name in class_names)
+        or not _CONNECTION_ERROR_CLASS_NAMES.isdisjoint(class_names)
+    ):
+        return _LLMErrorInfo(True, "connection error", transient=True)
     # With no HTTP status, these come from building or sending the request
     # in-process: a keyword the installed SDK doesn't take (anthropic 1.x
     # raises TypeError for temperature=), a client attribute an old SDK
     # lacks, a config value the SDK's validation rejects. Nothing reached the
-    # server, and every retry fails identically. A reply the SDK couldn't
-    # decode (JSONDecodeError, google-genai's UnknownApiResponseError, both
-    # ValueErrors) can be a garbled one-off, so it stays retryable.
-    decode_error = isinstance(exc, json.JSONDecodeError | UnicodeError) or any("Response" in name for name in class_names)
-    if isinstance(exc, TypeError | AttributeError | ValueError) and not decode_error:
+    # server, and every retry fails identically. The providers read replies
+    # inside _reading_response, so the same exceptions from a garbled reply
+    # arrive as _UnreadableResponseError instead. A reply the SDK itself
+    # couldn't decode (JSONDecodeError, google-genai's UnknownApiResponseError,
+    # both ValueErrors) can be a garbled one-off too, so it stays retryable.
+    # So does a pydantic ValidationError titled after a response model:
+    # google-genai validates every reply into a GenerateContentResponse inside
+    # the SDK call, while one titled after a request model (e.g.
+    # GenerateContentConfig) is a local config error.
+    decode_error = (
+        isinstance(exc, json.JSONDecodeError | UnicodeError)
+        or any("Response" in name for name in class_names)
+        or "Response" in str(getattr(exc, "title", ""))
+    )
+    if decode_error:
+        return _LLMErrorInfo(True, f"unreadable reply ({type(exc).__name__})")
+    if isinstance(exc, TypeError | AttributeError | ValueError):
         return _LLMErrorInfo(False, f"local {type(exc).__name__} (SDK/config mismatch?)")
     return _LLMErrorInfo(True, f"unexpected {type(exc).__name__}")
 
@@ -388,6 +466,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         two_phase_planning: bool = False,
         request_timeout: float | Literal["auto"] | None = "auto",
         max_consecutive_failed_turns: int | None = DEFAULT_MAX_CONSECUTIVE_FAILED_TURNS,
+        retry_budget_s: float | None = DEFAULT_RETRY_BUDGET_S,
     ):
         """
         Initialize the LLM bot.
@@ -397,9 +476,11 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             player: Player number for this bot (default 2)
             api_key: API key for the LLM provider (optional, uses env var if not provided)
             model: Model name to use (optional, uses default if not provided)
-            max_retries: Maximum number of attempts per API call. Only transient
-                failures (rate limits, 5xx, timeouts, connection errors) are
-                retried; see LLMBotError for the rest.
+            max_retries: Attempts per API call for a retryable failure
+                (default 3). Rate limits, 5xx/overloaded, timeouts and
+                connection errors are retried past this while the call is
+                inside ``retry_budget_s``. Failures no retry can fix aren't
+                retried at all; see LLMBotError.
             log_conversations: Enable conversation logging to JSON files (default False)
             conversation_log_dir: Directory for conversation logs (default: logs/llm_conversations/)
             game_session_id: Unique game session identifier (default: auto-generated)
@@ -425,9 +506,15 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
                 "auto" (default) is default_request_timeout(max_tokens):
                 DEFAULT_REQUEST_TIMEOUT_S, raised for large max_tokens. None
                 uses the SDK default.
-            max_consecutive_failed_turns: Turns in a row without a usable LLM
-                response before take_turn() raises LLMBotError instead of
-                passing another turn (default 3). None never raises.
+            max_consecutive_failed_turns: Turns in a row where the API gave
+                no reply (after retries) before take_turn() raises
+                LLMBotError instead of passing another turn (default 3).
+                None never raises.
+            retry_budget_s: Seconds one API call may spend, counting requests
+                and backoff, retrying rate limits, 5xx/overloaded, timeouts
+                and connection errors beyond ``max_retries`` attempts
+                (default DEFAULT_RETRY_BUDGET_S, 60 s). None retries those
+                only ``max_retries`` times.
 
         Raises:
             ValueError: If no API key is available.
@@ -453,6 +540,7 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         )
         self.max_consecutive_failed_turns = max_consecutive_failed_turns
         self.consecutive_failed_turns = 0
+        self.retry_budget_s = retry_budget_s
 
         # Resolve system prompt - can be a name or a full prompt string
         if system_prompt is None:
@@ -749,16 +837,20 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         5. Validates and executes the suggested actions
 
         Actions that aren't in ``get_legal_actions`` at the moment they would
-        run are skipped and counted (see ``illegal_action_count``). If the LLM
-        gives no usable response (none after retries, or one with no
-        parseable actions list), the turn ends without actions, up to
+        run are skipped and counted (see ``illegal_action_count``). A reply
+        with no usable actions (empty, prose, JSON cut off at max_tokens, a
+        refusal or safety block) ends the turn without actions and is counted
+        (``llm_empty_reply`` / ``llm_unparseable_reply``): that is the model's
+        play, scored on the board. If the API gives no reply at all after
+        retries, the turn also ends without actions, up to
         ``max_consecutive_failed_turns`` turns in a row.
 
         Raises:
             LLMBotError: On a non-retryable API failure (missing SDK, bad key,
                 no permission, unknown model, rejected request), or when the
-                failed-turn streak reaches ``max_consecutive_failed_turns``.
-                The turn is left un-ended for the caller to handle.
+                streak of turns without a reply reaches
+                ``max_consecutive_failed_turns``. The turn is left un-ended
+                for the caller to handle.
         """
         logger.info("LLM Bot (Player %s) is thinking...", self.bot_player)
 
@@ -786,13 +878,21 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
         # Get LLM response with retries
         response_text = self._call_llm_with_retry(execution_system_prompt, user_prompt)
 
-        if not response_text:
+        if response_text is None:
+            # No reply at all: the API is down, overloaded, unreachable or
+            # timing out. May raise LLMBotError once that has lasted
+            # max_consecutive_failed_turns turns.
             self._record_failed_turn()
             self.game_state.end_turn()
             return
 
-        # Store conversation in history if stateful mode is enabled
-        if self.stateful:
+        # The provider answered, so any outage streak is over, whatever the
+        # reply holds.
+        self.consecutive_failed_turns = 0
+
+        # Store conversation in history if stateful mode is enabled. An empty
+        # reply is left out: providers reject an empty assistant message.
+        if self.stateful and response_text:
             self.conversation_history.append({"role": "user", "content": user_prompt})
             self.conversation_history.append({"role": "assistant", "content": response_text})
 
@@ -806,17 +906,20 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             stop_reason=self._last_stop_reason,
         )
 
-        # Parse and execute actions. A reply with no parseable actions list
-        # (prose only, JSON cut off at max_tokens, a refusal) is as useless as
-        # no reply, and more likely without a JSON-forcing prefill, so it
-        # counts toward the failed-turn limit too; otherwise a model that
-        # never returns usable JSON would pass turns forever. Only a parsed
-        # reply ends the streak, even if all its actions were illegal
-        # (those are counted separately).
-        if self._execute_actions(response_text):
-            self.consecutive_failed_turns = 0
+        # An empty or unparseable reply (a refusal, a safety block, prose, JSON
+        # cut off at max_tokens) passes the turn but never raises LLMBotError:
+        # it is the model failing at the task, not the infrastructure failing
+        # the model. Raising would cancel the game in a tournament, which
+        # would favour models that break the output format over ones that
+        # play a losing position out. Both are counted in the bot's stats.
+        if not response_text:
+            logger.warning(
+                "LLM returned an empty reply (stop reason: %s); ending turn without actions",
+                self._last_stop_reason or "n/a",
+            )
+            self._record("llm_empty_reply")
         else:
-            self._record_failed_turn()
+            self._execute_actions(response_text)
 
         # End turn (advance game state to next player, collect income, etc.)
         # Skip if game is already over (e.g., due to resignation)
@@ -824,20 +927,19 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             self.game_state.end_turn()
 
     def _record_failed_turn(self) -> None:
-        """Count a turn without a usable reply; raise once the streak hits the limit."""
+        """Count a turn the API didn't answer; raise once the streak hits the limit."""
         self.consecutive_failed_turns += 1
         self._record("llm_failed_turn")
         limit = self.max_consecutive_failed_turns
         if limit is not None and self.consecutive_failed_turns >= limit:
             message = (
-                f"{self.__class__.__name__} ({self.model}) got no usable response for "
+                f"{self.__class__.__name__} ({self.model}) got no response from the API for "
                 f"{self.consecutive_failed_turns} turns in a row; stopping instead of passing more turns"
             )
             logger.error(message)
             raise LLMBotError(message, retryable=True)
         logger.warning(
-            "No usable response from LLM (stop reason: %s). Ending turn without actions (%d consecutive failed turn(s)).",
-            self._last_stop_reason or "n/a",
+            "No response from the LLM API. Ending turn without actions (%d consecutive failed turn(s)).",
             self.consecutive_failed_turns,
         )
 
@@ -855,6 +957,20 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             delay = max(delay, min(retry_after, _RETRY_AFTER_CAP_S))
         return delay
 
+    def _should_retry(self, attempts_made: int, info: _LLMErrorInfo, spent_after_delay: float) -> bool:
+        """Whether to try again after ``attempts_made`` retryable failures.
+
+        Every retryable failure gets ``max_retries`` attempts. A transient
+        one (rate limit, 5xx/overloaded, timeout, connection error) is then
+        retried for as long as the call, counting the next backoff, stays
+        inside ``retry_budget_s``: with the SDKs' own retries off, three
+        quick attempts (about 3 s of backoff) gave up on a short overload,
+        and three such turns raise LLMBotError.
+        """
+        if attempts_made < max(1, self.max_retries):
+            return True
+        return info.transient and self.retry_budget_s is not None and spent_after_delay <= self.retry_budget_s
+
     def _call_llm_with_retry(self, system_prompt: str, user_prompt: str) -> str | None:
         """
         Call the LLM, retrying transient failures with jittered exponential backoff.
@@ -864,7 +980,8 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             user_prompt: The user prompt with game state
 
         Returns:
-            The LLM response text, or None if every attempt failed transiently
+            The LLM response text (possibly empty), or None if no attempt got
+            a reply (see _should_retry for how long it keeps trying)
 
         Raises:
             LLMBotError: On the first non-retryable failure (see _classify_llm_error).
@@ -878,49 +995,54 @@ class LLMBot(BaseBot):  # pylint: disable=too-few-public-methods
             # In stateless mode, only send current turn
             messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
-        attempts = max(1, self.max_retries)
-        for attempt in range(attempts):
+        attempts_made = 0
+        # Seconds this call has used: time in requests plus backoff. Summed
+        # from the parts rather than read off a clock around the whole loop
+        # so the budget holds however sleeping is done.
+        spent = 0.0
+        while True:
+            attempts_made += 1
             # Reset per-call telemetry so a failed attempt can't leave the
             # previous call's tokens or stop reason behind.
             self._last_input_tokens = 0
             self._last_output_tokens = 0
             self._last_stop_reason = ""
+            started = time.monotonic()
             try:
                 response_text = self._call_llm(messages)
             except LLMBotError:
                 raise
             except Exception as exc:
+                spent += time.monotonic() - started
                 info = _classify_llm_error(exc)
                 if not info.retryable:
                     message = f"{self.__class__.__name__} ({self.model}): {info.reason}: {exc}"
                     logger.error("LLM request failed and won't be retried: %s", message)
                     raise LLMBotError(message, retryable=False) from exc
-                if attempt == attempts - 1:
+                delay = self._retry_delay(attempts_made - 1, info.retry_after)
+                if not self._should_retry(attempts_made, info, spent + delay):
                     logger.warning(
-                        "LLM request failed (%s), attempt %d/%d; giving up for this turn: %s",
+                        "LLM request failed (%s), attempt %d after %.0fs; giving up for this turn: %s",
                         info.reason,
-                        attempt + 1,
-                        attempts,
+                        attempts_made,
+                        spent,
                         exc,
                     )
                     return None
-                delay = self._retry_delay(attempt, info.retry_after)
                 logger.warning(
-                    "LLM request failed (%s), attempt %d/%d; retrying in %.1fs: %s",
+                    "LLM request failed (%s), attempt %d; retrying in %.1fs: %s",
                     info.reason,
-                    attempt + 1,
-                    attempts,
+                    attempts_made,
                     delay,
                     exc,
                 )
                 time.sleep(delay)
+                spent += delay
                 continue
             # Accumulate token usage (only if tracked by subclass)
             self.total_input_tokens += self._last_input_tokens
             self.total_output_tokens += self._last_output_tokens
             return response_text
-
-        return None
 
     def _run_planning_phase(self, game_state_json: dict[str, Any]) -> dict | None:
         """
@@ -1352,7 +1474,7 @@ Use RESIGN only as a last resort when victory is impossible."""
         Returns:
             True if the reply held an ``actions`` list (even an empty one, or
             one whose actions were all skipped); False if no such list could
-            be parsed from it, which take_turn counts as a failed turn.
+            be parsed from it (counted as ``llm_unparseable_reply``).
         """
         try:
             response_json = self._extract_json(response_text)
@@ -1361,7 +1483,7 @@ Use RESIGN only as a last resort when victory is impossible."""
             response_json = None
         if not isinstance(response_json, dict) or not isinstance(response_json.get("actions"), list):
             logger.warning(
-                "Invalid response format: no 'actions' list found (stop reason: %s)",
+                "Invalid response format: no 'actions' list found (stop reason: %s); ending turn without actions",
                 self._last_stop_reason or "n/a",
             )
             self._record("llm_unparseable_reply")
@@ -1794,19 +1916,20 @@ class OpenAIBot(LLMBot):  # pylint: disable=too-few-public-methods
 
         response = self._client.chat.completions.create(**request_kwargs)
 
-        # Capture token usage from OpenAI API response
-        if response.usage:
-            self._last_input_tokens = response.usage.prompt_tokens
-            self._last_output_tokens = response.usage.completion_tokens
+        with _reading_response(response):
+            # Capture token usage from OpenAI API response
+            if response.usage:
+                self._last_input_tokens = response.usage.prompt_tokens
+                self._last_output_tokens = response.usage.completion_tokens
 
-        # Capture finish reason from OpenAI API response
-        if response.choices and response.choices[0].finish_reason:
-            self._last_stop_reason = response.choices[0].finish_reason
+            # Capture finish reason from OpenAI API response
+            if response.choices and response.choices[0].finish_reason:
+                self._last_stop_reason = response.choices[0].finish_reason
 
-        if not response.choices:
-            return ""
-        # content is None on a refusal; "" makes take_turn count a failed turn.
-        return response.choices[0].message.content or ""
+            if not response.choices:
+                return ""
+            # content is None on a refusal; "" makes take_turn pass the turn.
+            return response.choices[0].message.content or ""
 
 
 class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
@@ -1908,20 +2031,21 @@ class ClaudeBot(LLMBot):  # pylint: disable=too-few-public-methods
 
         response = self._client.messages.create(**request_kwargs)
 
-        # Capture token usage from Claude API response
-        usage = getattr(response, "usage", None)
-        if usage is not None:
-            self._last_input_tokens = usage.input_tokens
-            self._last_output_tokens = usage.output_tokens
+        with _reading_response(response):
+            # Capture token usage from Claude API response
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                self._last_input_tokens = usage.input_tokens
+                self._last_output_tokens = usage.output_tokens
 
-        # Capture stop reason from Claude API response
-        if response.stop_reason:
-            self._last_stop_reason = response.stop_reason
+            # Capture stop reason from Claude API response
+            if response.stop_reason:
+                self._last_stop_reason = response.stop_reason
 
-        # The reply is a list of content blocks, not always one text block
-        # (it can be empty, or hold thinking/tool blocks), so join every text
-        # block instead of indexing content[0].
-        return "".join(block.text for block in response.content or [] if getattr(block, "type", None) == "text")
+            # The reply is a list of content blocks, not always one text block
+            # (it can be empty, or hold thinking/tool blocks), so join every
+            # text block instead of indexing content[0].
+            return "".join(block.text for block in response.content or [] if getattr(block, "type", None) == "text")
 
 
 class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
@@ -2027,31 +2151,32 @@ class GeminiBot(LLMBot):  # pylint: disable=too-few-public-methods
             config=config,
         )
 
-        # Track token usage from response metadata
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            usage = response.usage_metadata
-            self._last_input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-            self._last_output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        with _reading_response(response):
+            # Track token usage from response metadata
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = response.usage_metadata
+                self._last_input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+                self._last_output_tokens = getattr(usage, "candidates_token_count", 0) or 0
 
-        # Capture finish reason from Gemini API response
-        if hasattr(response, "candidates") and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, "finish_reason") and candidate.finish_reason:
-                # Convert enum to string if necessary
-                finish_reason = candidate.finish_reason
-                self._last_stop_reason = str(finish_reason.name) if hasattr(finish_reason, "name") else str(finish_reason)
+            # Capture finish reason from Gemini API response
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "finish_reason") and candidate.finish_reason:
+                    # Convert enum to string if necessary
+                    finish_reason = candidate.finish_reason
+                    self._last_stop_reason = str(finish_reason.name) if hasattr(finish_reason, "name") else str(finish_reason)
 
-        # Blocked or empty responses return "" rather than a synthetic
-        # END_TURN reply, so take_turn counts them as failed turns and a
-        # streak of them raises LLMBotError instead of looking like a
-        # passive opponent.
-        if not response.text:
-            block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
-            if block_reason:
-                logger.warning("Gemini response blocked: %s", block_reason)
-                self._last_stop_reason = self._last_stop_reason or f"blocked: {block_reason}"
-            else:
-                logger.warning("Empty response from Gemini API")
-            return ""
+            # Blocked or empty responses return "" rather than a synthetic
+            # END_TURN reply: take_turn still passes the turn, but logs and
+            # counts it (llm_empty_reply) as the model's own failure, where
+            # a synthetic END_TURN looked like a deliberate pass.
+            if not response.text:
+                block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+                if block_reason:
+                    logger.warning("Gemini response blocked: %s", block_reason)
+                    self._last_stop_reason = self._last_stop_reason or f"blocked: {block_reason}"
+                else:
+                    logger.warning("Empty response from Gemini API")
+                return ""
 
-        return response.text
+            return response.text
