@@ -8,7 +8,7 @@ import logging
 
 import pygame
 
-from reinforcetactics.app.action_executor import handle_action_menu_result
+from reinforcetactics.app.action_executor import apply_targeted_action, handle_action_menu_result
 from reinforcetactics.constants import TILE_SIZE
 from reinforcetactics.game.llm_bot import LLMBotError
 from reinforcetactics.ui import widgets
@@ -288,27 +288,14 @@ class InputHandler:
         if clicked_unit and self.target_selection_action and clicked_unit in self.target_selection_action["targets"]:
             # Execute the action on the clicked target
             action_type = self.target_selection_action["type"]
-            if action_type == "attack":
-                self.game.attack(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} attacked {clicked_unit.type}")
-            elif action_type == "paralyze":
-                self.game.paralyze(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} paralyzed {clicked_unit.type}")
-            elif action_type == "heal":
-                self.game.heal(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} healed {clicked_unit.type}")
-            elif action_type == "cure":
-                self.game.cure(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} cured {clicked_unit.type}")
-            elif action_type == "haste":
-                self.game.haste(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} hasted {clicked_unit.type}")
-            elif action_type == "defence_buff":
-                self.game.defence_buff(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} granted defence buff to {clicked_unit.type}")
-            elif action_type == "attack_buff":
-                self.game.attack_buff(self.target_selection_unit, clicked_unit)
-                print(f"{self.target_selection_unit.type} granted attack buff to {clicked_unit.type}")
+            if not apply_targeted_action(self.game, action_type, self.target_selection_unit, clicked_unit):
+                # The engine refused it and nothing changed, so the unit
+                # still has its action: back to its menu, turn not spent.
+                self.target_selection_mode = False
+                self.target_selection_action = None
+                self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.target_selection_unit)
+                self.menu_opened_time = current_time
+                return "continue"
 
             # End unit's turn and reset selection
             can_still_act = self.game.end_unit_turn(self.target_selection_unit)

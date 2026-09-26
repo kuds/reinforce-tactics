@@ -4,6 +4,49 @@ Action Executor for Reinforce Tactics.
 This module handles unit action execution from the unit action menu.
 """
 
+# Targeted actions: GameState method, past-tense verb for the console log.
+# The engine refuses an illegal action without changing anything (review
+# §1.2); each entry's result is read by ``_accepted`` below.
+TARGETED_ACTIONS = {
+    "attack": ("attack", "attacked"),
+    "paralyze": ("paralyze", "paralyzed"),
+    "heal": ("heal", "healed"),
+    "cure": ("cure", "cured"),
+    "haste": ("haste", "hasted"),
+    "defence_buff": ("defence_buff", "granted defence buff to"),
+    "attack_buff": ("attack_buff", "granted attack buff to"),
+}
+
+
+def _accepted(kind, result):
+    """Whether the engine carried out ``kind``, judged from its return value.
+
+    attack returns its result dict with ``damage`` 0 when refused (an executed
+    attack always deals at least 1); heal returns the HP healed (0 when
+    refused); the other abilities return a bool.
+    """
+    if kind == "attack":
+        return result["damage"] > 0
+    if kind == "heal":
+        return result > 0
+    return bool(result)
+
+
+def apply_targeted_action(game, kind, unit, target):
+    """Run the targeted action ``kind`` from ``unit`` on ``target``.
+
+    Returns:
+        True if the engine carried it out. On False nothing changed, and the
+        caller must not end the unit's turn: the refused action did not use it.
+    """
+    method, verb = TARGETED_ACTIONS[kind]
+    result = getattr(game, method)(unit, target)
+    if _accepted(kind, result):
+        print(f"{unit.type} {verb} {target.type}")
+        return True
+    print(f"{unit.type} can't {kind.replace('_', ' ')} {target.type} right now (not a legal action)")
+    return False
+
 
 def handle_action_menu_result(game, menu_result, active_menu_ref, target_selection_unit_ref, selected_unit_ref):
     """
@@ -73,6 +116,12 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
 
     if action["type"] == "capture":
         result = game.seize(unit)
+        if "damage" not in result:
+            # Refused by the engine (see GameState.seize): nothing happened,
+            # so the unit keeps its action.
+            print(f"{unit.type} can't capture here right now (not a legal action)")
+            selected_unit_ref[0] = unit
+            return (False, None, unit)
         if result["captured"]:
             print(f"{unit.type} captured structure!")
         can_still_act = game.end_unit_turn(unit)
@@ -90,27 +139,9 @@ def execute_unit_action(game, action, unit, selected_unit_ref):
         if len(targets) == 1:
             # Only one target, execute immediately
             target = targets[0]
-            if action["type"] == "attack":
-                game.attack(unit, target)
-                print(f"{unit.type} attacked {target.type}")
-            elif action["type"] == "paralyze":
-                game.paralyze(unit, target)
-                print(f"{unit.type} paralyzed {target.type}")
-            elif action["type"] == "heal":
-                game.heal(unit, target)
-                print(f"{unit.type} healed {target.type}")
-            elif action["type"] == "cure":
-                game.cure(unit, target)
-                print(f"{unit.type} cured {target.type}")
-            elif action["type"] == "haste":
-                game.haste(unit, target)
-                print(f"{unit.type} hasted {target.type}")
-            elif action["type"] == "defence_buff":
-                game.defence_buff(unit, target)
-                print(f"{unit.type} granted defence buff to {target.type}")
-            elif action["type"] == "attack_buff":
-                game.attack_buff(unit, target)
-                print(f"{unit.type} granted attack buff to {target.type}")
+            if not apply_targeted_action(game, action["type"], unit, target):
+                selected_unit_ref[0] = unit
+                return (False, None, unit)
             can_still_act = game.end_unit_turn(unit)
             if can_still_act:
                 print(f"{unit.type} used haste action (can act again)")
