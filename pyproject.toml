@@ -35,6 +35,12 @@ dependencies = [
     "tensorboard",
     "pandas",
     "PyYAML",
+    # SB3's model.learn(progress_bar=True) (the CLI's --mode train, the
+    # training scripts and the examples) raises ImportError at the start of
+    # training unless both are installed. stable-baselines3 lists them only in
+    # its [extra], and scripts/eval_agent.py imports tqdm directly.
+    "tqdm",
+    "rich",
 ]
 
 [project.optional-dependencies]
