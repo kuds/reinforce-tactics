@@ -907,7 +907,7 @@ class TestMapCoordinateConversion:
     def test_serialized_coordinates_are_original(self, padded_game, test_bot_class):
         """Test that serialized coordinates are in original map system."""
         # Add a unit at padded position [7, 7] (which is original [0, 0])
-        padded_game.create_unit("W", 7, 7, player=2)
+        padded_game.place_unit("W", 7, 7, player=2)
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
@@ -940,7 +940,7 @@ class TestMapCoordinateConversion:
     def test_legal_actions_use_original_coordinates(self, padded_game, test_bot_class):
         """Test that legal actions use original coordinates."""
         # Add a unit at padded [7, 8]
-        padded_game.create_unit("W", 7, 8, player=2)
+        padded_game.place_unit("W", 7, 8, player=2)
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
         game_state_json = bot._serialize_game_state()
@@ -959,6 +959,7 @@ class TestMapCoordinateConversion:
 
     def test_create_unit_action_converts_coordinates(self, padded_game, test_bot_class):
         """Test that CREATE_UNIT action converts from original to padded coordinates."""
+        padded_game.current_player = 2  # the engine only creates on the player's own turn
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
 
         # Action in original coordinates [4, 5] (building at padded [11, 12])
@@ -994,8 +995,9 @@ class TestMapCoordinateConversion:
     def test_move_action_converts_coordinates(self, padded_game, test_bot_class):
         """Test that MOVE action converts from original to padded coordinates."""
         # Create a unit at padded [7, 7]
-        unit = padded_game.create_unit("W", 7, 7, player=2)
+        unit = padded_game.place_unit("W", 7, 7, player=2)
         unit.can_move = True  # Enable movement for this test
+        padded_game.current_player = 2  # the engine only moves the current player's units
 
         bot = test_bot_class(padded_game, player=2, api_key="test-key")
 
@@ -1053,7 +1055,7 @@ class TestMapCoordinateConversion:
         bot = test_bot_class(simple_game, player=2, api_key="test-key")
 
         # Create a unit at position [5, 5]
-        simple_game.create_unit("W", 5, 5, player=2)
+        simple_game.place_unit("W", 5, 5, player=2)
 
         game_state_json = bot._serialize_game_state()
 
@@ -1069,30 +1071,31 @@ class TestMapCoordinateConversion:
 
     def test_action_history_uses_original_coordinates(self, padded_game):
         """Test that action history records use original/unpadded coordinates."""
-        # Create a unit at padded position [7, 7] (original [0, 0])
-        unit = padded_game.create_unit("W", 7, 7, player=1)
+        # Create a unit on player 1's building at padded [8, 7] (original
+        # [1, 0]) -- create_unit only spawns on an owned building.
+        unit = padded_game.create_unit("W", 8, 7, player=1)
 
         # Check the create_unit action was recorded with original coordinates
         assert len(padded_game.action_history) >= 1
         create_action = padded_game.action_history[-1]
         assert create_action["type"] == "create_unit"
-        assert create_action["x"] == 0  # Original coordinate, not 7
+        assert create_action["x"] == 1  # Original coordinate, not 8
         assert create_action["y"] == 0  # Original coordinate, not 7
 
-        # Move the unit from padded [7, 7] to [7, 8] (original [0, 0] to [0, 1])
+        # Move the unit from padded [8, 7] to [8, 8] (original [1, 0] to [1, 1])
         unit.can_move = True
-        padded_game.move_unit(unit, 7, 8)
+        padded_game.move_unit(unit, 8, 8)
 
         # Check the move action was recorded with original coordinates
         move_action = padded_game.action_history[-1]
         assert move_action["type"] == "move"
-        assert move_action["from_x"] == 0  # Original coordinate, not 7
+        assert move_action["from_x"] == 1  # Original coordinate, not 8
         assert move_action["from_y"] == 0  # Original coordinate, not 7
-        assert move_action["to_x"] == 0  # Original coordinate, not 7
+        assert move_action["to_x"] == 1  # Original coordinate, not 8
         assert move_action["to_y"] == 1  # Original coordinate, not 8
 
-        # Create an enemy unit at padded [7, 9] (original [0, 2])
-        enemy = padded_game.create_unit("W", 7, 9, player=2)
+        # Place an enemy unit at padded [8, 9] (original [1, 2])
+        enemy = padded_game.place_unit("W", 8, 9, player=2)
 
         # Attack the enemy
         unit.can_attack = True
@@ -1101,19 +1104,20 @@ class TestMapCoordinateConversion:
         # Check the attack action was recorded with original coordinates
         attack_action = padded_game.action_history[-1]
         assert attack_action["type"] == "attack"
-        assert attack_action["attacker_pos"] == (0, 1)  # Original coords
-        assert attack_action["target_pos"] == (0, 2)  # Original coords
+        assert attack_action["attacker_pos"] == (1, 1)  # Original coords
+        assert attack_action["target_pos"] == (1, 2)  # Original coords
 
     def test_action_history_no_padding(self, simple_game):
         """Test that action history works correctly when there's no padding."""
-        # Create a unit at position [5, 5] (no padding, so original = padded)
-        simple_game.create_unit("W", 5, 5, player=1)
+        # Create a unit on player 1's building at [1, 0] (no padding, so
+        # original = padded)
+        simple_game.create_unit("W", 1, 0, player=1)
 
         # Check the create_unit action
         create_action = simple_game.action_history[-1]
         assert create_action["type"] == "create_unit"
-        assert create_action["x"] == 5  # Same as input since no padding
-        assert create_action["y"] == 5
+        assert create_action["x"] == 1  # Same as input since no padding
+        assert create_action["y"] == 0
 
 
 class TestLLMBotFogOfWar:
@@ -1162,7 +1166,7 @@ class TestLLMBotFogOfWar:
     def test_serialized_state_hides_enemy_units(self, fow_game, bot_class):
         """Hidden enemies must not appear in the serialized enemy_units list."""
         # Bot plays player 1; enemy at (8, 8) is far outside HQ vision (range 4)
-        fow_game.create_unit("W", 8, 8, player=2)
+        fow_game.place_unit("W", 8, 8, player=2)
         fow_game.update_visibility()
         assert not fow_game.is_position_visible(8, 8, player=1)
 
@@ -1184,13 +1188,13 @@ class TestLLMBotFogOfWar:
         # Player 1 unit positioned where a 1-tile move would put it adjacent
         # to a hidden enemy. Without the FOW filter, _compute_move_then_actions
         # would emit a move_then_attack against the hidden enemy.
-        attacker = fow_game.create_unit("W", 4, 4, player=1)
+        attacker = fow_game.place_unit("W", 4, 4, player=1)
         attacker.can_move = True
         attacker.can_attack = True
 
         # Enemy positioned outside attacker's pre-move vision (Warrior range 3)
         # but within 1-tile move + attack reach.
-        hidden_enemy = fow_game.create_unit("W", 8, 4, player=2)
+        hidden_enemy = fow_game.place_unit("W", 8, 4, player=2)
         fow_game.update_visibility(player=1)
         assert not fow_game.is_position_visible(8, 4, player=1)
 
@@ -1203,14 +1207,14 @@ class TestLLMBotFogOfWar:
 
     def test_move_then_attack_includes_visible_enemies(self, fow_game, bot_class):
         """Visible enemies must still appear in move-then-attack combos."""
-        attacker = fow_game.create_unit("W", 3, 3, player=1)
+        attacker = fow_game.place_unit("W", 3, 3, player=1)
         attacker.can_move = True
         attacker.can_attack = True
 
         # Enemy within attacker's pre-move vision range (Warrior vision 3).
         # We only need the unit to exist on the board; we look it up by
         # position in the serialized output below.
-        fow_game.create_unit("W", 5, 3, player=2)
+        fow_game.place_unit("W", 5, 3, player=2)
         fow_game.update_visibility(player=1)
         assert fow_game.is_position_visible(5, 3, player=1)
 
@@ -1223,10 +1227,10 @@ class TestLLMBotFogOfWar:
 
     def test_move_then_actions_unaffected_without_fow(self, simple_game, bot_class):
         """Without FOW, the FOW filter must not accidentally drop enemies."""
-        attacker = simple_game.create_unit("W", 3, 3, player=1)
+        attacker = simple_game.place_unit("W", 3, 3, player=1)
         attacker.can_move = True
         attacker.can_attack = True
-        target = simple_game.create_unit("W", 8, 3, player=2)
+        target = simple_game.place_unit("W", 8, 3, player=2)
 
         bot = bot_class(simple_game, player=1, api_key="test-key")
         state = bot._serialize_game_state()

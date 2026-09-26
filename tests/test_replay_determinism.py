@@ -22,6 +22,7 @@ record and playback must not change the outcome.
 
 import os
 import random
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,23 @@ def _make_game(max_turns: int = 50) -> GameState:
     return game
 
 
+# Scenario units are put on the board with ``place_unit`` (``create_unit``
+# refuses anything but an empty owned building on the player's own turn).
+# ``place_unit`` is setup, not a game action, so nothing lands in the action
+# log for the replay to rebuild the units from. ``_place`` remembers each
+# placement per game; ``_save_replay`` writes them into game_info and
+# ``_replay`` re-places them before the first action -- the scenario's
+# analogue of a replay's initial map. (Place before any create_unit in a
+# replayed test, so unit ids are handed out in the same order both times.)
+_PLACEMENTS: "weakref.WeakKeyDictionary[GameState, list[list[Any]]]" = weakref.WeakKeyDictionary()
+
+
+def _place(game: GameState, unit_type: str, x: int, y: int, player: int):
+    """``game.place_unit`` that the replay helpers can reproduce."""
+    _PLACEMENTS.setdefault(game, []).append([unit_type, x, y, player])
+    return game.place_unit(unit_type, x, y, player)
+
+
 def _save_replay(game: GameState, tmp_path: Path) -> str:
     """Serialise a game's action history with the full v2 game_info."""
     final_p1 = [u for u in game.units if u.player == 1]
@@ -82,6 +100,7 @@ def _save_replay(game: GameState, tmp_path: Path) -> str:
         "end_reason": game.end_reason,
         "winning_action_index": game.game_over_action_index,
         "replay_schema_version": 3,
+        "setup_units": _PLACEMENTS.get(game, []),
         "final_units_p1": len(final_p1),
         "final_units_p2": len(final_p2),
         "final_hp_total_p1": sum(u.health for u in final_p1),
@@ -107,6 +126,8 @@ def _replay(path: str) -> tuple[GameState, dict[str, Any]]:
     replay_game.max_turns = game_info["max_turns"]
     replay_game.player_gold[1] = 9999
     replay_game.player_gold[2] = 9999
+    for unit_type, x, y, player in game_info.get("setup_units", []):
+        replay_game.place_unit(unit_type, x, y, player)
 
     # Reseed to a *different* value than the original. v2 must not
     # depend on RNG state being reproduced -- it applies recorded
@@ -184,8 +205,8 @@ def _enable(unit) -> None:
 def test_elimination_direct_kill(tmp_path):
     """P1's last unit is killed by a direct P2 attack."""
     g = _make_game()
-    p1 = g.create_unit("W", 2, 1, player=1)
-    p2 = g.create_unit("W", 2, 2, player=2)
+    p1 = _place(g, "W", 2, 1, 1)
+    p2 = _place(g, "W", 2, 2, 2)
     _enable(p1)
     _enable(p2)
     # Damage P1 so the next P2 attack finishes them off.
@@ -205,8 +226,8 @@ def test_elimination_via_counter_kill(tmp_path):
     """P1's only unit dies *attacking* a stronger P2 unit (the original
     bug -- attacker_killed was never recorded in v1 replays)."""
     g = _make_game()
-    attacker = g.create_unit("W", 2, 1, player=1)
-    defender = g.create_unit("W", 2, 2, player=2)
+    attacker = _place(g, "W", 2, 1, 1)
+    defender = _place(g, "W", 2, 2, 2)
     _enable(attacker)
     _enable(defender)
     # Glass cannon attacker: enough damage to provoke a counter, low
@@ -237,7 +258,7 @@ def test_hq_capture(tmp_path):
     this case self-contained.
     """
     g = _make_game()
-    seizer = g.create_unit("W", 4, 4, player=1)
+    seizer = _place(g, "W", 4, 4, 1)
     _enable(seizer)
     hq_tile = g.grid.get_tile(4, 4)  # h_2 location
     hq_tile.health = 1
@@ -273,8 +294,8 @@ def test_max_turns_draw(tmp_path):
 def test_resign(tmp_path):
     """P1 resigns -- P2 wins by ``resign``."""
     g = _make_game()
-    g.create_unit("W", 2, 1, player=1)
-    g.create_unit("W", 2, 2, player=2)
+    _place(g, "W", 2, 1, 1)
+    _place(g, "W", 2, 2, 2)
     g.resign(1)
 
     assert g.game_over and g.end_reason == "resign" and g.winner == 2
@@ -302,8 +323,8 @@ def test_rogue_forest_evade_outcome_is_captured(tmp_path):
     forest_tile = g.grid.get_tile(3, 2)
     assert forest_tile.type == "f", f"expected forest at (3,2), got {forest_tile.type}"
 
-    rogue = g.create_unit("R", 3, 2, player=1)
-    target = g.create_unit("W", 3, 3, player=2)
+    rogue = _place(g, "R", 3, 2, 1)
+    target = _place(g, "W", 3, 3, 2)
     _enable(rogue)
     _enable(target)
     # Keep both well above one-shot range so the counter actually
@@ -334,8 +355,8 @@ def test_rogue_evade_rng_independence(tmp_path):
     random.seed(7)
 
     g = _make_game()
-    rogue = g.create_unit("R", 2, 1, player=1)
-    target = g.create_unit("W", 2, 2, player=2)
+    rogue = _place(g, "R", 2, 1, 1)
+    target = _place(g, "W", 2, 2, 2)
     _enable(rogue)
     _enable(target)
     # Let both survive the exchange so the counter-evade outcome
@@ -393,8 +414,8 @@ def test_no_trailing_actions_after_game_over(tmp_path):
     no further actions should land in action_history regardless of how
     many bot-style calls land afterwards."""
     g = _make_game()
-    g.create_unit("W", 2, 1, player=1)
-    g.create_unit("W", 2, 2, player=2)
+    _place(g, "W", 2, 1, 1)
+    _place(g, "W", 2, 2, 2)
     g.resign(1)
 
     actions_after_game_over = len(g.action_history)
@@ -422,8 +443,8 @@ def test_dead_unit_cannot_move(tmp_path):
     audit: 90% of replays affected).
     """
     g = _make_game()
-    attacker = g.create_unit("W", 2, 1, player=1)
-    defender = g.create_unit("W", 2, 2, player=2)
+    attacker = _place(g, "W", 2, 1, 1)
+    defender = _place(g, "W", 2, 2, 2)
     _enable(attacker)
     _enable(defender)
     attacker.health = 1  # guarantees counter-kill
@@ -443,9 +464,9 @@ def test_dead_unit_cannot_attack_seize_or_buff(tmp_path):
     """The same stale-reference guard must apply across the whole
     action surface, not just move_unit."""
     g = _make_game()
-    a = g.create_unit("W", 2, 1, player=1)
-    d = g.create_unit("W", 2, 2, player=2)
-    other = g.create_unit("W", 3, 1, player=1)
+    a = _place(g, "W", 2, 1, 1)
+    d = _place(g, "W", 2, 2, 2)
+    other = _place(g, "W", 3, 1, 1)
     _enable(a)
     _enable(d)
     _enable(other)
@@ -567,9 +588,12 @@ def test_unit_id_assigned_on_create():
     """Every unit created through ``GameState.create_unit`` gets a stable
     monotonic ``unit_id``."""
     g = _make_game()
+    # Each on an empty building its player owns, on that player's turn.
     u1 = g.create_unit("W", 2, 1, player=1)
-    u2 = g.create_unit("W", 2, 2, player=2)
-    u3 = g.create_unit("W", 3, 1, player=1)
+    g.end_turn()
+    u2 = g.create_unit("W", 4, 3, player=2)
+    g.end_turn()
+    u3 = g.create_unit("W", 1, 2, player=1)
     assert u1.unit_id == 0
     assert u2.unit_id == 1
     assert u3.unit_id == 2
@@ -580,8 +604,8 @@ def test_unit_id_recorded_in_actions():
     """The v3 schema adds ``actor_unit_id`` / ``target_unit_id`` to every
     action that involves a unit."""
     g = _make_game()
-    a = g.create_unit("W", 2, 1, player=1)
-    d = g.create_unit("W", 2, 2, player=2)
+    a = g.create_unit("W", 2, 1, player=1)  # player 1's building, player 1's turn
+    d = _place(g, "W", 2, 2, 2)
     _enable(a)
     _enable(d)
     a.health = 1  # guarantee counter-kill
@@ -602,7 +626,7 @@ def test_unit_id_persists_across_save_load(tmp_path):
     collide with pre-load ids."""
     g = _make_game()
     u1 = g.create_unit("W", 2, 1, player=1)
-    u2 = g.create_unit("W", 2, 2, player=2)
+    u2 = _place(g, "W", 2, 2, 2)
     original_ids = (u1.unit_id, u2.unit_id, g._next_unit_id)
 
     state = g.to_dict()
@@ -611,7 +635,7 @@ def test_unit_id_persists_across_save_load(tmp_path):
 
     assert restored_ids == original_ids
     # Newly created post-load unit should pick up where the counter left off.
-    u3 = restored.create_unit("W", 3, 1, player=1)
+    u3 = restored.create_unit("W", 1, 2, player=1)  # player 1's other building
     assert u3.unit_id == 2  # was _next_unit_id
 
 
@@ -628,11 +652,11 @@ def test_v3_replay_uses_unit_id_when_position_is_ambiguous(tmp_path):
     # Two P1 units; the second is the "ghost target" of the action
     # below. If the v3 lookup wrongly used position, it would attack
     # the wrong unit (the one currently *at* the recorded position).
-    u_a = g.create_unit("W", 2, 1, player=1)
-    u_b = g.create_unit("W", 3, 1, player=1)
+    u_a = _place(g, "W", 2, 1, 1)
+    u_b = _place(g, "W", 3, 1, 1)
     u_a.unit_id = 100
     u_b.unit_id = 101
-    enemy = g.create_unit("W", 2, 2, player=2)
+    enemy = _place(g, "W", 2, 2, 2)
     enemy.unit_id = 200
     _enable(enemy)
 
@@ -745,8 +769,8 @@ def test_v3_schema_written_by_full_game(tmp_path):
     carries ``replay_schema_version: 3`` and the v3 unit-id fields
     on every action that has a unit involved."""
     g = _make_game()
-    a = g.create_unit("W", 2, 1, player=1)
-    d = g.create_unit("W", 2, 2, player=2)
+    a = g.create_unit("W", 2, 1, player=1)  # a real create, so the log has one
+    d = _place(g, "W", 2, 2, 2)
     _enable(a)
     _enable(d)
     a.health = 1
@@ -791,12 +815,12 @@ def test_haste_double_move_replay_through_v3(tmp_path):
     """
     g = _make_game()
 
-    sorcerer = g.create_unit("S", 1, 4, player=1)  # p tile, adjacent to knight
-    knight = g.create_unit("K", 1, 3, player=1)  # p tile, distance 1 from sorcerer
+    sorcerer = _place(g, "S", 1, 4, 1)  # p tile, adjacent to knight
+    knight = _place(g, "K", 1, 3, 1)  # p tile, distance 1 from sorcerer
     # Place an enemy so the game stays in progress (otherwise
     # ``_check_player_eliminated`` short-circuits and the replay
     # comparison is trivial).
-    enemy = g.create_unit("W", 4, 1, player=2)
+    enemy = _place(g, "W", 4, 1, 2)
     _enable(sorcerer)
     _enable(knight)
     _enable(enemy)

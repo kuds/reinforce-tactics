@@ -279,6 +279,23 @@ def apply_recorded_move_v3(game_state, action: dict[str, Any], translate_fn: Cal
     _apply_move_outcome(game_state, action, unit, to_x, to_y)
 
 
+def _warn_refused(action: dict[str, Any], schema_version: int) -> None:
+    """Log that the engine refused a recorded action the replay re-executes.
+
+    The engine now enforces the rules itself (turn, spent actions, range,
+    targets, spawn tiles), so a replay recorded before it did -- e.g. a v1
+    LLM game with a repeated SEIZE or an out-of-range attack -- can hold
+    actions it refuses. Playback then diverges from the recorded game;
+    say so loudly instead of silently dropping the action.
+    """
+    logger.warning(
+        "Replay (schema v%d): the engine refused recorded %s action %r; playback diverges from the recorded game",
+        schema_version,
+        action.get("type"),
+        {k: v for k, v in action.items() if k != "timestamp"},
+    )
+
+
 def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Callable, schema_version: int = 1) -> None:
     """Execute a single replay action on ``game_state``.
 
@@ -307,7 +324,9 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
         if action_type == "create_unit":
             px, py = translate_fn(action["x"], action["y"])
             unit = game_state.create_unit(action["unit_type"], px, py, action["player"])
-            if unit is not None and schema_version >= 3 and "unit_id" in action:
+            if unit is None:
+                _warn_refused(action, schema_version)
+            elif schema_version >= 3 and "unit_id" in action:
                 # Pin the unit's id to the recorded value so later actions
                 # can look it up. The engine's natural id assignment is
                 # monotonic, so values normally already match, but pinning
@@ -329,7 +348,8 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                     # without this override -- silent failure that diverged
                     # downstream state and produced ghost-action symptoms.
                     unit.can_move = True
-                    game_state.move_unit(unit, tx, ty)
+                    if not game_state.move_unit(unit, tx, ty):
+                        _warn_refused(action, schema_version)
         elif action_type == "attack":
             if schema_version >= 3 and "attacker_unit_id" in action:
                 apply_recorded_attack_v3(game_state, action, translate_fn)
@@ -340,8 +360,8 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                 tp = translate_fn(*action["target_pos"])
                 attacker = game_state.get_unit_at_position(*ap)
                 target = game_state.get_unit_at_position(*tp)
-                if attacker and target:
-                    game_state.attack(attacker, target)
+                if attacker and target and game_state.attack(attacker, target)["damage"] <= 0:
+                    _warn_refused(action, schema_version)
         elif action_type == "seize":
             if schema_version >= 3 and "actor_unit_id" in action:
                 apply_recorded_seize_v3(game_state, action, translate_fn)
@@ -350,15 +370,15 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
             else:
                 pos = translate_fn(*action["position"])
                 unit = game_state.get_unit_at_position(*pos)
-                if unit:
-                    game_state.seize(unit)
+                if unit and "damage" not in game_state.seize(unit):
+                    _warn_refused(action, schema_version)
         elif action_type == "paralyze":
             pp = translate_fn(*action["paralyzer_pos"])
             tp = translate_fn(*action["target_pos"])
             paralyzer = game_state.get_unit_at_position(*pp)
             target = game_state.get_unit_at_position(*tp)
-            if paralyzer and target:
-                game_state.paralyze(paralyzer, target)
+            if paralyzer and target and not game_state.paralyze(paralyzer, target):
+                _warn_refused(action, schema_version)
         elif action_type == "heal":
             if schema_version >= 3 and "actor_unit_id" in action:
                 apply_recorded_heal_v3(game_state, action, translate_fn)
@@ -369,36 +389,36 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                 tp = translate_fn(*action["target_pos"])
                 healer = game_state.get_unit_at_position(*hp)
                 target = game_state.get_unit_at_position(*tp)
-                if healer and target:
-                    game_state.heal(healer, target)
+                if healer and target and game_state.heal(healer, target) <= 0:
+                    _warn_refused(action, schema_version)
         elif action_type == "cure":
             cp = translate_fn(*action["curer_pos"])
             tp = translate_fn(*action["target_pos"])
             curer = game_state.get_unit_at_position(*cp)
             target = game_state.get_unit_at_position(*tp)
-            if curer and target:
-                game_state.cure(curer, target)
+            if curer and target and not game_state.cure(curer, target):
+                _warn_refused(action, schema_version)
         elif action_type == "haste":
             sp = translate_fn(*action["sorcerer_pos"])
             tp = translate_fn(*action["target_pos"])
             sorcerer = game_state.get_unit_at_position(*sp)
             target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.haste(sorcerer, target)
+            if sorcerer and target and not game_state.haste(sorcerer, target):
+                _warn_refused(action, schema_version)
         elif action_type == "defence_buff":
             sp = translate_fn(*action["sorcerer_pos"])
             tp = translate_fn(*action["target_pos"])
             sorcerer = game_state.get_unit_at_position(*sp)
             target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.defence_buff(sorcerer, target)
+            if sorcerer and target and not game_state.defence_buff(sorcerer, target):
+                _warn_refused(action, schema_version)
         elif action_type == "attack_buff":
             sp = translate_fn(*action["sorcerer_pos"])
             tp = translate_fn(*action["target_pos"])
             sorcerer = game_state.get_unit_at_position(*sp)
             target = game_state.get_unit_at_position(*tp)
-            if sorcerer and target:
-                game_state.attack_buff(sorcerer, target)
+            if sorcerer and target and not game_state.attack_buff(sorcerer, target):
+                _warn_refused(action, schema_version)
         elif action_type == "resign":
             game_state.resign(action["player"])
         elif action_type == "end_turn":

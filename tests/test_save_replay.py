@@ -38,11 +38,10 @@ def game_with_actions(simple_map):
     game.player_configs = [{"type": "human", "bot_type": None}, {"type": "computer", "bot_type": "SimpleBot"}]
 
     # Create some units and perform actions
-    unit1 = game.create_unit("W", 1, 1, player=1)
-    _ = game.create_unit("W", 3, 3, player=2)  # Create unit but not used in test
+    unit1 = game.place_unit("W", 1, 1, player=1)
+    _ = game.place_unit("W", 3, 3, player=2)  # Create unit but not used in test
 
     if unit1:
-        unit1.can_move = True  # Newly created units have can_move=False until next turn
         game.move_unit(unit1, 2, 1)
 
     game.end_turn()
@@ -304,8 +303,8 @@ class TestReplayActionHandlers:
         game = GameState(simple_map, num_players=2)
         # Give player 1 enough gold to afford a Mage (costs 300, starting gold is 250)
         game.player_gold[1] = 500
-        mage = game.create_unit("M", 1, 1, player=1)
-        enemy = game.create_unit("W", 2, 1, player=2)
+        mage = game.place_unit("M", 1, 1, player=1)
+        enemy = game.place_unit("W", 2, 1, player=2)
 
         if mage and enemy:
             game.paralyze(mage, enemy)
@@ -322,8 +321,8 @@ class TestReplayActionHandlers:
     def test_heal_action_handler(self, simple_map):
         """Test that heal actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit("C", 1, 1, player=1)
-        ally = game.create_unit("W", 2, 1, player=1)
+        cleric = game.place_unit("C", 1, 1, player=1)
+        ally = game.place_unit("W", 2, 1, player=1)
 
         if cleric and ally:
             # Damage the ally first
@@ -350,8 +349,8 @@ class TestReplayActionHandlers:
     def test_cure_action_handler(self, simple_map):
         """Test that cure actions are handled in replay."""
         game = GameState(simple_map, num_players=2)
-        cleric = game.create_unit("C", 1, 1, player=1)
-        ally = game.create_unit("W", 2, 1, player=1)
+        cleric = game.place_unit("C", 1, 1, player=1)
+        ally = game.place_unit("W", 2, 1, player=1)
 
         if cleric and ally:
             # Paralyze the ally first
@@ -433,7 +432,7 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import REPLAY_BORDER_SIZE, ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        game.create_unit("W", 1, 1, player=1)
+        game.create_unit("W", 2, 1, player=1)  # on player 1's building
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -464,8 +463,8 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        # Create unit at position (1, 1) in original coordinates
-        game.create_unit("W", 1, 1, player=1)
+        # Create unit on player 1's building at (2, 1) in original coordinates
+        game.create_unit("W", 2, 1, player=1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -484,7 +483,7 @@ class TestReplayPadding:
                     break
 
             # The unit should be at translated position
-            expected_x = 1 + player.padding_offset_x
+            expected_x = 2 + player.padding_offset_x
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
@@ -498,10 +497,11 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        unit = game.create_unit("W", 1, 1, player=1)
-        if unit:
-            unit.can_move = True  # Newly created units have can_move=False until next turn
-            game.move_unit(unit, 2, 1)
+        # Create on player 1's building at (2, 1), then step onto the HQ at (1, 1)
+        unit = game.create_unit("W", 2, 1, player=1)
+        assert unit is not None
+        unit.can_move = True  # Newly created units have can_move=False until next turn
+        assert game.move_unit(unit, 1, 1)
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -518,7 +518,7 @@ class TestReplayPadding:
                     player.execute_action(action)
 
             # The unit should be at translated destination position
-            expected_x = 2 + player.padding_offset_x
+            expected_x = 1 + player.padding_offset_x
             expected_y = 1 + player.padding_offset_y
             unit = player.game_state.get_unit_at_position(expected_x, expected_y)
             assert unit is not None
@@ -531,7 +531,7 @@ class TestReplayPadding:
         from reinforcetactics.utils.replay_player import ReplayPlayer
 
         game = GameState(simple_map, num_players=2)
-        game.create_unit("W", 1, 1, player=1)
+        game.create_unit("W", 2, 1, player=1)  # on player 1's building
         game.end_turn()
 
         with tempfile.TemporaryDirectory() as tmpdir:

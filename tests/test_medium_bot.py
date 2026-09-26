@@ -139,13 +139,13 @@ class TestMediumBotCoordinatedAttacks:
         game = GameState(map_data, num_players=2)
 
         # Create enemy unit with low health
-        game.create_unit("W", 3, 3, 1)
+        game.place_unit("W", 3, 3, 1)
         enemy = game.units[-1]
         enemy.health = 5  # Low health
 
         # Create bot units nearby
-        game.create_unit("W", 2, 3, 2)
-        game.create_unit("W", 4, 3, 2)
+        game.place_unit("W", 2, 3, 2)
+        game.place_unit("W", 4, 3, 2)
 
         bot = MediumBot(game, player=2)
         bot_units = [u for u in game.units if u.player == 2]
@@ -175,7 +175,7 @@ class TestMediumBotContestedStructures:
             structure.health = structure.max_health - 5
 
             # Place enemy unit on structure
-            game.create_unit("W", structure.x, structure.y, 1)
+            game.place_unit("W", structure.x, structure.y, 1)
 
             contested = bot.find_contested_structures()
 
@@ -221,11 +221,11 @@ class TestMediumBotAttackValue:
         game = GameState(map_data, num_players=2)
 
         # Create attacker
-        game.create_unit("W", 2, 2, 2)
+        game.place_unit("W", 2, 2, 2)
         attacker = game.units[-1]
 
         # Create weak target
-        game.create_unit("W", 3, 2, 1)
+        game.place_unit("W", 3, 2, 1)
         target = game.units[-1]
         target.health = 5  # Low health
 
@@ -291,7 +291,11 @@ def heal_game():
     map_data[5][4] = "b_2"
     map_data[4][5] = "b_2"
     map_data[5][3] = "t_2"
-    return GameState(map_data, num_players=2)
+    game = GameState(map_data, num_players=2)
+    # The bots under test play player 2, and the engine only lets the
+    # current player act.
+    game.current_player = 2
+    return game
 
 
 class TestSimpleBotHealRetreat:
@@ -300,7 +304,7 @@ class TestSimpleBotHealRetreat:
 
     def test_stays_on_heal_tile_when_wounded(self, heal_game):
         bot = SimpleBot(heal_game, player=2)
-        heal_game.create_unit("W", 5, 5, 2)  # On HQ
+        heal_game.place_unit("W", 5, 5, 2)  # On HQ
         unit = heal_game.units[-1]
         unit.health = 2  # well below 50%
 
@@ -313,7 +317,7 @@ class TestSimpleBotHealRetreat:
         if already standing on one. A wounded unit two tiles away from a
         Building keeps acting normally."""
         bot = SimpleBot(heal_game, player=2)
-        heal_game.create_unit("W", 3, 3, 2)  # NOT on a heal tile
+        heal_game.place_unit("W", 3, 3, 2)  # NOT on a heal tile
         unit = heal_game.units[-1]
         unit.health = 1
 
@@ -331,7 +335,7 @@ class TestMediumBotHealRetreat:
     def test_routes_wounded_unit_to_heal_tile(self, heal_game):
         bot = MediumBot(heal_game, player=2)
         # Place a Warrior next to a Building -- one move puts it on heal.
-        heal_game.create_unit("W", 4, 4, 2)
+        heal_game.place_unit("W", 4, 4, 2)
         unit = heal_game.units[-1]
         unit.health = 1
         unit.can_move = True  # Newly created units have can_move=False until next turn
@@ -341,7 +345,7 @@ class TestMediumBotHealRetreat:
 
     def test_full_health_unit_does_not_retreat(self, heal_game):
         bot = MediumBot(heal_game, player=2)
-        heal_game.create_unit("W", 4, 4, 2)
+        heal_game.place_unit("W", 4, 4, 2)
         unit = heal_game.units[-1]
         # Full HP -- should fall through retreat priority.
         original_health = unit.health
@@ -355,11 +359,11 @@ class TestMediumBotHealRetreat:
         """A wounded unit that can kill an adjacent enemy this turn should
         attack instead of retreating."""
         bot = MediumBot(heal_game, player=2)
-        heal_game.create_unit("W", 4, 4, 2)
+        heal_game.place_unit("W", 4, 4, 2)
         attacker = heal_game.units[-1]
         attacker.health = 1
         # 1-HP enemy adjacent
-        heal_game.create_unit("W", 4, 3, 1)
+        heal_game.place_unit("W", 4, 3, 1)
         target = heal_game.units[-1]
         target.health = 1
 
@@ -376,8 +380,8 @@ class TestAdvancedBotHealRetreat:
     def test_archer_threshold_is_higher_than_warrior(self, heal_game):
         bot = AdvancedBot(heal_game, player=2)
         heal_game.player_gold[2] = 10_000  # cover both unit costs
-        warrior = heal_game.create_unit("W", 5, 5, 2)
-        archer = heal_game.create_unit("A", 4, 5, 2)
+        warrior = heal_game.place_unit("W", 5, 5, 2)
+        archer = heal_game.place_unit("A", 4, 5, 2)
         assert warrior is not None and archer is not None
 
         # Set both to the same fraction (~50%): archer should retreat (>0.55
@@ -393,7 +397,7 @@ class TestAdvancedBotHealRetreat:
         bot = AdvancedBot(heal_game, player=2)
         # Place between a tower at (3,5) and a building at (4,5).
         # Distance to (3,5) is 1, distance to (4,5) is 1.
-        heal_game.create_unit("W", 4, 4, 2)
+        heal_game.place_unit("W", 4, 4, 2)
         unit = heal_game.units[-1]
         unit.health = 1
 
@@ -408,7 +412,7 @@ class TestAdvancedBotHealRetreat:
         bot = AdvancedBot(heal_game, player=2)
         heal_game.player_gold[1] = 10_000
         heal_game.player_gold[2] = 10_000
-        unit = heal_game.create_unit("W", 1, 1, 2)
+        unit = heal_game.place_unit("W", 1, 1, 2)
         assert unit is not None
         unit.health = 1
         # Move the unit's reachable set toward the heal tiles by giving it
@@ -416,7 +420,7 @@ class TestAdvancedBotHealRetreat:
         unit.x, unit.y = 4, 4
 
         # Enemy threatens (5,4) but not (4,5).
-        archer = heal_game.create_unit("A", 5, 2, 1)
+        archer = heal_game.place_unit("A", 5, 2, 1)
         assert archer is not None
 
         target = bot.find_retreat_tile(unit)
@@ -446,8 +450,8 @@ class TestCaptureUnitDistance:
     def test_unit_picks_its_own_closest_tower(self, capture_game):
         bot = MediumBot(capture_game, player=2)
         capture_game.player_gold[2] = 10_000
-        far_unit = capture_game.create_unit("W", 0, 5, 2)  # near tower (5, 2)
-        near_unit = capture_game.create_unit("W", 9, 5, 2)  # near tower (5, 7)
+        far_unit = capture_game.place_unit("W", 0, 5, 2)  # near tower (5, 2)
+        near_unit = capture_game.place_unit("W", 9, 5, 2)  # near tower (5, 7)
         assert far_unit is not None and near_unit is not None
 
         far_target = bot.pick_capture_target(far_unit)
@@ -476,8 +480,8 @@ class TestCaptureAssignment:
         capture_game.player_gold[2] = 10_000
         # Two units in the same general area -- without claim tracking they
         # would pick the same closest tower.
-        a = capture_game.create_unit("W", 5, 8, 2)
-        b = capture_game.create_unit("W", 6, 8, 2)
+        a = capture_game.place_unit("W", 5, 8, 2)
+        b = capture_game.place_unit("W", 6, 8, 2)
         assert a is not None and b is not None
 
         target_a = bot.pick_capture_target(a)
@@ -505,13 +509,13 @@ class TestEnemyCountHelper:
         bot = MediumBot(simple_game, player=2)
         simple_game.player_gold[1] = 10_000
         simple_game.player_gold[2] = 10_000
-        simple_game.create_unit("W", 3, 3, 1)
-        simple_game.create_unit("W", 3, 4, 1)
-        simple_game.create_unit("A", 3, 5, 1)
+        simple_game.place_unit("W", 3, 3, 1)
+        simple_game.place_unit("W", 3, 4, 1)
+        simple_game.place_unit("A", 3, 5, 1)
         # Friendly unit must not be counted.
-        simple_game.create_unit("W", 7, 7, 2)
+        simple_game.place_unit("W", 7, 7, 2)
         # Dead unit must not be counted.
-        dead = simple_game.create_unit("M", 4, 4, 1)
+        dead = simple_game.place_unit("M", 4, 4, 1)
         if dead is not None:
             dead.health = 0
 
@@ -525,22 +529,22 @@ class TestMediumBotCounterRule:
     def test_no_counter_below_threshold(self, simple_game):
         bot = MediumBot(simple_game, player=2)
         simple_game.player_gold[1] = 10_000
-        simple_game.create_unit("A", 3, 3, 1)
-        simple_game.create_unit("A", 3, 4, 1)  # only 2 archers, below threshold
+        simple_game.place_unit("A", 3, 3, 1)
+        simple_game.place_unit("A", 3, 4, 1)  # only 2 archers, below threshold
         assert bot.get_counter_unit() is None
 
     def test_three_archers_trigger_knight_counter(self, simple_game):
         bot = MediumBot(simple_game, player=2)
         simple_game.player_gold[1] = 10_000
         for y in range(3, 6):
-            simple_game.create_unit("A", 3, y, 1)
+            simple_game.place_unit("A", 3, y, 1)
         assert bot.get_counter_unit() == "K"
 
     def test_three_warriors_trigger_archer_counter(self, simple_game):
         bot = MediumBot(simple_game, player=2)
         simple_game.player_gold[1] = 10_000
         for y in range(3, 6):
-            simple_game.create_unit("W", 3, y, 1)
+            simple_game.place_unit("W", 3, y, 1)
         assert bot.get_counter_unit() == "A"
 
     def test_purchase_prefers_counter(self, simple_game):
@@ -551,7 +555,7 @@ class TestMediumBotCounterRule:
         simple_game.player_gold[1] = 10_000
         simple_game.player_gold[2] = 10_000
         for y in range(3, 6):
-            simple_game.create_unit("A", 3, y, 1)
+            simple_game.place_unit("A", 3, y, 1)
 
         # Force the affordable list to include both K and W.
         from reinforcetactics.constants import UNIT_DATA
@@ -575,7 +579,7 @@ class TestAdvancedBotCounterMatrix:
         simple_game.player_gold[1] = 10_000
         # Archer-heavy enemy comp.
         for y in range(2, 7):
-            simple_game.create_unit("A", 3, y, 1)
+            simple_game.place_unit("A", 3, y, 1)
 
         targets = bot.get_dynamic_composition_targets()
         baseline = bot.FULL_COMPOSITION_TARGETS["K"] / sum(bot.FULL_COMPOSITION_TARGETS.values())
@@ -586,7 +590,7 @@ class TestAdvancedBotCounterMatrix:
         bot = AdvancedBot(simple_game, player=2)
         simple_game.player_gold[1] = 10_000
         for y in range(2, 6):
-            simple_game.create_unit("W", 3, y, 1)
+            simple_game.place_unit("W", 3, y, 1)
         targets = bot.get_dynamic_composition_targets()
         assert abs(sum(targets.values()) - 1.0) < 1e-6
 
@@ -708,25 +712,27 @@ class TestMidCapturePreservation:
         game = GameState(map_data, num_players=2)
         game.player_gold[1] = 10_000
         game.player_gold[2] = 10_000
+        # The bot under test plays player 2; only the current player may act.
+        game.current_player = 2
 
         # Find a neutral tower (beginner has 4 in the centre).
         neutral_tower = next(tile for row in game.grid.tiles for tile in row if tile.type == "t" and tile.player is None)
 
         # Park a Warrior on the tower with a partial seize already applied.
-        warrior = game.create_unit("W", neutral_tower.x, neutral_tower.y, 2)
+        warrior = game.place_unit("W", neutral_tower.x, neutral_tower.y, 2)
         assert warrior is not None
         neutral_tower.health = max(1, neutral_tower.max_health // 2)
 
         # Killable enemy adjacent to a position the warrior could reach
         # (max move radius covers a 1-tower step). 1 HP so it's "killable".
-        enemy = game.create_unit("W", neutral_tower.x + 1, neutral_tower.y, 1)
+        enemy = game.place_unit("W", neutral_tower.x + 1, neutral_tower.y, 1)
         assert enemy is not None
         enemy.health = 1
 
         bot = bot_cls(game, player=2)
         # Reset can_act flags so the bot's turn loop will see them as
-        # eligible. After a fresh create_unit they're already True; we
-        # spell it out for clarity.
+        # eligible. place_unit already leaves them True; we spell it out
+        # for clarity.
         warrior.can_move = True
         warrior.can_attack = True
         return game, bot, warrior, neutral_tower, enemy

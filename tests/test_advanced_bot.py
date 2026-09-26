@@ -111,8 +111,8 @@ class TestAdvancedBotSpecialAbilities:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit("C", 5, 5, 2)
-        simple_game.create_unit("W", 5, 6, 2)
+        simple_game.place_unit("C", 5, 5, 2)
+        simple_game.place_unit("W", 5, 6, 2)
 
         cleric = [u for u in simple_game.units if u.type == "C" and u.player == 2][0]
         warrior = [u for u in simple_game.units if u.type == "W" and u.player == 2]
@@ -144,8 +144,8 @@ class TestAdvancedBotRangedCombat:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit("A", 5, 5, 2)
-        simple_game.create_unit("W", 5, 3, 1)  # Enemy warrior
+        simple_game.place_unit("A", 5, 5, 2)
+        simple_game.place_unit("W", 5, 3, 1)  # Enemy warrior
 
         archer = [u for u in simple_game.units if u.type == "A" and u.player == 2][0]
 
@@ -163,8 +163,8 @@ class TestAdvancedBotRangedCombat:
         simple_game.current_player = 2
         simple_game.player_gold[2] = 1000
 
-        simple_game.create_unit("M", 5, 5, 2)
-        simple_game.create_unit("W", 5, 3, 1)  # Enemy warrior
+        simple_game.place_unit("M", 5, 5, 2)
+        simple_game.place_unit("W", 5, 3, 1)  # Enemy warrior
 
         mage = [u for u in simple_game.units if u.type == "M" and u.player == 2][0]
 

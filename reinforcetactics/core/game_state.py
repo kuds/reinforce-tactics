@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -654,9 +655,198 @@ class GameState:
         }
         self.action_history.append(action_record)
 
+    # ------------------------------------------------------------------
+    # Legality predicates
+    # ------------------------------------------------------------------
+    # Each rule is written once and used twice: ``_compute_legal_actions``
+    # enumerates what a player may do with it, and the action methods below
+    # reject anything else with it. The action methods used to trust their
+    # callers, so any caller that did not pre-filter against the legal list
+    # (multi_discrete policies, LLM bots, the rule bots' knight charge, the
+    # GUI) could spawn units anywhere, attack across the map, act out of
+    # turn or seize an HQ several times in one turn (review core-2). One
+    # definition per rule is what keeps the mask and the engine agreeing: an
+    # offered action the engine rejects traps a deterministic policy, and an
+    # accepted action the mask never offers is an exploit.
+    #
+    # Two gates apply only on execution, not in enumeration: the game must
+    # not be over, and it must be the acting player's turn.
+    # ``get_legal_actions(player)`` still answers for any player at any time
+    # (masks and prompts are built for a player's own turn in practice).
+
+    @staticmethod
+    def _is_ready_unit(unit: Unit, player: int) -> bool:
+        """``unit`` belongs to ``player``, is alive and is not paralyzed."""
+        return unit.player == player and unit.health > 0 and not unit.is_paralyzed()
+
+    def _under_unit_cap(self, player: int) -> bool:
+        return sum(1 for u in self.units if u.player == player) < self.max_units_per_player
+
+    def _is_free_spawn_tile(self, player: int, x: int, y: int) -> bool:
+        """An in-bounds, empty Building owned by ``player`` (HQs and towers never spawn)."""
+        tile = self.grid.get_tile(x, y)
+        return (
+            tile is not None
+            and tile.type == TileType.BUILDING.value
+            and tile.player == player
+            and self.get_unit_at_position(x, y) is None
+        )
+
+    def _can_afford(self, player: int, unit_type: str) -> bool:
+        return self.player_gold[player] >= self.unit_data[unit_type]["cost"]
+
+    def _move_destinations(self, unit: Unit) -> list[tuple[int, int]]:
+        """Tiles ``unit`` may end a move on, in BFS order.
+
+        Reachable within its movement over walkable tiles (it can pass
+        through friendly units, never enemies) and not occupied by anyone.
+        """
+        reachable = unit.get_reachable_positions(
+            self.grid.width,
+            self.grid.height,
+            lambda x, y: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=unit),
+        )
+        # Reachable tiles are already walkable and enemy-free, so "can end
+        # here" only adds "no friendly unit either"; a set keeps that O(1)
+        # per tile instead of a scan of every unit.
+        occupied = {(u.x, u.y) for u in self.units}
+        return [pos for pos in reachable if pos not in occupied]
+
+    def _can_attack_target(self, unit: Unit, target: Unit) -> bool:
+        """A living enemy within ``unit``'s reach that fog of war lets it attack.
+
+        Under fog of war the target must have been visible when the unit
+        started its action (``is_enemy_attackable_by_unit``), so moving to
+        discover an enemy does not also let the unit hit it.
+        """
+        return (
+            target.player != unit.player
+            and target.health > 0
+            and self.mechanics.can_reach(unit, target.x, target.y, self.grid)
+            and (not self.fog_of_war or self.is_enemy_attackable_by_unit(unit, target))
+        )
+
+    def _can_paralyze_target(self, unit: Unit, target: Unit) -> bool:
+        """Mage off cooldown, an attackable enemy within 1..2 that is not already paralyzed.
+
+        Re-casting on a paralyzed target would only refresh the status (a
+        near no-op) and inflate the action space, the same reason heal,
+        cure and the buffs skip an ally that already has the effect.
+        """
+        return (
+            unit.can_use_paralyze()
+            and not target.is_paralyzed()
+            and abs(unit.x - target.x) + abs(unit.y - target.y) <= 2
+            and self._can_attack_target(unit, target)
+        )
+
+    def _can_heal_target(self, unit: Unit, target: Unit) -> bool:
+        return unit.type == "C" and self.mechanics.is_healable_ally(unit, target)
+
+    def _can_cure_target(self, unit: Unit, target: Unit) -> bool:
+        return unit.type == "C" and self.mechanics.is_curable_ally(unit, target)
+
+    def _can_haste_target(self, unit: Unit, target: Unit) -> bool:
+        return unit.can_use_haste() and self.mechanics.is_hasteable_ally(unit, target)
+
+    def _can_defence_buff_target(self, unit: Unit, target: Unit) -> bool:
+        return unit.can_use_defence_buff() and self.mechanics.is_defence_buffable_ally(unit, target)
+
+    def _can_attack_buff_target(self, unit: Unit, target: Unit) -> bool:
+        return unit.can_use_attack_buff() and self.mechanics.is_attack_buffable_ally(unit, target)
+
+    def _can_seize(self, unit: Unit) -> bool:
+        """``unit`` stands on a structure its player does not own."""
+        tile = self.grid.get_tile(unit.x, unit.y)
+        return tile is not None and tile.is_capturable() and tile.player != unit.player
+
+    def _may_act(self, action: str, unit: Unit, target: Unit | None = None, rule: Callable[[], bool] | None = None) -> bool:
+        """Validate one unit action before it is applied; log why when it is not.
+
+        Rejects when the game is over; when ``unit`` (or ``target``) is no
+        longer in play -- a stale reference, e.g. a bot still holding a unit
+        that died to a counter earlier in its loop; when it is not the
+        unit's player's turn; when the unit is dead or paralyzed; when the
+        action slot it needs is spent (``can_move`` for a move,
+        ``can_attack`` for attacks, abilities and seizing); or when
+        ``rule`` (the action's target/range predicate) fails.
+        """
+        if self.game_over:
+            reason = "the game is over"
+        elif unit not in self.units or (target is not None and target not in self.units):
+            reason = "a unit involved is no longer in play"
+        elif unit.player != self.current_player:
+            reason = f"it is player {self.current_player}'s turn"
+        elif not self._is_ready_unit(unit, unit.player):
+            reason = "the unit is dead or paralyzed"
+        elif not (unit.can_move if action == "move" else unit.can_attack):
+            reason = "the unit has already spent that action this turn"
+        elif rule is not None and not rule():
+            reason = "the target is out of range, on the wrong side, or a precondition fails"
+        else:
+            return True
+        logger.debug("Rejected %s by player %d %s at (%d, %d): %s", action, unit.player, unit.type, unit.x, unit.y, reason)
+        return False
+
+    @staticmethod
+    def _noop_attack_result() -> dict[str, Any]:
+        """What ``attack`` returns when it applies nothing (``damage`` 0)."""
+        return {
+            "attacker_alive": True,
+            "target_alive": True,
+            "damage": 0,
+            "counter_damage": 0,
+            "charge_bonus": False,
+            "flank_bonus": False,
+            "evade": False,
+            "attack_buff": False,
+            "defence_buff": False,
+        }
+
+    def place_unit(self, unit_type: str, x: int, y: int, player: int) -> Unit:
+        """Put a unit on the board for a test, scenario or other setup.
+
+        Not a game action, so none of ``create_unit``'s rules apply: no gold
+        is charged, nothing is recorded in the action history, and any tile
+        (walkable or not), any player and any unit type (enabled or not) is
+        accepted whoever's turn it is. The unit gets the next ``unit_id``
+        and starts ready to act (``can_move``/``can_attack`` True), as if it
+        had begun the turn on that tile; a unit made with ``create_unit``
+        instead waits for its player's next turn. Because nothing is
+        recorded, a replay cannot rebuild placed units from its action log.
+
+        Raises:
+            ValueError: for an unknown unit type, an off-board position or
+                an occupied tile -- states the engine cannot represent.
+        """
+        if unit_type not in self.unit_data:
+            raise ValueError(f"Unknown unit type: {unit_type!r}")
+        if self.grid.get_tile(x, y) is None:
+            raise ValueError(f"({x}, {y}) is off the {self.grid.width}x{self.grid.height} board")
+        if self.get_unit_at_position(x, y) is not None:
+            raise ValueError(f"({x}, {y}) is already occupied")
+
+        unit = Unit(unit_type, x, y, player, stats=self.unit_data[unit_type])
+        unit.unit_id = self._next_unit_id
+        self._next_unit_id += 1
+        unit.can_move = True
+        unit.can_attack = True
+        self.units.append(unit)
+        self._invalidate_cache()
+        # A placed unit can reveal (or stand in) fog for every player.
+        self.update_visibility()
+        return unit
+
     def create_unit(self, unit_type: str, x: int, y: int, player: int | None = None) -> Unit | None:
         """
         Create a unit at the specified position.
+
+        Rejected (returns None, changes and records nothing) unless the game
+        is running, ``player`` is the current player, ``unit_type`` is
+        enabled, the player is under the unit cap and can afford it, and
+        ``(x, y)`` is an empty Building the player owns -- the same rules
+        ``get_legal_actions`` offers creates by. For test or scenario setup
+        use :meth:`place_unit`.
 
         Args:
             unit_type: 'W', 'M', 'C', 'B', or 'A'
@@ -670,26 +860,36 @@ class GameState:
         if player is None:
             player = self.current_player
 
-        # Enforce the per-player unit cap. Mirrored in get_legal_actions so
-        # the RL action mask hides create_unit at the cap rather than the
-        # agent issuing a rejected action and eating the invalid_action
-        # penalty.
-        if sum(1 for u in self.units if u.player == player) >= self.max_units_per_player:
-            logger.debug(f"Cannot create unit: player {player} at unit cap ({self.max_units_per_player})")
+        if self.game_over:
+            logger.debug("Cannot create unit: the game is over")
             return None
 
-        # Check if position is occupied
-        if self.get_unit_at_position(x, y):
-            logger.debug(f"Cannot create unit at ({x}, {y}): position occupied")
+        if player != self.current_player:
+            logger.debug(f"Cannot create unit for player {player}: it is player {self.current_player}'s turn")
             return None
 
-        # Check if player can afford
         if unit_type not in self.unit_data:
             logger.warning(f"Unknown unit type: {unit_type}")
             return None
 
+        if unit_type not in self.enabled_units:
+            logger.debug(f"Cannot create unit: {unit_type} is not enabled in this game")
+            return None
+
+        # Enforce the per-player unit cap. Mirrored in get_legal_actions so
+        # the RL action mask hides create_unit at the cap rather than the
+        # agent issuing a rejected action and eating the invalid_action
+        # penalty.
+        if not self._under_unit_cap(player):
+            logger.debug(f"Cannot create unit: player {player} at unit cap ({self.max_units_per_player})")
+            return None
+
+        if not self._is_free_spawn_tile(player, x, y):
+            logger.debug(f"Cannot create unit at ({x}, {y}): not an empty building owned by player {player}")
+            return None
+
         cost = self.unit_data[unit_type]["cost"]
-        if self.player_gold[player] < cost:
+        if not self._can_afford(player, unit_type):
             logger.debug(f"Cannot create unit: insufficient gold ({self.player_gold[player]} < {cost})")
             return None
 
@@ -723,40 +923,18 @@ class GameState:
         """
         from_x, from_y = unit.x, unit.y
 
-        # Reject duplicate moves: bot/RL/LLM call sites don't all gate on
-        # ``unit.can_move`` before calling, and ``get_reachable_positions``
-        # ignores it too, so without this check a unit could be moved more
-        # than once per turn (producing duplicate "move" events in replays
-        # and illegal positioning in-game).
-        if not unit.can_move:
-            logger.debug(f"Cannot move {unit.type} at ({unit.x}, {unit.y}): can_move is False")
+        # Actor gate (see _may_act). Among other things it rejects duplicate
+        # moves -- bot/RL/LLM call sites don't all gate on ``unit.can_move``
+        # before calling, and ``get_reachable_positions`` ignores it, so a
+        # unit could otherwise move more than once per turn -- and stale
+        # references: a unit can die mid-loop from a counter-attack while the
+        # bot still holds it, and moving it would log an event the replay
+        # player (which only sees self.units) can't reproduce (PR #360 audit).
+        if not self._may_act("move", unit):
             return False
 
-        # Stale-reference guard: bots iterate over their own units once
-        # per turn, but a unit can die mid-loop from a counter-attack on
-        # an earlier action. The bot still holds the Python reference and
-        # will keep calling APIs on the dead unit; without this guard
-        # the engine moves it, logs the event, and the replay player
-        # (which only sees self.units) can't reproduce it -- the action
-        # silently no-ops and state diverges. See PR #360 audit.
-        if unit not in self.units:
-            return False
-
-        # Check if move is valid
-        reachable = unit.get_reachable_positions(
-            self.grid.width,
-            self.grid.height,
-            lambda x, y: self.mechanics.can_move_to_position(
-                x, y, self.grid, self.units, moving_unit=unit, is_destination=False
-            ),
-        )
-
-        if (to_x, to_y) not in reachable:
-            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable")
-            return False
-
-        if not self.mechanics.can_move_to_position(to_x, to_y, self.grid, self.units, moving_unit=unit, is_destination=True):
-            logger.debug(f"Cannot move to ({to_x}, {to_y}): position blocked")
+        if (to_x, to_y) not in self._move_destinations(unit):
+            logger.debug(f"Cannot move to ({to_x}, {to_y}): not reachable or occupied")
             return False
 
         # FOW: Snapshot pre-move enemy visibility so the unit cannot attack
@@ -799,23 +977,17 @@ class GameState:
             target: Target unit
 
         Returns:
-            dict: Attack results
+            dict: Attack results. An illegal attack (see ``_may_act``; the
+            target must also be a living enemy within reach that fog of war
+            lets the attacker see) changes nothing and returns the no-op
+            result with ``damage`` 0. An executed attack always deals at
+            least 1, so ``result["damage"] > 0`` tells callers whether the
+            attack happened.
         """
-        # Stale-reference guard (see move_unit for full rationale).
-        # Returns the same shape as a clean no-op attack so callers
+        # Rejections return the same shape as a clean attack so callers
         # that index into the result dict don't KeyError.
-        if attacker not in self.units or target not in self.units:
-            return {
-                "attacker_alive": True,
-                "target_alive": True,
-                "damage": 0,
-                "counter_damage": 0,
-                "charge_bonus": False,
-                "flank_bonus": False,
-                "evade": False,
-                "attack_buff": False,
-                "defence_buff": False,
-            }
+        if not self._may_act("attack", attacker, target, lambda: self._can_attack_target(attacker, target)):
+            return self._noop_attack_result()
 
         result = self.mechanics.attack_unit(
             attacker, target, self.grid, self.units, damage_model=self.damage_model, rng=self.rng
@@ -879,8 +1051,8 @@ class GameState:
         return result
 
     def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
-        """Paralyze a target unit."""
-        if paralyzer not in self.units or target not in self.units:
+        """Paralyze a target unit. Returns False, changing nothing, if illegal."""
+        if not self._may_act("paralyze", paralyzer, target, lambda: self._can_paralyze_target(paralyzer, target)):
             return False
         result = self.mechanics.paralyze_unit(paralyzer, target)
         if result:
@@ -898,8 +1070,8 @@ class GameState:
         return result
 
     def heal(self, healer: Unit, target: Unit) -> int:
-        """Heal a target unit."""
-        if healer not in self.units or target not in self.units:
+        """Heal a target unit. Returns the HP healed; 0, changing nothing, if illegal."""
+        if not self._may_act("heal", healer, target, lambda: self._can_heal_target(healer, target)):
             return 0
         amount = self.mechanics.heal_unit(healer, target)
         if amount > 0:
@@ -923,8 +1095,8 @@ class GameState:
         return amount
 
     def cure(self, curer: Unit, target: Unit) -> bool:
-        """Cure a target unit's paralysis."""
-        if curer not in self.units or target not in self.units:
+        """Cure a target unit's paralysis. Returns False, changing nothing, if illegal."""
+        if not self._may_act("cure", curer, target, lambda: self._can_cure_target(curer, target)):
             return False
         result = self.mechanics.cure_unit(curer, target)
         if result:
@@ -950,9 +1122,10 @@ class GameState:
             target: The target friendly unit
 
         Returns:
-            bool: True if Haste was successfully applied
+            bool: True if Haste was successfully applied (False, changing
+            nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
+        if not self._may_act("haste", sorcerer, target, lambda: self._can_haste_target(sorcerer, target)):
             return False
         result = self.mechanics.haste_unit(sorcerer, target)
         if result:
@@ -979,9 +1152,10 @@ class GameState:
             target: The target friendly unit
 
         Returns:
-            bool: True if Defence Buff was successfully applied
+            bool: True if Defence Buff was successfully applied (False,
+            changing nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
+        if not self._may_act("defence_buff", sorcerer, target, lambda: self._can_defence_buff_target(sorcerer, target)):
             return False
         result = self.mechanics.defence_buff_unit(sorcerer, target)
         if result:
@@ -1008,9 +1182,10 @@ class GameState:
             target: The target friendly unit
 
         Returns:
-            bool: True if Attack Buff was successfully applied
+            bool: True if Attack Buff was successfully applied (False,
+            changing nothing, if illegal)
         """
-        if sorcerer not in self.units or target not in self.units:
+        if not self._may_act("attack_buff", sorcerer, target, lambda: self._can_attack_buff_target(sorcerer, target)):
             return False
         result = self.mechanics.attack_buff_unit(sorcerer, target)
         if result:
@@ -1029,11 +1204,17 @@ class GameState:
         return result
 
     def seize(self, unit: Unit) -> dict[str, Any]:
-        """Seize the structure the unit is on."""
-        if unit not in self.units:
-            tile = self.grid.get_tile(unit.x, unit.y)
-            return {"captured": False, "game_over": False, "structure_type": tile.type}
+        """Seize the structure the unit is on.
+
+        An illegal seize (see ``_may_act``; the unit must also stand on a
+        structure its player does not own) changes and records nothing and
+        returns a result without ``damage``. Checking ``can_attack`` here is
+        what stops one unit from seizing several times a turn -- repeated
+        SEIZEs from an LLM took a 50-HP HQ in one turn (review aibots-1).
+        """
         tile = self.grid.get_tile(unit.x, unit.y)
+        if not self._may_act("seize", unit, rule=lambda: self._can_seize(unit)):
+            return {"captured": False, "game_over": False, "structure_type": tile.type if tile else None}
         result = self.mechanics.seize_structure(unit, tile)
 
         # Record action. tile_hp_after / tile_owner_after let the v2
@@ -1373,15 +1554,21 @@ class GameState:
             "end_turn": True,
         }
 
+        # Every test below is one of the predicates the action methods
+        # validate with (see "Legality predicates"), so everything offered
+        # here is accepted on the player's turn and nothing else is. The
+        # iteration order (units, reachable tiles, targets) is part of the
+        # flat_discrete action encoding and must not change.
+
         # Building units (only at Buildings, not HQ)
         # Only include enabled unit types. Suppressed entirely once the player
         # is at the unit cap so the action mask matches create_unit's own
         # enforcement (no offered-then-rejected create actions).
-        if sum(1 for u in self.units if u.player == player) < self.max_units_per_player:
+        if self._under_unit_cap(player):
             for tile in self.grid.get_capturable_tiles(player):
-                if tile.type == TileType.BUILDING.value and not self.get_unit_at_position(tile.x, tile.y):
+                if self._is_free_spawn_tile(player, tile.x, tile.y):
                     for unit_type in self.enabled_units:
-                        if self.player_gold[player] >= self.unit_data[unit_type]["cost"]:
+                        if self._can_afford(player, unit_type):
                             legal_actions["create_unit"].append({"unit_type": unit_type, "x": tile.x, "y": tile.y})
 
         # Unit actions
@@ -1391,95 +1578,49 @@ class GameState:
             # filter on ``health > 0`` defensively -- mirror that here so a
             # corpse left in ``self.units`` by any future deferred-removal path
             # (AoE, end-of-turn DoT, status damage) can't emit phantom actions.
-            if unit.player == player and unit.health > 0 and not unit.is_paralyzed():
-                # Movement
-                if unit.can_move:
-                    reachable = unit.get_reachable_positions(
-                        self.grid.width,
-                        self.grid.height,
-                        lambda x, y, _u=unit: self.mechanics.can_move_to_position(x, y, self.grid, self.units, moving_unit=_u),
+            if not self._is_ready_unit(unit, player):
+                continue
+
+            # Movement: reachable tiles that are also free to end on
+            if unit.can_move:
+                for pos in self._move_destinations(unit):
+                    legal_actions["move"].append(
+                        {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
                     )
-                    for pos in reachable:
-                        # Only include positions that are valid as final destinations
-                        # (not occupied by any unit)
-                        if self.mechanics.can_move_to_position(
-                            pos[0], pos[1], self.grid, self.units, moving_unit=unit, is_destination=True
-                        ):
-                            legal_actions["move"].append(
-                                {"unit": unit, "from_x": unit.x, "from_y": unit.y, "to_x": pos[0], "to_y": pos[1]}
-                            )
 
-                # Combat actions
-                if unit.can_attack:
-                    # For Archers, Mages, and Sorcerers, find enemies within range (not just adjacent)
-                    if unit.type in ["M", "A", "S"]:
-                        # Check if unit is on mountain (for Archer range bonus)
-                        unit_tile = self.grid.get_tile(unit.x, unit.y)
-                        on_mountain = unit_tile.type == "m"
+            if not unit.can_attack:
+                continue
 
-                        for enemy in self.units:
-                            if enemy.player != player and enemy.health > 0:
-                                # FOW: Skip enemies not attackable (checks pre-move snapshot)
-                                if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
-                                    continue
+            # Combat: every enemy in reach (adjacent for melee, 1-2 for
+            # Mages/Sorcerers, 2-3 or 2-4 on a mountain for Archers); Mages
+            # can also paralyze one of them when off cooldown.
+            for enemy in self.units:
+                if self._can_attack_target(unit, enemy):
+                    legal_actions["attack"].append({"attacker": unit, "target": enemy})
+                    if self._can_paralyze_target(unit, enemy):
+                        legal_actions["paralyze"].append({"paralyzer": unit, "target": enemy})
 
-                                damage = unit.get_attack_damage(enemy.x, enemy.y, on_mountain)
-                                if damage > 0:
-                                    legal_actions["attack"].append({"attacker": unit, "target": enemy})
+            # Healing / curing (Cleric only) - range 1..CLERIC_HEAL_RANGE
+            if unit.type == "C":
+                for ally in self.mechanics.get_healable_allies(unit, self.units):
+                    legal_actions["heal"].append({"healer": unit, "target": ally})
+                for ally in self.mechanics.get_curable_allies(unit, self.units):
+                    legal_actions["cure"].append({"curer": unit, "target": ally})
 
-                                    # Paralyze: skip already-paralyzed targets.
-                                    # Re-casting only refreshes the status (a
-                                    # near no-op) and inflates the action space,
-                                    # unlike heal/cure/buffs which all guard
-                                    # against re-applying to an already-affected
-                                    # ally.
-                                    if unit.type == "M" and unit.can_use_paralyze() and not enemy.is_paralyzed():
-                                        # Mages can also paralyze at range (if not on cooldown)
-                                        distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
-                                        if distance <= 2:
-                                            legal_actions["paralyze"].append({"paralyzer": unit, "target": enemy})
-                    else:
-                        # For other units, only adjacent enemies
-                        adjacent_enemies = self.mechanics.get_adjacent_enemies(unit, self.units)
-                        for enemy in adjacent_enemies:
-                            # FOW: Skip enemies not attackable (checks pre-move snapshot)
-                            if self.fog_of_war and not self.is_enemy_attackable_by_unit(unit, enemy):
-                                continue
+            # Sorcerer abilities, each gated on its own cooldown
+            if unit.can_use_haste():
+                for ally in self.mechanics.get_hasteable_allies(unit, self.units):
+                    legal_actions["haste"].append({"sorcerer": unit, "target": ally})
+            if unit.can_use_defence_buff():
+                for ally in self.mechanics.get_defence_buffable_allies(unit, self.units):
+                    legal_actions["defence_buff"].append({"sorcerer": unit, "target": ally})
+            if unit.can_use_attack_buff():
+                for ally in self.mechanics.get_attack_buffable_allies(unit, self.units):
+                    legal_actions["attack_buff"].append({"sorcerer": unit, "target": ally})
 
-                            legal_actions["attack"].append({"attacker": unit, "target": enemy})
-
-                    # Healing (Cleric only) - range 1-2
-                    if unit.type == "C":
-                        healable_allies = self.mechanics.get_healable_allies(unit, self.units)
-                        for ally in healable_allies:
-                            legal_actions["heal"].append({"healer": unit, "target": ally})
-
-                        curable_allies = self.mechanics.get_curable_allies(unit, self.units)
-                        for ally in curable_allies:
-                            legal_actions["cure"].append({"curer": unit, "target": ally})
-
-                    # Haste (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_haste():
-                        hasteable_allies = self.mechanics.get_hasteable_allies(unit, self.units)
-                        for ally in hasteable_allies:
-                            legal_actions["haste"].append({"sorcerer": unit, "target": ally})
-
-                    # Defence Buff (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_defence_buff():
-                        buffable_allies = self.mechanics.get_defence_buffable_allies(unit, self.units)
-                        for ally in buffable_allies:
-                            legal_actions["defence_buff"].append({"sorcerer": unit, "target": ally})
-
-                    # Attack Buff (Sorcerer only)
-                    if unit.type == "S" and unit.can_use_attack_buff():
-                        buffable_allies = self.mechanics.get_attack_buffable_allies(unit, self.units)
-                        for ally in buffable_allies:
-                            legal_actions["attack_buff"].append({"sorcerer": unit, "target": ally})
-
-                    # Seizing
-                    tile = self.grid.get_tile(unit.x, unit.y)
-                    if tile.is_capturable() and tile.player != player:
-                        legal_actions["seize"].append({"unit": unit, "tile": tile})
+            # Seizing
+            if self._can_seize(unit):
+                legal_actions["seize"].append({"unit": unit, "tile": self.grid.get_tile(unit.x, unit.y)})
 
         return legal_actions
 

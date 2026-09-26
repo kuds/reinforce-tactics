@@ -727,7 +727,9 @@ class TestUnitPurchaseMenu:
         from reinforcetactics.ui.menus import UnitPurchaseMenu
 
         screen = pygame.display.set_mode((640, 640))
-        menu = UnitPurchaseMenu(screen, mock_game_state, (5, 5))
+        # Open it on the Building at (6, 6), as the input handler does: HQs
+        # never spawn units, and the engine refuses a create there.
+        menu = UnitPurchaseMenu(screen, mock_game_state, (6, 6))
 
         # Draw the menu to populate interactive elements
         menu.draw(screen)
@@ -746,7 +748,7 @@ class TestUnitPurchaseMenu:
         assert result["unit"] is not None
 
         # Check that unit was created at the building position
-        created_unit = mock_game_state.get_unit_at_position(5, 5)
+        created_unit = mock_game_state.get_unit_at_position(6, 6)
         assert created_unit is not None
         assert created_unit.player == 1
 

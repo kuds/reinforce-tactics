@@ -1022,6 +1022,14 @@ class StrategyGameEnv(gym.Env):
                     result = self.game_state.attack(unit, target)
                     result_info["damage"] = result["damage"]
                     result_info["target_alive"] = result["target_alive"]
+                    # The engine refuses an illegal attack (spent or paralyzed
+                    # attacker, out of range, hidden by fog, wrong turn) with
+                    # damage 0; an executed attack always deals at least 1.
+                    # multi_discrete per-dimension masks over-approximate the
+                    # legal set, so these combinations are sampled and must
+                    # be penalised, not rewarded (review rlenv-2).
+                    if result["damage"] <= 0:
+                        is_valid = False
                 else:
                     is_valid = False
 

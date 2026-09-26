@@ -131,35 +131,41 @@ class GameMechanics:
 
         return adjacent_allies
 
+    # Per-target ally rules. Each ``is_*`` predicate is the single definition
+    # of "may this caster target this unit"; the matching ``get_*`` list
+    # helper filters with it, and ``GameState`` both enumerates legal actions
+    # through the list helpers and validates a requested action with the
+    # predicate, so the mask and the engine cannot disagree.
+
+    @staticmethod
+    def is_healable_ally(cleric, ally):
+        """A damaged living ally (not the Cleric itself) within 1..CLERIC_HEAL_RANGE."""
+        if ally.player != cleric.player or ally.health <= 0 or ally == cleric:
+            return False
+        distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
+        return 1 <= distance <= CLERIC_HEAL_RANGE and ally.health < ally.max_health
+
     @staticmethod
     def get_healable_allies(cleric, units):
         """
         Get damaged friendly units within the Cleric's heal range (1..CLERIC_HEAL_RANGE).
         """
-        healable = []
+        return [ally for ally in units if GameMechanics.is_healable_ally(cleric, ally)]
 
-        for ally in units:
-            if ally.player == cleric.player and ally.health > 0 and ally != cleric:
-                distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-                if 1 <= distance <= CLERIC_HEAL_RANGE and ally.health < ally.max_health:
-                    healable.append(ally)
-
-        return healable
+    @staticmethod
+    def is_curable_ally(cleric, ally):
+        """A paralyzed living ally (not the Cleric itself) within 1..CLERIC_HEAL_RANGE."""
+        if ally.player != cleric.player or ally.health <= 0 or ally == cleric:
+            return False
+        distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
+        return 1 <= distance <= CLERIC_HEAL_RANGE and ally.is_paralyzed()
 
     @staticmethod
     def get_curable_allies(cleric, units):
         """
         Get paralyzed friendly units within the Cleric's cure range (1..CLERIC_HEAL_RANGE).
         """
-        curable = []
-
-        for ally in units:
-            if ally.player == cleric.player and ally.health > 0 and ally != cleric:
-                distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-                if 1 <= distance <= CLERIC_HEAL_RANGE and ally.is_paralyzed():
-                    curable.append(ally)
-
-        return curable
+        return [ally for ally in units if GameMechanics.is_curable_ally(cleric, ally)]
 
     @staticmethod
     def get_adjacent_paralyzed_allies(unit, units):
@@ -214,13 +220,46 @@ class GameMechanics:
             target_defence: The target's defence stat
 
         Returns:
-            Reduced damage as integer (minimum 1)
+            Reduced damage as integer: 0 when ``base_damage <= 0`` (no hit,
+            e.g. the attacker is out of range), otherwise at least 1.
         """
+        # The min-1 floor below guarantees a *hit* always does something;
+        # applied to a zero base it turned "cannot reach" into 1 phantom
+        # damage (review core-3 / prior-11).
+        if base_damage <= 0:
+            return 0
         reduction = target_defence * DEFENCE_REDUCTION_PER_POINT
         # Cap reduction at 90% to ensure some damage always gets through
         reduction = min(reduction, 0.9)
         reduced_damage = base_damage * (1 - reduction)
         return max(1, int(reduced_damage))
+
+    @staticmethod
+    def is_hasteable_ally(sorcerer, unit):
+        """A living ally other than the Sorcerer, within 1..2, not already hasted."""
+        if unit.player != sorcerer.player or unit == sorcerer or unit.health <= 0:
+            return False
+        # Haste range is 1-2 tiles
+        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+        return 1 <= distance <= 2 and not unit.is_hasted
+
+    @staticmethod
+    def is_defence_buffable_ally(sorcerer, unit):
+        """A living ally within 0..2 (the Sorcerer may buff itself) without a defence buff."""
+        if unit.player != sorcerer.player or unit.health <= 0:
+            return False
+        # Buff range is 1-2 tiles (can buff self at distance 0)
+        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+        return distance <= 2 and not unit.has_defence_buff()
+
+    @staticmethod
+    def is_attack_buffable_ally(sorcerer, unit):
+        """A living ally within 0..2 (the Sorcerer may buff itself) without an attack buff."""
+        if unit.player != sorcerer.player or unit.health <= 0:
+            return False
+        # Buff range is 1-2 tiles (can buff self at distance 0)
+        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
+        return distance <= 2 and not unit.has_attack_buff()
 
     @staticmethod
     def get_hasteable_allies(sorcerer, units):
@@ -234,16 +273,7 @@ class GameMechanics:
         Returns:
             List of allied units (excluding sorcerer) within range 1-2 that haven't been hasted
         """
-        hasteable = []
-
-        for unit in units:
-            if unit.player == sorcerer.player and unit != sorcerer and unit.health > 0:
-                # Haste range is 1-2 tiles
-                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-                if 1 <= distance <= 2 and not unit.is_hasted:
-                    hasteable.append(unit)
-
-        return hasteable
+        return [unit for unit in units if GameMechanics.is_hasteable_ally(sorcerer, unit)]
 
     @staticmethod
     def get_defence_buffable_allies(sorcerer, units):
@@ -257,16 +287,7 @@ class GameMechanics:
         Returns:
             List of allied units within range 1-2 that don't have defence buff
         """
-        buffable = []
-
-        for unit in units:
-            if unit.player == sorcerer.player and unit.health > 0:
-                # Buff range is 1-2 tiles (can buff self at distance 0)
-                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-                if distance <= 2 and not unit.has_defence_buff():
-                    buffable.append(unit)
-
-        return buffable
+        return [unit for unit in units if GameMechanics.is_defence_buffable_ally(sorcerer, unit)]
 
     @staticmethod
     def get_attack_buffable_allies(sorcerer, units):
@@ -280,16 +301,7 @@ class GameMechanics:
         Returns:
             List of allied units within range 1-2 that don't have attack buff
         """
-        buffable = []
-
-        for unit in units:
-            if unit.player == sorcerer.player and unit.health > 0:
-                # Buff range is 1-2 tiles (can buff self at distance 0)
-                distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-                if distance <= 2 and not unit.has_attack_buff():
-                    buffable.append(unit)
-
-        return buffable
+        return [unit for unit in units if GameMechanics.is_attack_buffable_ally(sorcerer, unit)]
 
     @staticmethod
     def _hp_damage_scale(unit, damage_model):
@@ -304,6 +316,22 @@ class GameMechanics:
         if damage_model == "hp_scaled" and getattr(unit, "max_health", 0):
             return unit.health / unit.max_health
         return 1.0
+
+    @staticmethod
+    def can_reach(unit, target_x, target_y, grid=None):
+        """Whether ``unit`` can hit ``(target_x, target_y)`` from where it stands.
+
+        The one definition of attack reach: ``GameState`` uses it to
+        enumerate and validate attacks, and ``attack_unit`` uses it to
+        decide whether the defender can counter. Reach is "the unit's
+        range damage there is positive" (``Unit.get_attack_damage``), which
+        includes the Archer's +1 range on a mountain.
+        """
+        on_mountain = False
+        if grid:
+            tile = grid.get_tile(unit.x, unit.y)
+            on_mountain = tile is not None and tile.type == "m"
+        return unit.get_attack_damage(target_x, target_y, on_mountain) > 0
 
     @staticmethod
     def _calculate_counter_damage(unit, target_x, target_y, grid, damage_model="flat"):
@@ -364,13 +392,30 @@ class GameMechanics:
             attacker_tile = grid.get_tile(attacker.x, attacker.y)
             attacker_on_mountain = attacker_tile.type == "m"
 
+        # An attacker that cannot reach the target does not hit it, and so
+        # provokes no counter either. ``GameState.attack`` rejects such an
+        # attack before it gets here; this keeps a direct caller of the
+        # mechanics layer from dealing the old phantom 1 damage each way.
+        range_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
+        if range_damage <= 0:
+            return {
+                "attacker_alive": True,
+                "target_alive": True,
+                "damage": 0,
+                "counter_damage": 0,
+                "charge_bonus": False,
+                "flank_bonus": False,
+                "evade": False,
+                "attack_buff": False,
+                "defence_buff": False,
+            }
+
         # Calculate base attack damage. Under "hp_scaled" the base is reduced
         # by the attacker's current HP fraction *before* ability bonuses and
         # defence reduction, so a wounded unit hits proportionally weaker
         # (makes focus-fire decisive and discourages the even-attrition
         # stalemate flat damage produces). "flat" scales by 1.0 (legacy).
-        base_attack_damage = attacker.get_attack_damage(target.x, target.y, attacker_on_mountain)
-        base_attack_damage = base_attack_damage * GameMechanics._hp_damage_scale(attacker, damage_model)
+        base_attack_damage = range_damage * GameMechanics._hp_damage_scale(attacker, damage_model)
 
         # Apply special ability bonuses
         charge_applied = False
@@ -395,8 +440,12 @@ class GameMechanics:
             base_attack_damage = int(base_attack_damage * (1 + SORCERER_ATTACK_BUFF_AMOUNT))
             attack_buff_applied = True
 
-        # Apply defence reduction to attack damage
-        attack_damage = GameMechanics.apply_defence_reduction(base_attack_damage, target.defence)
+        # Apply defence reduction to attack damage. The attacker reaches, so
+        # this is a hit and lands for at least 1: under "hp_scaled" a bonus's
+        # int() can truncate a badly wounded unit's base to 0, which
+        # apply_defence_reduction (rightly, for a miss) would turn into 0.
+        # Callers rely on it: an executed attack always has damage >= 1.
+        attack_damage = max(1, GameMechanics.apply_defence_reduction(base_attack_damage, target.defence))
 
         # Sorcerer's Defence Buff: -50% damage taken if target has defence buff
         if target.has_defence_buff():
@@ -417,6 +466,13 @@ class GameMechanics:
             if attacker.type == "A":
                 if target.type not in ["A", "M", "S"]:
                     can_counter = False
+
+            # A defender that cannot reach the attacker cannot counter (a
+            # Warrior hit by a Mage at range 2, an Archer hit point-blank).
+            # Checked before the Rogue evade roll: with no counter coming
+            # there is nothing to evade, so no roll is spent or reported.
+            if can_counter and not GameMechanics.can_reach(target, attacker.x, attacker.y, grid):
+                can_counter = False
 
             # Rogue's Evade: 25% chance to dodge counter-attacks (35% in forest)
             if can_counter and attacker.type == "R":
@@ -441,8 +497,11 @@ class GameMechanics:
                 if target.has_attack_buff():
                     base_counter_damage = int(base_counter_damage * (1 + SORCERER_ATTACK_BUFF_AMOUNT))
 
-                # Apply defence reduction to counter damage
-                counter_damage = GameMechanics.apply_defence_reduction(base_counter_damage, attacker.defence)
+                # Apply defence reduction to counter damage. The defender
+                # reaches, so this is a hit: floor at 1 as for the primary
+                # (the int() in _calculate_counter_damage can truncate a
+                # wounded or weak defender's base to 0).
+                counter_damage = max(1, GameMechanics.apply_defence_reduction(base_counter_damage, attacker.defence))
 
                 # Apply defence buff to attacker receiving counter damage
                 if attacker.has_defence_buff():

@@ -642,9 +642,10 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if self.game_state.get_unit_at_position(x, y):
                 return False
 
-            # Create the unit
-            self.game_state.create_unit(unit_code, x, y, self.bot_player)
-            return True
+            # Create the unit. The engine has the last word (turn, unit cap,
+            # game over): report its refusal so take_turn stops instead of
+            # re-predicting the same no-op action.
+            return self.game_state.create_unit(unit_code, x, y, self.bot_player) is not None
 
         except Exception as e:
             logger.debug("Failed to create unit: %s", e)
@@ -657,8 +658,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not unit or unit.player != self.bot_player or not unit.can_move:
                 return False
 
-            self.game_state.move_unit(unit, to_x, to_y)
-            return True
+            return self.game_state.move_unit(unit, to_x, to_y)
 
         except Exception as e:
             logger.debug("Failed to move unit: %s", e)
@@ -679,8 +679,9 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not attacker.can_attack:
                 return False
 
-            self.game_state.attack(attacker, target)
-            return True
+            # An executed attack always deals at least 1 damage; 0 means the
+            # engine refused it (out of range, fog of war, ...).
+            return self.game_state.attack(attacker, target)["damage"] > 0
 
         except Exception as e:
             logger.debug("Failed to attack: %s", e)
@@ -697,8 +698,8 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             if not tile.is_capturable() or tile.player == self.bot_player:
                 return False
 
-            self.game_state.seize(unit)
-            return True
+            # A refused seize (e.g. the unit already acted) carries no damage.
+            return self.game_state.seize(unit).get("damage", 0) > 0
 
         except Exception as e:
             logger.debug("Failed to seize: %s", e)
