@@ -212,7 +212,12 @@ def test_random_play_keeps_engine_invariants(scenario):
     _check_history(game)
 
     # The action log alone reproduces the game.
-    info = {"num_players": seats, "teams": game.teams, "max_turns": max_turns}
+    info = {
+        "num_players": seats,
+        "teams": game.teams,
+        "max_turns": max_turns,
+        "eliminated_players": sorted(game.eliminated_players),
+    }
     replay = GameState(map_data, **replay_actions.replay_game_state_kwargs(info))
     for action in game.action_history:
         execute_replay_action(replay, action, lambda x, y: (x, y), schema_version=3)

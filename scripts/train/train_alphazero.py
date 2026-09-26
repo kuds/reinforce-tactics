@@ -61,6 +61,10 @@ _ARG_TO_CONFIG_PATH = {
     "lr": "alphazero.lr",
     "weight_decay": "alphazero.weight_decay",
     "checkpoint_dir": "logging.log_dir",
+    "enabled_units": "env.enabled_units",
+    # The config's seed seeds every game's combat RNG, as ``--seed`` does
+    # (without it a config-driven run drew a fresh seed per game).
+    "seed": "seed",
 }
 
 

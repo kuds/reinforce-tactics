@@ -203,3 +203,25 @@ def test_alphazero_game_seed_derivation(seed):
     trainer.history = {"iteration": [1, 2]}
     got = trainer._game_seed("self_play", 3)
     assert got == (None if seed is None else derive_seed(5, "self_play", 2, 3))
+
+
+def test_a_config_driven_alphazero_run_is_seeded_by_the_config(tmp_path, monkeypatch):
+    """``--config`` fed every AlphaZero option but the seed, so config runs were never reproducible."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    config = tmp_path / "az.yaml"
+    config.write_text("algorithm: alphazero\nseed: 123\nenv:\n  enabled_units: [W, A]\n", encoding="utf-8")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "train" / "train_alphazero.py"
+    spec = importlib.util.spec_from_file_location("train_alphazero_under_test", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setattr(sys, "argv", ["train_alphazero.py", "--config", str(config)])
+    args = module.parse_args()
+    assert (args.seed, args.enabled_units) == (123, ["W", "A"])
+
+    monkeypatch.setattr(sys, "argv", ["train_alphazero.py", "--config", str(config), "--seed", "7"])
+    assert module.parse_args().seed == 7  # the command line still wins

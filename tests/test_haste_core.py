@@ -76,6 +76,16 @@ class TestEnginePath:
         assert not (warrior.can_move or warrior.can_attack)
         assert _unit_actions(game, warrior) == ["move", "attack", "attack"]
 
+    def test_waiting_with_a_unit_hasted_after_it_acted_ends_its_extra_action(self, game):
+        """The GUI's Wait on the refreshed target used to be swallowed as if it had just acted."""
+        sorcerer, warrior, enemy = _setup(game)
+        game.move_unit(warrior, 4, 4)
+        game.attack(warrior, enemy)
+        assert game.haste(sorcerer, warrior)
+
+        assert game.end_unit_turn(warrior) is False
+        assert not (warrior.can_move or warrior.can_attack)
+
     def test_end_unit_turn_right_after_a_refreshed_action_keeps_the_extra_action(self, game):
         sorcerer, warrior, enemy = _setup(game)
         game.haste(sorcerer, warrior)

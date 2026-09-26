@@ -333,8 +333,8 @@ AVAILABLE ACTIONS:
 8. END_TURN: Finish your turn
 
 COMBAT RULES:
-- Warriors attack adjacent only. Mages/Archers attack at range 1-2.
-- Archers cannot attack adjacent enemies (distance 0)
+- Warriors attack adjacent only. Mages and Sorcerers attack at range 1-2.
+- Archers attack at range 2-3 (2-4 from mountains) and cannot attack adjacent enemies (distance 1)
 - Counter-attacks occur unless attacker is an Archer (vs melee defenders)
 
 CRITICAL CONSTRAINTS:

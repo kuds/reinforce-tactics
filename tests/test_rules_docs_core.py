@@ -16,6 +16,7 @@ import pytest
 
 from reinforcetactics import constants as C
 from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.core.unit import Unit
 from reinforcetactics.game import llm_prompts
 
 README = Path("README.md").read_text(encoding="utf-8")
@@ -202,6 +203,10 @@ def test_llm_prompt_numbers_match_the_constants(name):
     for heal_range in re.findall(r"(?:HEAL|CURE)[^\n]*range 1-(\d+)", text):
         assert int(heal_range) == C.CLERIC_HEAL_RANGE, name
     assert "adjacent ally" not in text, name  # heal/cure reach CLERIC_HEAL_RANGE, not 1
+    archer = Unit("A", 0, 0, 1)
+    for low, high in re.findall(r"Archers?(?: attack)? at range (\d+)-(\d+)", text):
+        assert (int(low), int(high)) == archer.get_attack_range(), name
+    assert "Mages/Archers" not in text, name  # they have different ranges
     for pct, forest_pct in re.findall(r"EVADE[^\n]*?(\d+)% (?:chance to )?dodge[^\n]*?(\d+)% in forest", text):
         assert (f"{pct}%", f"{forest_pct}%") == (
             _pct(C.ROGUE_EVADE_CHANCE),

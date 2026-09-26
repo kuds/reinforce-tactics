@@ -158,6 +158,8 @@ These numbers are the defaults in `reinforcetactics/constants.py` (`tests/test_r
 
 **Elimination**: An eliminated player's units are removed, its structures turn neutral (a neutral HQ is then an ordinary structure to capture) and its turns are skipped, so it gets no income or new units.
 
+Games with three or more seats recorded before these rules (September 2026) were played by the old ones: any HQ capture won, and nobody was eliminated. Their replays still play back by those rules (the engine override `legacy_end_rules`, which replay playback sets for them).
+
 **Teams**: A map declares teams on each player's HQ code as `h_<player>_<team>` (e.g. `h_3_1`), or code passes `GameState(teams={player: team})`; the two must agree. Without a declaration every player is its own side. Teammates never attack, paralyze or seize each other; they can heal, cure and buff each other's units (Haste targets only your own units), flank for each other and move through each other. The bundled 2v2 map plays players 1 and 3 against 2 and 4; the 2v2 mode gives those teams to a map that declares none.
 
 **Turns**: Each turn starts with its player's income, auto-heal on owned structures, and status and cooldown ticks. Player 1's first turn skips this step, so it plays turn 0 on starting gold while Player 2 collects income before its first move. That long-standing schedule is the default; the engine override `begin_first_turn: true` gives Player 1 turn-0 income as well. Cancelling a move (in the GUI, before the unit acts) takes it back completely: it leaves no trace in the replay, and under fog of war what the move revealed is hidden again.

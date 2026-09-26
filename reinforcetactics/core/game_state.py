@@ -93,6 +93,7 @@ class GameState:
             "max_units_per_player",
             "unit_data",
             "begin_first_turn",
+            "legacy_end_rules",
             *TERRAIN_RULE_KEYS,
         }
     )
@@ -200,9 +201,29 @@ class GameState:
         sweep can toggle it and replays reproduce it. Non-bool values fail
         loud: ``"false"`` would otherwise read as true.
         """
-        value = (overrides or {}).get("begin_first_turn", False)
+        return GameState._resolve_bool_override(overrides, "begin_first_turn")
+
+    @staticmethod
+    def _resolve_legacy_end_rules(overrides: dict[str, Any]) -> bool:
+        """Resolve ``legacy_end_rules`` from the engine-override overlay.
+
+        ``True`` plays by the end rules of games recorded before September
+        2026 (review core-7), so their replays play back as they were
+        played: any HQ capture wins the game for the capturer, whatever the
+        seat count; nobody is eliminated, so a seat that lost its units or
+        resigned keeps its turns, income and structures; and with three or
+        more seats the game ends only when a single player has units left.
+        ``replay_actions.replay_game_state_kwargs`` sets it for those
+        replays; nothing else should.
+        """
+        return GameState._resolve_bool_override(overrides, "legacy_end_rules")
+
+    @staticmethod
+    def _resolve_bool_override(overrides: dict[str, Any], key: str) -> bool:
+        """A bool engine override, default False. Non-bools fail loud: ``"false"`` would read as true."""
+        value = (overrides or {}).get(key, False)
         if not isinstance(value, bool):
-            raise ValueError(f"engine_overrides.begin_first_turn must be a bool, got {value!r}")
+            raise ValueError(f"engine_overrides.{key} must be a bool, got {value!r}")
         return value
 
     @staticmethod
@@ -416,6 +437,7 @@ class GameState:
                       "damage_model": "flat" | "hp_scaled",  # combat model
                       "max_units_per_player": int,  # per-player unit cap
                       "begin_first_turn": bool,    # P1 turn-0 start-of-turn
+                      "legacy_end_rules": bool,    # pre-2026-09 replays only
                       "unit_data": {CODE: {field: value}},  # sparse deltas
                       # optional terrain rules, see core/terrain_rules.py:
                       "terrain_move_cost": {TILE_CODE: cost},
@@ -491,6 +513,7 @@ class GameState:
         # the game as shipped; see core/terrain_rules.py.
         self.terrain_rules: TerrainRules = TerrainRules.from_overrides(self.engine_overrides)
         self.begin_first_turn: bool = self._resolve_begin_first_turn(self.engine_overrides)
+        self.legacy_end_rules: bool = self._resolve_legacy_end_rules(self.engine_overrides)
         self.player_gold: dict[int, int] = {i: self.starting_gold for i in range(1, num_players + 1)}
         # Cumulative structure auto-heal totals per player (HP restored and
         # gold spent by ``heal_units_on_structures`` over the whole game).
@@ -757,8 +780,28 @@ class GameState:
         player is knocked out and the game ends only when one team is left
         (see ``_eliminate_player``).
         """
-        if not any(u.player == defeated_player for u in self.units):
-            self._eliminate_player(defeated_player, "elimination", by_player=self.current_player)
+        if any(u.player == defeated_player for u in self.units):
+            return
+        if self.legacy_end_rules:
+            self._legacy_last_player_standing(defeated_player, "elimination")
+            return
+        self._eliminate_player(defeated_player, "elimination", by_player=self.current_player)
+
+    def _legacy_last_player_standing(self, defeated_player: int, reason: str) -> None:
+        """The pre-September-2026 end check after ``defeated_player`` lost its units (see ``legacy_end_rules``).
+
+        Two seats: the other player wins. More: the game ends when only one
+        player has units left (after a resign, also when none has). Nobody
+        is eliminated otherwise.
+        """
+        if self.num_players == 2:
+            self._set_game_over(winner=2 if defeated_player == 1 else 1, end_reason=reason)
+            return
+        players_with_units = {u.player for u in self.units}
+        if len(players_with_units) == 1:
+            self._set_game_over(winner=players_with_units.pop(), end_reason=reason)
+        elif not players_with_units and reason == "resign":
+            self._set_game_over(winner=None, end_reason=reason)
 
     def _on_hq_captured(self, capturer: int, previous_owner: int | None) -> None:
         """Apply the end rule for an HQ that ``capturer`` just took from ``previous_owner``.
@@ -771,7 +814,7 @@ class GameState:
         """
         if previous_owner is None or self.game_over:
             return
-        if self._starting_team_count() <= 2:
+        if self.legacy_end_rules or self._starting_team_count() <= 2:
             self._set_game_over(winner=capturer, end_reason="hq_capture")
         elif not self._player_owns_hq(previous_owner):
             self._eliminate_player(previous_owner, "hq_capture", by_player=capturer)
@@ -1488,7 +1531,7 @@ class GameState:
         # FOW: remember what the mover's side saw before the move, so a
         # cancel_move can take back what the move revealed (review core-9).
         if self.fog_of_war and unit.player in self.visibility_maps:
-            unit.pre_move_visibility = copy.deepcopy(self.visibility_maps[unit.player])
+            unit.pre_move_visibility = self.visibility_maps[unit.player].copy()
 
         # FOW ambush rule: without fog of war the path was planned around
         # every unit, so it is always clear.
@@ -1715,6 +1758,11 @@ class GameState:
             if not (target.can_move or target.can_attack):
                 # Already done for the turn: the extra action starts now.
                 self._consume_action(target)
+                # haste_refreshed shields the unit that just acted from the
+                # end_unit_turn its controller calls next. The target didn't
+                # act, so its controller's next end_unit_turn (the GUI's Wait)
+                # must end the extra action, not be swallowed.
+                target.haste_refreshed = False
             self.record_action(
                 "haste",
                 sorcerer_pos=(sorcerer.x, sorcerer.y),
@@ -2106,6 +2154,9 @@ class GameState:
         self.units[:] = [u for u in self.units if u.player != player]
         self._invalidate_cache()
 
+        if self.legacy_end_rules:
+            self._legacy_last_player_standing(player, "resign")
+            return
         self._eliminate_player(player, "resign")
 
     def end_unit_turn(self, unit: Unit, force_end: bool = False) -> bool:

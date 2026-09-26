@@ -29,6 +29,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from reinforcetactics.constants import HASTE_COOLDOWN
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,12 +51,21 @@ def replay_game_state_kwargs(game_info: dict[str, Any]) -> dict[str, Any]:
     before game_info carried them fall back to the defaults they were
     always played back with -- free-for-all included, even on a map whose
     codes declare teams (the old 2v2 map put one player on two teams).
+    Those replays of games with three or more seats were also played by
+    the old end rules (any HQ capture won, nobody was eliminated), so they
+    play back with ``legacy_end_rules`` (see ``GameState``); with two seats
+    the rules are unchanged. ``eliminated_players`` has been in game_info
+    since the new rules, so its absence marks an old replay.
     """
     teams = {int(p): int(t) for p, t in (game_info.get("teams") or {}).items()} or None
+    num_players = game_info.get("num_players", 2)
+    engine_overrides = dict(game_info.get("engine_overrides") or {})
+    if num_players > 2 and "eliminated_players" not in game_info:
+        engine_overrides["legacy_end_rules"] = True
     return {
-        "num_players": game_info.get("num_players", 2),
+        "num_players": num_players,
         "max_turns": game_info.get("max_turns"),
-        "engine_overrides": game_info.get("engine_overrides") or None,
+        "engine_overrides": engine_overrides or None,
         "teams": teams,
         "map_teams": "teams" in game_info,
     }
@@ -81,6 +92,38 @@ def find_unit_by_id(game_state, unit_id: int | None):
 # Position lookup vs id lookup is the only thing that differs between the
 # two schema generations; everything below is identical.
 # ---------------------------------------------------------------------------
+
+
+def _apply_legacy_haste_on_paralyzed(game_state, sorcerer, target) -> bool:
+    """Replay a haste the old engine allowed on a paralyzed unit; True if applied.
+
+    Games before September 2026 could haste a paralyzed unit (review
+    core-8); the engine now refuses it, so their replays would diverge
+    here: the Sorcerer would keep its action and its cooldown. This applies
+    what the old engine did (the target is marked hasted, the Sorcerer's
+    cooldown starts and its action is spent) when that is the only reason
+    for the refusal.
+    """
+    if not target.is_paralyzed():
+        return False
+    paralyzed_turns, target.paralyzed_turns = target.paralyzed_turns, 0
+    try:
+        allowed = game_state._can_haste_target(sorcerer, target)
+    finally:
+        target.paralyzed_turns = paralyzed_turns
+    if (
+        not allowed
+        or game_state.game_over
+        or sorcerer.player != game_state.current_player
+        or sorcerer.is_paralyzed()
+        or not sorcerer.can_attack
+    ):
+        return False
+    target.is_hasted = True
+    sorcerer.haste_cooldown = HASTE_COOLDOWN
+    game_state._consume_action(sorcerer)
+    game_state._invalidate_cache()
+    return True
 
 
 def _refresh_hasted_actor(game_state, unit, slot: str = "can_attack") -> None:
@@ -500,7 +543,9 @@ def execute_replay_action(game_state, action: dict[str, Any], translate_fn: Call
                 # before a second Sorcerer re-hasted it.
                 if target.is_hasted:
                     game_state.end_unit_turn(target)
-                if not game_state.haste(sorcerer, target):
+                if not game_state.haste(sorcerer, target) and not _apply_legacy_haste_on_paralyzed(
+                    game_state, sorcerer, target
+                ):
                     _warn_refused(action, schema_version)
         elif action_type == "defence_buff":
             sp = translate_fn(*action["sorcerer_pos"])

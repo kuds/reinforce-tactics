@@ -205,7 +205,12 @@ class TestPersistenceAndReplay:
         game.resign(3)
         assert game.game_over and game.winner == 1
 
-        info = {"num_players": 3, "replay_schema_version": 3, "teams": game.teams}
+        info = {
+            "num_players": 3,
+            "replay_schema_version": 3,
+            "teams": game.teams,
+            "eliminated_players": sorted(game.eliminated_players),
+        }
         replay = GameState(
             FileIO.load_map(str(MAPS_DIR / "1v1v1" / "triangle_arena.csv")), **replay_actions.replay_game_state_kwargs(info)
         )
@@ -215,3 +220,85 @@ class TestPersistenceAndReplay:
         assert replay.eliminated_players == game.eliminated_players
         assert replay.game_over and replay.winner == game.winner and replay.end_reason == game.end_reason
         assert sorted((u.player, u.x, u.y) for u in replay.units) == sorted((u.player, u.x, u.y) for u in game.units)
+
+
+class TestReplaysOfGamesPlayedByTheOldEndRules:
+    """Replays written before these rules (no ``eliminated_players`` in game_info) play back by the old ones."""
+
+    def _legacy(self):
+        return GameState(_ffa_map(), num_players=3, engine_overrides={"legacy_end_rules": True})
+
+    def test_only_old_multi_seat_replays_get_the_legacy_rules(self):
+        kwargs = replay_actions.replay_game_state_kwargs
+        assert kwargs({"num_players": 3})["engine_overrides"] == {"legacy_end_rules": True}
+        assert kwargs({"num_players": 3, "engine_overrides": {"starting_gold": 500}})["engine_overrides"] == {
+            "starting_gold": 500,
+            "legacy_end_rules": True,
+        }
+        assert kwargs({"num_players": 3, "eliminated_players": []})["engine_overrides"] is None
+        assert kwargs({"num_players": 2})["engine_overrides"] is None  # two seats: same rules
+
+    def test_any_hq_capture_wins(self):
+        game = self._legacy()
+        game.place_unit("W", 5, 5, 2)
+        game.place_unit("W", 6, 6, 3)
+
+        _capture_hq(game, 1, (9, 0))
+
+        assert game.game_over and game.winner == 1 and game.end_reason == "hq_capture"
+        assert not game.eliminated_players
+
+    def test_a_seat_without_units_plays_on_until_one_player_has_units(self):
+        game = self._legacy()
+        attacker = game.place_unit("K", 4, 4, 1)
+        victim = game.place_unit("W", 5, 4, 2)
+        victim.health = 1
+        survivor = game.place_unit("W", 8, 8, 3)
+
+        game.attack(attacker, victim)
+
+        assert not game.game_over and not game.eliminated_players
+        assert game.grid.get_tile(9, 0).player == 2  # keeps its structures
+        game.end_turn()
+        assert game.current_player == 2  # and its turn
+        assert game.create_unit("W", 8, 0) is not None  # and can rebuild
+
+        game.units.remove(survivor)
+        game.units[:] = [u for u in game.units if u.player == 1]
+        game._check_player_eliminated(3)
+        assert game.game_over and game.winner == 1 and game.end_reason == "elimination"
+
+    def test_a_resigned_seat_keeps_its_turns(self):
+        game = self._legacy()
+        game.place_unit("W", 5, 5, 1)
+        game.place_unit("W", 6, 6, 3)
+
+        game.resign(2)
+
+        assert not game.game_over and not game.eliminated_players
+        game.end_turn()
+        assert game.current_player == 2
+        game.resign(3)
+        assert game.game_over and game.winner == 1 and game.end_reason == "resign"
+
+    def test_an_old_haste_on_a_paralyzed_unit_replays(self):
+        """The old engine let a Sorcerer haste a paralyzed unit; the replay must still spend the Sorcerer."""
+        game = GameState(np.full((8, 8), "p", dtype=object), num_players=2)
+        sorcerer = game.place_unit("S", 2, 2, 1)
+        target = game.place_unit("W", 3, 2, 1)
+        target.paralyzed_turns = 2
+        assert not game.haste(sorcerer, target)  # the engine refuses it now
+
+        action = {
+            "type": "haste",
+            "sorcerer_pos": (2, 2),
+            "target_pos": (3, 2),
+            "target_type": "W",
+            "player": 1,
+            "actor_unit_id": sorcerer.unit_id,
+            "target_unit_id": target.unit_id,
+        }
+        execute_replay_action(game, action, lambda x, y: (x, y), schema_version=3)
+
+        assert sorcerer.haste_cooldown > 0 and not sorcerer.can_attack and not sorcerer.can_move
+        assert target.is_hasted and target.paralyzed_turns == 2

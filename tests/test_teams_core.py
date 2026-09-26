@@ -17,6 +17,7 @@ import pytest
 from reinforcetactics.constants import SORCERER_BUFF_DURATION
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.game.bot import AdvancedBot, MasterBot, MediumBot, SimpleBot
+from reinforcetactics.game.llm_bot import LLMBot
 from reinforcetactics.utils.file_io import FileIO
 
 MAPS_DIR = Path(__file__).resolve().parents[1] / "maps"
@@ -247,6 +248,80 @@ class TestScriptedBotsTreatTeammatesAsAllies:
             assert game.are_enemies(attack["player"], owner_of[attack["target_unit_id"]]), attack
         # Every seat played: all four built something.
         assert {a["player"] for a in game.action_history if a["type"] == "create_unit"} == {1, 2, 3, 4}
+
+
+class _SilentLLMBot(LLMBot):
+    def _get_api_key_from_env(self):
+        return "test-key"
+
+    def _get_env_var_name(self):
+        return "TEST_API_KEY"
+
+    def _get_default_model(self):
+        return "test-model"
+
+    def _get_supported_models(self):
+        return ["test-model"]
+
+    def _call_llm(self, messages):
+        return '{"actions": []}'
+
+    def _get_llm_sdk_version(self):
+        return "test-sdk-1.0.0"
+
+
+class TestLLMBotsTreatTeammatesAsAllies:
+    """The LLM prompt listed a teammate's units and structures as enemies and offered them as targets."""
+
+    @pytest.fixture
+    def state(self):
+        game = GameState(_four_player_map({(6, 4): "b_3", (2, 6): "b_2"}), num_players=4)
+        game.player_gold.update({1: 111, 2: 222, 3: 333, 4: 444})
+        game.place_unit("K", 4, 4, 1)  # moves 4: reaches the teammate's building
+        cleric = game.place_unit("C", 4, 6, 1)
+        teammate = game.place_unit("W", 5, 4, 3)
+        teammate.health = 5  # hurt: healable, and a tempting target if it were an enemy
+        game.place_unit("W", 4, 2, 2)
+        game.place_unit("W", 8, 8, 4)
+        return game, cleric, _SilentLLMBot(game, player=1, api_key="test-key")._serialize_game_state()
+
+    def test_teammates_are_listed_as_allies_not_enemies(self, state):
+        _game, _cleric, s = state
+        assert (5, 4) not in {tuple(u["position"]) for u in s["enemy_units"]}
+        assert [(tuple(u["position"]), u["player"]) for u in s["teammate_units"]] == [((5, 4), 3)]
+        assert (6, 4) not in {tuple(b["position"]) for b in s["enemy_buildings"]}
+        assert {tuple(b["position"]) for b in s["teammate_buildings"]} == {(6, 4), (9, 9)}
+        assert (2, 6) in {tuple(b["position"]) for b in s["enemy_buildings"]}
+
+    def test_combos_target_enemies_and_heal_teammates(self, state):
+        _game, cleric, s = state
+        combos = s["legal_actions"]
+        assert all(tuple(c["then_attack"]) != (5, 4) for c in combos["move_then_attack"])
+        seizable = {tuple(c["move_to"]) for c in combos["move_then_seize"]}
+        assert (6, 4) not in seizable and (2, 6) in seizable
+        # The Cleric reaches its teammate's hurt Warrior from beyond an adjacent tile.
+        heals = {tuple(c["move_to"]) for c in combos["move_then_heal"] if tuple(c["then_heal"]) == (5, 4)}
+        assert heals and any(abs(x - 5) + abs(y - 4) > 1 for x, y in heals)
+
+    def test_opponent_gold_lists_each_enemy_still_in_the_game(self, state):
+        game, _cleric, s = state
+        assert s["opponent_gold"] == {"2": 222, "4": 444}
+
+        game.resign(4)
+        s = _SilentLLMBot(game, player=1, api_key="test-key")._serialize_game_state()
+        assert s["opponent_gold"] == 222  # one opponent left
+
+    def test_a_1v1_state_has_no_teammate_keys_and_a_single_opponent_gold(self):
+        grid = _grid_with({(0, 0): "h_1", (9, 9): "h_2"})
+        game = GameState(grid, num_players=2)
+        s = _SilentLLMBot(game, player=1, api_key="test-key")._serialize_game_state()
+        assert "teammate_units" not in s and "teammate_buildings" not in s
+        assert s["opponent_gold"] == game.player_gold[2]
+        assert _buildings_income(s) == {(9, 9): game.income_rates["headquarters"]}
+
+
+def _buildings_income(state):
+    return {tuple(b["position"]): b["income"] for b in state["enemy_buildings"]}
 
 
 class TestTeamsPersist:

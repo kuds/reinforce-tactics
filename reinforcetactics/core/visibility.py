@@ -111,6 +111,22 @@ class VisibilityMap:
         # Current visibility mask (recomputed each update)
         self._current_visible = np.zeros((height, width), dtype=bool)
 
+    def copy(self) -> "VisibilityMap":
+        """An independent copy, much cheaper than ``copy.deepcopy``.
+
+        The arrays and the memory dicts are copied. The snapshots in the
+        dicts are shared: memory changes only by replacing a snapshot, never
+        by editing one. ``GameState.move_unit`` takes one of these before
+        every fog-of-war move so ``cancel_move`` can restore it.
+        """
+        clone = VisibilityMap.__new__(VisibilityMap)
+        clone.width, clone.height, clone.player = self.width, self.height, self.player
+        clone.state = self.state.copy()
+        clone.last_seen_units = dict(self.last_seen_units)
+        clone.last_seen_structures = dict(self.last_seen_structures)
+        clone._current_visible = self._current_visible.copy()
+        return clone
+
     def update(self, game_state: "GameState") -> None:
         """Recalculate visibility based on current unit/structure positions.
 

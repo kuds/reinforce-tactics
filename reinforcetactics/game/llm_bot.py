@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from reinforcetactics import __version__
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.constants import CLERIC_HEAL_RANGE, UNIT_DATA
 from reinforcetactics.game.bot_base import BaseBot
 from reinforcetactics.game.llm_prompts import (
     DEFAULT_PROMPT,
@@ -1163,7 +1163,7 @@ Respond with your strategic plan in JSON format."""
                     "type": unit.type,
                     "position": [orig_x, orig_y],
                     "hp": unit.health,
-                    "max_hp": UNIT_DATA[unit.type]["health"],
+                    "max_hp": unit.max_health,
                     "can_move": unit.can_move,
                     "can_attack": unit.can_attack,
                     "is_paralyzed": unit.is_paralyzed(),
@@ -1172,24 +1172,36 @@ Respond with your strategic plan in JSON format."""
                 unit_id_map[unit] = unit_id
                 unit_id += 1
 
-        # Serialize enemy units (less detail, convert to original coordinates)
-        # With fog of war, only include visible enemy units
+        # Serialize the other players' units (less detail, original
+        # coordinates): enemies, and in a team game the teammates' units,
+        # which are allies for every rule and so must not be listed as
+        # enemies. With fog of war only enemies in sight are included; a
+        # teammate's units are known wherever they stand (see
+        # GameState.pathing_units).
         enemy_units = []
+        teammate_units = []
         for unit in self.game_state.units:
-            if unit.player != self.bot_player:
-                # FOW: Skip enemies that are not visible
-                if self.game_state.fog_of_war:
-                    if not self.game_state.is_position_visible(unit.x, unit.y, self.bot_player):
-                        continue
+            if unit.player == self.bot_player:
+                continue
+            is_enemy = self.game_state.are_enemies(unit.player, self.bot_player)
+            if (
+                is_enemy
+                and self.game_state.fog_of_war
+                and not self.game_state.is_position_visible(unit.x, unit.y, self.bot_player)
+            ):
+                continue
 
-                orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
-                enemy_data = {
-                    "type": unit.type,
-                    "position": [orig_x, orig_y],
-                    "hp": unit.health,
-                    "max_hp": UNIT_DATA[unit.type]["health"],
-                }
-                enemy_units.append(enemy_data)
+            orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
+            other_data = {
+                "type": unit.type,
+                "position": [orig_x, orig_y],
+                "hp": unit.health,
+                "max_hp": unit.max_health,
+            }
+            if is_enemy:
+                enemy_units.append(other_data)
+            else:
+                teammate_units.append({**other_data, "player": unit.player})
 
         # Serialize buildings (convert to original coordinates)
         # With fog of war, only include structures the bot knows of, with the
@@ -1201,6 +1213,12 @@ Respond with your strategic plan in JSON format."""
         player_buildings = []
         enemy_buildings = []
         neutral_buildings = []
+        teammate_buildings = []
+        income_by_type = {
+            "h": self.game_state.income_rates["headquarters"],
+            "b": self.game_state.income_rates["building"],
+            "t": self.game_state.income_rates["tower"],
+        }
 
         for row in self.game_state.grid.tiles:
             for tile in row:
@@ -1217,7 +1235,7 @@ Respond with your strategic plan in JSON format."""
                     building_info = {
                         "type": tile.type,
                         "position": [orig_x, orig_y],
-                        "income": 100 if tile.type == "h" else (100 if tile.type == "b" else 50),
+                        "income": income_by_type[tile.type],
                     }
 
                     # FOW: an out-of-sight structure is reported as last seen
@@ -1228,10 +1246,12 @@ Respond with your strategic plan in JSON format."""
 
                     if owner == self.bot_player:
                         player_buildings.append(building_info)
-                    elif owner is not None:
+                    elif owner is None:
+                        neutral_buildings.append(building_info)
+                    elif self.game_state.are_enemies(owner, self.bot_player):
                         enemy_buildings.append(building_info)
                     else:
-                        neutral_buildings.append(building_info)
+                        teammate_buildings.append({**building_info, "player": owner})
 
         # Format legal actions for the LLM
         formatted_legal_actions = self._format_legal_actions(legal_actions, unit_id_map)
@@ -1259,6 +1279,10 @@ Respond with your strategic plan in JSON format."""
             "neutral_buildings": neutral_buildings,
             "legal_actions": formatted_legal_actions,
         }
+        if teammate_units or teammate_buildings:
+            # Team games only: the teammates' units and structures (allies).
+            state["teammate_units"] = teammate_units
+            state["teammate_buildings"] = teammate_buildings
 
         # FOW: Include fog of war status and hide enemy gold
         if self.game_state.fog_of_war:
@@ -1266,7 +1290,18 @@ Respond with your strategic plan in JSON format."""
             state["opponent_gold"] = "hidden"  # Hide enemy gold in FOW mode
         else:
             state["fog_of_war"] = False
-            state["opponent_gold"] = self.game_state.player_gold[1 if self.bot_player == 2 else 2]
+            # One opponent: its gold. Several (free-for-all, 2v2): each
+            # enemy player's gold by player number. A teammate is not an
+            # opponent, and a knocked-out player is left out.
+            enemies = [
+                p
+                for p in range(1, self.game_state.num_players + 1)
+                if self.game_state.are_enemies(p, self.bot_player) and not self.game_state.is_eliminated(p)
+            ]
+            if len(enemies) == 1:
+                state["opponent_gold"] = self.game_state.player_gold[enemies[0]]
+            else:
+                state["opponent_gold"] = {str(p): self.game_state.player_gold[p] for p in enemies}
 
         return state
 
@@ -1297,12 +1332,15 @@ Respond with your strategic plan in JSON format."""
         # combo against an enemy the bot can't see right now would either be a
         # FOW info leak (we'd reveal hidden enemy positions) or a "move to
         # discover, then attack" exploit (forbidden by is_enemy_attackable_by_unit).
-        enemy_units = [u for u in self.game_state.units if u.player != self.bot_player]
+        enemy_units = [u for u in self.game_state.units if self.game_state.are_enemies(u.player, self.bot_player)]
         if self.game_state.fog_of_war:
             enemy_units = [u for u in enemy_units if self.game_state.is_position_visible(u.x, u.y, self.bot_player)]
 
-        # Get ally units for heal/cure calculations (Cleric only)
-        ally_units = [u for u in self.game_state.units if u.player == self.bot_player and u != unit]
+        # Get ally units for heal/cure calculations (Cleric only): its own
+        # player's and its teammates' units
+        ally_units = [
+            u for u in self.game_state.units if self.game_state.are_allies(u.player, self.bot_player) and u is not unit
+        ]
 
         for to_x, to_y in reachable_positions:
             # Convert to original coords for output
@@ -1346,17 +1384,17 @@ Respond with your strategic plan in JSON format."""
                     known = self.game_state.known_structure(self.bot_player, to_x, to_y)
                     known_to_bot = known is not None
                     owner = known.owner if known is not None else None
-                if known_to_bot and owner != self.bot_player:
+                # Its own or a teammate's structure can't be seized.
+                if known_to_bot and not self.game_state.are_allies(owner, self.bot_player):
                     result["move_then_seize"].append(
                         {"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True}
                     )
 
             # Cleric-specific: check for heal/cure opportunities
             if unit.type == "C":
-                adjacent_positions = [(to_x, to_y - 1), (to_x, to_y + 1), (to_x - 1, to_y), (to_x + 1, to_y)]
-
                 for ally in ally_units:
-                    if (ally.x, ally.y) in adjacent_positions:
+                    # The engine's heal/cure reach (GameMechanics.is_healable_ally)
+                    if 1 <= abs(to_x - ally.x) + abs(to_y - ally.y) <= CLERIC_HEAL_RANGE:
                         orig_ally_x, orig_ally_y = self.game_state.padded_to_original_coords(ally.x, ally.y)
                         # Heal if damaged
                         if ally.health < ally.max_health:
@@ -1404,7 +1442,7 @@ Respond with your strategic plan in JSON format."""
                 {
                     "unit_type": action["unit_type"],
                     "position": [orig_x, orig_y],
-                    "cost": UNIT_DATA[action["unit_type"]]["cost"],
+                    "cost": self.game_state.unit_data[action["unit_type"]]["cost"],  # engine overrides included
                 }
             )
 
