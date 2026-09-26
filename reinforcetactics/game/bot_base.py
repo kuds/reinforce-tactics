@@ -230,13 +230,9 @@ class BotUnitMixin:
 
     def get_reachable(self, unit):
         """Get all reachable positions for a unit on the current grid."""
-        return unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        # The engine's search: one blocker set per call instead of a scan of
+        # every unit per tile, and the game's terrain move costs (core-20/25).
+        return self.game_state.get_reachable_positions(unit)
 
     # Heal amounts mirror GameState.heal_units_on_structures: tower=+1,
     # HQ/building=+2 at the start of the owner's next turn.

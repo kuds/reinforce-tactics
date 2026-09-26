@@ -131,6 +131,12 @@ class VisibilityMap:
                     vision_range = calculate_vision_radius(tile.type, is_structure=True)
                     self._add_vision_radius(x, y, vision_range)
 
+        # Optional terrain rules (forest concealment, HQ always known) from
+        # engine_overrides; off by default. See core/terrain_rules.py.
+        terrain_rules = getattr(game_state, "terrain_rules", None)
+        if terrain_rules is not None:
+            terrain_rules.adjust_vision(self, game_state)
+
         # Step 3: Update state array
         self.state[self._current_visible] = VISIBLE
 

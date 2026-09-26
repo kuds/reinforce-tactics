@@ -1628,7 +1628,9 @@ class StrategyGameEnv(gym.Env):
         # tiebreaks below — without this the evade roll reads the module-
         # global ``random``, which the episode seed never touches (and which
         # forked SubprocVecEnv workers inherit in identical states).
-        engine_rng = random.Random(int(self.np_random.integers(0, 2**31 - 1)))
+        # Passed as a seed (GameState builds the same random.Random from it)
+        # so the value is recorded in the game's saves and replays.
+        engine_seed = int(self.np_random.integers(0, 2**31 - 1))
 
         # Reset game state (preserving enabled_units, fog_of_war, max_turns
         # and the engine-constant overlay)
@@ -1639,7 +1641,7 @@ class StrategyGameEnv(gym.Env):
             enabled_units=self.enabled_units,
             fog_of_war=self.fog_of_war,
             engine_overrides=self.engine_overrides,
-            rng=engine_rng,
+            seed=engine_seed,
         )
         self.current_step = 0
         self._actions_this_turn = 0

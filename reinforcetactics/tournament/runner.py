@@ -17,7 +17,7 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
-from reinforcetactics.core.game_state import GameState
+from reinforcetactics.core.game_state import GameState, derive_seed
 from reinforcetactics.game.bot_registry import player_type as bot_player_type
 from reinforcetactics.utils.file_io import FileIO
 
@@ -274,6 +274,21 @@ class TournamentRunner:
 
         return random.Random(_seed_for(1, bot1_name)), random.Random(_seed_for(2, bot2_name))
 
+    def _engine_seed_for_game(self, game_id: int, map_stem: str, bot1_name: str, bot2_name: str) -> int | None:
+        """Seed for a game's combat RNG (the Rogue evade roll), or None.
+
+        Derived from the same inputs as the bot seeds, with its own label so
+        the stream is independent of both bots'. Without it the engine rolled
+        with the module-global ``random``, so a re-run with the same
+        ``rng_seed`` diverged whenever a Rogue attacked into a counter, and
+        concurrent games shared one stream (review persist-6). With no
+        ``rng_seed`` the GameState draws its own seed from entropy; the
+        replay records it either way.
+        """
+        if self.config.rng_seed is None:
+            return None
+        return derive_seed(self.config.rng_seed, game_id, map_stem, bot1_name, bot2_name, "engine")
+
     def _execute_game(self, scheduled_game: ScheduledGame) -> GameResult:
         """
         Execute a single scheduled game.
@@ -311,6 +326,7 @@ class TournamentRunner:
             map_data,
             num_players=2,
             enabled_units=self.config.enabled_units,
+            seed=self._engine_seed_for_game(scheduled_game.game_id, map_config.stem, bot1_desc.name, bot2_desc.name),
         )
         max_turns = map_config.max_turns or self.config.max_turns
         game_state.max_turns = max_turns
@@ -508,6 +524,8 @@ class TournamentRunner:
             "game_over": game_state.game_over,
             "end_reason": end_reason,
             "winning_action_index": game_state.game_over_action_index,
+            # Seed of the game's combat RNG, so the game can be re-run.
+            "seed": game_state.seed,
             "library_version": _rt_version,
             "replay_schema_version": 3,
             "final_units_p1": len(final_units_p1),

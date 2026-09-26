@@ -2,6 +2,7 @@
 Unit class representing a game unit.
 """
 
+import heapq
 from collections import deque
 
 from reinforcetactics.constants import UNIT_DATA
@@ -156,39 +157,95 @@ class Unit:
         """Check if this unit is currently paralyzed."""
         return self.paralyzed_turns > 0
 
-    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func):
+    def get_reachable_positions(self, grid_width, grid_height, can_move_to_func, move_cost=None):
         """
-        Get all positions reachable within movement range using BFS.
+        Get all positions reachable within movement range.
 
         Args:
             grid_width: Width of the grid
             grid_height: Height of the grid
             can_move_to_func: Function to check if a position is valid for movement
+            move_cost: Optional ``(x, y) -> cost`` of entering a tile (see
+                ``find_paths``); None means every tile costs 1
 
         Returns:
-            List of (x, y) tuples for all reachable positions
+            List of (x, y) tuples for all reachable positions, in search order
         """
-        reachable = []
-        visited = set()
-        queue = deque([(self.x, self.y, 0)])
-        visited.add((self.x, self.y))
+        return list(self.find_paths(grid_width, grid_height, can_move_to_func, move_cost))
 
-        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    # Neighbour order is part of the search order, which fixes the order of
+    # move actions (the flat_discrete encoding and every bot tiebreak).
+    _DIRECTIONS = ((0, -1), (0, 1), (-1, 0), (1, 0))
+
+    def find_paths(self, grid_width, grid_height, can_enter, move_cost=None):
+        """Every tile this unit can reach this turn, mapped to the tiles stepped to get there.
+
+        A tile is reachable when some path of enterable tiles (``can_enter``)
+        costs at most ``movement_range`` in total, each step costing
+        ``move_cost(x, y)`` of the tile entered (1 when ``move_cost`` is
+        None). The start tile is not included. The step count is that of
+        the cheapest path found, which is what a "path" Knight Charge
+        counts.
+
+        Uniform cost is a breadth-first search; any other cost is a Dijkstra
+        search whose ties are broken by discovery order, so with every cost
+        1 it finds exactly the tiles the BFS finds, in the same order
+        (tests/test_pathfinding_core.py checks this on every shipped map).
+
+        Returns:
+            dict ``{(x, y): steps}`` in the order tiles were settled.
+        """
+        if move_cost is None:
+            return self._find_paths_uniform(grid_width, grid_height, can_enter)
+
+        budget = self.movement_range + 1e-9  # float costs such as 0.5 may accumulate rounding error
+        start = (self.x, self.y)
+        best_cost = {start: 0}
+        steps = {start: 0}
+        settled = {}
+        seq = 0  # discovery order: the tiebreak that makes cost-1 Dijkstra match BFS
+        heap = [(0, seq, self.x, self.y)]
+        while heap:
+            cost, _, x, y = heapq.heappop(heap)
+            if (x, y) in settled or cost > best_cost[(x, y)]:
+                continue  # a stale entry for a tile since reached more cheaply
+            settled[(x, y)] = steps[(x, y)]
+            for dx, dy in self._DIRECTIONS:
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < grid_width and 0 <= ny < grid_height):
+                    continue
+                new_cost = cost + move_cost(nx, ny)
+                if new_cost > budget or new_cost >= best_cost.get((nx, ny), float("inf")):
+                    continue
+                if not can_enter(nx, ny):
+                    continue
+                best_cost[(nx, ny)] = new_cost
+                steps[(nx, ny)] = steps[(x, y)] + 1
+                seq += 1
+                heapq.heappush(heap, (new_cost, seq, nx, ny))
+        del settled[start]
+        return settled
+
+    def _find_paths_uniform(self, grid_width, grid_height, can_enter):
+        """``find_paths`` with every step costing 1: a plain BFS (the fast default)."""
+        reachable = {}
+        visited = {(self.x, self.y)}
+        queue = deque([(self.x, self.y, 0)])
 
         while queue:
             curr_x, curr_y, distance = queue.popleft()
 
             if distance > 0:
-                reachable.append((curr_x, curr_y))
+                reachable[(curr_x, curr_y)] = distance
 
             if distance < self.movement_range:
-                for dx, dy in directions:
+                for dx, dy in self._DIRECTIONS:
                     new_x = curr_x + dx
                     new_y = curr_y + dy
 
                     if (new_x, new_y) not in visited:
                         if 0 <= new_x < grid_width and 0 <= new_y < grid_height:
-                            if can_move_to_func(new_x, new_y):
+                            if can_enter(new_x, new_y):
                                 visited.add((new_x, new_y))
                                 queue.append((new_x, new_y, distance + 1))
 

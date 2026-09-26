@@ -55,21 +55,46 @@ class GameMechanics:
         if not tile.is_walkable():
             return False
 
-        # Check if another unit is already there
+        # Check if another unit is already there. This scans every unit, so
+        # searches build ``movement_blockers`` once instead of calling this
+        # per tile (review core-20); it stays for callers checking one tile.
         for unit in units:
             if unit.x == x and unit.y == y:
-                # If this is the final destination, block all units
-                if is_destination:
+                # A destination must be empty; a path may pass through friends.
+                if is_destination or GameMechanics.blocks_movement(unit, moving_unit):
                     return False
 
-                # For pathfinding, allow passing through friendly units
-                if moving_unit is not None and unit.player == moving_unit.player:
-                    continue  # Allow passing through friendly units
-
-                # Block enemy units or if no moving_unit specified (legacy behavior)
-                return False
-
         return True
+
+    @staticmethod
+    def blocks_movement(unit, moving_unit):
+        """Whether ``unit`` stops ``moving_unit`` from passing through its tile.
+
+        The one definition of who blocks whom: units of another side do,
+        friendly units do not (though no unit may end its move on an occupied
+        tile). With no ``moving_unit`` every unit blocks (the legacy rule).
+        """
+        return moving_unit is None or unit.player != moving_unit.player
+
+    @staticmethod
+    def movement_blockers(units, moving_unit=None):
+        """The tiles ``moving_unit`` may not pass through, as a set of ``(x, y)``.
+
+        Built once per search, so the search's per-tile test is a set lookup
+        instead of a scan of every unit (review core-20). A search for a
+        player's restricted view of the board (e.g. hidden enemies under fog
+        of war) filters this set before searching.
+        """
+        return {(u.x, u.y) for u in units if GameMechanics.blocks_movement(u, moving_unit)}
+
+    @staticmethod
+    def passability(grid, blocked):
+        """``(x, y) -> bool`` for ``Unit.find_paths``: walkable and not in ``blocked``.
+
+        Bounds are checked by the search itself.
+        """
+        tiles = grid.tiles
+        return lambda x, y: (x, y) not in blocked and tiles[y][x].is_walkable()
 
     @staticmethod
     def get_adjacent_enemies(unit, units):
@@ -374,13 +399,14 @@ class GameMechanics:
             damage_model: "flat" (HP-independent, legacy) or "hp_scaled"
                 (outgoing damage scaled by the attacker's current HP
                 fraction). Applies symmetrically to the counter-attack.
-            rng: Optional random source exposing ``random()`` (e.g. a
+            rng: Random source exposing ``random()`` (e.g. a
                 ``random.Random`` instance) used for the Rogue evade roll —
-                the only stochastic outcome in combat. ``None`` falls back
-                to the module-global ``random`` (legacy behaviour). Callers
-                that need reproducible combat (the RL env, seeded evals)
-                should pass a seeded instance; ``GameState.attack`` forwards
-                ``GameState.rng`` automatically.
+                the only stochastic outcome in combat. ``GameState.attack``
+                always forwards the game's own seeded ``GameState.rng``.
+                ``None`` (direct callers only) rolls with a fresh, unseeded
+                ``random.Random``; the module-global ``random`` is never
+                read, so no caller's seeding can leak into combat or be
+                disturbed by it.
 
         Returns:
             dict with 'attacker_alive', 'target_alive', 'damage', 'counter_damage',
@@ -474,7 +500,8 @@ class GameMechanics:
             if can_counter and not GameMechanics.can_reach(target, attacker.x, attacker.y, grid):
                 can_counter = False
 
-            # Rogue's Evade: 25% chance to dodge counter-attacks (35% in forest)
+            # Rogue's Evade: ROGUE_EVADE_CHANCE to dodge counter-attacks,
+            # plus ROGUE_FOREST_EVADE_BONUS when the Rogue stands in forest.
             if can_counter and attacker.type == "R":
                 evade_chance = ROGUE_EVADE_CHANCE
                 # Check if Rogue is in forest for bonus evade chance
@@ -482,7 +509,7 @@ class GameMechanics:
                     rogue_tile = grid.get_tile(attacker.x, attacker.y)
                     if rogue_tile.type == "f":  # Forest tile
                         evade_chance += ROGUE_FOREST_EVADE_BONUS
-                evade_rng = rng if rng is not None else random
+                evade_rng = rng if rng is not None else random.Random()
                 if evade_rng.random() < evade_chance:
                     can_counter = False
                     evade_applied = True
@@ -656,7 +683,8 @@ class GameMechanics:
     @staticmethod
     def defence_buff_unit(sorcerer, target):
         """
-        Sorcerer grants Defence Buff to target unit, reducing damage taken by 35%.
+        Sorcerer grants Defence Buff to target unit, reducing damage taken by
+        SORCERER_DEFENCE_BUFF_AMOUNT (50%) for SORCERER_BUFF_DURATION turns.
 
         Args:
             sorcerer: The Sorcerer unit using Defence Buff
@@ -693,7 +721,8 @@ class GameMechanics:
     @staticmethod
     def attack_buff_unit(sorcerer, target):
         """
-        Sorcerer grants Attack Buff to target unit, increasing damage dealt by 35%.
+        Sorcerer grants Attack Buff to target unit, increasing damage dealt by
+        SORCERER_ATTACK_BUFF_AMOUNT (50%) for SORCERER_BUFF_DURATION turns.
 
         Args:
             sorcerer: The Sorcerer unit using Attack Buff

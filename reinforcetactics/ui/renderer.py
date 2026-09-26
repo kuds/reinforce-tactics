@@ -850,13 +850,8 @@ class Renderer:
         if not unit.can_move:
             return
 
-        movement_positions = unit.get_reachable_positions(
-            self.game_state.grid.width,
-            self.game_state.grid.height,
-            lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
-            ),
-        )
+        # The engine's search, so the overlay follows terrain move costs.
+        movement_positions = self.game_state.get_reachable_positions(unit)
 
         if movement_positions:
             alpha = self._overlay_alpha("move", (id(unit), unit.x, unit.y), theme.OVERLAY_MOVEMENT_ALPHA)

@@ -37,7 +37,7 @@ from typing import Any
 import numpy as np
 
 from reinforcetactics.constants import ALL_UNIT_TYPES, UNIT_TYPE_TO_IDX
-from reinforcetactics.core.game_state import GameState
+from reinforcetactics.core.game_state import GameState, derive_seed
 from reinforcetactics.game.bot_registry import STOCHASTIC_BOTS, build_scripted, canonical_name
 from reinforcetactics.rl.gym_env import build_per_dim_masks
 from reinforcetactics.rl.observation import build_observation
@@ -610,6 +610,11 @@ def _play_episode(
         max_turns=max_turns,
         enabled_units=units,
         fog_of_war=fog_of_war,
+        # The combat RNG (Rogue evade) gets its own stream from the episode
+        # seed, like tiebreak_rng above, so a seeded dataset is reproducible
+        # without shifting either bot stream (review core-10). None draws a
+        # fresh seed per episode.
+        seed=derive_seed(seed, "engine") if seed is not None else None,
     )
     if fog_of_war:
         game_state.update_visibility()
