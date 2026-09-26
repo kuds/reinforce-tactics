@@ -149,60 +149,6 @@ class TestMovement:
         assert (2, 3) in reachable
 
 
-class TestAdjacentUnits:
-    """Test getting adjacent units."""
-
-    def test_get_adjacent_enemies(self):
-        """Test finding adjacent enemy units."""
-        unit = Unit("W", 5, 5, 1)
-        enemy1 = Unit("W", 6, 5, 2)  # Right
-        enemy2 = Unit("M", 5, 4, 2)  # Up
-        ally = Unit("C", 4, 5, 1)  # Left (same player)
-
-        units = [unit, enemy1, enemy2, ally]
-
-        adjacent_enemies = GameMechanics.get_adjacent_enemies(unit, units)
-
-        assert len(adjacent_enemies) == 2
-        assert enemy1 in adjacent_enemies
-        assert enemy2 in adjacent_enemies
-        assert ally not in adjacent_enemies
-
-    def test_get_adjacent_allies(self):
-        """Test finding damaged adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, damaged
-        ally1.health = 10
-        ally2 = Unit("M", 5, 4, 1)  # Up, full health
-        ally2.health = ally2.max_health
-        enemy = Unit("W", 4, 5, 2)  # Left, different player
-
-        units = [unit, ally1, ally2, enemy]
-
-        adjacent_allies = GameMechanics.get_adjacent_allies(unit, units)
-
-        assert len(adjacent_allies) == 1
-        assert ally1 in adjacent_allies
-        assert ally2 not in adjacent_allies  # Full health
-        assert enemy not in adjacent_allies  # Different player
-
-    def test_get_adjacent_paralyzed_allies(self):
-        """Test finding paralyzed adjacent allies."""
-        unit = Unit("C", 5, 5, 1)
-        ally1 = Unit("W", 6, 5, 1)  # Right, paralyzed
-        ally1.paralyzed_turns = 2
-        ally2 = Unit("M", 5, 4, 1)  # Up, not paralyzed
-        ally2.paralyzed_turns = 0
-
-        units = [unit, ally1, ally2]
-
-        adjacent_paralyzed = GameMechanics.get_adjacent_paralyzed_allies(unit, units)
-
-        assert len(adjacent_paralyzed) == 1
-        assert ally1 in adjacent_paralyzed
-        assert ally2 not in adjacent_paralyzed
-
-
 class TestAttackableEnemies:
     """Test finding enemies within attack range."""
 
@@ -591,13 +537,12 @@ class TestParalysisDecrement:
 
         units = [unit1, unit2, unit3]
 
-        cured = GameMechanics.decrement_paralysis(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert unit1.paralyzed_turns == 1
         assert unit2.paralyzed_turns == 0
         assert unit3.paralyzed_turns == 3  # Different player
-        assert len(cured) == 1  # Only unit2 was cured
-        assert unit2 in cured
+        assert expired == [(unit2, "paralyzed_turns")]  # Only unit2 was cured
 
 
 class TestArcherCounterAttack:
@@ -927,16 +872,15 @@ class TestSorcererHasteAbility:
         sorcerer.haste_cooldown = 2
 
         units = [sorcerer]
-        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.haste_cooldown == 1
-        assert len(ready) == 0
+        assert expired == []
 
-        ready = GameMechanics.decrement_haste_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.haste_cooldown == 0
-        assert len(ready) == 1
-        assert sorcerer in ready
+        assert expired == [(sorcerer, "haste_cooldown")]
 
 
 class TestSorcererAttacks:
@@ -1313,16 +1257,15 @@ class TestBuffCooldownDecrement:
         sorcerer.defence_buff_cooldown = 2
 
         units = [sorcerer]
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.defence_buff_cooldown == 1
-        assert len(result["defence_ready"]) == 0
+        assert expired == []
 
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.defence_buff_cooldown == 0
-        assert len(result["defence_ready"]) == 1
-        assert sorcerer in result["defence_ready"]
+        assert expired == [(sorcerer, "defence_buff_cooldown")]
 
     def test_attack_buff_cooldown_decrements(self, simple_grid):
         """Test attack buff cooldown decrements each turn."""
@@ -1330,16 +1273,15 @@ class TestBuffCooldownDecrement:
         sorcerer.attack_buff_cooldown = 2
 
         units = [sorcerer]
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.attack_buff_cooldown == 1
-        assert len(result["attack_ready"]) == 0
+        assert expired == []
 
-        result = GameMechanics.decrement_buff_cooldowns(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert sorcerer.attack_buff_cooldown == 0
-        assert len(result["attack_ready"]) == 1
-        assert sorcerer in result["attack_ready"]
+        assert expired == [(sorcerer, "attack_buff_cooldown")]
 
 
 class TestBuffDurationDecrement:
@@ -1351,17 +1293,16 @@ class TestBuffDurationDecrement:
         warrior.defence_buff_turns = 2
 
         units = [warrior]
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.defence_buff_turns == 1
-        assert len(result["defence_expired"]) == 0
+        assert expired == []
         assert warrior.has_defence_buff() is True
 
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.defence_buff_turns == 0
-        assert len(result["defence_expired"]) == 1
-        assert warrior in result["defence_expired"]
+        assert expired == [(warrior, "defence_buff_turns")]
         assert warrior.has_defence_buff() is False
 
     def test_attack_buff_duration_decrements(self, simple_grid):
@@ -1370,15 +1311,14 @@ class TestBuffDurationDecrement:
         warrior.attack_buff_turns = 2
 
         units = [warrior]
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.attack_buff_turns == 1
-        assert len(result["attack_expired"]) == 0
+        assert expired == []
         assert warrior.has_attack_buff() is True
 
-        result = GameMechanics.decrement_buff_durations(units, 1)
+        expired = GameMechanics.tick_statuses(units, 1)
 
         assert warrior.attack_buff_turns == 0
-        assert len(result["attack_expired"]) == 1
-        assert warrior in result["attack_expired"]
+        assert expired == [(warrior, "attack_buff_turns")]
         assert warrior.has_attack_buff() is False

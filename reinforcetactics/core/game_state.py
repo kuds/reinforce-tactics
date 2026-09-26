@@ -1255,7 +1255,7 @@ class GameState:
         )
 
     def _can_paralyze_target(self, unit: Unit, target: Unit) -> bool:
-        """Mage off cooldown, an attackable enemy within 1..2 that is not already paralyzed.
+        """Mage off cooldown, an attackable enemy in paralyze range that is not already paralyzed.
 
         Re-casting on a paralyzed target would only refresh the status (a
         near no-op) and inflate the action space, the same reason heal,
@@ -1264,7 +1264,7 @@ class GameState:
         return (
             unit.can_use_paralyze()
             and not target.is_paralyzed()
-            and abs(unit.x - target.x) + abs(unit.y - target.y) <= 2
+            and self.mechanics.in_ability_range("paralyze", unit, target)
             and self._can_attack_target(unit, target)
         )
 
@@ -1668,65 +1668,95 @@ class GameState:
 
         return result
 
-    def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
-        """Paralyze a target unit. Returns False, changing nothing, if illegal."""
-        if not self._may_act("paralyze", paralyzer, target, lambda: self._can_paralyze_target(paralyzer, target)):
-            return False
-        result = self.mechanics.paralyze_unit(paralyzer, target, self.teams)
-        if result:
-            self._consume_action(paralyzer)
+    def _use_ability(
+        self,
+        action: str,
+        actor: Unit,
+        target: Unit,
+        can_target: Callable[[Unit, Unit], bool],
+        apply: Callable[[], Any],
+        rejected: Any,
+        actor_pos_field: str,
+        record_fields: Callable[[Any], dict[str, Any]] | None = None,
+        after_apply: Callable[[], None] | None = None,
+    ) -> Any:
+        """The shared body of the targeted abilities (paralyze, heal, cure, haste, the buffs).
+
+        Validates with ``_may_act`` and ``can_target`` (the ability's
+        ``_can_*_target`` predicate, the one its legal actions are listed
+        with), returning ``rejected`` and changing nothing when that fails.
+        Otherwise applies the mechanics call ``apply``; if it took effect,
+        spends ``actor``'s action (``_consume_action``), runs
+        ``after_apply``, records ``action`` with the fields ``actor_pos_field``
+        (the actor's position), ``target_pos``, ``record_fields(result)``,
+        ``player``, ``actor_unit_id`` and ``target_unit_id`` -- in that order,
+        the record layout replays and saves have always had -- and
+        invalidates the legal-action cache.
+
+        Returns:
+            ``apply``'s result, or ``rejected``.
+        """
+        if not self._may_act(action, actor, target, lambda: can_target(actor, target)):
+            return rejected
+        result = apply()
+        # heal_unit returns the HP it restored (-1 if refused), the others a
+        # bool; either way the ability took effect iff result > 0.
+        if result > 0:
+            self._consume_action(actor)
+            if after_apply is not None:
+                after_apply()
             self.record_action(
-                "paralyze",
-                paralyzer_pos=(paralyzer.x, paralyzer.y),
+                action,
+                **{actor_pos_field: (actor.x, actor.y)},
                 target_pos=(target.x, target.y),
-                player=paralyzer.player,
-                actor_unit_id=paralyzer.unit_id,
+                **(record_fields(result) if record_fields is not None else {}),
+                player=actor.player,
+                actor_unit_id=actor.unit_id,
                 target_unit_id=target.unit_id,
             )
             self._invalidate_cache()
         return result
 
+    def paralyze(self, paralyzer: Unit, target: Unit) -> bool:
+        """Paralyze a target unit. Returns False, changing nothing, if illegal."""
+        return self._use_ability(
+            "paralyze",
+            paralyzer,
+            target,
+            self._can_paralyze_target,
+            lambda: self.mechanics.paralyze_unit(paralyzer, target, self.teams),
+            rejected=False,
+            actor_pos_field="paralyzer_pos",
+        )
+
     def heal(self, healer: Unit, target: Unit) -> int:
         """Heal a target unit. Returns the HP healed; 0, changing nothing, if illegal."""
-        if not self._may_act("heal", healer, target, lambda: self._can_heal_target(healer, target)):
-            return 0
-        amount = self.mechanics.heal_unit(healer, target, self.teams)
-        if amount > 0:
-            self._consume_action(healer)
+        return self._use_ability(
+            "heal",
+            healer,
+            target,
+            self._can_heal_target,
+            lambda: self.mechanics.heal_unit(healer, target, self.teams),
+            rejected=0,
+            actor_pos_field="healer_pos",
             # target_hp_after lets the replay player set HP directly
             # instead of re-calling mechanics.heal_unit (the only path
             # today that could observe HEAL_AMOUNT drift between save
             # and replay).
-            self.record_action(
-                "heal",
-                healer_pos=(healer.x, healer.y),
-                target_pos=(target.x, target.y),
-                amount=amount,
-                target_hp_after=target.health,
-                player=healer.player,
-                actor_unit_id=healer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return amount
+            record_fields=lambda amount: {"amount": amount, "target_hp_after": target.health},
+        )
 
     def cure(self, curer: Unit, target: Unit) -> bool:
         """Cure a target unit's paralysis. Returns False, changing nothing, if illegal."""
-        if not self._may_act("cure", curer, target, lambda: self._can_cure_target(curer, target)):
-            return False
-        result = self.mechanics.cure_unit(curer, target, self.teams)
-        if result:
-            self._consume_action(curer)
-            self.record_action(
-                "cure",
-                curer_pos=(curer.x, curer.y),
-                target_pos=(target.x, target.y),
-                player=curer.player,
-                actor_unit_id=curer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        return self._use_ability(
+            "cure",
+            curer,
+            target,
+            self._can_cure_target,
+            lambda: self.mechanics.cure_unit(curer, target, self.teams),
+            rejected=False,
+            actor_pos_field="curer_pos",
+        )
 
     def haste(self, sorcerer: Unit, target: Unit) -> bool:
         """
@@ -1750,11 +1780,8 @@ class GameState:
             bool: True if Haste was successfully applied (False, changing
             nothing, if illegal)
         """
-        if not self._may_act("haste", sorcerer, target, lambda: self._can_haste_target(sorcerer, target)):
-            return False
-        result = self.mechanics.haste_unit(sorcerer, target)
-        if result:
-            self._consume_action(sorcerer)
+
+        def grant_if_already_acted() -> None:
             if not (target.can_move or target.can_attack):
                 # Already done for the turn: the extra action starts now.
                 self._consume_action(target)
@@ -1763,17 +1790,18 @@ class GameState:
                 # act, so its controller's next end_unit_turn (the GUI's Wait)
                 # must end the extra action, not be swallowed.
                 target.haste_refreshed = False
-            self.record_action(
-                "haste",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+
+        return self._use_ability(
+            "haste",
+            sorcerer,
+            target,
+            self._can_haste_target,
+            lambda: self.mechanics.haste_unit(sorcerer, target),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+            after_apply=grant_if_already_acted,
+        )
 
     def defence_buff(self, sorcerer: Unit, target: Unit) -> bool:
         """
@@ -1787,22 +1815,16 @@ class GameState:
             bool: True if Defence Buff was successfully applied (False,
             changing nothing, if illegal)
         """
-        if not self._may_act("defence_buff", sorcerer, target, lambda: self._can_defence_buff_target(sorcerer, target)):
-            return False
-        result = self.mechanics.defence_buff_unit(sorcerer, target, self.teams)
-        if result:
-            self._consume_action(sorcerer)
-            self.record_action(
-                "defence_buff",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        return self._use_ability(
+            "defence_buff",
+            sorcerer,
+            target,
+            self._can_defence_buff_target,
+            lambda: self.mechanics.defence_buff_unit(sorcerer, target, self.teams),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+        )
 
     def attack_buff(self, sorcerer: Unit, target: Unit) -> bool:
         """
@@ -1816,22 +1838,16 @@ class GameState:
             bool: True if Attack Buff was successfully applied (False,
             changing nothing, if illegal)
         """
-        if not self._may_act("attack_buff", sorcerer, target, lambda: self._can_attack_buff_target(sorcerer, target)):
-            return False
-        result = self.mechanics.attack_buff_unit(sorcerer, target, self.teams)
-        if result:
-            self._consume_action(sorcerer)
-            self.record_action(
-                "attack_buff",
-                sorcerer_pos=(sorcerer.x, sorcerer.y),
-                target_pos=(target.x, target.y),
-                target_type=target.type,
-                player=sorcerer.player,
-                actor_unit_id=sorcerer.unit_id,
-                target_unit_id=target.unit_id,
-            )
-            self._invalidate_cache()
-        return result
+        return self._use_ability(
+            "attack_buff",
+            sorcerer,
+            target,
+            self._can_attack_buff_target,
+            lambda: self.mechanics.attack_buff_unit(sorcerer, target, self.teams),
+            rejected=False,
+            actor_pos_field="sorcerer_pos",
+            record_fields=lambda _: {"target_type": target.type},
+        )
 
     def seize(self, unit: Unit) -> dict[str, Any]:
         """Seize the structure the unit is on.
@@ -2081,20 +2097,9 @@ class GameState:
             The income breakdown (``calculate_income``) with the healing
             stats under ``"healing"`` -- what ``end_turn`` returns.
         """
-        # Handle paralysis and enable units
-        self.mechanics.decrement_paralysis(self.units, player)
-
-        # Decrement Mage paralyze cooldowns
-        self.mechanics.decrement_paralyze_cooldowns(self.units, player)
-
-        # Decrement Sorcerer haste cooldowns
-        self.mechanics.decrement_haste_cooldowns(self.units, player)
-
-        # Decrement Sorcerer buff cooldowns (defence buff and attack buff)
-        self.mechanics.decrement_buff_cooldowns(self.units, player)
-
-        # Decrement buff durations for units with active buffs
-        self.mechanics.decrement_buff_durations(self.units, player)
+        # Tick paralysis, ability cooldowns and buff durations of the
+        # player's units (only theirs: durations count the unit's own turns)
+        self.mechanics.tick_statuses(self.units, player)
 
         for unit in self.units:
             if unit.player == player:

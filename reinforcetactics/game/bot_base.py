@@ -21,7 +21,7 @@ Provides:
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
-from reinforcetactics.constants import UNIT_DATA
+from reinforcetactics.constants import ABILITY_RANGES, UNIT_DATA
 from reinforcetactics.core.mechanics import same_side
 
 # Strategic categories used by bot decision logic to bucket unit types by
@@ -386,7 +386,7 @@ class BotUnitMixin:
         if not enemies:
             return False
 
-        in_range = [e for e in enemies if 1 <= self.manhattan_distance(unit.x, unit.y, e.x, e.y) <= 2]
+        in_range = self.game_state.mechanics.units_in_range(unit, enemies, *ABILITY_RANGES["paralyze"])
         if not in_range:
             return False
 

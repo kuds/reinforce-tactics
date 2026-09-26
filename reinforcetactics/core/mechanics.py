@@ -6,10 +6,10 @@ import random
 from collections.abc import Mapping
 
 from reinforcetactics.constants import (
+    ABILITY_RANGES,
     BUILDING_INCOME,
     CHARGE_BONUS,
     CHARGE_MIN_DISTANCE,
-    CLERIC_HEAL_RANGE,
     COUNTER_ATTACK_MULTIPLIER,
     DEFENCE_REDUCTION_PER_POINT,
     FLANK_BONUS,
@@ -121,18 +121,46 @@ class GameMechanics:
         tiles = grid.tiles
         return lambda x, y: (x, y) not in blocked and tiles[y][x].is_walkable()
 
+    # ------------------------------------------------------------------
+    # Range scans and per-target rules
+    # ------------------------------------------------------------------
+    # Every "who is within reach" question is ``in_range`` / ``units_in_range``
+    # with a range from one place: ``Unit.get_attack_range`` for attacks,
+    # ``constants.ABILITY_RANGES`` for the targeted abilities. Each ``is_*``
+    # predicate is the single definition of "may this caster target this
+    # unit"; the matching ``get_*`` list helper filters with it, and
+    # ``GameState`` both enumerates legal actions through the list helpers and
+    # validates a requested action with the predicate, so the mask and the
+    # engine cannot disagree.
+
     @staticmethod
-    def get_adjacent_enemies(unit, units, teams=None):
-        """Get list of enemy units adjacent to the given unit."""
-        adjacent_enemies = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
+    def in_range(unit, target, lo, hi):
+        """Whether ``target`` is ``lo..hi`` tiles (Manhattan distance) from ``unit``."""
+        return lo <= abs(unit.x - target.x) + abs(unit.y - target.y) <= hi
 
-        for enemy in units:
-            if not same_side(enemy.player, unit.player, teams) and enemy.health > 0:
-                if (enemy.x, enemy.y) in adjacent_positions:
-                    adjacent_enemies.append(enemy)
+    @staticmethod
+    def units_in_range(center, units, lo, hi, predicate=None):
+        """The units ``lo..hi`` tiles (Manhattan distance) from ``center`` that pass ``predicate``.
 
-        return adjacent_enemies
+        In ``units`` order, which the orderings built from it (legal
+        actions, bot tiebreaks) rely on. ``center`` itself is included when
+        ``lo`` is 0 and it is in ``units``.
+        """
+        return [u for u in units if GameMechanics.in_range(center, u, lo, hi) and (predicate is None or predicate(u))]
+
+    @staticmethod
+    def in_ability_range(ability, caster, target):
+        """Whether ``target`` is within ``caster``'s reach for ``ability`` (see ``ABILITY_RANGES``)."""
+        lo, hi = ABILITY_RANGES[ability]
+        return GameMechanics.in_range(caster, target, lo, hi)
+
+    @staticmethod
+    def _on_mountain(unit, grid):
+        """Whether ``unit`` stands on a mountain (the Archer's +1 range); False without a grid."""
+        if not grid:
+            return False
+        tile = grid.get_tile(unit.x, unit.y)
+        return tile is not None and tile.type == "m"
 
     @staticmethod
     def get_attackable_enemies(unit, units, grid, teams=None):
@@ -148,89 +176,10 @@ class GameMechanics:
         Returns:
             List of enemy units within attack range
         """
-        attackable_enemies = []
-
-        # Check if unit is on a mountain (for Archer range bonus)
-        on_mountain = False
-        if grid:
-            tile = grid.get_tile(unit.x, unit.y)
-            on_mountain = tile.type == "m"
-
-        # Get the unit's attack range
-        min_range, max_range = unit.get_attack_range(on_mountain)
-
-        # Check all enemies
-        for enemy in units:
-            if not same_side(enemy.player, unit.player, teams) and enemy.health > 0:
-                distance = abs(unit.x - enemy.x) + abs(unit.y - enemy.y)
-                if min_range <= distance <= max_range:
-                    attackable_enemies.append(enemy)
-
-        return attackable_enemies
-
-    @staticmethod
-    def get_adjacent_allies(unit, units, teams=None):
-        """Get list of damaged friendly units adjacent to the given unit."""
-        adjacent_allies = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
-
-        for ally in units:
-            if same_side(ally.player, unit.player, teams) and ally.health > 0 and ally != unit:
-                if (ally.x, ally.y) in adjacent_positions:
-                    if ally.health < ally.max_health:
-                        adjacent_allies.append(ally)
-
-        return adjacent_allies
-
-    # Per-target ally rules. Each ``is_*`` predicate is the single definition
-    # of "may this caster target this unit"; the matching ``get_*`` list
-    # helper filters with it, and ``GameState`` both enumerates legal actions
-    # through the list helpers and validates a requested action with the
-    # predicate, so the mask and the engine cannot disagree.
-
-    @staticmethod
-    def is_healable_ally(cleric, ally, teams=None):
-        """A damaged living ally (a teammate's unit too; not the Cleric itself) within 1..CLERIC_HEAL_RANGE."""
-        if not same_side(ally.player, cleric.player, teams) or ally.health <= 0 or ally == cleric:
-            return False
-        distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-        return 1 <= distance <= CLERIC_HEAL_RANGE and ally.health < ally.max_health
-
-    @staticmethod
-    def get_healable_allies(cleric, units, teams=None):
-        """
-        Get damaged friendly units within the Cleric's heal range (1..CLERIC_HEAL_RANGE).
-        """
-        return [ally for ally in units if GameMechanics.is_healable_ally(cleric, ally, teams)]
-
-    @staticmethod
-    def is_curable_ally(cleric, ally, teams=None):
-        """A paralyzed living ally (a teammate's unit too; not the Cleric itself) within 1..CLERIC_HEAL_RANGE."""
-        if not same_side(ally.player, cleric.player, teams) or ally.health <= 0 or ally == cleric:
-            return False
-        distance = abs(cleric.x - ally.x) + abs(cleric.y - ally.y)
-        return 1 <= distance <= CLERIC_HEAL_RANGE and ally.is_paralyzed()
-
-    @staticmethod
-    def get_curable_allies(cleric, units, teams=None):
-        """
-        Get paralyzed friendly units within the Cleric's cure range (1..CLERIC_HEAL_RANGE).
-        """
-        return [ally for ally in units if GameMechanics.is_curable_ally(cleric, ally, teams)]
-
-    @staticmethod
-    def get_adjacent_paralyzed_allies(unit, units, teams=None):
-        """Get list of paralyzed friendly units adjacent to the given unit."""
-        adjacent_paralyzed = []
-        adjacent_positions = [(unit.x, unit.y - 1), (unit.x, unit.y + 1), (unit.x - 1, unit.y), (unit.x + 1, unit.y)]
-
-        for ally in units:
-            if same_side(ally.player, unit.player, teams) and ally.health > 0 and ally != unit:
-                if (ally.x, ally.y) in adjacent_positions:
-                    if ally.is_paralyzed():
-                        adjacent_paralyzed.append(ally)
-
-        return adjacent_paralyzed
+        lo, hi = unit.get_attack_range(GameMechanics._on_mountain(unit, grid))
+        return GameMechanics.units_in_range(
+            unit, units, lo, hi, lambda enemy: not same_side(enemy.player, unit.player, teams) and enemy.health > 0
+        )
 
     @staticmethod
     def is_enemy_flanked(attacker, target, units, teams=None):
@@ -248,19 +197,114 @@ class GameMechanics:
         Returns:
             True if target is adjacent to at least one of attacker's allies (excluding attacker)
         """
-        adjacent_positions = [
-            (target.x, target.y - 1),
-            (target.x, target.y + 1),
-            (target.x - 1, target.y),
-            (target.x + 1, target.y),
-        ]
+        return bool(
+            GameMechanics.units_in_range(
+                target,
+                units,
+                1,
+                1,
+                lambda unit: unit is not attacker and same_side(unit.player, attacker.player, teams) and unit.health > 0,
+            )
+        )
 
-        for unit in units:
-            if same_side(unit.player, attacker.player, teams) and unit != attacker and unit.health > 0:
-                if (unit.x, unit.y) in adjacent_positions:
-                    return True
+    @staticmethod
+    def _is_ally_in_ability_range(ability, caster, unit, teams=None):
+        """A living unit on ``caster``'s side (see :func:`same_side`) within ``ability``'s range."""
+        return (
+            same_side(unit.player, caster.player, teams)
+            and unit.health > 0
+            and GameMechanics.in_ability_range(ability, caster, unit)
+        )
 
-        return False
+    @staticmethod
+    def is_healable_ally(cleric, ally, teams=None):
+        """A damaged living ally (a teammate's unit too; not the Cleric itself) within the heal range."""
+        return GameMechanics._is_ally_in_ability_range("heal", cleric, ally, teams) and ally.health < ally.max_health
+
+    @staticmethod
+    def get_healable_allies(cleric, units, teams=None):
+        """
+        Get damaged friendly units within the Cleric's heal range (1..CLERIC_HEAL_RANGE).
+        """
+        return [ally for ally in units if GameMechanics.is_healable_ally(cleric, ally, teams)]
+
+    @staticmethod
+    def is_curable_ally(cleric, ally, teams=None):
+        """A paralyzed living ally (a teammate's unit too; not the Cleric itself) within the cure range."""
+        return GameMechanics._is_ally_in_ability_range("cure", cleric, ally, teams) and ally.is_paralyzed()
+
+    @staticmethod
+    def get_curable_allies(cleric, units, teams=None):
+        """
+        Get paralyzed friendly units within the Cleric's cure range (1..CLERIC_HEAL_RANGE).
+        """
+        return [ally for ally in units if GameMechanics.is_curable_ally(cleric, ally, teams)]
+
+    @staticmethod
+    def is_hasteable_ally(sorcerer, unit):
+        """A living, unparalyzed unit of the Sorcerer's own player within the haste range, not already hasted.
+
+        Own units only, not a teammate's (no ``teams``, so only the
+        Sorcerer's player is on its side): haste is an extra action *this*
+        turn, and a teammate's unit cannot act on the Sorcerer's turn (its
+        haste would be cleared when its owner's turn starts). A paralyzed
+        unit cannot act at all, so hasting it would only waste the cast.
+        """
+        return (
+            GameMechanics._is_ally_in_ability_range("haste", sorcerer, unit) and not unit.is_paralyzed() and not unit.is_hasted
+        )
+
+    @staticmethod
+    def is_defence_buffable_ally(sorcerer, unit, teams=None):
+        """A living ally (a teammate's unit too; the Sorcerer itself too) within the buff range without a defence buff."""
+        return GameMechanics._is_ally_in_ability_range("defence_buff", sorcerer, unit, teams) and not unit.has_defence_buff()
+
+    @staticmethod
+    def is_attack_buffable_ally(sorcerer, unit, teams=None):
+        """A living ally (a teammate's unit too; the Sorcerer itself too) within the buff range without an attack buff."""
+        return GameMechanics._is_ally_in_ability_range("attack_buff", sorcerer, unit, teams) and not unit.has_attack_buff()
+
+    @staticmethod
+    def get_hasteable_allies(sorcerer, units):
+        """
+        Get list of friendly units that can receive Haste from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units (excluding sorcerer) within the haste range that haven't been hasted
+        """
+        return [unit for unit in units if GameMechanics.is_hasteable_ally(sorcerer, unit)]
+
+    @staticmethod
+    def get_defence_buffable_allies(sorcerer, units, teams=None):
+        """
+        Get list of friendly units that can receive Defence Buff from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units within the buff range that don't have defence buff
+        """
+        return [unit for unit in units if GameMechanics.is_defence_buffable_ally(sorcerer, unit, teams)]
+
+    @staticmethod
+    def get_attack_buffable_allies(sorcerer, units, teams=None):
+        """
+        Get list of friendly units that can receive Attack Buff from the Sorcerer.
+
+        Args:
+            sorcerer: The Sorcerer unit
+            units: List of all units
+
+        Returns:
+            List of allied units within the buff range that don't have attack buff
+        """
+        return [unit for unit in units if GameMechanics.is_attack_buffable_ally(sorcerer, unit, teams)]
 
     @staticmethod
     def apply_defence_reduction(base_damage, target_defence):
@@ -289,81 +333,6 @@ class GameMechanics:
         return max(1, int(reduced_damage))
 
     @staticmethod
-    def is_hasteable_ally(sorcerer, unit):
-        """A living, unparalyzed unit of the Sorcerer's own player within 1..2, not already hasted.
-
-        Own units only, not a teammate's: haste is an extra action *this*
-        turn, and a teammate's unit cannot act on the Sorcerer's turn (its
-        haste would be cleared when its owner's turn starts). A paralyzed
-        unit cannot act at all, so hasting it would only waste the cast.
-        """
-        if unit.player != sorcerer.player or unit == sorcerer or unit.health <= 0 or unit.is_paralyzed():
-            return False
-        # Haste range is 1-2 tiles
-        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-        return 1 <= distance <= 2 and not unit.is_hasted
-
-    @staticmethod
-    def is_defence_buffable_ally(sorcerer, unit, teams=None):
-        """A living ally (a teammate's unit too) within 0..2 (the Sorcerer may buff itself) without a defence buff."""
-        if not same_side(unit.player, sorcerer.player, teams) or unit.health <= 0:
-            return False
-        # Buff range is 1-2 tiles (can buff self at distance 0)
-        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-        return distance <= 2 and not unit.has_defence_buff()
-
-    @staticmethod
-    def is_attack_buffable_ally(sorcerer, unit, teams=None):
-        """A living ally (a teammate's unit too) within 0..2 (the Sorcerer may buff itself) without an attack buff."""
-        if not same_side(unit.player, sorcerer.player, teams) or unit.health <= 0:
-            return False
-        # Buff range is 1-2 tiles (can buff self at distance 0)
-        distance = abs(sorcerer.x - unit.x) + abs(sorcerer.y - unit.y)
-        return distance <= 2 and not unit.has_attack_buff()
-
-    @staticmethod
-    def get_hasteable_allies(sorcerer, units):
-        """
-        Get list of friendly units that can receive Haste from the Sorcerer.
-
-        Args:
-            sorcerer: The Sorcerer unit
-            units: List of all units
-
-        Returns:
-            List of allied units (excluding sorcerer) within range 1-2 that haven't been hasted
-        """
-        return [unit for unit in units if GameMechanics.is_hasteable_ally(sorcerer, unit)]
-
-    @staticmethod
-    def get_defence_buffable_allies(sorcerer, units, teams=None):
-        """
-        Get list of friendly units that can receive Defence Buff from the Sorcerer.
-
-        Args:
-            sorcerer: The Sorcerer unit
-            units: List of all units
-
-        Returns:
-            List of allied units within range 1-2 that don't have defence buff
-        """
-        return [unit for unit in units if GameMechanics.is_defence_buffable_ally(sorcerer, unit, teams)]
-
-    @staticmethod
-    def get_attack_buffable_allies(sorcerer, units, teams=None):
-        """
-        Get list of friendly units that can receive Attack Buff from the Sorcerer.
-
-        Args:
-            sorcerer: The Sorcerer unit
-            units: List of all units
-
-        Returns:
-            List of allied units within range 1-2 that don't have attack buff
-        """
-        return [unit for unit in units if GameMechanics.is_attack_buffable_ally(sorcerer, unit, teams)]
-
-    @staticmethod
     def _hp_damage_scale(unit, damage_model):
         """Multiplier applied to a unit's outgoing damage under ``damage_model``.
 
@@ -384,14 +353,11 @@ class GameMechanics:
         The one definition of attack reach: ``GameState`` uses it to
         enumerate and validate attacks, and ``attack_unit`` uses it to
         decide whether the defender can counter. Reach is "the unit's
-        range damage there is positive" (``Unit.get_attack_damage``), which
-        includes the Archer's +1 range on a mountain.
+        range damage there is positive" (``Unit.get_attack_damage``, which
+        is 0 outside ``Unit.get_attack_range``), which includes the
+        Archer's +1 range on a mountain.
         """
-        on_mountain = False
-        if grid:
-            tile = grid.get_tile(unit.x, unit.y)
-            on_mountain = tile is not None and tile.type == "m"
-        return unit.get_attack_damage(target_x, target_y, on_mountain) > 0
+        return unit.get_attack_damage(target_x, target_y, GameMechanics._on_mountain(unit, grid)) > 0
 
     @staticmethod
     def _calculate_counter_damage(unit, target_x, target_y, grid, damage_model="flat"):
@@ -412,12 +378,7 @@ class GameMechanics:
         Returns:
             Counter-attack damage as integer
         """
-        on_mountain = False
-        if grid:
-            tile = grid.get_tile(unit.x, unit.y)
-            on_mountain = tile.type == "m"
-
-        base = unit.get_attack_damage(target_x, target_y, on_mountain) * COUNTER_ATTACK_MULTIPLIER
+        base = unit.get_attack_damage(target_x, target_y, GameMechanics._on_mountain(unit, grid)) * COUNTER_ATTACK_MULTIPLIER
         base = base * GameMechanics._hp_damage_scale(unit, damage_model)
         return int(base)
 
@@ -450,10 +411,7 @@ class GameMechanics:
             and bonus info ('charge_bonus', 'flank_bonus')
         """
         # Check if attacker is on mountain for range calculation
-        attacker_on_mountain = False
-        if grid:
-            attacker_tile = grid.get_tile(attacker.x, attacker.y)
-            attacker_on_mountain = attacker_tile.type == "m"
+        attacker_on_mountain = GameMechanics._on_mountain(attacker, grid)
 
         # An attacker that cannot reach the target does not hit it, and so
         # provokes no counter either. ``GameState.attack`` rejects such an
@@ -598,20 +556,17 @@ class GameMechanics:
         if same_side(target.player, paralyzer.player, teams):
             return False
 
-        # Mage paralyze range is 1..2 -- mirror of the mask gate in
-        # ``GameState.get_legal_actions`` (``distance <= 2``). Kept
-        # symmetric with haste/buff helpers so any future mask
-        # tightening can't reopen the heal-spam loop pattern:
-        # mask-only filters let through a legal-but-unexecutable
-        # action that, under a deterministic policy, traps the
-        # legal-actions cache (which only invalidates on successful
-        # mutations).
-        distance = abs(paralyzer.x - target.x) + abs(paralyzer.y - target.y)
-        if distance < 1 or distance > 2:
+        # The range the legal-action mask uses too (``ABILITY_RANGES``, via
+        # ``GameState._can_paralyze_target``). Kept symmetric with the
+        # heal/cure/buff checks so the mask and execution can't drift and
+        # reopen the heal-spam loop pattern: a legal-but-unexecutable action
+        # that, under a deterministic policy, traps the legal-actions cache
+        # (which only invalidates on successful mutations).
+        if not GameMechanics.in_ability_range("paralyze", paralyzer, target):
             return False
 
         # The counter ticks at the start of each of the victim's turns and
-        # frees it on reaching 0 (decrement_paralysis). A paralysis is cast
+        # frees it on reaching 0 (tick_statuses). A paralysis is cast
         # on the victim's opponent's turn, so the victim's next turn start
         # ticks it before that lost turn is played: +1 makes it cost exactly
         # PARALYZE_DURATION of the victim's own turns, and keeps it paralyzed
@@ -639,15 +594,14 @@ class GameMechanics:
         if not same_side(target.player, healer.player, teams):
             return -1
 
-        # Check distance (range 1..CLERIC_HEAL_RANGE). Must agree with
-        # ``get_healable_allies`` (the mask builder); a tighter bound here
-        # produces mask/execution drift -- the mask advertises heal
-        # actions whose execution returns -1 with no state change, and
-        # under a deterministic policy that loops the legal_actions
-        # cache forever (eval signature: thousands of consecutive
-        # invalid heal actions until max_steps truncation).
-        distance = abs(healer.x - target.x) + abs(healer.y - target.y)
-        if distance < 1 or distance > CLERIC_HEAL_RANGE:
+        # Check distance: the heal range ``is_healable_ally`` (the mask's
+        # rule) reads too. A tighter bound here produced mask/execution
+        # drift -- the mask advertised heal actions whose execution
+        # returned -1 with no state change, and under a deterministic policy
+        # that looped the legal_actions cache forever (eval signature:
+        # thousands of consecutive invalid heal actions until max_steps
+        # truncation).
+        if not GameMechanics.in_ability_range("heal", healer, target):
             return -1
 
         if target.health >= target.max_health:
@@ -666,12 +620,10 @@ class GameMechanics:
         if not same_side(target.player, curer.player, teams):
             return False
 
-        # Check distance (range 1..CLERIC_HEAL_RANGE). Mirror of the
-        # same fix applied to ``heal_unit``: mask uses
-        # ``CLERIC_HEAL_RANGE`` so cure must too, or the mask/execution
-        # disagreement re-opens the heal-spam loop on a paralyzed ally.
-        distance = abs(curer.x - target.x) + abs(curer.y - target.y)
-        if distance < 1 or distance > CLERIC_HEAL_RANGE:
+        # Check distance: the cure range ``is_curable_ally`` reads too, or
+        # the mask/execution disagreement re-opens the heal-spam loop on a
+        # paralyzed ally (see heal_unit).
+        if not GameMechanics.in_ability_range("cure", curer, target):
             return False
 
         if not target.is_paralyzed():
@@ -744,9 +696,8 @@ class GameMechanics:
         if target.has_defence_buff():
             return False
 
-        # Check distance (range 0-2, can buff self)
-        distance = abs(sorcerer.x - target.x) + abs(sorcerer.y - target.y)
-        if distance > 2:
+        # Check distance (min 0: can buff self)
+        if not GameMechanics.in_ability_range("defence_buff", sorcerer, target):
             return False
 
         # Apply defence buff to target (see _buff_counter for the teammate case)
@@ -782,9 +733,8 @@ class GameMechanics:
         if target.has_attack_buff():
             return False
 
-        # Check distance (range 0-2, can buff self)
-        distance = abs(sorcerer.x - target.x) + abs(sorcerer.y - target.y)
-        if distance > 2:
+        # Check distance (min 0: can buff self)
+        if not GameMechanics.in_ability_range("attack_buff", sorcerer, target):
             return False
 
         # Apply attack buff to target (see _buff_counter for the teammate case)
@@ -800,106 +750,62 @@ class GameMechanics:
         """Counter value for a buff covering SORCERER_BUFF_DURATION of ``target``'s own turns.
 
         Buff counters tick at the start of the buffed unit's owner's turn
-        (decrement_buff_durations). Cast on the Sorcerer's own unit, the
-        cast turn is one of the covered turns and is not ticked, so the
-        counter is the duration itself (unchanged behaviour). A teammate's
+        (tick_statuses). Cast on the Sorcerer's own unit, the cast turn is
+        one of the covered turns and is not ticked, so the counter is the
+        duration itself (unchanged behaviour). A teammate's
         unit is buffed outside its owner's turn and would lose one covered
         turn to its owner's next turn start, so it is stored one higher --
         the same rule a paralysis follows (see constants.PARALYZE_DURATION).
         """
         return SORCERER_BUFF_DURATION + (0 if target.player == sorcerer.player else 1)
 
+    # The per-unit counters ``tick_statuses`` runs down, each with the unit
+    # type it applies to (None: any unit). Statuses (paralysis, the buffs)
+    # count their unit's turn starts until they end, cooldowns the caster's
+    # turn starts until it may cast again; see the Status effects comment in
+    # constants.py for why a status applied outside its owner's turn is
+    # stored one higher (PARALYZE_DURATION + 1, _buff_counter).
+    TURN_START_COUNTERS = (
+        ("paralyzed_turns", None),
+        ("paralyze_cooldown", "M"),
+        ("haste_cooldown", "S"),
+        ("defence_buff_cooldown", "S"),
+        ("attack_buff_cooldown", "S"),
+        ("defence_buff_turns", None),
+        ("attack_buff_turns", None),
+    )
+
     @staticmethod
-    def decrement_paralyze_cooldowns(units, player):
-        """
-        Decrement paralyze cooldowns for a player's Mages at turn start.
+    def tick_statuses(units, player):
+        """Tick ``player``'s status and cooldown counters as its turn starts.
+
+        Each positive ``TURN_START_COUNTERS`` counter on each of the
+        player's units (of the counter's unit type, where it has one) drops
+        by one. Only the player whose turn is starting ticks, so every
+        duration is counted in its unit's own turns.
 
         Args:
             units: List of all units
             player: Player number whose turn is starting
 
         Returns:
-            List of Mages that came off cooldown
+            ``(unit, attr)`` for every counter that ran out (reached 0) on
+            this tick: a unit freed from paralysis, a buff that expired, a
+            caster whose ability came off cooldown.
         """
-        ready = []
+        expired = []
         for unit in units:
-            if unit.player == player and unit.type == "M" and unit.paralyze_cooldown > 0:
-                unit.paralyze_cooldown -= 1
-                if unit.paralyze_cooldown == 0:
-                    ready.append(unit)
-        return ready
-
-    @staticmethod
-    def decrement_haste_cooldowns(units, player):
-        """
-        Decrement haste cooldowns for a player's Sorcerers at turn start.
-
-        Args:
-            units: List of all units
-            player: Player number whose turn is starting
-
-        Returns:
-            List of Sorcerers that came off cooldown
-        """
-        ready = []
-        for unit in units:
-            if unit.player == player and unit.type == "S" and unit.haste_cooldown > 0:
-                unit.haste_cooldown -= 1
-                if unit.haste_cooldown == 0:
-                    ready.append(unit)
-        return ready
-
-    @staticmethod
-    def decrement_buff_cooldowns(units, player):
-        """
-        Decrement buff cooldowns for a player's Sorcerers at turn start.
-
-        Args:
-            units: List of all units
-            player: Player number whose turn is starting
-
-        Returns:
-            Dict with lists of Sorcerers that came off defence/attack buff cooldown
-        """
-        defence_ready = []
-        attack_ready = []
-        for unit in units:
-            if unit.player == player and unit.type == "S":
-                if unit.defence_buff_cooldown > 0:
-                    unit.defence_buff_cooldown -= 1
-                    if unit.defence_buff_cooldown == 0:
-                        defence_ready.append(unit)
-                if unit.attack_buff_cooldown > 0:
-                    unit.attack_buff_cooldown -= 1
-                    if unit.attack_buff_cooldown == 0:
-                        attack_ready.append(unit)
-        return {"defence_ready": defence_ready, "attack_ready": attack_ready}
-
-    @staticmethod
-    def decrement_buff_durations(units, player):
-        """
-        Decrement buff durations for a player's units at turn start.
-
-        Args:
-            units: List of all units
-            player: Player number whose turn is starting
-
-        Returns:
-            Dict with lists of units that lost defence/attack buff
-        """
-        defence_expired = []
-        attack_expired = []
-        for unit in units:
-            if unit.player == player:
-                if unit.defence_buff_turns > 0:
-                    unit.defence_buff_turns -= 1
-                    if unit.defence_buff_turns == 0:
-                        defence_expired.append(unit)
-                if unit.attack_buff_turns > 0:
-                    unit.attack_buff_turns -= 1
-                    if unit.attack_buff_turns == 0:
-                        attack_expired.append(unit)
-        return {"defence_expired": defence_expired, "attack_expired": attack_expired}
+            if unit.player != player:
+                continue
+            for attr, unit_type in GameMechanics.TURN_START_COUNTERS:
+                if unit_type is not None and unit.type != unit_type:
+                    continue
+                value = getattr(unit, attr)
+                if value > 0:
+                    setattr(unit, attr, value - 1)
+                    if value == 1:
+                        expired.append((unit, attr))
+        return expired
 
     @staticmethod
     def seize_structure(unit, tile, teams=None):
@@ -1036,14 +942,3 @@ class GameMechanics:
         )
 
         return {"total": total_income, "headquarters": headquarters_count, "buildings": building_count, "towers": tower_count}
-
-    @staticmethod
-    def decrement_paralysis(units, player):
-        """Decrement paralysis counters for a player's units at turn start."""
-        cured = []
-        for unit in units:
-            if unit.player == player and unit.is_paralyzed():
-                unit.paralyzed_turns -= 1
-                if unit.paralyzed_turns <= 0:
-                    cured.append(unit)
-        return cured

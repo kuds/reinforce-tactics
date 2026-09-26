@@ -97,6 +97,12 @@ class Unit:
         """
         Calculate attack damage based on distance to target.
 
+        Reach is ``get_attack_range``'s, so the damage lookup and the range
+        cannot disagree: 0 outside it. Inside it, a split attack (Mage and
+        Sorcerer: ``{"adjacent": ..., "range": ...}``) deals its adjacent
+        value at distance 1 and its range value beyond; any other unit deals
+        its one attack value.
+
         Args:
             target_x: Target X coordinate
             target_y: Target Y coordinate
@@ -106,31 +112,20 @@ class Unit:
             Attack damage value
         """
         distance = abs(self.x - target_x) + abs(self.y - target_y)
-
-        if self.type in ["M", "S"]:
-            # Mage and Sorcerer have ranged attacks
-            if distance == 1:
-                return self.attack_data["adjacent"]
-            elif distance == 2:
-                return self.attack_data["range"]
-            else:
-                return 0
-        elif self.type == "A":
-            # Archer has range 2-3 normally, 2-4 on mountain (cannot attack at distance 1)
-            max_range = 4 if on_mountain else 3
-            if 2 <= distance <= max_range:
-                return self.attack_data
-            else:
-                return 0
-        else:
-            if distance == 1:
-                return self.attack_data
-            else:
-                return 0
+        min_range, max_range = self.get_attack_range(on_mountain)
+        if not min_range <= distance <= max_range:
+            return 0
+        if isinstance(self.attack_data, dict):
+            return self.attack_data["adjacent"] if distance == 1 else self.attack_data["range"]
+        return self.attack_data
 
     def get_attack_range(self, on_mountain=False):
         """
         Get the min and max attack range for this unit.
+
+        The one definition of attack reach: ``get_attack_damage`` is 0
+        outside it, so ``GameMechanics.can_reach`` (what the engine
+        enumerates and validates attacks with) follows it too.
 
         Args:
             on_mountain: Whether the unit is on a mountain tile (for Archer range bonus)

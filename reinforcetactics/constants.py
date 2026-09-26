@@ -309,9 +309,11 @@ ROGUE_EVADE_CHANCE = 0.15  # Rogue: 15% chance to dodge counter-attacks
 # counter value, while the victim lost 2 turns).
 PARALYZE_DURATION = 2
 PARALYZE_COOLDOWN = 2  # Turns before Mage can use Paralyze again
+PARALYZE_RANGE = 2  # Max Manhattan distance for Mage paralyze
 HEAL_AMOUNT = 7
 CLERIC_HEAL_RANGE = 3  # Max Manhattan distance for Cleric heal and cure-paralyze abilities
 HASTE_COOLDOWN = 2  # Turns before Sorcerer can use Haste again
+HASTE_RANGE = 2  # Max Manhattan distance for Sorcerer haste
 
 # Rogue forest bonus
 ROGUE_FOREST_EVADE_BONUS = 0.15  # Additional 15% dodge chance when in forest (15% + 15% = 30%)
@@ -321,6 +323,21 @@ SORCERER_BUFF_DURATION = 3  # Own turns of the buffed unit the buff covers (see 
 SORCERER_BUFF_COOLDOWN = 2  # Turns before Sorcerer can use buff again
 SORCERER_DEFENCE_BUFF_AMOUNT = 0.50  # 50% damage reduction
 SORCERER_ATTACK_BUFF_AMOUNT = 0.50  # 50% damage increase
+BUFF_RANGE = 2  # Max Manhattan distance for Sorcerer defence and attack buffs
+
+# (min, max) Manhattan distance from caster to target for each targeted
+# ability -- the one place the engine reads them from (the legal-action
+# predicates and the mechanics that apply the ability both do). Min 1 means
+# the caster cannot target itself; the buffs' min 0 lets a Sorcerer buff
+# itself. Attack reach is per unit type: ``Unit.get_attack_range``.
+ABILITY_RANGES = {
+    "paralyze": (1, PARALYZE_RANGE),
+    "heal": (1, CLERIC_HEAL_RANGE),
+    "cure": (1, CLERIC_HEAL_RANGE),
+    "haste": (1, HASTE_RANGE),
+    "defence_buff": (0, BUFF_RANGE),
+    "attack_buff": (0, BUFF_RANGE),
+}
 
 # Tile type mapping (string code -> display name)
 # Kept for backwards compatibility

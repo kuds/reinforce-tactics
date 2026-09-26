@@ -6,10 +6,12 @@ import random
 from typing import Any
 
 from reinforcetactics.constants import (
+    BUFF_RANGE,
     CHARGE_BONUS,
     CHARGE_MIN_DISTANCE,
     COUNTER_ATTACK_MULTIPLIER,
     FLANK_BONUS,
+    HASTE_RANGE,
     ROGUE_EVADE_CHANCE,
     ROGUE_FOREST_EVADE_BONUS,
     UNIT_DATA,
@@ -2326,12 +2328,9 @@ class AdvancedBot(MediumBot):
         if not allies:
             return False
 
-        # Check range (Sorcerer buffs have range 0-2)
-        def in_buff_range(target):
-            dist = self.manhattan_distance(unit.x, unit.y, target.x, target.y)
-            return dist <= 2
-
-        allies_in_range = [a for a in allies if in_buff_range(a)]
+        # Allies within reach of haste or a buff (``allies`` excludes the
+        # Sorcerer itself); the engine checks each cast's own range.
+        allies_in_range = self.game_state.mechanics.units_in_range(unit, allies, 0, max(HASTE_RANGE, BUFF_RANGE))
         if not allies_in_range:
             return False
 
@@ -2812,7 +2811,7 @@ class MasterBot(AdvancedBot):
             and a.can_move
             and not a.is_hasted
             and not a.is_paralyzed()
-            and self.manhattan_distance(unit.x, unit.y, a.x, a.y) <= 2
+            and self.game_state.mechanics.in_ability_range("haste", unit, a)
         ]
         if not candidates:
             return False
