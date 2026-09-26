@@ -20,6 +20,19 @@ replays/
 videos/
 tournament_results/
 benchmarks/
+# Tournament results, LLM conversation logs and replays (mounted at runtime).
+docker/tournament/output/
+
+# Secrets. Both images build with the repo root as context and `COPY . .`
+# (the tournament image via docker-compose's `context: ../..`), so a secret
+# not excluded here lands in a layer that gets pushed to a registry.
+# docker/tournament/README.md has users put their OpenAI/Anthropic/Google API
+# keys in docker/tournament/.env. `**/` also matches the context root.
+**/.env
+**/.env.*
+!**/.env.example
+**/*credentials*.json
+**/*service-account*.json
 
 # Test/coverage and editor cruft
 tests/

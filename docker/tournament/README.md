@@ -13,6 +13,11 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
+`docker compose` reads `.env` to fill the `${...}` variables in
+`docker-compose.yml`, so the keys reach the container as environment variables
+at run time. The repo's `.dockerignore` keeps every `.env` file (and `output/`)
+out of the build context, so the keys never end up in an image layer you push.
+
 Or export them directly:
 
 ```bash

@@ -1,0 +1,56 @@
+# Files `gcloud builds submit` (scripts/cloud/build_image.sh) leaves out of the
+# source it uploads to Cloud Build.
+#
+# Without this file gcloud falls back to the root .gitignore, which neither
+# ignores benchmarks/ (so every local bootstrap run's checkpoints and videos
+# rode along in each upload) nor sees docker/tournament/.gitignore (so an API
+# key .env there was uploaded to the Cloud Build bucket).
+#
+# This mirrors .dockerignore: nothing excluded there reaches the image, so
+# excluding it here too cannot change what gets built. .gitignore syntax: a
+# leading "/" anchors a pattern to the repo root, which is how every
+# .dockerignore pattern is matched. Dockerfile and .dockerignore must stay in
+# the upload; the Docker build step in Cloud Build needs both.
+# tests/test_build_ignores.py checks these rules.
+.gcloudignore
+.git
+/.github/
+__pycache__/
+*.pyc
+
+# Docs and site (not needed to train)
+/docs-site/
+/docs/
+/assets/
+/images/
+
+# Local/training artifacts (regenerated at runtime, never baked into the image)
+/models/
+/checkpoints/
+/tensorboard/
+/logs/
+/saves/
+/replays/
+/videos/
+/tournament_results/
+/benchmarks/
+/docker/tournament/output/
+
+# Secrets (API key .env files, GCP credential JSON)
+.env
+.env.*
+!.env.example
+*credentials*.json
+*service-account*.json
+
+# Test/coverage and editor cruft
+/tests/
+/.pytest_cache/
+/.coverage
+/htmlcov/
+/.idea/
+/.venv/
+/*.egg-info/
+/dist/
+/build/
+/settings.json

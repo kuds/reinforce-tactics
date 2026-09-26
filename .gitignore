@@ -44,6 +44,18 @@ build/
 /models
 /tensorboard
 /logs
+# scripts/train/train_bootstrap.py's default run dir: model zips, per-stage
+# checkpoints, videos and charts. The hand-written notes elsewhere under
+# benchmarks/ stay tracked.
+/benchmarks/bootstrap/
+
+# Secrets: provider API keys in .env files and GCP credential JSON, anywhere
+# in the tree (docker/tournament/.gitignore only covers its own directory).
+.env
+.env.*
+!.env.example
+*credentials*.json
+*service-account*.json
 
 # Transient scratch files from analysis/scan agents (Drive crawls,
 # decoded payloads, working notes). Underscore-prefixed by convention;
