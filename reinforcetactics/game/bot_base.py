@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from reinforcetactics.core.actions import ACTOR_KEYS
+from reinforcetactics.core.legal_actions import find_paths
 from reinforcetactics.core.mechanics import same_side
 from reinforcetactics.rules import ABILITY_RANGES, UNIT_DATA
 
@@ -525,18 +526,28 @@ class BotUnitMixin:
             act(unit, depth + 1)
 
     def find_best_move_position(self, unit, target_x, target_y):
-        """The destination nearest ``(target_x, target_y)``; None when none is nearer than where ``unit`` stands.
+        """The destination nearest ``(target_x, target_y)``, or None when ``unit`` should keep its tile.
 
-        Staying put is the benchmark: a unit whose nearer tiles are all
-        held (by friends crowding a structure, or by an enemy standing on
-        it) keeps its tile rather than stepping sideways or back. Since
-        ``get_reachable`` returns only legal destinations (friends' tiles
-        and the unit's own excluded), comparing against nothing sent such a
-        unit away from its target: over a fifth of SimpleBot's moves ended
-        farther from it than they began. Before that, the nearest candidate
-        there was usually a friend's tile, which the engine refused, so the
-        unit stayed: this keeps that outcome without the refused move.
-        Every caller treats None as "no move".
+        Staying put is the benchmark when units are in the way: a unit
+        whose nearer tiles are all held (by friends crowding a structure,
+        or by an enemy standing on it) keeps its tile rather than stepping
+        sideways or back. Since ``get_reachable`` returns only legal
+        destinations (friends' tiles and the unit's own excluded),
+        comparing against nothing sent such a unit away from its target:
+        over a fifth of SimpleBot's moves ended farther from it than they
+        began. Before that, the nearest candidate there was usually a
+        friend's tile, which the engine refused, so the unit stayed: this
+        keeps that outcome without the refused move.
+
+        Terrain is the exception (``_walled_off_from``). When nothing
+        within this turn's move is nearer even with every unit ignored,
+        terrain (water, or costly ground under terrain move costs) stands
+        between the unit and a target more than a tile away, and the way
+        round starts with a step sideways or back. Holding there froze the
+        unit for the rest of the game, since the target stays its nearest.
+        It takes the nearest destination instead, as it did before this
+        benchmark, and the shuffled tiebreak walks a seeded bot round the
+        obstacle. Every caller treats None as "no move".
         """
         reachable = self.get_reachable(unit)
 
@@ -544,23 +555,36 @@ class BotUnitMixin:
             return None
 
         # Shuffle so equidistant reachable tiles tiebreak randomly under
-        # stochastic mode -- the strict ``<`` below otherwise hard-prefers
-        # the first-visited candidate, which is the most-hit decision site
-        # in the bot (every move-toward-target call). Without this, two
+        # stochastic mode -- ``min`` otherwise hard-prefers the
+        # first-visited candidate, which is the most-hit decision site in
+        # the bot (every move-toward-target call). Without this, two
         # equally-good landing tiles produce identical games every run.
         reachable_list = list(reachable)
         self._maybe_shuffle(reachable_list)
 
-        best_pos = None
-        best_distance = self.manhattan_distance(unit.x, unit.y, target_x, target_y)
+        def distance(pos):
+            return self.manhattan_distance(pos[0], pos[1], target_x, target_y)
 
-        for pos in reachable_list:
-            distance = self.manhattan_distance(pos[0], pos[1], target_x, target_y)
-            if distance < best_distance:
-                best_distance = distance
-                best_pos = pos
+        nearest = min(reachable_list, key=distance)
+        here = self.manhattan_distance(unit.x, unit.y, target_x, target_y)
+        if distance(nearest) < here or self._walled_off_from(unit, target_x, target_y, here):
+            return nearest
+        return None
 
-        return best_pos
+    def _walled_off_from(self, unit, target_x, target_y, here: int) -> bool:
+        """Whether terrain alone keeps ``unit`` from getting nearer ``(target_x, target_y)`` this turn.
+
+        True when the target is more than a tile away (``here``, the
+        unit's distance to it) and no tile the unit could reach this turn
+        with every unit ignored is strictly nearer: a local minimum of the
+        distance that the terrain makes. Otherwise units are what stand in
+        the way, and ``find_best_move_position`` holds. Next to the target
+        there is nothing to walk round.
+        """
+        if here <= 1:
+            return False
+        terrain_reach = find_paths(self.game_state, unit, blocked=set())
+        return not any(self.manhattan_distance(x, y, target_x, target_y) < here for x, y in terrain_reach)
 
     def _is_capturing_us(self, enemy) -> bool:
         """True if ``enemy`` stands on a capturable tile we want back."""

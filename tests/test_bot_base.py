@@ -153,6 +153,17 @@ def _open_game(towers=()):
     return GameState(grid, num_players=2)
 
 
+def _walled_tower_game():
+    """A 9x9 grass map: a neutral tower at (4, 1) behind ocean at (3..5, 2); HQs in the bottom corners, no gold."""
+    grid = np.full((9, 9), "p", dtype=object)
+    grid[8, 0], grid[8, 8] = "h_1", "h_2"
+    grid[1, 4] = "t"
+    grid[2, 3] = grid[2, 4] = grid[2, 5] = "o"
+    game = GameState(grid, num_players=2, max_turns=30, seed=1)
+    game.player_gold[1] = game.player_gold[2] = 0
+    return game
+
+
 class TestActingThroughTheEngine:
     """The mixin's reach, capture and continuation helpers lead only to actions the engine accepts (review rulebots-1/6)."""
 
@@ -207,6 +218,52 @@ class TestActingThroughTheEngine:
         bot = SimpleBot(game, player=1)
 
         assert bot.find_best_move_position(unit, 6, 3) == (unit.movement_range, 3)
+
+    def test_a_unit_held_back_by_friends_at_a_distance_keeps_its_tile(self):
+        """Units, not terrain, are in the way, so it holds rather than stepping back.
+
+        A one-tile corridor: friends fill every tile nearer the tower that
+        the Warrior could reach, and its only legal destination is behind it.
+        """
+        grid = np.full((7, 7), "o", dtype=object)
+        grid[3, :] = "p"
+        grid[3, 0], grid[3, 5], grid[3, 6] = "h_1", "t", "h_2"
+        game = GameState(grid, num_players=2)
+        unit = game.place_unit("W", 1, 3, 1)
+        for x in (2, 3, 4):
+            game.place_unit("W", x, 3, 1)
+        bot = SimpleBot(game, player=1, rng=random.Random(0))
+
+        assert bot.get_reachable(unit) == [(0, 3)]
+        assert bot.find_best_move_position(unit, 5, 3) is None
+
+    def test_a_unit_walled_off_from_its_target_steps_round_the_wall(self):
+        """Nothing within its move is nearer the tower even with units ignored: holding kept it there all game."""
+        game = _walled_tower_game()
+        unit = game.place_unit("W", 4, 3, 1)  # ocean at (3..5, 2) between it and the tower at (4, 1)
+        bot = SimpleBot(game, player=1)
+
+        assert bot.find_best_move_position(unit, 4, 1) in bot.get_reachable(unit)
+
+    @pytest.mark.parametrize("bot_cls", [SimpleBot, MediumBot, AdvancedBot, MasterBot])
+    def test_a_structure_behind_a_short_wall_is_reached(self, bot_cls):
+        """A Warrior heading for a tower behind a wall gets round it and starts seizing it.
+
+        Every tier moves towards it through ``find_best_move_position``; with
+        a strictly-nearer rule and no terrain exception each stopped at the
+        wall, at (4, 3), for the rest of the game.
+        """
+        for seed in range(3):
+            game = _walled_tower_game()
+            game.place_unit("W", 4, 5, 1)
+            tower = game.grid.get_tile(4, 1)
+            bot = bot_cls(game, player=1, rng=random.Random(seed))
+            for _ in range(12):
+                bot.take_turn()
+                game.end_turn()  # player 2 has no units and passes
+                if tower.health < tower.max_health:
+                    break
+            assert tower.health < tower.max_health, f"seed {seed}: the Warrior never got round the wall"
 
     def test_pick_capture_target_skips_a_structure_a_friend_stands_on(self):
         game = _open_game(towers=[(3, 2), (3, 5)])  # (3, 2) is nearer, but a friend holds it
