@@ -180,22 +180,28 @@ def _build_strategy_env(
     gold_scale: float | None,
     turn_scale: float | None,
     unit_count_scale: float | None,
+    fog_of_war: bool,
+    flat_action_version: int | None,
 ) -> StrategyGameEnv:
     """Construct a ``StrategyGameEnv`` from the shared parameter set.
 
     The single place the env-construction kwargs are spelled out for the
-    masking wrappers — ``make_maskable_env`` and the per-rank vec-env
-    builder both delegate here, so a new env parameter is added exactly
-    once. Scale factors are forwarded only when explicitly set so the
-    env's own defaults stay in charge otherwise.
+    masking wrappers — ``make_maskable_env``, the per-rank vec-env builder
+    and the self-play builders all delegate here, so a new env parameter is
+    added exactly once (and every caller must pass it: the parameters are
+    keyword-only with no defaults). Scale factors and the flat_discrete
+    table version are forwarded only when explicitly set so the env's own
+    defaults stay in charge otherwise.
     """
-    scale_kwargs: dict[str, Any] = {}
+    optional_kwargs: dict[str, Any] = {}
     if gold_scale is not None:
-        scale_kwargs["gold_scale"] = gold_scale
+        optional_kwargs["gold_scale"] = gold_scale
     if turn_scale is not None:
-        scale_kwargs["turn_scale"] = turn_scale
+        optional_kwargs["turn_scale"] = turn_scale
     if unit_count_scale is not None:
-        scale_kwargs["unit_count_scale"] = unit_count_scale
+        optional_kwargs["unit_count_scale"] = unit_count_scale
+    if flat_action_version is not None:
+        optional_kwargs["flat_action_version"] = flat_action_version
 
     return StrategyGameEnv(
         map_file=map_file,
@@ -212,7 +218,8 @@ def _build_strategy_env(
         gamma=gamma,
         pad_to_size=pad_to_size,
         engine_overrides=engine_overrides,
-        **scale_kwargs,
+        fog_of_war=fog_of_war,
+        **optional_kwargs,
     )
 
 
@@ -236,6 +243,8 @@ def make_maskable_env(
     turn_scale: float | None = None,
     unit_count_scale: float | None = None,
     engine_overrides: dict[str, Any] | None = None,
+    fog_of_war: bool = False,
+    flat_action_version: int | None = None,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -253,6 +262,10 @@ def make_maskable_env(
         seed: Optional seed for reproducibility. When provided, the env's
             ``np_random`` (and the random opponent's RNG) are seeded so that
             episodes are deterministic across runs.
+        fog_of_war: Partial observability for the agent (and the opponent's
+            observation in self-play).
+        flat_action_version: flat_discrete decode-table layout; ``None``
+            keeps the env's default (``FLAT_ACTION_VERSION_LATEST``).
 
     Returns:
         ActionMaskedEnv ready for training
@@ -285,6 +298,8 @@ def make_maskable_env(
         gold_scale=gold_scale,
         turn_scale=turn_scale,
         unit_count_scale=unit_count_scale,
+        fog_of_war=fog_of_war,
+        flat_action_version=flat_action_version,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -311,6 +326,8 @@ def _make_env_fn(
     unit_count_scale: float | None = None,
     max_actions_per_turn: int | None = None,
     engine_overrides: dict[str, Any] | None = None,
+    fog_of_war: bool = False,
+    flat_action_version: int | None = None,
 ) -> Callable[[], gym.Env]:
     """
     Create a function that creates an environment.
@@ -345,6 +362,8 @@ def _make_env_fn(
             gold_scale=gold_scale,
             turn_scale=turn_scale,
             unit_count_scale=unit_count_scale,
+            fog_of_war=fog_of_war,
+            flat_action_version=flat_action_version,
         )
         env.reset(seed=seed + rank)
         # Monitor must be the outer wrapper: it injects the ``episode``
@@ -381,6 +400,8 @@ def make_maskable_vec_env(
     turn_scale: float | None = None,
     unit_count_scale: float | None = None,
     engine_overrides: dict[str, Any] | None = None,
+    fog_of_war: bool = False,
+    flat_action_version: int | None = None,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -437,6 +458,8 @@ def make_maskable_vec_env(
             unit_count_scale=unit_count_scale,
             max_actions_per_turn=max_actions_per_turn,
             engine_overrides=engine_overrides,
+            fog_of_war=fog_of_war,
+            flat_action_version=flat_action_version,
         )
         for i in range(n_envs)
     ]

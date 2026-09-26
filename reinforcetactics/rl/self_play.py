@@ -363,11 +363,27 @@ class SelfPlayEnv(gym.Wrapper):
     - Support for opponent pool (multiple historical models)
     - Optional random seat per episode (``swap_players``)
 
+    Which weights the opponent plays:
+
+    - ``set_opponent_snapshot`` (SelfPlayCallback, at training start and
+      every ``update_freq`` calls) installs the *latest* snapshot at once,
+      mid-episode included.
+    - While the pool is empty, every episode plays the latest snapshot.
+    - Once the pool has entries, each reset draws the episode's opponent:
+      the latest snapshot with probability ``latest_opponent_prob``, else a
+      pool sample (the pool's own ``selection_strategy``). The default 0.0 is
+      the long-standing behaviour, which replaces the latest snapshot with a
+      pool sample at every reset: a fresh snapshot then only plays out the
+      episodes already running when it arrives. The draw uses the env's
+      ``np_random`` and is only made for 0 < p < 1, so the default leaves
+      the random stream exactly as it was.
+
     Attributes:
         opponent_model: The model used for opponent decisions until the
             first snapshot is installed (in-process only)
         opponent_pool: Pool of historical opponents (optional)
         swap_players: Whether the agent's seat is drawn per episode
+        latest_opponent_prob: See above.
     """
 
     def __init__(
@@ -377,6 +393,7 @@ class SelfPlayEnv(gym.Wrapper):
         opponent_pool: OpponentPool | None = None,
         swap_players: bool = True,
         opponent_deterministic: bool = False,
+        latest_opponent_prob: float = 0.0,
     ):
         """
         Initialize the self-play environment.
@@ -388,7 +405,12 @@ class SelfPlayEnv(gym.Wrapper):
             opponent_pool: Pool of historical opponents for diverse training
             swap_players: Randomly swap which player agent controls each episode
             opponent_deterministic: Use deterministic opponent actions
+            latest_opponent_prob: Probability, per episode, of playing the
+                latest snapshot instead of a pool sample once the pool has
+                entries (in [0, 1]; default 0.0, see the class docstring).
         """
+        if not 0.0 <= float(latest_opponent_prob) <= 1.0:
+            raise ValueError(f"latest_opponent_prob must be in [0, 1]; got {latest_opponent_prob}")
         super().__init__(env)
         base = env.unwrapped
         if not isinstance(base, StrategyGameEnv):
@@ -409,6 +431,7 @@ class SelfPlayEnv(gym.Wrapper):
         self.opponent_model = opponent_model
         self.opponent_pool = opponent_pool
         self.opponent_deterministic = opponent_deterministic
+        self.latest_opponent_prob = float(latest_opponent_prob)
         self.swap_players = swap_players
 
         # Frozen opponent policy (built from a policy_snapshot) and the
@@ -564,14 +587,30 @@ class SelfPlayEnv(gym.Wrapper):
         self._opponent_source = source
         return True
 
+    def _select_episode_opponent(self) -> None:
+        """Choose this episode's opponent weights: latest snapshot or a pool sample.
+
+        See the class docstring. With the pool empty (or absent) the latest
+        snapshot simply stays in place.
+        """
+        if self.opponent_pool is None or self.opponent_pool.size == 0:
+            return
+        p = self.latest_opponent_prob
+        if p >= 1.0 or (p > 0.0 and float(self._base_env.np_random.random()) < p):
+            if self._latest_params is not None:
+                self._load_opponent_params(self._latest_params, source="latest")
+            return
+        self.update_opponent_from_pool()
+
     def _build_opponent(self, game_state: Any, opponent_player: int) -> _SelfPlayOpponent:
         """Opponent factory registered with the base env.
 
         Called from ``StrategyGameEnv.reset`` after ``np_random`` has been
-        seeded and before player 1's opening turn, so the per-episode pool
-        draw is reproducible and in place for the opponent's first move.
+        seeded and before player 1's opening turn, so the per-episode
+        opponent draw is reproducible and in place for the opponent's first
+        move.
         """
-        self.update_opponent_from_pool()
+        self._select_episode_opponent()
         return _SelfPlayOpponent(self, game_state, opponent_player)
 
     # ------------------------------------------------------------------
@@ -874,9 +913,16 @@ def _make_callback_class():
 
         This callback:
         1. Pushes a snapshot of the current policy to every opponent at
-           training start and every ``update_freq`` calls
+           training start and every ``update_freq`` calls. The snapshot
+           becomes each env's *latest* opponent at once; whether later
+           episodes keep playing it depends on the pool (see 2).
         2. Optionally adds the model to the opponent pool (and mirrors the
-           addition into worker-process pools)
+           addition into worker-process pools). Once the pool has entries,
+           every episode's opponent is drawn at reset: the latest snapshot
+           with probability ``SelfPlayEnv.latest_opponent_prob``, else a
+           pool sample. With the default 0.0 a pushed snapshot is replaced
+           by a pool sample at the next reset, i.e. with a non-empty pool
+           ``update_freq`` only refreshes the episodes in flight.
         3. Tracks win rates and logs stats (incl. tensorboard when available)
 
         Vectorized envs (DummyVecEnv, SubprocVecEnv, VecMonitor over either,
@@ -913,8 +959,12 @@ def _make_callback_class():
                 env: The SelfPlayEnv or vectorized environment whose
                     self-play opponents to manage. Mutually exclusive with
                     ``envs``.
-                update_freq: How often (in calls) to update the opponent to
-                    the current model
+                update_freq: How often (in calls) to push a snapshot of the
+                    current model to the opponents as their latest snapshot.
+                    It is played until the next reset, and after it only
+                    while the pool is empty or when the per-episode draw
+                    picks it (``SelfPlayEnv.latest_opponent_prob``; with the
+                    default 0.0 a non-empty pool always wins the draw).
                 add_to_pool_freq: How often (in calls) to consider adding
                     the model to the opponent pool
                 min_win_rate_for_pool: Minimum win rate, over the games
@@ -1055,7 +1105,7 @@ def _make_callback_class():
             return wins / games if games else 0.5
 
         def _update_opponents(self, log: bool = True) -> None:
-            """Update all opponents to a snapshot of the current model."""
+            """Install a snapshot of the current model as every env's latest opponent."""
             self._call("set_opponent_snapshot", policy_snapshot(self.model))
 
             if log and self.verbose >= 1:
@@ -1150,8 +1200,21 @@ def _env_kwargs(
     max_actions_per_turn: int | None,
     gamma: float,
     pad_to_size: tuple[int, int] | None,
+    fog_of_war: bool,
+    engine_overrides: dict[str, Any] | None,
+    gold_scale: float | None,
+    turn_scale: float | None,
+    unit_count_scale: float | None,
+    flat_action_version: int | None,
 ) -> dict[str, Any]:
-    """The StrategyGameEnv construction kwargs shared by self-play and bot workers."""
+    """The StrategyGameEnv construction kwargs shared by self-play and bot workers.
+
+    Every EnvConfig field a self-play run can honour. ``engine_overrides``,
+    the observation scales and ``fog_of_war`` used to be hard-coded to the
+    defaults here, so ``train_self_play.py --config`` with a balance overlay
+    or fog of war silently trained the default game. ``opponent_kwargs`` is
+    set per worker kind (self-play workers take none).
+    """
     return {
         "map_file": map_file,
         "render_mode": None,
@@ -1165,18 +1228,30 @@ def _env_kwargs(
         "opponent_kwargs": None,
         "gamma": gamma,
         "pad_to_size": tuple(pad_to_size) if pad_to_size is not None else None,
-        "engine_overrides": None,
-        "gold_scale": None,
-        "turn_scale": None,
-        "unit_count_scale": None,
+        "engine_overrides": engine_overrides,
+        "gold_scale": gold_scale,
+        "turn_scale": turn_scale,
+        "unit_count_scale": unit_count_scale,
+        "fog_of_war": bool(fog_of_war),
+        "flat_action_version": flat_action_version,
     }
 
 
-def _build_self_play_env(env_kwargs: dict[str, Any], opponent_pool: OpponentPool | None, swap_players: bool) -> SelfPlayEnv:
+def _build_self_play_env(
+    env_kwargs: dict[str, Any],
+    opponent_pool: OpponentPool | None,
+    swap_players: bool,
+    latest_opponent_prob: float = 0.0,
+) -> SelfPlayEnv:
     from reinforcetactics.rl.masking import ActionMaskedEnv, _build_strategy_env
 
     base_env = _build_strategy_env(opponent="self", **env_kwargs)
-    return SelfPlayEnv(ActionMaskedEnv(base_env), opponent_pool=opponent_pool, swap_players=swap_players)
+    return SelfPlayEnv(
+        ActionMaskedEnv(base_env),
+        opponent_pool=opponent_pool,
+        swap_players=swap_players,
+        latest_opponent_prob=latest_opponent_prob,
+    )
 
 
 def make_self_play_env(
@@ -1193,6 +1268,13 @@ def make_self_play_env(
     gamma: float = 0.99,
     pad_to_size: tuple[int, int] | None = None,
     seed: int | None = None,
+    fog_of_war: bool = False,
+    engine_overrides: dict[str, Any] | None = None,
+    gold_scale: float | None = None,
+    turn_scale: float | None = None,
+    unit_count_scale: float | None = None,
+    flat_action_version: int | None = None,
+    latest_opponent_prob: float = 0.0,
 ) -> SelfPlayEnv:
     """
     Create a single self-play environment.
@@ -1212,6 +1294,13 @@ def make_self_play_env(
         pad_to_size: Optional ``(pad_h, pad_w)`` observation padding
             (flat_discrete only)
         seed: Optional seed for an initial ``reset(seed=...)``
+        fog_of_war: Partial observability (each seat sees its own view)
+        engine_overrides: Sparse overlay over the engine constants
+        gold_scale / turn_scale / unit_count_scale: Observation tanh
+            divisors (``None`` keeps the env defaults)
+        flat_action_version: flat_discrete decode-table layout (``None``
+            keeps the env default, the latest version)
+        latest_opponent_prob: See :class:`SelfPlayEnv`.
 
     Returns:
         SelfPlayEnv ready for training
@@ -1234,9 +1323,16 @@ def make_self_play_env(
             max_actions_per_turn=max_actions_per_turn,
             gamma=gamma,
             pad_to_size=pad_to_size,
+            fog_of_war=fog_of_war,
+            engine_overrides=engine_overrides,
+            gold_scale=gold_scale,
+            turn_scale=turn_scale,
+            unit_count_scale=unit_count_scale,
+            flat_action_version=flat_action_version,
         ),
         opponent_pool,
         swap_players,
+        latest_opponent_prob,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -1250,11 +1346,12 @@ def _make_self_play_env_fn(
     env_kwargs: dict[str, Any],
     opponent_pool: OpponentPool | None,
     swap_players: bool,
+    latest_opponent_prob: float = 0.0,
 ) -> Callable[[], SelfPlayEnv]:
     """Create a function that creates a self-play environment."""
 
     def _init() -> SelfPlayEnv:
-        env = _build_self_play_env(env_kwargs, opponent_pool, swap_players)
+        env = _build_self_play_env(env_kwargs, opponent_pool, swap_players, latest_opponent_prob)
         # Seed through the wrapper so the seat draw is part of the seeded
         # stream too.
         env.reset(seed=seed + rank)
@@ -1263,13 +1360,20 @@ def _make_self_play_env_fn(
     return _init
 
 
-def _make_bot_env_fn(rank: int, seed: int, *, env_kwargs: dict[str, Any], opponent: str) -> Callable[[], gym.Env]:
+def _make_bot_env_fn(
+    rank: int,
+    seed: int,
+    *,
+    env_kwargs: dict[str, Any],
+    opponent: str,
+    opponent_kwargs: dict[str, Any] | None = None,
+) -> Callable[[], gym.Env]:
     """A scripted-bot worker for a mixed VecEnv (same spaces as the self-play workers)."""
 
     def _init() -> gym.Env:
         from reinforcetactics.rl.masking import ActionMaskedEnv, _build_strategy_env
 
-        env = _build_strategy_env(opponent=opponent, **env_kwargs)
+        env = _build_strategy_env(opponent=opponent, **{**env_kwargs, "opponent_kwargs": opponent_kwargs})
         env.reset(seed=seed + rank)
         # No Monitor here, matching the self-play workers: the caller wraps
         # the whole VecEnv in VecMonitor.
@@ -1296,6 +1400,14 @@ def make_self_play_vec_env(
     pad_to_size: tuple[int, int] | None = None,
     bot_ratio: float = 0.0,
     bot_opponent: str = "bot",
+    fog_of_war: bool = False,
+    engine_overrides: dict[str, Any] | None = None,
+    gold_scale: float | None = None,
+    turn_scale: float | None = None,
+    unit_count_scale: float | None = None,
+    flat_action_version: int | None = None,
+    bot_opponent_kwargs: dict[str, Any] | None = None,
+    latest_opponent_prob: float = 0.0,
 ):
     """
     Create vectorized self-play environments for parallel training.
@@ -1319,7 +1431,17 @@ def make_self_play_vec_env(
         bot_ratio: Fraction of workers that play a scripted bot instead of
             self-play (mixed training). ``round(n_envs * bot_ratio)``
             workers, which must leave at least one of each kind when > 0.
-        bot_opponent: Opponent type for the bot workers.
+        bot_opponent: Opponent type for the bot workers: a scripted bot
+            from the registry (``bot_registry.accepted_names()``).
+        fog_of_war, engine_overrides, gold_scale, turn_scale,
+            unit_count_scale, flat_action_version: Forwarded to every
+            worker's env (see :func:`make_self_play_env`).
+        bot_opponent_kwargs: Constructor kwargs for the bot workers'
+            opponent (validated against it).
+        latest_opponent_prob: Per-episode probability that a self-play
+            worker plays the latest snapshot rather than a pool sample once
+            the pool has entries (see :class:`SelfPlayEnv`). The default 0.0
+            keeps the long-standing pool-only behaviour.
 
     Returns:
         Vectorized environment ready for MaskablePPO. Wrap it in
@@ -1343,6 +1465,18 @@ def make_self_play_vec_env(
             f"bot_ratio={bot_ratio} with n_envs={n_envs} gives {n_bot} bot workers; mixed training needs at "
             "least one bot worker and one self-play worker"
         )
+    if not 0.0 <= latest_opponent_prob <= 1.0:
+        raise ValueError(f"latest_opponent_prob must be in [0, 1]; got {latest_opponent_prob}")
+    if n_bot:
+        # Checked here, in the trainer process: inside a SubprocVecEnv worker
+        # the env's own ValueError surfaces only as a broken pipe. 'self' (or
+        # None) would leave the bot workers with no opponent at all.
+        from reinforcetactics.game.bot_registry import accepted_names, is_scripted_name
+        from reinforcetactics.rl.env_schema import validate_opponent_kwargs
+
+        if not (isinstance(bot_opponent, str) and is_scripted_name(bot_opponent)):
+            raise ValueError(f"bot_opponent must be a scripted bot ({', '.join(accepted_names())}); got {bot_opponent!r}")
+        validate_opponent_kwargs(bot_opponent, bot_opponent_kwargs)
 
     env_kwargs = _env_kwargs(
         map_file=map_file,
@@ -1355,12 +1489,28 @@ def make_self_play_vec_env(
         max_actions_per_turn=max_actions_per_turn,
         gamma=gamma,
         pad_to_size=pad_to_size,
+        fog_of_war=fog_of_war,
+        engine_overrides=engine_overrides,
+        gold_scale=gold_scale,
+        turn_scale=turn_scale,
+        unit_count_scale=unit_count_scale,
+        flat_action_version=flat_action_version,
     )
     env_fns: list[Callable[[], gym.Env]] = [
-        _make_self_play_env_fn(i, seed, env_kwargs=env_kwargs, opponent_pool=opponent_pool, swap_players=swap_players)
+        _make_self_play_env_fn(
+            i,
+            seed,
+            env_kwargs=env_kwargs,
+            opponent_pool=opponent_pool,
+            swap_players=swap_players,
+            latest_opponent_prob=latest_opponent_prob,
+        )
         for i in range(n_envs - n_bot)
     ]
-    env_fns += [_make_bot_env_fn(i, seed, env_kwargs=env_kwargs, opponent=bot_opponent) for i in range(n_envs - n_bot, n_envs)]
+    env_fns += [
+        _make_bot_env_fn(i, seed, env_kwargs=env_kwargs, opponent=bot_opponent, opponent_kwargs=bot_opponent_kwargs)
+        for i in range(n_envs - n_bot, n_envs)
+    ]
 
     if use_subprocess and n_envs > 1:
         vec_env = SubprocVecEnv(env_fns)

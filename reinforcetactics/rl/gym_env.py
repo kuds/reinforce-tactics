@@ -317,6 +317,61 @@ def stamp_flat_action_version(obj: Any, version: int) -> None:
     setattr(space, "flat_action_version", version)
 
 
+def checkpoint_flat_action_version(path: str | Any) -> int:
+    """The flat_discrete table version an SB3 ``.zip`` checkpoint was trained with.
+
+    Reads only the checkpoint's metadata (the pickled action space in its
+    ``data`` entry), not its weights, so the version can decide how the
+    envs are built *before* the model is. Unstamped checkpoints read as
+    :data:`FLAT_ACTION_VERSION_LEGACY` (see :func:`flat_action_version_of`).
+
+    Raises:
+        FileNotFoundError: ``path`` does not exist.
+        ValueError: ``path`` is not an SB3 checkpoint with an action space.
+    """
+    import json
+    import os
+    import zipfile
+
+    from stable_baselines3.common.save_util import json_to_data
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"checkpoint '{path}' does not exist")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = json.loads(archive.read("data").decode())
+    except (zipfile.BadZipFile, KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"'{path}' is not a Stable-Baselines3 checkpoint: {exc}") from exc
+    # Deserialize the action space alone: the other entries (schedules,
+    # policy classes) need not even be importable here.
+    space = json_to_data(json.dumps({"action_space": entries.get("action_space")})).get("action_space")
+    if not isinstance(space, spaces.Space):
+        raise ValueError(f"checkpoint '{path}' records no action space")
+    return flat_action_version_of(space)
+
+
+def resolve_flat_action_version(
+    configured: int | None,
+    *,
+    action_space_type: str,
+    checkpoint_path: str | None = None,
+) -> int:
+    """The flat_discrete table version a run's envs should use.
+
+    ``configured`` (a config's ``env.flat_action_version``) wins when set.
+    ``None`` means: the version of the checkpoint the run continues
+    (``checkpoint_path``: a warm start or resume of a flat_discrete policy),
+    so the policy keeps decoding with the table it was trained on; else
+    :data:`FLAT_ACTION_VERSION_LATEST`. multi_discrete runs never read the
+    checkpoint (the version only shapes flat_discrete tables).
+    """
+    if configured is not None:
+        return _check_flat_action_version(configured)
+    if action_space_type == "flat_discrete" and checkpoint_path:
+        return checkpoint_flat_action_version(checkpoint_path)
+    return FLAT_ACTION_VERSION_LATEST
+
+
 class _RateLimitedWarning:
     """Log a warning at most once per ``interval_s``, counting the ones held back.
 
