@@ -59,7 +59,7 @@ UNIT_TYPE_TO_IDX = {ut: i for i, ut in enumerate(ALL_UNIT_TYPES)}
 # Unit costs and stats. ``name`` is the display name bots and LLM prompts
 # use; sprite files and colours are ``ui.assets.UNIT_ASSETS``, keyed by the
 # same codes. engine_overrides["unit_data"] can change any of these fields
-# per game (GameState._resolve_engine_overrides).
+# per game (EngineConfig.from_overrides in core/engine_config.py).
 UNIT_DATA = {
     "W": {
         "name": "Warrior",
