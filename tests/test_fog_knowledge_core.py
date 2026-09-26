@@ -9,15 +9,19 @@ plans around the units a player can see, so a hidden enemy no longer shapes
 the move mask; a move that runs into one is ambushed and stops short.
 """
 
+from unittest.mock import Mock
+
 import numpy as np
 import pygame
 import pytest
 
+from reinforcetactics.app.input_handler import InputHandler
 from reinforcetactics.constants import BUILDING_MAX_HEALTH, TILE_SIZE, TOWER_MAX_HEALTH
 from reinforcetactics.core.game_state import GameState
 from reinforcetactics.core.visibility import SHROUDED, UNEXPLORED, VISIBLE, calculate_vision_radius
 from reinforcetactics.game.llm_bot import LLMBot
 from reinforcetactics.rl.observation import build_observation
+from reinforcetactics.ui.menus.in_game.unit_action_menu import UnitActionMenu
 from reinforcetactics.ui.renderer import Renderer
 from reinforcetactics.utils import settings as settings_module
 
@@ -214,6 +218,46 @@ class TestAmbush:
         assert not game.move_unit(barbarian, 9, 7)
         assert (barbarian.x, barbarian.y) == (4, 7) and barbarian.can_move
 
+    def test_an_ambushed_move_cannot_be_cancelled(self, fow_game):
+        """The move is spent: cancelling it would be free scouting (move, see the ambusher, undo, re-plan)."""
+        barbarian = fow_game.place_unit("B", 4, 7, player=1)
+        fow_game.place_unit("W", 7, 7, player=2)
+        assert fow_game.move_unit(barbarian, 9, 7)
+        assert barbarian.ambushed and barbarian.has_moved
+
+        assert not fow_game.can_cancel_move(barbarian)
+        assert fow_game.cancel_move(barbarian) is False
+
+        assert (barbarian.x, barbarian.y) == (6, 7)
+        assert not barbarian.can_move
+        assert not any(m[:2] == (6, 7) for m in _moves(fow_game, 1))  # no second move either
+
+    def test_reselecting_an_ambushed_unit_does_not_make_the_ambusher_a_target(self, fow_game):
+        """The GUI re-captures the attack snapshot when a unit is selected; after a move it must keep the old one."""
+        barbarian = fow_game.place_unit("B", 4, 7, player=1)
+        ambusher = fow_game.place_unit("W", 7, 7, player=2)
+        assert fow_game.move_unit(barbarian, 9, 7)
+
+        fow_game.capture_visible_enemies_for_unit(barbarian)  # what selecting it in the GUI does
+
+        assert (7, 7) not in barbarian.visible_enemies_at_action_start
+        assert ambusher not in [a["target"] for a in fow_game.get_legal_actions(1)["attack"]]
+
+    def test_the_units_next_action_is_cancellable_again(self, fow_game):
+        barbarian = fow_game.place_unit("B", 4, 7, player=1)
+        fow_game.place_unit("W", 7, 7, player=2)
+        assert fow_game.move_unit(barbarian, 9, 7)
+        fow_game.end_unit_turn(barbarian)
+        assert not barbarian.ambushed
+        fow_game.end_turn()
+        fow_game.end_turn()
+
+        assert fow_game.move_unit(barbarian, 6, 9)  # a clear path this time
+
+        assert fow_game.can_cancel_move(barbarian)
+        assert fow_game.cancel_move(barbarian)
+        assert (barbarian.x, barbarian.y) == (6, 7) and barbarian.can_move
+
 
 class TestVisibilityIsAlwaysCurrent:
     """core-12: the engine refreshes visibility itself whenever vision can change."""
@@ -261,6 +305,36 @@ class TestVisibilityIsAlwaysCurrent:
 
         assert not fow_game.is_position_visible(10, 10, player=1)
         assert not fow_game.is_position_visible(9, 8, player=1)
+
+    def test_cancel_move_takes_back_the_vision_the_move_gave(self, fow_game):
+        """A cancelled scout left its tiles VISIBLE, so known_structure served (and memorised) live state."""
+        archer = fow_game.place_unit("A", 3, 1, player=1)  # vision 4: sees x <= 7
+        assert not fow_game.is_position_visible(*BUILDING, player=1)
+        assert fow_game.move_unit(archer, 5, 1)
+        assert fow_game.is_position_visible(*BUILDING, player=1)
+
+        assert fow_game.cancel_move(archer)
+
+        assert fow_game.visibility_maps[1].get_visibility_state(*BUILDING) == SHROUDED  # seen, now out of sight
+        fow_game.end_turn()
+        tile = _tile(fow_game, BUILDING)
+        tile.player, tile.health = 2, 5  # captured out of P1's sight
+        assert fow_game.to_numpy(for_player=1)["grid"][BUILDING[1], BUILDING[0], 1] == 0
+        fow_game.end_turn()
+        assert fow_game.known_structure(1, *BUILDING).owner is None
+
+    def test_a_bare_update_visibility_invalidates_the_legal_actions(self, fow_game):
+        """Legality under fog reads visibility, so any refresh (not just the engine's own) must drop the cache."""
+        barbarian = fow_game.place_unit("B", 5, 1, player=1)  # moves 5, sees 2
+        fow_game.place_unit("W", 8, 3, player=2)  # hidden, so a legal destination
+        assert (5, 1, 8, 3) in _moves(fow_game, 1)
+        _tile(fow_game, BUILDING).player = 1  # e.g. a scenario script; building vision 3 covers (8, 3)
+
+        fow_game.update_visibility()
+
+        assert fow_game.is_position_visible(8, 3, player=1)
+        assert (5, 1, 8, 3) not in _moves(fow_game, 1)
+        assert barbarian.can_move
 
 
 class TestVisibilityUpdateCost:
@@ -355,6 +429,34 @@ class TestLLMPromptUsesTheSameView:
 
         assert _buildings(state, "enemy_buildings")[TOWER] == {"type": "t", "position": [1, 8], "income": 50}
 
+    @staticmethod
+    def _seize_offers(game):
+        state = _SilentLLMBot(game, player=1, api_key="test-key")._serialize_game_state()
+        return {tuple(a["move_to"]) for a in state["legal_actions"]["move_then_seize"]}
+
+    def test_move_then_seize_is_not_offered_on_a_structure_never_seen(self, fow_game):
+        """The move set reaches tiles the bot has never seen; a then_seize hint there revealed the structure."""
+        fow_game.place_unit("B", 4, 7, player=1)  # moves 5, sees 2: TOWER is reachable but unexplored
+        assert fow_game.known_structure(1, *TOWER) is None
+        assert TOWER in {(m[2], m[3]) for m in _moves(fow_game, 1)}
+
+        assert TOWER not in self._seize_offers(fow_game)
+
+    def test_move_then_seize_follows_the_known_owner(self, fow_game):
+        fow_game.place_unit("B", 4, 7, player=1)
+        fow_game.place_unit("A", TOWER[0], TOWER[1] - 3, player=1)  # vision 4: sees the tower
+        assert fow_game.known_structure(1, *TOWER).owner is None
+
+        assert TOWER in self._seize_offers(fow_game)  # a known neutral tower
+        _tile(fow_game, TOWER).player = 1
+        assert TOWER not in self._seize_offers(fow_game)  # its own
+
+    def test_without_fog_move_then_seize_is_unchanged(self):
+        game = GameState(_map(), num_players=2)
+        game.place_unit("B", 4, 7, player=1)
+
+        assert TOWER in self._seize_offers(game)
+
 
 @pytest.fixture
 def headless(tmp_path, monkeypatch):
@@ -401,3 +503,55 @@ class TestRendererDrawsTheKnownOwner:
         captured = self._tile_pixels(renderer, tower)
 
         assert not (neutral == captured).all()
+
+
+class TestGuiFollowsTheAmbushRule:
+    """The GUI must not undo an ambush, nor draw moves by units its player can't see."""
+
+    @staticmethod
+    def _click(handler, x, y):
+        return handler._handle_grid_click((x * TILE_SIZE + 1, y * TILE_SIZE + 1), current_time=0)
+
+    def test_an_ambushed_unit_gets_a_notice_and_no_cancel_option(self, headless, fow_game):
+        screen = pygame.display.set_mode((TILE_SIZE * 12, TILE_SIZE * 12))
+        renderer = Mock()
+        renderer.screen = screen
+        handler = InputHandler(fow_game, renderer, bots={}, num_players=2)
+        barbarian = fow_game.place_unit("B", 4, 7, player=1)
+        ambusher = fow_game.place_unit("W", 7, 7, player=2)
+
+        self._click(handler, 4, 7)  # select
+        self._click(handler, 9, 7)  # move: ambushed at (6, 7)
+
+        assert (barbarian.x, barbarian.y) == (6, 7)
+        assert handler.notice_text.startswith("Ambushed!")
+        assert isinstance(handler.active_menu, UnitActionMenu)
+        assert "cancel_move" not in {a["type"] for a in handler.active_menu.actions}
+
+        # ESC closes the menu; the move stays spent and the unit where it stopped.
+        handler.handle_keyboard_event(Mock(key=pygame.K_ESCAPE))
+        assert handler.active_menu is None
+        assert (barbarian.x, barbarian.y) == (6, 7) and not barbarian.can_move
+
+        # Selecting it again and opening its menu offers no attack on the ambusher.
+        self._click(handler, 6, 7)
+        self._click(handler, 6, 7)
+        assert isinstance(handler.active_menu, UnitActionMenu)
+        attack = [a for a in handler.active_menu.actions if a["type"] == "attack"]
+        assert not attack or ambusher not in attack[0]["targets"]
+
+    def test_the_movement_overlay_ignores_units_the_player_cannot_see(self, headless, fow_game, monkeypatch):
+        renderer = Renderer(fow_game, headless=True, viewing_player=1)
+        barbarian = fow_game.place_unit("B", 4, 7, player=1)
+        drawn = []
+        original = barbarian.get_reachable_positions
+        monkeypatch.setattr(
+            barbarian, "get_reachable_positions", lambda *a, **k: drawn.append(sorted(original(*a, **k))) or drawn[-1]
+        )
+
+        renderer.draw_movement_overlay(barbarian)
+        fow_game.place_unit("W", 7, 7, player=2)  # hidden on the Barbarian's path
+        renderer.draw_movement_overlay(barbarian)
+
+        assert drawn[0] == drawn[1]  # no hole where the hidden enemy stands
+        assert {(m[2], m[3]) for m in _moves(fow_game, 1)} <= set(drawn[1])  # every legal move is drawn

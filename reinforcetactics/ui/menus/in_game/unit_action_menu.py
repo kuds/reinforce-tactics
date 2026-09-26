@@ -87,8 +87,9 @@ class UnitActionMenu:
         if any(a["unit"] is self.unit for a in legal.get("seize", [])):
             actions.append({"name": "Capture (S)", "key": "s", "type": "capture", "targets": None})
 
-        # Cancel Move - only if unit has moved this turn
-        if self.unit.has_moved:
+        # Cancel Move - only if the unit has moved this action and the engine
+        # would undo it (a fog-of-war ambush spends the move for good)
+        if self.game_state.can_cancel_move(self.unit):
             actions.append({"name": "Cancel Move (M)", "key": "m", "type": "cancel_move", "targets": None})
 
         # Wait/End Turn - always available

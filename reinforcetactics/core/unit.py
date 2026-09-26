@@ -79,6 +79,9 @@ class Unit:
         # Fog of war: Track which enemy positions were visible when this unit started its action
         # This prevents "move to discover, then attack" exploitation
         self.visible_enemies_at_action_start = None  # Set of (x, y) tuples, or None if not captured
+        # Fog of war: this action's move was ambushed, so it can't be
+        # cancelled (see GameState.move_unit and GameState.can_cancel_move)
+        self.ambushed = False
 
     def get_attack_damage(self, target_x, target_y, on_mountain=False):
         """
@@ -318,6 +321,8 @@ class Unit:
                 if self.visible_enemies_at_action_start is not None
                 else None
             ),
+            # An ambushed move can't be cancelled, after a reload too.
+            "ambushed": self.ambushed,
         }
 
     @classmethod
@@ -355,4 +360,5 @@ class Unit:
         unit.has_moved = data.get("has_moved", (unit.x, unit.y) != (unit.original_x, unit.original_y))
         snapshot = data.get("visible_enemies_at_action_start")
         unit.visible_enemies_at_action_start = {(x, y) for x, y in snapshot} if snapshot is not None else None
+        unit.ambushed = data.get("ambushed", False)
         return unit

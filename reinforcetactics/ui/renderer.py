@@ -864,11 +864,15 @@ class Renderer:
         if not unit.can_move:
             return
 
+        # Plan with the units the player knows of, as the engine does (all of
+        # them without fog of war): a hidden enemy must neither punch a hole
+        # in the overlay, revealing it, nor hide a tile the engine allows.
+        known_units = self.game_state.pathing_units(unit.player)
         movement_positions = unit.get_reachable_positions(
             self.game_state.grid.width,
             self.game_state.grid.height,
             lambda x, y: self.game_state.mechanics.can_move_to_position(
-                x, y, self.game_state.grid, self.game_state.units, moving_unit=unit, is_destination=False
+                x, y, self.game_state.grid, known_units, moving_unit=unit, is_destination=False
             ),
         )
 

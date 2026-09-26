@@ -1335,9 +1335,21 @@ Respond with your strategic plan in JSON format."""
                             }
                         )
 
-            # Check if moving here allows seizing a structure
-            if tile and tile.is_capturable() and tile.player != self.bot_player:
-                result["move_then_seize"].append({"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True})
+            # Check if moving here allows seizing a structure. Under fog of war
+            # the move set includes tiles the bot has never seen, so judge by
+            # the structure it knows of (GameState.known_structure, the same
+            # view as its building lists): offering then_seize on an unseen
+            # tile would reveal that a structure stands there.
+            if tile and tile.is_capturable():
+                known_to_bot, owner = True, tile.player
+                if self.game_state.fog_of_war:
+                    known = self.game_state.known_structure(self.bot_player, to_x, to_y)
+                    known_to_bot = known is not None
+                    owner = known.owner if known is not None else None
+                if known_to_bot and owner != self.bot_player:
+                    result["move_then_seize"].append(
+                        {"unit_id": unit_id, "move_to": [orig_to_x, orig_to_y], "then_seize": True}
+                    )
 
             # Cleric-specific: check for heal/cure opportunities
             if unit.type == "C":
@@ -1748,13 +1760,19 @@ Use RESIGN only as a last resort when victory is impossible."""
         if not self.game_state.move_unit(unit, to_x, to_y):
             logger.warning("Engine refused MOVE %s", action)
             return False
+        # Log where the unit really is: a fog-of-war ambush stops it short.
+        if unit.ambushed:
+            logger.info(
+                "Unit %s was ambushed on its way to original coords (%s, %s)", action.get("unit_id"), orig_to_x, orig_to_y
+            )
+        orig_x, orig_y = self.game_state.padded_to_original_coords(unit.x, unit.y)
         logger.info(
             "Moved unit %s to original coords (%s, %s) / padded coords (%s, %s)",
             action.get("unit_id"),
-            orig_to_x,
-            orig_to_y,
-            to_x,
-            to_y,
+            orig_x,
+            orig_y,
+            unit.x,
+            unit.y,
         )
         return True
 

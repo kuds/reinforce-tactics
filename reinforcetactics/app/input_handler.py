@@ -392,7 +392,12 @@ class InputHandler:
         # Priority 3: Movement with selected unit
         if self.selected_unit and self.selected_unit.can_move:
             if self.game.move_unit(self.selected_unit, grid_x, grid_y):
-                print(f"Moved {self.selected_unit.type} to ({grid_x}, {grid_y})")
+                unit = self.selected_unit
+                # Under fog of war the unit may have been ambushed and stopped
+                # short of the clicked tile (see GameState.move_unit).
+                print(f"Moved {unit.type} to ({unit.x}, {unit.y})")
+                if unit.ambushed:
+                    self.show_notice(f"Ambushed! Your {unit.type} stopped at ({unit.x}, {unit.y})")
                 # After movement, open unit action menu
                 self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.selected_unit)
                 self.target_selection_unit = self.selected_unit

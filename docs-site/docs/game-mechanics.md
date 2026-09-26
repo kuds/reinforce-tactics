@@ -222,7 +222,7 @@ Fog of war is optional and off by default. When it is on, each player sees only 
 ### Ambushes
 - Enemies a player cannot see never block that player's movement options, so the move options reveal nothing hidden
 - A unit moves along a shortest route through the tiles its player knows to be passable (the same route every time)
-- If a hidden enemy stands on that route, or on the destination, the unit is **ambushed**: it stops on the last free tile before the enemy (possibly where it started), its move is spent, and the enemy comes into view. The move is recorded (and replayed) to where the unit actually stopped
+- If a hidden enemy stands on that route, or on the destination, the unit is **ambushed**: it stops on the last free tile before the enemy (possibly where it started), its move is spent (it can't be cancelled), and the enemy comes into view. The move is recorded (and replayed) to where the unit actually stopped
 - Without fog of war nothing changes: every enemy blocks movement as usual
 
 ### Attacks Under Fog

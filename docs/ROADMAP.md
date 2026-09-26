@@ -104,7 +104,7 @@ tracked here:
 ### Package & Infrastructure ✅
 - `pyproject.toml` for pip install support (version 0.2.0)
 - Dependency split: headless base, `[gui]`, `[llm]`, `[dev]`, `[all]` extras
-- Fog of War: HQ always visible, buildings/towers hidden until scouted
+- Fog of War: every HQ known from the start, buildings/towers hidden until scouted and remembered as last seen, ambushes by hidden enemies (see README)
 - 2v2 FoW perspective support
 - Documentation site sync with current codebase
 

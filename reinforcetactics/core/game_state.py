@@ -44,8 +44,9 @@ _CHECK_LEGAL_ACTION_CACHE = os.environ.get("RT_CHECK_CACHE") == "1"
 # Version of the save format written by ``GameState.to_dict``. Saves without
 # the field are version 1 (everything before it existed) and still load.
 # 2: adds the fields ``from_dict`` needs to resume a game exactly
-# (winning_action_index, healing_totals, per-unit has_moved and fog-of-war
-# attack snapshot, padding metadata, original_map_data, the fog-of-war state).
+# (winning_action_index, healing_totals, per-unit has_moved, fog-of-war
+# attack snapshot and ambushed flag, padding metadata, original_map_data, the
+# fog-of-war state).
 SAVE_FORMAT_VERSION = 2
 
 # Configure logging
@@ -592,7 +593,7 @@ class GameState:
             )
         return vis_map.get_last_seen_structure(x, y)
 
-    def _pathing_units(self, player: int) -> list[Unit]:
+    def pathing_units(self, player: int) -> list[Unit]:
         """The units ``player``'s pathfinding treats as present: its blocking view.
 
         Without fog of war that is every unit. Under fog of war it is the
@@ -601,7 +602,8 @@ class GameState:
         the move mask (review core-5), so pathfinding plans around the units
         the player knows of and ``move_unit`` resolves a collision with a
         hidden unit when the move is carried out (the ambush rule, see
-        ``_resolve_ambush``).
+        ``_resolve_ambush``). Public so the GUI's movement overlay plans with
+        the same view and shows exactly the tiles the engine allows.
         """
         if not self.fog_of_war:
             return self.units
@@ -619,6 +621,13 @@ class GameState:
         """
         if not self.fog_of_war:
             unit.visible_enemies_at_action_start = None
+            return
+
+        # The snapshot is taken once, when the action begins. A unit that has
+        # already moved this action keeps it: re-selecting an ambushed unit in
+        # the GUI (its move can't be cancelled) must not add the ambusher, or
+        # any enemy the move revealed, to its attack targets.
+        if unit.has_moved and unit.visible_enemies_at_action_start is not None:
             return
 
         visible_positions = set()
@@ -792,10 +801,10 @@ class GameState:
 
         Reachable within its movement over walkable tiles (it can pass
         through friendly units, never enemies) and not occupied by anyone,
-        judged by the units its player knows of (``_pathing_units``: all of
+        judged by the units its player knows of (``pathing_units``: all of
         them without fog of war). ``came_from`` receives the BFS path tree.
         """
-        known_units = self._pathing_units(unit.player)
+        known_units = self.pathing_units(unit.player)
         reachable = unit.get_reachable_positions(
             self.grid.width,
             self.grid.height,
@@ -1038,12 +1047,13 @@ class GameState:
         Move a unit to a new position.
 
         Under fog of war the destination only has to be legal by what the
-        player can see (see ``_pathing_units``), and the unit takes the
+        player can see (see ``pathing_units``), and the unit takes the
         shortest such path the breadth-first search finds first (it tries
         up, down, left, right from each tile). If a hidden unit stands on
         that path or on the destination the unit is ambushed: it stops on
         the last free tile before it (possibly where it started), the move
-        is spent and is recorded to where the unit really stopped (with
+        is spent (``unit.ambushed`` is set and ``cancel_move`` refuses to
+        undo it) and is recorded to where the unit really stopped (with
         ``ambushed: True``), and the ambusher comes into view. Read
         ``unit.x``/``unit.y`` for where it ended up.
 
@@ -1096,6 +1106,9 @@ class GameState:
         # Execute move
         unit.move_to(to_x, to_y)
         unit.can_move = False  # Consume move action
+        # An ambushed move is spent: cancel_move refuses to undo it, or a
+        # human could scout with it for free and re-plan around the ambusher.
+        unit.ambushed = ambusher is not None
 
         # Record action (where the unit really went, so replays need no
         # knowledge of the ambush rule)
@@ -1604,6 +1617,7 @@ class GameState:
                 unit.original_x = unit.x
                 unit.original_y = unit.y
                 unit.has_moved = False
+                unit.ambushed = False
                 unit.distance_moved = 0
                 unit.is_hasted = False
                 # FOW: Clear stale snapshot so it gets recaptured before
@@ -1656,14 +1670,34 @@ class GameState:
             True if the unit can still act (haste was consumed).
         """
         can_still_act = unit.end_unit_turn(force_end=force_end)
+        unit.ambushed = False  # the action is over (see move_unit)
         self._invalidate_cache()
         return can_still_act
 
+    def can_cancel_move(self, unit: Unit) -> bool:
+        """Whether ``cancel_move`` would undo ``unit``'s move.
+
+        It must have moved this action, and not into a fog-of-war ambush: an
+        ambushed move is spent (see ``move_unit``), so the GUI doesn't offer
+        to cancel it.
+        """
+        return unit.has_moved and not unit.ambushed
+
     def cancel_move(self, unit: Unit) -> bool:
-        """Undo ``unit``'s move this action through the engine (see ``end_unit_turn``)."""
+        """Undo ``unit``'s move this action through the engine (see ``end_unit_turn``).
+
+        Refused (returns False) when ``can_cancel_move`` is False.
+        """
+        if not self.can_cancel_move(unit):
+            return False
         cancelled = unit.cancel_move()
         if cancelled:
             self._invalidate_cache()
+            # The unit no longer sees from where it moved to. Without this the
+            # tiles it saw there stayed VISIBLE, so known_structure served
+            # their live state (and the memory kept it) while nothing was in
+            # sight. What the move revealed stays explored (SHROUDED).
+            self.update_visibility(unit.player)
         return cancelled
 
     def get_legal_actions(self, player: int | None = None) -> dict[str, list[Any]]:
@@ -2159,17 +2193,25 @@ class GameState:
             if map_data is None:
                 raise ValueError("Save has no recorded terrain ('map_data'); pass the map explicitly")
 
+        # Nothing below depends on the version yet (every field falls back
+        # to a new game's value), so an unknown one only earns a warning. A
+        # hand-edited, non-numeric version must not make the load crash.
+        raw_version = save_data.get("save_format_version", 1)
+        try:
+            version = int(raw_version)
+        except (TypeError, ValueError):
+            logger.warning("Save format version %r is not a number; loading what it recognises", raw_version)
+        else:
+            if version > SAVE_FORMAT_VERSION:
+                logger.warning(
+                    "Save format version %s is newer than this version of the game (%s); loading what it recognises",
+                    version,
+                    SAVE_FORMAT_VERSION,
+                )
+
         # Every container read from save_data is copied: the caller keeps its
         # dict, and a game must not share lists with it (or with the
         # class-level ALL_UNIT_TYPES) that either side could mutate.
-        version = save_data.get("save_format_version", 1)
-        if version > SAVE_FORMAT_VERSION:
-            logger.warning(
-                "Save format version %s is newer than this version of the game (%s); loading what it recognises",
-                version,
-                SAVE_FORMAT_VERSION,
-            )
-
         # Extract enabled_units from save data (default to all if not present for backward compatibility)
         saved_units = save_data.get("enabled_units")
         enabled_units = list(saved_units) if saved_units is not None else list(cls.ALL_UNIT_TYPES)

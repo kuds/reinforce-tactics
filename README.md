@@ -160,7 +160,7 @@ See the `examples/` directory for more, including an action-masking training dem
 
 **Fog of War** (optional, off by default): each player sees a square around its own units (2-4 tiles; Archers and Rogues see farthest, +1 on a mountain) and structures (HQ 4, building 3, tower 5).
 - Every HQ's location and owner are known from the start. Other buildings and towers are unknown until scouted; out of sight, a structure shows its owner and HP as you last saw them, so captures made out of sight stay hidden.
-- Enemies you can't see never block your move options. A move whose path runs into a hidden enemy is *ambushed*: the unit stops on the last free tile before it, the move is spent, and the enemy is revealed. The unit takes a shortest route by what you can see (the same route every time).
+- Enemies you can't see never block your move options. A move whose path runs into a hidden enemy is *ambushed*: the unit stops on the last free tile before it, the move is spent (it can't be cancelled), and the enemy is revealed. The unit takes a shortest route by what you can see (the same route every time).
 - A unit can only attack enemies that were in sight when its action began, so it can't attack an enemy it found by moving (or by being ambushed).
 - Saves keep each player's explored map and memory.
 

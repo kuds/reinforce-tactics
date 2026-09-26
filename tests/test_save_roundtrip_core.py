@@ -163,6 +163,19 @@ class TestEveryFieldSurvivesAReload:
         assert loaded.get_legal_actions(1)["attack"] == []
         assert loaded.units[0].visible_enemies_at_action_start == set()
 
+    def test_an_ambushed_move_stays_uncancellable_after_a_reload(self):
+        game = GameState(_map(12), fog_of_war=True)
+        barbarian = game.place_unit("B", 4, 7, player=1)
+        game.place_unit("W", 7, 7, player=2)
+        assert game.move_unit(barbarian, 9, 7) and barbarian.ambushed
+
+        loaded = _reload(game)
+
+        unit = loaded.get_unit_at_position(6, 7)
+        assert unit.ambushed and unit.has_moved
+        assert loaded.cancel_move(unit) is False
+        assert (unit.x, unit.y) == (6, 7)
+
     def test_the_save_names_its_format_version(self):
         assert GameState(_map()).to_dict()["save_format_version"] == SAVE_FORMAT_VERSION == 2
 
@@ -205,7 +218,8 @@ class TestOlderSavesStillLoad:
     @pytest.mark.parametrize("path", SHIPPED_SAVES, ids=lambda p: p.name)
     def test_every_shipped_save_loads(self, path):
         data = json.loads(path.read_text())
-        assert "save_format_version" not in data  # written before versioning: format 1
+        # Shipped before versioning (format 1); a maintainer may re-save one later.
+        assert data.get("save_format_version", 1) <= SAVE_FORMAT_VERSION
         data["map_file"] = str(REPO_ROOT / data["map_file"])
 
         game = restore_saved_game(data)
@@ -239,6 +253,7 @@ class TestOlderSavesStillLoad:
         for unit in data["units"]:
             unit.pop("has_moved")
             unit.pop("visible_enemies_at_action_start")
+            unit.pop("ambushed")
         return data
 
     def test_a_version_1_fog_save_loads_with_fog_rebuilt_from_the_board(self):
@@ -268,6 +283,19 @@ class TestOlderSavesStillLoad:
             GameState.from_dict(data)
 
         assert "newer" in caplog.text
+
+    def test_a_non_numeric_version_warns_and_loads(self, caplog):
+        """A hand-edited version must not crash the load (it raised TypeError)."""
+        game = GameState(_map())
+        game.place_unit("W", 5, 5, player=1)
+        data = _json(game.to_dict())
+        data["save_format_version"] = "2b"
+
+        with caplog.at_level(logging.WARNING, logger="reinforcetactics.core.game_state"):
+            loaded = GameState.from_dict(data)
+
+        assert "not a number" in caplog.text
+        assert len(loaded.units) == 1
 
 
 # ---------------------------------------------------------------------------
