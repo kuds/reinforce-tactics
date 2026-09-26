@@ -9,7 +9,8 @@
 | Section | State | Where |
 |---|---|---|
 | §1 P0 (1.1–1.9) | **Done.** Each item implemented with regression tests that fail on the old code, adversarially reviewed, and merged. | 1.1 `57036e2`; 1.2 merge `8d3e114`; 1.3 `1b946be`; 1.4–1.5 `666e0c7`; 1.6–1.8 `64f3741`; 1.9 `0944446`; integration fixes `ac6f999` (GUI offers only legal actions) and `f462e62` (LLM quota/retry follow-ups) |
-| Core engine findings (`core-4`…`core-25`) | In progress | — |
+| Core engine findings, phase 1 (`core-4`–`core-13`, `core-17`, `core-18`, `core-20`, `core-21`, `core-23`, `core-25`; `core-1`–`core-3` were §1) | **Done.** Three workstreams, each reviewed and merged, then integration-tested together: seeded RNG, pathfinding and terrain rules; fog-of-war knowledge and complete saves; teams, elimination, engine-side haste and turn start. | W3 merge `8dced54`; W2 merge `0293c5b`; W1 merge `6719287`; follow-ups `60cdb92` |
+| Core engine findings, phase 2 (`core-14`, `core-15`, `core-16`, `core-19`, `core-22`, `core-24`) | In progress: structural refactors (one action API, rule-logic dedupe, `GameState` decomposition, dead coordinate plumbing, constants split) | — |
 
 Behaviour changes from §1 that matter when comparing against older runs:
 
@@ -17,6 +18,15 @@ Behaviour changes from §1 that matter when comparing against older runs:
 - **The engine refuses illegal actions.** It checks turn, action budget, paralysis, range, ownership and game over. `multi_discrete` policies now see those refusals as invalid actions.
 - **No more phantom counterattacks.** Out-of-range defenders no longer deal 1 damage back.
 - **Tests and scenarios set up units with `GameState.place_unit()`,** not `create_unit()`.
+
+Behaviour changes from core phase 1:
+
+- **Teams and elimination.** The bundled 2v2 map now plays players 1 and 3 against 2 and 4. Teammates never attack or seize each other. In a free-for-all, losing your last HQ or last unit, or resigning, eliminates you and the game goes on. Replays recorded under the old end rules play back by them (`legacy_end_rules`, set automatically).
+- **Haste is an engine rule.** The extra action now reaches the RL env, MCTS and LLM bots, which never got it before. The GUI no longer gets a third action.
+- **Fog of war hides what it should.** Hidden enemies no longer shape the move mask; running into one is an ambush. Observations, the renderer and LLM prompts show out-of-sight structures as last seen. Every HQ is known from the start. Cancelling a move takes back what it revealed.
+- **Every game owns a seeded RNG.** Tournaments, evals, AlphaZero and BC datasets are reproducible from their seeds. Archived seeded runs drew Rogue evades from the global `random` and will not match.
+- **Saves are complete** (format version 2). A reloaded game offers the same legal actions as the unsaved one.
+- **Unchanged by default:** paralysis still costs the victim two turns (the constant now says 2, the value it always had in effect), and Player 1 still plays turn 0 without income (`begin_first_turn` opts in). The new terrain rules are all off.
 
 ---
 
