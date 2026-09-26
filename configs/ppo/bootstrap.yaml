@@ -10,7 +10,9 @@
 # tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 22_000_000  # informational; per-stage budgets drive run length
+# Worst-case budget: ~22M env steps, the sum of the stages' max_timesteps.
+# The curriculum runner ignores a top-level total_timesteps (train_bootstrap.py
+# reports it, and --strict rejects it), so the number lives in this comment.
 
 env:
   # 8 envs leaves headroom on a 12-vCPU machine for the main process

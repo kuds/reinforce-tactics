@@ -29,7 +29,9 @@ script leaves that upload to the entrypoint (``GCS_WRAPPER_SYNC``).
 Exit codes (so a scheduler can tell the outcomes apart):
 
     0    every curriculum stage promoted
-    1    failure (an exception, or a bad --config / --set value)
+    1    failure (an exception, a bad --config / --set value, a missing
+         warm_start_path, or with --strict a config field the curriculum
+         runner does not read)
     2    command-line usage error (argparse)
     3    the curriculum stalled: a stage used its budget without promoting.
          Partial artifacts are still post-processed and uploaded.
@@ -74,12 +76,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--config", type=str, default="configs/ppo/bootstrap.yaml", help="Path to the bootstrap YAML config")
     p.add_argument("--output-dir", type=str, default=None, help="Output dir (default: benchmarks/bootstrap/<timestamp>)")
-    p.add_argument("--device", type=str, default="auto", help="Device: cpu, cuda, or auto")
+    p.add_argument(
+        "--device", type=str, default=None, help="Device: cpu, cuda, or auto (default: the config's ppo.device, 'auto')"
+    )
     p.add_argument(
         "--set",
         action="append",
         metavar="KEY=VALUE",
         help="Override a config value (dotted key), e.g. --set env.enabled_units='[W,M,C,A,K]'. Repeatable.",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail when the config sets fields the curriculum runner does not read (default: warn)",
     )
 
     # Behaviour-cloning warm-start (notebook section 3c-3e). Off by default;
@@ -136,6 +145,23 @@ def _apply_set_overrides(cfg, set_items):
             raise SystemExit(f"--set expects KEY=VALUE, got: {item!r}")
         overrides[key.strip()] = yaml.safe_load(raw)
     return apply_overrides(cfg, overrides)
+
+
+def _write_resolved_config(cfg, output_dir: Path) -> None:
+    """Record the config the run uses, with the runner's derived values filled in.
+
+    ``resolve_config`` fills ``env.pad_to_size`` and
+    ``env.flat_action_version`` the way ``run_curriculum`` will, so the
+    record rebuilds the run's observation and action spaces; the unresolved
+    dump left pad_to_size null for every mixed-size curriculum (review
+    rltrain-13). Best-effort: a dump failure must not stop the run.
+    """
+    from reinforcetactics.rl.config import save_config
+
+    try:
+        save_config(cfg, output_dir / "resolved_config.yaml")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] could not write resolved_config.yaml: {exc}")
 
 
 def _print_stage_table(cfg) -> None:
@@ -434,13 +460,31 @@ def main(argv: list[str] | None = None) -> int:
     # torch / sb3 / the rest of the package installed.
     import matplotlib.pyplot as plt  # MPLBACKEND=Agg set above
 
-    from reinforcetactics.rl.bootstrap import CurriculumStalled, run_curriculum
-    from reinforcetactics.rl.config import load_config, save_config
+    import reinforcetactics.rl.bootstrap as bootstrap
+    from reinforcetactics.rl.bootstrap import CurriculumStalled
+    from reinforcetactics.rl.config import check_ignored_config_fields, load_config
 
     config_path = Path(args.config)
     cfg = load_config(config_path)
     cfg = _apply_set_overrides(cfg, args.set)
-    cfg.ppo.device = _resolve_device(args.device)
+    cfg.ppo.device = _resolve_device(args.device or cfg.ppo.device)
+    # Fail before any output or training on a warm-start checkpoint that is
+    # not there (--build-bc writes its own), and report the fields the
+    # curriculum runner does not read (an error with --strict).
+    cfg.validate(check_files=not args.build_bc)
+    check_ignored_config_fields(
+        cfg,
+        bootstrap.CONSUMED_CONFIG_FIELDS,
+        entry_point="train_bootstrap.py",
+        strict=args.strict,
+        algorithms=bootstrap.CONSUMED_ALGORITHMS,
+        hints=bootstrap.IGNORED_FIELD_HINTS,
+    )
+    # pad_to_size and flat_action_version exactly as run_curriculum will
+    # resolve them, so the record written below (and every post-run stage
+    # env: sanity eval, replays) matches training. Re-resolved after
+    # --build-bc sets warm_start_path.
+    cfg = bootstrap.resolve_config(cfg)
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) if args.output_dir else Path("benchmarks") / "bootstrap" / run_id
@@ -455,12 +499,9 @@ def main(argv: list[str] | None = None) -> int:
     # ...and the config actually used. ``_apply_set_overrides`` and the device
     # resolution above already mutated ``cfg``, so the copied YAML alone would
     # record ``gamma: 0.99`` for a run launched with
-    # ``--set ppo.gamma=0.997``. Best-effort: a dump failure must not stop the
-    # run, but without this a --set sweep is unreproducible from its own record.
-    try:
-        save_config(cfg, output_dir / "resolved_config.yaml")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  [warn] could not write resolved_config.yaml: {exc}")
+    # ``--set ppo.gamma=0.997``; without this a --set sweep is unreproducible
+    # from its own record.
+    _write_resolved_config(cfg, output_dir)
 
     print(f"\n🚀 Bootstrap run {run_id} on {cfg.ppo.device}")
     print(f"Output dir: {output_dir}")
@@ -470,12 +511,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.build_bc:
             bc_model, bc_dataset, bc_stats = _bc_build(cfg, output_dir, args)
+            cfg = bootstrap.resolve_config(cfg)
+            _write_resolved_config(cfg, output_dir)
             if not args.skip_plots:
                 _bc_diagnostics(bc_dataset, bc_stats, charts_dir, plt)
             _bc_sanity_eval(cfg, bc_model)
 
         try:
-            result = run_curriculum(cfg, output_dir=output_dir)
+            result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()
