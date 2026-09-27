@@ -151,13 +151,34 @@ up as a success; the entrypoint passes the code through unchanged.
 | `0` | Every curriculum stage promoted | Complete, uploaded |
 | `1` | Failure: an exception during the run (see the traceback in the log), or an invalid `--config` / `--set` value at startup | Whatever the run wrote, uploaded (nothing for a startup error) |
 | `2` | Command-line usage error (argparse) | None; the run never started |
-| `3` | **Stalled**: a stage used its `max_timesteps` budget without reaching its promotion win rate | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
+| `3` | **Stalled**: a stage used its `max_timesteps` budget, and its retries (`curriculum.max_retries`, default 1: one more full budget from the stage's `best_model.zip`), without meeting its promotion criterion | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
 | `130` | Interrupted with Ctrl-C (`SIGINT`) | Uploaded |
 | `143` | Terminated by `SIGTERM` (Vertex cancel/preemption, `docker stop`) | Uploaded on the way out, within the grace period |
 
 A `SIGTERM` that arrives once the run has ended, while its upload is in
 progress, is ignored so the upload can finish; the exit code then still reports
 how the run ended.
+
+#### Resuming an interrupted run
+
+A run that ended with `143` (or `130`, or was killed outright) can continue
+where it stopped. Download its directory (or run in the same container) and
+pass it to `--resume`:
+
+```bash
+python3 scripts/train/train_bootstrap.py --resume ./bootstrap_run --device cuda
+```
+
+The stages whose `config.json` says `promoted: true` are skipped; the stage that
+was running continues from its rolling `<stage>/latest.zip` (saved every
+`eval.checkpoint_freq` stage steps, and on `SIGTERM`) with the rest of its
+budget, its eval timeline, promotion streak, best-model record and schedule
+positions (see `run_manifest.json`). `num_timesteps` and the TensorBoard curves
+continue. Without `--config` the run's own `resolved_config.yaml` is used; a
+config that differs from it in what is trained or measured is refused unless
+`--force`. A stalled run (`run_status.json` says `curriculum_stalled`) is not
+resumed: start a new run with `warm_start_path` set to the stalled stage's
+`best_model.zip`.
 
 ### Configuration (environment variables)
 

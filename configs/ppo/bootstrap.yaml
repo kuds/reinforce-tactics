@@ -231,8 +231,29 @@ eval:
   # that need tighter CIs.
   eval_freq: 50_000
   n_eval_episodes: 80
+  # Gate settings left at their defaults (see EvalConfig). Since the eval-gate
+  # change the gate measures the *stochastic* policy (eval_deterministic:
+  # false) and every eval also records the greedy win rate on the same seeds
+  # (eval_both_modes: true, which doubles eval time). The promotion_win_rate
+  # values below were tuned on greedy evals; if stages stop promoting, compare
+  # win_rate_greedy with win_rate_stochastic in eval_results.jsonl before
+  # lowering them. Recommended once validated: n_eval_envs: 4 (batched eval
+  # predict; identical results for the greedy mode) and eval_seats: [1, 2]
+  # with env.agent_seat: random, so checkpoints are trained and gated in the
+  # seat they are deployed in half the time. checkpoint_freq (default 50_000)
+  # is the rolling latest.zip that train_bootstrap.py --resume continues from.
 
 curriculum:
+  # Promotion / recovery settings left at their defaults (see
+  # CurriculumConfig): promotion_criterion point (the gate these thresholds
+  # were tuned for), max_retries 1 (a stalled stage gets one more budget from
+  # its best_model.zip), regression_guard_evals 0 (off). Recommended to try
+  # on the noisy *_random_N stages: promotion_criterion: rolling with
+  # promotion_rolling_k: 3 and patience: 1, or wilson with thresholds lowered
+  # by ~5-8 points at 80 episodes; promotion_score: win_plus_half_draw where
+  # max_turns draws dominate; regression_guard_evals: 3 with
+  # regression_guard_drop: 0.25; anneal_horizon near the steps a stage
+  # typically needs to promote, so ent_coef schedules finish cooling.
   stages:
     - name: starter_random
       map_file: maps/1v1/starter.csv
