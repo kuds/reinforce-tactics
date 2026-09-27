@@ -129,7 +129,10 @@ class TestEnvConfigReachesSelfPlayEnvs:
                         "flat_action_version": 1,
                     },
                     "ppo": {"policy_kwargs": {"net_arch": [16]}},
-                    "self_play": {"latest_opponent_prob": 0.25},
+                    # Mixed mode with the pool on: the bot workers read
+                    # env.opponent / opponent_kwargs, and the pool reads
+                    # latest_opponent_prob (--strict reports them otherwise).
+                    "self_play": {"latest_opponent_prob": 0.25, "use_opponent_pool": True, "mixed_training": True},
                 }
             )
         )

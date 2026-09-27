@@ -255,9 +255,9 @@ def parse_args(argv: list[str] | None = None):
         parser.set_defaults(**config_to_argparse_defaults(cfg, _ARG_TO_CONFIG_PATH))
 
     args = parser.parse_args(argv)
-    if cfg is not None:
-        from reinforcetactics.rl.config import check_ignored_config_fields
+    from reinforcetactics.rl.config import check_ignored_config_fields, effective_config
 
+    if cfg is not None:
         check_ignored_config_fields(
             cfg,
             CONSUMED_CONFIG_FIELDS,
@@ -266,6 +266,12 @@ def parse_args(argv: list[str] | None = None):
             algorithms=CONSUMED_ALGORITHMS,
             hints=IGNORED_FIELD_HINTS,
         )
+    # The flags override the validated config's values: validate what the
+    # run will actually use (a bad value is a usage error).
+    try:
+        effective_config(cfg, args, _ARG_TO_CONFIG_PATH)
+    except (TypeError, ValueError) as exc:
+        parser.error(str(exc))
     return args
 
 

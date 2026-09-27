@@ -140,11 +140,14 @@ def validate_scripted_kwargs(bot_type: Any, kwargs: Mapping[str, Any] | None) ->
     Keys must be parameters of the bot's constructor (see
     :func:`constructor_kwargs`): today only ``random`` (``max_actions``)
     and ``mixed`` take any, so kwargs given for the deterministic ladder,
-    which the gym env used to drop silently, are rejected. ``MixedBot``'s
-    are checked in depth (inner bot names, ``p_hard`` in ``[0, 1]``, and
+    which the gym env used to drop silently, are rejected. The values are
+    checked too, by each bot's ``validate_config``: RandomBot's
+    ``max_actions`` must be an integer >= 1, and ``MixedBot``'s are checked
+    in depth (inner bot names, ``p_hard`` in ``[0, 1]``, and
     ``easy_kwargs`` / ``hard_kwargs`` against the inner bots' own
-    constructors) so a bad bridge stage fails when it is configured, not
-    at the random reset whose coin flip first picks the bad side.
+    constructors and values) so a bad bridge stage fails when it is
+    configured, not at the random reset whose coin flip first picks the bad
+    side.
 
     Raises:
         KeyError: ``bot_type`` names no scripted bot.
@@ -167,6 +170,8 @@ def validate_scripted_kwargs(bot_type: Any, kwargs: Mapping[str, Any] | None) ->
             )
     if name == "mixed":
         MixedBot.validate_config(**kwargs)
+    elif name == "random":
+        RandomBot.validate_config(**kwargs)
 
 
 def resolve_scripted(bot_type: Any) -> type:

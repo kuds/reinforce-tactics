@@ -35,19 +35,22 @@ import math
 import numbers
 import types
 import warnings
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
+from reinforcetactics.core.engine_config import EngineConfig
 from reinforcetactics.game.bot_registry import accepted_names as accepted_bot_names
-from reinforcetactics.game.bot_registry import is_scripted_name
+from reinforcetactics.game.bot_registry import canonical_name as canonical_bot_name
+from reinforcetactics.game.bot_registry import resolve_scripted
 from reinforcetactics.rl.env_schema import (
-    resolve_opponent,
+    accepted_opponents,
     validate_opponent_kwargs,
     validate_reward_config,
 )
 from reinforcetactics.rl.gym_env import FLAT_ACTION_VERSIONS
+from reinforcetactics.rules import ALL_UNIT_TYPES
 
 try:
     import yaml
@@ -63,14 +66,18 @@ class EnvConfig:
     """Environment construction parameters."""
 
     map_file: str | None = None
-    # ``None``, ``'self'`` or a bot-registry name
-    # (``bot_registry.accepted_names()``); validated in
-    # :meth:`TrainingConfig.validate`. Curriculum runs ignore it: each stage
-    # names its own opponent.
-    opponent: str = "bot"
+    # ``'self'`` (train_feudal_rl.py --mode feudal only) or a bot-registry
+    # name, exactly as ``bot_registry.accepted_names()`` lists it; validated
+    # in :meth:`TrainingConfig.validate`. ``null`` is rejected: an env built
+    # with no opponent trains against nothing. Curriculum runs ignore it:
+    # each stage names its own opponent. train_self_play.py reads it as the
+    # scripted opponent of the bot workers (mixed mode).
+    opponent: str | None = "bot"
     max_steps: int = 200
     max_turns: int | None = None
     fog_of_war: bool = False
+    # Unit codes the agent (and the scripted opponents) may build, a
+    # non-empty subset of ``rules.ALL_UNIT_TYPES``; ``None`` = all of them.
     enabled_units: list[str] | None = None
     action_space_type: str = "multi_discrete"
     max_flat_actions: int = 512
@@ -118,11 +125,13 @@ class EnvConfig:
     gold_scale: float = 1000.0
     turn_scale: float = 60.0
     unit_count_scale: float = 20.0
-    # Extra kwargs forwarded to the opponent bot's constructor (e.g.
+    # Extra kwargs forwarded to ``opponent``'s constructor (e.g.
     # ``{max_actions: 10}`` for ``RandomBot``, ``{easy: simple, hard: medium,
-    # p_hard: 0.5}`` for ``MixedBot``). For the curriculum bootstrap path the
-    # per-stage :attr:`CurriculumStage.opponent_kwargs` takes precedence; for
-    # non-curriculum runs (feudal, flat baseline) this is the only knob.
+    # p_hard: 0.5}`` for ``MixedBot``); validated against that bot. Read by
+    # the non-curriculum entry points (feudal, the flat baseline, the bot
+    # workers of train_self_play.py's mixed mode). The curriculum runner
+    # ignores it, as it ignores ``opponent``: set
+    # :attr:`CurriculumStage.opponent_kwargs` on each stage instead.
     opponent_kwargs: dict[str, Any] | None = None
 
 
@@ -418,19 +427,71 @@ def _check_reward_config(reward_config: Any, where: str) -> None:
         raise type(exc)(f"{where}: {exc}") from None
 
 
-def _check_opponent(opponent: Any, opponent_kwargs: Any, where: str, *, scripted_only: bool = False) -> None:
-    """``opponent`` must be one the env plays, and ``opponent_kwargs`` must suit it."""
-    if scripted_only and not (isinstance(opponent, str) and is_scripted_name(opponent)):
+def _bot_kwarg_types(bot: str) -> dict[str, Any]:
+    """Annotated types of a scripted bot's constructor parameters (empty if unresolvable)."""
+    cls: Any = resolve_scripted(bot)
+    try:
+        return get_type_hints(cls.__init__)
+    except Exception:  # noqa: BLE001 - an unresolvable annotation just means "no coercion"
+        return {}
+
+
+def _coerce_bot_kwargs(bot: str, kwargs: Any, where: str) -> Any:
+    """Coerce scripted-bot kwargs to the bot constructor's annotated types.
+
+    The same coercion every other config value gets (:func:`_coerce_to`):
+    PyYAML reads ``max_actions: 1e1`` as the string ``'1e1'``, which
+    validation used to accept and RandomBot then crashed on at the stage's
+    first opponent turn, hours into a run. MixedBot's ``easy_kwargs`` /
+    ``hard_kwargs`` are coerced against the inner bots. Unknown keys and
+    non-mapping values pass through for :func:`validate_opponent_kwargs` to
+    reject.
+    """
+    if not isinstance(kwargs, Mapping) or not kwargs:
+        return kwargs
+    hints = _bot_kwarg_types(bot)
+    out = {k: (_coerce_to(v, hints[k], f"{where}[{k!r}]") if k in hints else v) for k, v in kwargs.items()}
+    if canonical_bot_name(bot) == "mixed":
+        for side, default in (("easy", "simple"), ("hard", "medium")):
+            inner, key = out.get(side, default), f"{side}_kwargs"
+            if key in out and isinstance(inner, str) and inner in accepted_bot_names():
+                out[key] = _coerce_bot_kwargs(inner, out[key], f"{where}[{key!r}]")
+    return out
+
+
+def _check_opponent(
+    opponent: Any, opponent_kwargs: Any, where: str, *, allowed: tuple[str, ...], kwargs_where: str = "opponent_kwargs"
+) -> Any:
+    """``opponent`` must be one of ``allowed``, and ``opponent_kwargs`` must suit it.
+
+    One acceptance rule for every config opponent field: the names exactly
+    as :func:`accepted_opponents` / ``bot_registry.accepted_names`` list
+    them. The env also resolves class names and any case (``'SimpleBot'``),
+    which ``env.opponent`` and ``self_play.eval_opponent`` used to accept
+    while a stage's opponent did not.
+
+    Returns:
+        ``opponent_kwargs`` coerced to the bot's constructor types.
+    """
+    if opponent is None:
         raise ValueError(
-            f"{where}: unknown opponent {opponent!r}. Expected one of: {', '.join(accepted_bot_names())} "
+            f"{where} must be set: null plays no opponent at all. Expected one of: {', '.join(allowed)} "
             "(see reinforcetactics.game.bot_registry)"
         )
+    if not isinstance(opponent, str) or opponent not in allowed:
+        raise ValueError(
+            f"{where}: Unknown opponent {opponent!r}. Expected one of: {', '.join(allowed)} "
+            "(see reinforcetactics.game.bot_registry)"
+        )
+    kwargs = opponent_kwargs
+    if opponent in accepted_bot_names():
+        kwargs = _coerce_bot_kwargs(opponent, opponent_kwargs, kwargs_where)
     try:
-        resolve_opponent(opponent)
-        validate_opponent_kwargs(opponent, opponent_kwargs)
+        validate_opponent_kwargs(opponent, kwargs)
     except (TypeError, ValueError, KeyError) as exc:
         message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         raise type(exc)(f"{where}: {message}") from None
+    return kwargs
 
 
 def _require(ok: bool, message: str) -> None:
@@ -613,7 +674,13 @@ class CurriculumStage:
         # deterministic ladder, say) used to be dropped by the env without a
         # word; MixedBot's inner names, p_hard and nested kwargs are checked
         # here rather than at the reset whose coin flip first picks them.
-        _check_opponent(self.opponent, self.opponent_kwargs, f"stage '{self.name}'", scripted_only=True)
+        self.opponent_kwargs = _check_opponent(
+            self.opponent,
+            self.opponent_kwargs,
+            f"stage '{self.name}'",
+            allowed=_CURRICULUM_OPPONENTS,
+            kwargs_where=f"stage '{self.name}': opponent_kwargs",
+        )
 
     def resolve_n_eval_episodes(self, eval_cfg: EvalConfig) -> int:
         """Eval episodes for this stage: its own override, else ``eval.n_eval_episodes``."""
@@ -843,8 +910,42 @@ class TrainingConfig:
         )
         for name in ("gold_scale", "turn_scale", "unit_count_scale"):
             _require(getattr(env, name) > 0, f"env.{name} must be > 0 (it divides a tanh input), got {getattr(env, name)}")
-        _check_opponent(env.opponent, env.opponent_kwargs, "env.opponent")
+        if env.enabled_units is not None:
+            # A typo used to pass here and crash on the first action mask
+            # (a bare KeyError, a broken pipe inside a SubprocVecEnv worker),
+            # and [] meant "buy nothing" to one trainer and "buy anything"
+            # to another.
+            unknown_units = [u for u in env.enabled_units if u not in ALL_UNIT_TYPES]
+            _require(
+                bool(env.enabled_units) and not unknown_units,
+                f"env.enabled_units must be null (all units) or a non-empty list of unit codes from "
+                f"{', '.join(ALL_UNIT_TYPES)}; got {env.enabled_units!r}",
+            )
+        try:
+            env.opponent_kwargs = _check_opponent(
+                env.opponent,
+                env.opponent_kwargs,
+                "env.opponent",
+                allowed=accepted_opponents(),
+                kwargs_where="env.opponent_kwargs",
+            )
+        except (TypeError, ValueError) as exc:
+            if self.curriculum.stages and env.opponent_kwargs:
+                raise type(exc)(
+                    f"{exc}. A curriculum reads neither env.opponent nor env.opponent_kwargs: "
+                    "set opponent_kwargs on the curriculum stage."
+                ) from None
+            raise
         _check_reward_config(env.reward_config, "env.reward_config")
+        if env.engine_overrides is not None:
+            # Resolved the way every GameState will resolve it, so a typo
+            # fails here, in the trainer process, rather than in each env
+            # worker at construction.
+            try:
+                EngineConfig.from_overrides(env.engine_overrides)
+            except (TypeError, ValueError, KeyError) as exc:
+                message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
+                raise ValueError(f"env.engine_overrides: {message}") from None
 
         # -- ppo ------------------------------------------------------------
         _require(ppo.learning_rate > 0, f"ppo.learning_rate must be > 0, got {ppo.learning_rate}")
@@ -889,7 +990,7 @@ class TrainingConfig:
         _require(0.0 <= sp.bot_ratio < 1.0, f"self_play.bot_ratio must be in [0, 1), got {sp.bot_ratio}")
         for name in ("opponent_update_freq", "pool_size", "add_to_pool_freq", "snapshot_freq"):
             _require(getattr(sp, name) > 0, f"self_play.{name} must be positive, got {getattr(sp, name)}")
-        _check_opponent(sp.eval_opponent, None, "self_play.eval_opponent", scripted_only=True)
+        _check_opponent(sp.eval_opponent, None, "self_play.eval_opponent", allowed=accepted_bot_names())
 
         # -- feudal ---------------------------------------------------------
         _require(fd.manager_horizon > 0, f"feudal.manager_horizon must be positive, got {fd.manager_horizon}")
@@ -1163,6 +1264,59 @@ def apply_overrides(
     return new_cfg
 
 
+def _is_config_path(dotted_path: str) -> bool:
+    """Whether ``dotted_path`` names a :class:`TrainingConfig` field (``"env.max_steps"``, ``"seed"``)."""
+    parts = dotted_path.split(".")
+    if len(parts) == 1:
+        return parts[0] in _TOP_LEVEL_FIELDS
+    return len(parts) == 2 and parts[0] in _SECTION_TYPES and parts[1] in {f.name for f in fields(_SECTION_TYPES[parts[0]])}
+
+
+def effective_config(
+    cfg: TrainingConfig | None,
+    args: Any,
+    mapping: Mapping[str, str],
+    *,
+    convert: Mapping[str, Callable[[Any], Any]] | None = None,
+) -> TrainingConfig:
+    """The config a CLI run actually uses, validated: ``cfg`` with every mapped argument written in.
+
+    The entry points load and validate ``--config``, turn its values into
+    argparse defaults (:func:`config_to_argparse_defaults`), and let flags
+    override them -- which used to happen after validation, so
+    ``--gamma 1.5`` or ``--eval-freq 0`` reached the trainer unchecked, and a
+    bad ``--reward-config`` / ``--engine-overrides`` JSON surfaced only
+    inside an env worker. This writes each parsed value back through
+    ``mapping`` (argparse ``dest`` -> dotted config path; paths that are not
+    config fields are skipped) and runs :meth:`TrainingConfig.validate` on
+    the result.
+
+    Args:
+        cfg: The loaded config, or ``None`` (the defaults) without ``--config``.
+        args: The parsed ``argparse.Namespace``.
+        mapping: The entry point's ``_ARG_TO_CONFIG_PATH``.
+        convert: Per-``dest`` conversion from the argparse value to the
+            config field's shape (a comma-separated ``--enabled-units``
+            string to a list, say).
+
+    ``None`` values are skipped, as :func:`apply_overrides` skips them: an
+    unset optional flag leaves the field as it is.
+
+    Raises:
+        TypeError, ValueError: The effective config does not validate.
+    """
+    base = cfg if cfg is not None else TrainingConfig()
+    overrides: dict[str, Any] = {}
+    for dest, path in mapping.items():
+        if not hasattr(args, dest) or not _is_config_path(path):
+            continue
+        value = getattr(args, dest)
+        if convert and dest in convert:
+            value = convert[dest](value)
+        overrides[path] = value
+    return apply_overrides(base, overrides)
+
+
 # ---------------------------------------------------------------------------
 # Fields an entry point does not read (review rltrain-9)
 #
@@ -1239,12 +1393,14 @@ def check_ignored_config_fields(
     strict: bool = False,
     algorithms: Iterable[str] | None = None,
     hints: Mapping[str, str] | None = None,
+    strict_hint: str | None = "Pass --strict to make this an error.",
 ) -> list[str]:
     """Warn about (or, with ``strict``, reject) set fields the entry point ignores.
 
     See :func:`ignored_config_fields` for ``consumed`` and ``algorithms``.
     ``hints`` maps a path (or ``"<section>.*"``) to a short explanation shown
-    next to it.
+    next to it. ``strict_hint`` ends the warning (``None``: nothing, for a
+    caller with no ``--strict`` flag).
 
     Returns:
         The ignored paths (empty when there is nothing to report).
@@ -1270,5 +1426,5 @@ def check_ignored_config_fields(
     )
     if strict:
         raise IgnoredConfigFieldError(message + "\nRemove them from the config, or run without --strict to only warn.")
-    warnings.warn(message + "\nPass --strict to make this an error.", IgnoredConfigFieldWarning, stacklevel=2)
+    warnings.warn(message + (f"\n{strict_hint}" if strict_hint else ""), IgnoredConfigFieldWarning, stacklevel=2)
     return ignored

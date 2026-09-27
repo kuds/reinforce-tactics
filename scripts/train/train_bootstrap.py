@@ -48,6 +48,7 @@ import argparse
 import os
 import signal
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from types import FrameType
@@ -131,7 +132,14 @@ def _resolve_device(device: str) -> str:
 
 
 def _apply_set_overrides(cfg, set_items):
-    """Apply ``--set key=value`` overrides (values parsed as YAML scalars/lists)."""
+    """Apply ``--set key=value`` overrides (values parsed as YAML scalars/lists).
+
+    A YAML null (``null``, ``~`` or an empty value) sets the field to None.
+    ``apply_overrides`` skips None values (so argparse defaults don't clobber
+    file values) and only unsets on its ``"null"`` sentinel, which a plain
+    ``--set env.max_turns=null`` never produced: the override was dropped
+    without a word and the run kept the file's value.
+    """
     if not set_items:
         return cfg
     import yaml
@@ -143,7 +151,8 @@ def _apply_set_overrides(cfg, set_items):
         key, sep, raw = item.partition("=")
         if not sep:
             raise SystemExit(f"--set expects KEY=VALUE, got: {item!r}")
-        overrides[key.strip()] = yaml.safe_load(raw)
+        value = yaml.safe_load(raw)
+        overrides[key.strip()] = "null" if value is None else value
     return apply_overrides(cfg, overrides)
 
 
@@ -462,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import reinforcetactics.rl.bootstrap as bootstrap
     from reinforcetactics.rl.bootstrap import CurriculumStalled
-    from reinforcetactics.rl.config import check_ignored_config_fields, load_config
+    from reinforcetactics.rl.config import IgnoredConfigFieldWarning, check_ignored_config_fields, load_config
 
     config_path = Path(args.config)
     cfg = load_config(config_path)
@@ -518,7 +527,11 @@ def main(argv: list[str] | None = None) -> int:
             _bc_sanity_eval(cfg, bc_model)
 
         try:
-            result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
+            with warnings.catch_warnings():
+                # Reported above (an error under --strict); run_curriculum
+                # would repeat the same report.
+                warnings.simplefilter("ignore", IgnoredConfigFieldWarning)
+                result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()

@@ -47,12 +47,26 @@ Top-level sections: `env`, `ppo`, `feudal`, `self_play`, `alphazero`,
 - Unknown keys raise `ValueError`.
 - Every value is coerced to its field's type (`learning_rate: 3e-4`, which
   PyYAML reads as a string, becomes a float) and range-checked.
-- `reward_config` keys must be ones the env reads (`KNOWN_REWARD_KEYS`), and
-  opponents / `opponent_kwargs` must be ones the bot registry knows.
+- `reward_config` keys must be ones the env reads (`KNOWN_REWARD_KEYS`).
+- Opponents must be named exactly as `bot_registry.accepted_names()` lists
+  them (plus `self` for `env.opponent`), and `opponent_kwargs` must be
+  constructor arguments of that bot, coerced to its types and range-checked
+  (RandomBot's `max_actions` is an integer >= 1).
+- `env.enabled_units` is `null` (all units) or a non-empty list of unit codes,
+  and `env.engine_overrides` is resolved the way every game will resolve it.
 
 No training script reads every field. Each one reports the fields a config
-sets away from their defaults that it ignores (for example `total_timesteps`
-or `logging.*` for `train_bootstrap.py`, `feudal.*` for
-`train_feudal_rl.py --mode flat`), as a warning by default and as an error
-with `--strict`. Every config here except the `ppo/bootstrap_sweep` archive
-(which keeps an informational `total_timesteps`) runs under `--strict`.
+sets away from their defaults that the run ignores (for example
+`total_timesteps` or `logging.*` for `train_bootstrap.py`, `feudal.*` for
+`train_feudal_rl.py --mode flat`, the pool settings for a
+`train_self_play.py` run without `use_opponent_pool`), as a warning by default
+and as an error with `--strict`. The report follows the run's mode:
+`train_self_play.py` reads `env.opponent` / `self_play.bot_ratio` only in
+mixed mode, and `train_feudal_rl.py` reads `self_play.*` only with
+`--opponent self`. `run_curriculum` (the notebook path) warns too. Every
+config here except the `ppo/bootstrap_sweep` archive (which keeps an
+informational `total_timesteps`) runs under `--strict`.
+
+Command-line flags that override a config value are validated like the
+config itself, so `--gamma 1.5` is a usage error. In
+`train_bootstrap.py`, `--set KEY=null` (or `~`) unsets a field.

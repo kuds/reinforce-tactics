@@ -69,6 +69,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+def _enabled_units_list(value: Any) -> Any:
+    """``--enabled-units`` (a comma-separated string) as the config's list."""
+    if isinstance(value, str):
+        return [u.strip() for u in value.split(",") if u.strip()]
+    return value
+
+
 def build_env_kwargs(args) -> dict[str, Any]:
     """StrategyGameEnv parameters shared by the training and evaluation envs.
 
@@ -79,9 +86,7 @@ def build_env_kwargs(args) -> dict[str, Any]:
     here: an explicit value wins, else a ``--resume-from`` flat_discrete
     checkpoint keeps the table it was trained on, else the latest.
     """
-    enabled_units = args.enabled_units
-    if isinstance(enabled_units, str):
-        enabled_units = [u.strip() for u in enabled_units.split(",") if u.strip()]
+    enabled_units = _enabled_units_list(args.enabled_units)
     pad_to_size = tuple(args.pad_to_size) if args.pad_to_size else None
     return {
         "map_file": args.map_file,
@@ -107,6 +112,20 @@ def build_env_kwargs(args) -> dict[str, Any]:
             checkpoint_path=getattr(args, "resume_from", None),
         ),
     }
+
+
+def run_record(args, env_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """What ``config.json`` records: the arguments, with the env settings as resolved.
+
+    ``env_kwargs`` is what :func:`build_env_kwargs` resolved, which is what
+    every env was built with. ``vars(args)`` alone recorded
+    ``flat_action_version: null`` whether a resume kept a version-1 table or
+    a cold start used version 2.
+    """
+    record = dict(vars(args))
+    record["flat_action_version"] = env_kwargs["flat_action_version"]
+    record["env_kwargs"] = dict(env_kwargs)
+    return record
 
 
 def _per_call(freq: int, n_envs: int) -> int:
@@ -275,7 +294,7 @@ def train_self_play(args) -> Path:
     callbacks.append(eval_callback)
 
     # Save training config
-    config = vars(args)
+    config = run_record(args, env_kwargs)
     config_path = log_dir / "config.json"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
@@ -366,6 +385,10 @@ _ARG_TO_CONFIG_PATH = {
     "bot_ratio": "self_play.bot_ratio",
     "eval_freq": "eval.eval_freq",
     "n_eval_episodes": "eval.n_eval_episodes",
+    # The fixed scripted opponent of the evaluation env. Used to be unmapped,
+    # so the config's value was ignored and the flag's own default ("bot")
+    # played instead.
+    "eval_opponent": "self_play.eval_opponent",
     "checkpoint_freq": "eval.checkpoint_freq",
     "log_dir": "logging.log_dir",
     "wandb": "logging.wandb",
@@ -373,20 +396,62 @@ _ARG_TO_CONFIG_PATH = {
     "wandb_entity": "logging.wandb_entity",
 }
 
-# Every config field this script reads: the argparse-mapped ones, plus
-# ``self_play.mixed_training`` (selects --mode mixed). Anything else a
-# --config sets away from its default is reported (an error with --strict).
+# Config fields only some modes read (review follow-up: the report used to
+# treat every mode alike, so a pure self-play run with a bot opponent set, or
+# a pool knob with the pool off, passed --strict and did nothing).
+# The bot workers exist only in mixed mode.
+_BOT_WORKER_FIELDS = frozenset({"env.opponent", "env.opponent_kwargs", "self_play.bot_ratio"})
+# The pool settings, read only with the opponent pool on.
+_POOL_FIELDS = frozenset(
+    {
+        "self_play.pool_size",
+        "self_play.pool_strategy",
+        "self_play.add_to_pool_freq",
+        "self_play.min_win_rate_for_pool",
+        "self_play.latest_opponent_prob",
+    }
+)
+
+# Every config field some mode of this script reads: the argparse-mapped
+# ones, plus ``self_play.mixed_training`` (selects --mode mixed). A run reads
+# the subset :func:`consumed_config_fields` returns for its mode; anything
+# else a --config sets away from its default is reported (an error with
+# --strict).
 CONSUMED_CONFIG_FIELDS: frozenset[str] = frozenset(_ARG_TO_CONFIG_PATH.values()) | {"self_play.mixed_training"}
 CONSUMED_ALGORITHMS: tuple[str, ...] = ("self_play", "mixed", "maskable_ppo")
+
+
+def consumed_config_fields(mode: str, use_opponent_pool: bool) -> frozenset[str]:
+    """The config fields a run in ``mode`` (``'self-play'`` / ``'mixed'``) reads."""
+    consumed = CONSUMED_CONFIG_FIELDS
+    if mode != "mixed":
+        consumed -= _BOT_WORKER_FIELDS
+    if not use_opponent_pool:
+        consumed -= _POOL_FIELDS
+    return consumed
+
+
+def consumed_algorithms(mode: str) -> tuple[str, ...]:
+    """The ``algorithm`` labels that describe a run in ``mode``: ``mixed`` only when it is one."""
+    return CONSUMED_ALGORITHMS if mode == "mixed" else ("self_play", "maskable_ppo")
+
+
 IGNORED_FIELD_HINTS: dict[str, str] = {
-    "algorithm": "this script trains MaskablePPO by self-play",
+    "algorithm": "this script trains MaskablePPO by self-play; 'mixed' needs --mode mixed (or self_play.mixed_training: true)",
     "warm_start_path": "use --resume-from to continue a checkpoint",
     "curriculum.*": "read only by train_bootstrap.py",
     "ppo.use_action_masking": "self-play always trains MaskablePPO with masks",
     "ppo.lr_schedule": "not implemented for the SB3 trainers; the learning rate is constant",
     "ppo.purchase_explore_eps": "only the curriculum runner installs the purchase-exploration hook",
     "self_play.snapshot_freq": "read only by train_feudal_rl.py",
-    "self_play.eval_opponent": "read only by train_feudal_rl.py; use --eval-opponent here",
+    "env.opponent": "the bot workers' opponent, read only in mixed mode (--mode mixed)",
+    "env.opponent_kwargs": "the bot workers' opponent kwargs, read only in mixed mode (--mode mixed)",
+    "self_play.bot_ratio": "read only in mixed mode (--mode mixed)",
+    "self_play.pool_size": "read only with self_play.use_opponent_pool: true",
+    "self_play.pool_strategy": "read only with self_play.use_opponent_pool: true",
+    "self_play.add_to_pool_freq": "read only with self_play.use_opponent_pool: true",
+    "self_play.min_win_rate_for_pool": "read only with self_play.use_opponent_pool: true",
+    "self_play.latest_opponent_prob": "read only with self_play.use_opponent_pool: true",
     "eval.seed_offset": "read only by train_bootstrap.py",
     "eval.resample_eval_seeds": "read only by train_bootstrap.py",
     "eval.best_eligible_after": "read only by train_bootstrap.py",
@@ -569,7 +634,7 @@ def build_parser(config_path: str | None = None, *, cfg=None) -> argparse.Argume
         type=str,
         default="bot",
         choices=accepted_names(),
-        help="Fixed scripted opponent the model is evaluated against",
+        help="Fixed scripted opponent the model is evaluated against (with --config: self_play.eval_opponent)",
     )
     parser.add_argument("--checkpoint-freq", type=int, default=50000, help="Checkpoint save frequency (timesteps)")
 
@@ -600,31 +665,36 @@ def build_parser(config_path: str | None = None, *, cfg=None) -> argparse.Argume
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse the command line; with ``--config``, report the fields this script ignores.
+    """Parse the command line and validate the settings the run will use.
 
-    The report is a warning, or an ``IgnoredConfigFieldError`` with
-    ``--strict``.
+    With ``--config``, the fields this run's mode does not read are
+    reported: a warning, or an ``IgnoredConfigFieldError`` with ``--strict``.
+    Every mapped flag is then written back into the config and validated
+    (:func:`reinforcetactics.rl.config.effective_config`), so a flag cannot
+    carry a value the config file would have been rejected for; a bad one
+    is a usage error.
     """
+    from reinforcetactics.rl.config import check_ignored_config_fields, effective_config, load_config
+
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None)
     pre_args, _ = pre_parser.parse_known_args(argv)
-    cfg = None
-    if pre_args.config:
-        from reinforcetactics.rl.config import load_config
-
-        cfg = load_config(pre_args.config)
-    args = build_parser(cfg=cfg).parse_args(argv)
+    cfg = load_config(pre_args.config) if pre_args.config else None
+    parser = build_parser(cfg=cfg)
+    args = parser.parse_args(argv)
     if cfg is not None:
-        from reinforcetactics.rl.config import check_ignored_config_fields
-
         check_ignored_config_fields(
             cfg,
-            CONSUMED_CONFIG_FIELDS,
-            entry_point="train_self_play.py",
+            consumed_config_fields(args.mode, args.use_opponent_pool),
+            entry_point=f"train_self_play.py --mode {args.mode}",
             strict=args.strict,
-            algorithms=CONSUMED_ALGORITHMS,
+            algorithms=consumed_algorithms(args.mode),
             hints=IGNORED_FIELD_HINTS,
         )
+    try:
+        effective_config(cfg, args, _ARG_TO_CONFIG_PATH, convert={"enabled_units": _enabled_units_list})
+    except (TypeError, ValueError) as exc:
+        parser.error(str(exc))
     return args
 
 

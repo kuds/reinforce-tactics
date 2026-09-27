@@ -47,6 +47,11 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
     accepts but the maskable factories don't. (``fog_of_war`` used to be
     left out for the maskable factories too, so ``--use-action-masking``
     runs trained with full information whatever the config said.)
+
+    ``gamma`` is the trainer's discount (``--gamma`` / ``ppo.gamma``): the
+    env's potential-based shaping ``gamma * Phi(s') - Phi(s)`` is only
+    policy-invariant for the discount the learner uses. It used to be left
+    out, so the envs shaped with 0.99 whatever the learner's discount was.
     """
     kwargs: dict = {
         "opponent": args.opponent,
@@ -54,6 +59,8 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
         "map_file": getattr(args, "map_file", None),
         "max_turns": getattr(args, "max_turns", None),
     }
+    if getattr(args, "gamma", None) is not None:
+        kwargs["gamma"] = args.gamma
     if include_render:
         kwargs["render_mode"] = None
     if cfg_env is not None:
@@ -406,13 +413,23 @@ def train_feudal_rl(args):
             return RandomBot(game_state, player=opponent_player)
 
     if self_play_enabled:
+        # Every env that plays episodes needs the factory: an opponent='self'
+        # env without one has no opponent at all. The vectorized rollout envs
+        # (n_envs > 1) used to be left out, so collect_rollout_vec trained
+        # every one of them against nothing.
         env.set_self_play_opponent_factory(_build_self_play_opponent)
+        for vec_env in vec_envs:
+            vec_env.set_self_play_opponent_factory(_build_self_play_opponent)
         # Take an initial snapshot so episode #1 already has a real opponent
         # (otherwise the first ``opponent_snapshot_freq`` steps would train
         # against RandomBot only, which is the same trap the bootstrap notebook
         # exists to escape).
         _add_snapshot(0)
+        # Reset (with the seeds they were built with) so the first episodes
+        # bind a snapshot opponent.
         env.reset(seed=args.seed)
+        for i, vec_env in enumerate(vec_envs):
+            vec_env.reset(seed=args.seed + i + 1)
         # Eval keeps using the originally-requested eval opponent (typically
         # 'random' or 'bot') — we don't want eval scores to drift with the
         # self-play opponent strength.
@@ -705,21 +722,35 @@ _ENV_FIELDS_FROM_CFG = frozenset(
     }
 )
 _FLAT_ONLY_FIELDS = frozenset({"ppo.use_action_masking"})
-_FEUDAL_ONLY_FIELDS = frozenset(
-    {
-        "feudal.*",
-        "ppo.lr_schedule",
-        "self_play.snapshot_freq",
-        "self_play.pool_size",
-        "self_play.eval_opponent",
-    }
-)
+_FEUDAL_ONLY_FIELDS = frozenset({"feudal.*", "ppo.lr_schedule"})
+# Read only when --mode feudal runs self-play (--opponent self): the
+# snapshot cadence, the snapshot pool and the fixed eval opponent. With a
+# scripted training opponent they used to count as read, so --strict passed
+# a config whose self_play section did nothing.
+_SELF_PLAY_FIELDS = frozenset({"self_play.snapshot_freq", "self_play.pool_size", "self_play.eval_opponent"})
 _COMMON_FIELDS = (
-    frozenset(p for p in _ARG_TO_CONFIG_PATH.values() if not p.startswith("feudal.")) - _FLAT_ONLY_FIELDS - _FEUDAL_ONLY_FIELDS
+    frozenset(p for p in _ARG_TO_CONFIG_PATH.values() if not p.startswith("feudal."))
+    - _FLAT_ONLY_FIELDS
+    - _FEUDAL_ONLY_FIELDS
+    - _SELF_PLAY_FIELDS
 ) | _ENV_FIELDS_FROM_CFG
+
+
+def consumed_config_fields(mode: str, opponent: str | None = None) -> frozenset[str]:
+    """The config fields a run in ``mode`` (``'flat'`` / ``'feudal'``) against ``opponent`` reads."""
+    if mode == "flat":
+        return _COMMON_FIELDS | _FLAT_ONLY_FIELDS
+    consumed = _COMMON_FIELDS | _FEUDAL_ONLY_FIELDS
+    if opponent == "self":
+        consumed |= _SELF_PLAY_FIELDS
+    return consumed
+
+
+# The widest set each mode reads (feudal: with --opponent self);
+# :func:`consumed_config_fields` gives a run's own.
 CONSUMED_CONFIG_FIELDS: dict[str, frozenset[str]] = {
-    "flat": _COMMON_FIELDS | _FLAT_ONLY_FIELDS,
-    "feudal": _COMMON_FIELDS | _FEUDAL_ONLY_FIELDS,
+    "flat": consumed_config_fields("flat"),
+    "feudal": consumed_config_fields("feudal", "self"),
 }
 CONSUMED_ALGORITHMS: dict[str, tuple[str, ...]] = {"flat": ("ppo", "maskable_ppo"), "feudal": ("feudal",)}
 IGNORED_FIELD_HINTS: dict[str, str] = {
@@ -901,17 +932,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # has no opponent at all: the flat baseline would train against nothing.
     if args.opponent == "self" and args.mode != "feudal":
         parser.error("--opponent self is only supported with --mode feudal (the flat baseline has no self-play opponent)")
-    if loaded_cfg is not None:
-        from reinforcetactics.rl.config import check_ignored_config_fields
+    from reinforcetactics.rl.config import check_ignored_config_fields, effective_config
 
+    if loaded_cfg is not None:
         check_ignored_config_fields(
             loaded_cfg,
-            CONSUMED_CONFIG_FIELDS[args.mode],
+            consumed_config_fields(args.mode, args.opponent),
             entry_point=f"train_feudal_rl.py --mode {args.mode}",
             strict=args.strict,
             algorithms=CONSUMED_ALGORITHMS[args.mode],
             hints=IGNORED_FIELD_HINTS,
         )
+    # The flags override the validated config's values: validate what the
+    # run will actually use (a bad value is a usage error).
+    try:
+        effective_config(loaded_cfg, args, _ARG_TO_CONFIG_PATH)
+    except (TypeError, ValueError) as exc:
+        parser.error(str(exc))
     # Carry the typed cfg through so env constructors can read non-scalar
     # fields (reward_config, engine_overrides, enabled_units, opponent_kwargs)
     # that argparse can't easily express. ``_make_strategy_env`` and the

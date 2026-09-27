@@ -42,7 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
+from reinforcetactics.rl.config import CurriculumStage, TrainingConfig, check_ignored_config_fields
 
 ConfigPath = str | Path
 
@@ -710,6 +710,18 @@ def run_curriculum(
     cfg.validate(check_files=True)
     if not cfg.curriculum.stages:
         raise ValueError("cfg.curriculum.stages is empty; nothing to run")
+    # Say which config fields this runner does not read (a warning; the
+    # train_bootstrap.py CLI reports them itself, before any output, and
+    # makes them an error under --strict). Notebooks call run_curriculum
+    # directly and used to get no report at all (review rltrain-9).
+    check_ignored_config_fields(
+        cfg,
+        CONSUMED_CONFIG_FIELDS,
+        entry_point="run_curriculum",
+        algorithms=CONSUMED_ALGORITHMS,
+        hints=IGNORED_FIELD_HINTS,
+        strict_hint="train_bootstrap.py --strict makes this an error.",
+    )
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

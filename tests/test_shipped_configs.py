@@ -68,11 +68,15 @@ def _consumed(path: Path, cfg: TrainingConfig):
     if cfg.curriculum.stages:
         return "train_bootstrap.py", bootstrap.CONSUMED_CONFIG_FIELDS, bootstrap.CONSUMED_ALGORITHMS
     if rel.startswith("self_play/"):
+        # What the run itself reads: its mode and whether the pool is on.
         sp = _script("train_self_play")
-        return "train_self_play.py", sp.CONSUMED_CONFIG_FIELDS, sp.CONSUMED_ALGORITHMS
+        mode = "mixed" if cfg.self_play.mixed_training else "self-play"
+        consumed = sp.consumed_config_fields(mode, cfg.self_play.use_opponent_pool)
+        return f"train_self_play.py --mode {mode}", consumed, sp.consumed_algorithms(mode)
     if rel.startswith("feudal/"):
         fd = _script("train_feudal_rl")
-        return "train_feudal_rl.py --mode feudal", fd.CONSUMED_CONFIG_FIELDS["feudal"], fd.CONSUMED_ALGORITHMS["feudal"]
+        consumed = fd.consumed_config_fields("feudal", cfg.env.opponent)
+        return "train_feudal_rl.py --mode feudal", consumed, fd.CONSUMED_ALGORITHMS["feudal"]
     if rel in ("ppo/maskable_ppo.yaml", "ppo/ppo_baseline.yaml"):  # configs/README: train_feudal_rl.py (flat)
         fd = _script("train_feudal_rl")
         return "train_feudal_rl.py --mode flat", fd.CONSUMED_CONFIG_FIELDS["flat"], fd.CONSUMED_ALGORITHMS["flat"]
@@ -107,6 +111,23 @@ def test_shipped_config_loads_validates_and_is_read(path):
     if cfg.curriculum.stages:
         resolved = bootstrap.resolve_config(cfg)
         assert resolved.env.flat_action_version is not None
+
+
+_ENTRY_POINT_ARGV = {
+    "self_play/self_play.yaml": ("train_self_play", []),
+    "feudal/feudal_rl.yaml": ("train_feudal_rl", ["--mode", "feudal"]),
+    "ppo/maskable_ppo.yaml": ("train_feudal_rl", ["--mode", "flat"]),
+    "ppo/ppo_baseline.yaml": ("train_feudal_rl", ["--mode", "flat"]),
+    "alphazero/alphazero.yaml": ("train_alphazero", []),
+}
+
+
+@pytest.mark.parametrize("rel", sorted(_ENTRY_POINT_ARGV))
+def test_non_curriculum_config_parses_strict_through_its_entry_point(rel):
+    """The script itself: its mode-aware report and the validation of the values the run uses."""
+    script, extra = _ENTRY_POINT_ARGV[rel]
+    args = _script(script).parse_args(["--config", str(CONFIGS / rel), "--strict", *extra])
+    assert args.strict
 
 
 def test_canonical_bootstrap_config_is_strict_clean():

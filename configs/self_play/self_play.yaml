@@ -32,6 +32,11 @@ self_play:
   min_win_rate_for_pool: 0.55
   mixed_training: false
   bot_ratio: 0.3
+  # The fixed scripted opponent the model is evaluated against ("bot" is
+  # SimpleBot). train_self_play.py used to ignore this field and evaluate
+  # against its --eval-opponent default, "bot"; stated here so the run keeps
+  # doing that now that the field is read (its dataclass default is "random").
+  eval_opponent: bot
 
 eval:
   eval_freq: 10000

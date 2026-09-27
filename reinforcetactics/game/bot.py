@@ -2,6 +2,7 @@
 AI bots for computer opponents with support for all unit types.
 """
 
+import numbers
 import random
 from collections.abc import Mapping
 from typing import Any
@@ -75,12 +76,33 @@ class RandomBot(BotUnitMixin, BaseBot):
             max_actions: Maximum number of random actions to attempt per turn
             rng: Optional ``random.Random`` instance for reproducibility. If
                 ``None``, the global ``random`` module is used (non-deterministic).
+
+        Raises:
+            ValueError: ``max_actions`` is not an integer >= 1 (see
+                :meth:`validate_config`).
         """
+        self.validate_config(max_actions=max_actions)
         self.game_state = game_state
         self.bot_player = player
         self.max_actions = max_actions
         # Both ``random`` and ``random.Random()`` instances expose ``.choice``.
         self._rng = rng if rng is not None else random
+
+    @classmethod
+    def validate_config(cls, max_actions: int = 20) -> None:
+        """Check RandomBot's kwargs without building it.
+
+        ``max_actions`` must be an integer >= 1. A string or a float (a YAML
+        ``1e1`` is the string ``'1e1'``) used to crash on the bot's first
+        turn, and 0 or a negative value made it a NoopBot that never acts.
+        Called by ``__init__`` and by config validation (through
+        ``bot_registry.validate_scripted_kwargs``).
+
+        Raises:
+            ValueError: A bad ``max_actions``.
+        """
+        if isinstance(max_actions, bool) or not isinstance(max_actions, numbers.Integral) or max_actions < 1:
+            raise ValueError(f"RandomBot max_actions must be an integer >= 1, got {max_actions!r}")
 
     def take_turn(self):
         """Execute random legal actions, then end the turn."""
