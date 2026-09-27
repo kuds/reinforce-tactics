@@ -274,8 +274,11 @@ def _fake_evaluate(calls: list[dict[str, Any]], outcomes: dict[bool, tuple[int, 
 
 
 class TestPeriodicEvalMeasures:
-    def _cb(self, monkeypatch, calls, outcomes, **kwargs) -> PeriodicEvalCallback:
+    def _cb(self, monkeypatch, calls, outcomes, *, use_class_default=False, **kwargs) -> PeriodicEvalCallback:
         monkeypatch.setattr("reinforcetactics.rl.callbacks.evaluate_model", _fake_evaluate(calls, outcomes))
+        if not use_class_default:
+            # The curriculum's gate (eval.eval_deterministic's default).
+            kwargs.setdefault("deterministic", False)
         cb = PeriodicEvalCallback(eval_env=object(), eval_freq=100, n_eval_episodes=10, verbose=0, **kwargs)
         cb.model = _LoggerModel()  # type: ignore[assignment]
         return cb
@@ -286,7 +289,7 @@ class TestPeriodicEvalMeasures:
         cb._do_eval()
         return cb.results[-1]
 
-    def test_gate_mode_defaults_to_the_stochastic_policy(self, monkeypatch):
+    def test_stochastic_gate_mode(self, monkeypatch):
         calls: list[dict[str, Any]] = []
         cb = self._cb(monkeypatch, calls, {False: (6, 3, 1), True: (9, 1, 0)})
         row = self._eval_at(cb, 100)
@@ -295,6 +298,17 @@ class TestPeriodicEvalMeasures:
         assert row["win_rate"] == pytest.approx(0.6)
         assert row["win_rate_stochastic"] == pytest.approx(0.6)
         assert row["win_rate_greedy"] is None
+
+    def test_direct_callers_keep_the_historical_greedy_default(self, monkeypatch):
+        # Only the curriculum's EvalConfig.eval_deterministic defaults to the
+        # stochastic policy (and bootstrap passes it explicitly); a caller that
+        # builds the callback itself (ppo_training.ipynb) still gets what
+        # evaluate_model's default always measured.
+        calls: list[dict[str, Any]] = []
+        cb = self._cb(monkeypatch, calls, {False: (6, 3, 1), True: (9, 1, 0)}, use_class_default=True)
+        row = self._eval_at(cb, 100)
+        assert [c["deterministic"] for c in calls] == [True]
+        assert row["deterministic"] is True and row["win_rate_greedy"] == pytest.approx(0.9)
 
     def test_both_modes_on_the_same_seeds(self, monkeypatch):
         calls: list[dict[str, Any]] = []

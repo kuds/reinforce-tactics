@@ -78,6 +78,18 @@ def save_model_atomically(model: Any, path: str | os.PathLike[str]) -> None:
         raise
 
 
+def _report_write_failure(hook: Callable[[str], None] | None, what: str) -> None:
+    """Report a failed best-effort write: to ``hook`` when set, else as a logged warning.
+
+    Call it inside the ``except`` block, so the traceback is still current
+    for ``exc_info``.
+    """
+    if hook is not None:
+        hook(what)
+    else:
+        logger.warning("could not %s", what, exc_info=True)
+
+
 class AtomicCheckpointCallback(CheckpointCallback):
     """SB3's ``CheckpointCallback`` with the model zip written by ``save_model_atomically``.
 
@@ -178,6 +190,10 @@ class TrainingMetricsCallback(BaseCallback):
         # Free-form context label (typically the curriculum stage name);
         # stamped onto records committed while it is set.
         self.context: str | None = None
+        # Called (inside the ``except``) with a description when a CSV append
+        # fails; the curriculum runner counts these (review rltrain-21).
+        # Unset, the failure is logged with its traceback.
+        self.on_write_failure: Callable[[str], None] | None = None
 
     def _on_step(self) -> bool:
         return True
@@ -226,8 +242,8 @@ class TrainingMetricsCallback(BaseCallback):
                 if write_header:
                     writer.writeheader()
                 writer.writerow({col: record.get(col, "") for col in self._CSV_COLUMNS})
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 - best effort; reported, never raised
+            _report_write_failure(self.on_write_failure, f"append a row to {self.csv_path}")
 
     def _on_rollout_start(self) -> None:
         # train() of the previous iteration has run by this hook, so
@@ -258,12 +274,24 @@ class PeriodicEvalCallback(BaseCallback):
     ``save_dir`` is provided; the best is tracked either way.
 
     Which policy is measured (review rltrain-4 / prior-5):
-    ``deterministic=False`` (the default) samples actions from the policy
-    PPO trains, ``True`` takes its argmax. With ``eval_both_modes`` the
-    other mode is evaluated too, on the same seeds, and every row carries
-    ``win_rate_stochastic`` and ``win_rate_greedy`` (plus the other mode's
-    W/L/D under ``other_mode``). The row's own fields (``win_rate``,
-    ``wins``, ...) always describe the gate mode.
+    ``deterministic=False`` samples actions from the policy PPO trains,
+    ``True`` (the default here, as it always was for direct callers such as
+    ppo_training.ipynb) takes its argmax. The curriculum passes
+    ``eval.eval_deterministic``, whose default is the stochastic policy.
+    With ``eval_both_modes`` the other mode is evaluated too, on the same
+    seeds, and every row carries ``win_rate_stochastic`` and
+    ``win_rate_greedy`` (plus the other mode's W/L/D under ``other_mode``).
+    The row's own fields (``win_rate``, ``wins``, ...) always describe the
+    gate mode. A stochastic eval samples from its own seeded torch stream
+    (see :mod:`reinforcetactics.rl.evaluation`), so it neither perturbs the
+    training run nor depends on it: a row can be re-derived from its
+    checkpoint and ``eval_seed``.
+
+    An eval is committed -- its row appended, ``best`` / ``peak`` updated,
+    its eval block marked done -- only after it has finished and
+    ``best_model.zip`` has been written, so an interrupt in the middle of
+    an eval leaves the bookkeeping (and a resume's snapshot of it) as it
+    was before the eval, and the eval runs again after a resume.
 
     Which seats are measured (critic-gaps-2): ``seats=None`` plays the eval
     env's own seat; ``seats=[1, 2]`` plays ``n_eval_episodes`` per seat and
@@ -288,6 +316,8 @@ class PeriodicEvalCallback(BaseCallback):
     ``row_hooks`` (callables taking the row) run on every new row before it
     is persisted; :class:`PromotionCallback` uses one to stamp its gate
     statistic onto the row. ``row_extra`` is merged into every row.
+    ``on_write_failure`` (called inside the ``except`` with a description)
+    receives a failed JSONL append; unset, the failure is logged.
     """
 
     def __init__(
@@ -304,7 +334,7 @@ class PeriodicEvalCallback(BaseCallback):
         best_eligible_after: int = 0,
         verbose: int = 1,
         *,
-        deterministic: bool = False,
+        deterministic: bool = True,
         eval_both_modes: bool = False,
         seats: Sequence[int] | None = None,
         seat_aggregate: str = "mean",
@@ -312,6 +342,7 @@ class PeriodicEvalCallback(BaseCallback):
         last_eval_block: int | None = None,
         best_state: Mapping[str, Any] | None = None,
         row_extra: Mapping[str, Any] | None = None,
+        on_write_failure: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(verbose=verbose)
         if seat_aggregate not in ("mean", "min"):
@@ -352,6 +383,7 @@ class PeriodicEvalCallback(BaseCallback):
         self.seat_aggregate = seat_aggregate
         self.row_extra = dict(row_extra or {})
         self.row_hooks: list[Callable[[dict], None]] = []
+        self.on_write_failure = on_write_failure
 
         self.results: list[dict] = []
         # Best eligible eval so far: ``None`` until one exists (it used to
@@ -415,8 +447,9 @@ class PeriodicEvalCallback(BaseCallback):
         # num_timesteps jumps by n_envs > 1 each step.
         block = self.num_timesteps // self.eval_freq
         if block > self._last_eval_block:
-            self._last_eval_block = block
-            self._do_eval()
+            # ``_do_eval`` marks the block done only once the eval is
+            # committed; an interrupt mid-eval leaves it pending.
+            self._do_eval(block)
         return True
 
     def _evaluate(self, *, deterministic: bool, seed: int, trace_dir: Path | None, track_breakdown: bool) -> dict:
@@ -440,10 +473,12 @@ class PeriodicEvalCallback(BaseCallback):
             return float(min(v["win_rate"] for v in by_seat.values()))
         return float(m["win_rate"])
 
-    def _do_eval(self) -> None:
+    def _do_eval(self, block: int | None = None) -> None:
+        if block is None:
+            block = int(self.num_timesteps) // self.eval_freq
         # Fixed problem set by default -- see ``resample_eval_seeds``.
         if self.resample_eval_seeds:
-            eval_seed = self.eval_seed_base + 1000 * self._last_eval_block
+            eval_seed = self.eval_seed_base + 1000 * block
         else:
             eval_seed = self.eval_seed_base
         # One subdir per eval block, named by the timestep at which the block
@@ -486,9 +521,7 @@ class PeriodicEvalCallback(BaseCallback):
         m["best_eligible"] = bool(best_eligible)
 
         gate_wr = m["gate_win_rate"]
-        if self.peak_win_rate is None or gate_wr > self.peak_win_rate:
-            self.peak_win_rate = gate_wr
-            self.peak_timestep = int(self.num_timesteps)
+        new_peak = self.peak_win_rate is None or gate_wr > self.peak_win_rate
         # Best by gate win rate, with avg_reward as a tiebreaker so we don't
         # latch onto the first 0%-WR snapshot. Evals inside the
         # ``best_eligible_after`` window are recorded but cannot claim the
@@ -497,28 +530,41 @@ class PeriodicEvalCallback(BaseCallback):
         new_best = False
         if best_eligible:
             best = (self.best_win_rate, self._best_reward) if self.best_win_rate is not None else None
-            if best is None or (gate_wr, m["avg_reward"]) > best:
-                new_best = True
-                self.best_win_rate = gate_wr
-                self._best_reward = float(m["avg_reward"])
-                self.best_timestep = int(self.num_timesteps)
+            new_best = best is None or (gate_wr, m["avg_reward"]) > best
         m["saved_best"] = bool(new_best and self.save_dir is not None)
         for hook in self.row_hooks:
             hook(m)
-        self.results.append(m)
         if new_best and self.save_dir is not None:
             save_model_atomically(self.model, self.save_dir / "best_model.zip")
 
         # Incremental persistence: append the row now so a mid-stage kill
         # (Colab disconnect / OOM) doesn't erase every eval this stage ran.
-        # Best-effort — a disk hiccup must not abort training.
+        # Best-effort — a disk hiccup must not abort training. Written before
+        # the commit below: a row whose eval block a checkpoint did not
+        # commit is dropped (and the eval replayed) by a resume, and a row
+        # that says it saved best_model.zip keeps the resumed best record
+        # true to that file.
         if self.results_jsonl_path is not None:
             try:
                 self.results_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.results_jsonl_path.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(m, default=float) + "\n")
-            except Exception:  # noqa: BLE001
-                logger.warning("could not append eval row to %s", self.results_jsonl_path, exc_info=True)
+            except Exception:  # noqa: BLE001 - best effort; reported, never raised
+                _report_write_failure(self.on_write_failure, f"append an eval row to {self.results_jsonl_path}")
+
+        # Commit. Nothing above changed this callback's state, so an
+        # interrupt before this point (mid-eval, or mid-save of
+        # best_model.zip, which is atomic) leaves the best record pointing at
+        # the weights best_model.zip holds, and the eval block pending.
+        if new_peak:
+            self.peak_win_rate = gate_wr
+            self.peak_timestep = int(self.num_timesteps)
+        if new_best:
+            self.best_win_rate = gate_wr
+            self._best_reward = float(m["avg_reward"])
+            self.best_timestep = int(self.num_timesteps)
+        self.results.append(m)
+        self._last_eval_block = max(self._last_eval_block, int(block))
 
         self._log(m)
 
@@ -685,9 +731,22 @@ class PromotionCallback(BaseCallback):
     absolute counter at stage entry already exceeds any reasonable
     per-stage minimum from the second stage onward.
 
-    ``initial_state`` (from :meth:`state_dict`) restores the streak and the
-    rolling window of a resumed stage; the eval rows already in
-    ``eval_callback.results`` are then treated as consumed.
+    ``initial_state`` (from :meth:`state_dict`) restores the streak, the
+    rolling window, the gate record and whether the stage already promoted
+    (a resume whose checkpoint landed on the promoting eval); the eval rows
+    already in ``eval_callback.results`` are then treated as consumed.
+    ``record`` (from :meth:`record`) carries only the gate record, across a
+    retry: the attempt starts a new streak, but a stall message covers
+    every attempt.
+
+    The gate record is what a stall is reported from (review rltrain-7):
+    the peak of the value the criterion compared with the threshold (the
+    point estimate, the Wilson bound or the rolling mean, of the chosen
+    score, seat-aggregated), how many evals passed, the longest run of
+    passes, and the same for the evals before ``min_timesteps``, which do
+    not count. Every row also gets ``gate_value`` / ``gate_passed`` (what
+    the gate compared on it and whether it passed; ``None`` / False before
+    ``min_timesteps``).
     """
 
     def __init__(
@@ -705,6 +764,7 @@ class PromotionCallback(BaseCallback):
         seat_aggregate: str = "mean",
         start_step: int | None = None,
         initial_state: Mapping[str, Any] | None = None,
+        record: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(verbose=verbose)
         if patience < 1:
@@ -748,25 +808,95 @@ class PromotionCallback(BaseCallback):
         # keeps from-zero semantics.
         self._fixed_start_step = start_step
         self._stage_start_step: int = int(start_step) if start_step is not None else 0
+        # The gate record (see the class docstring), over every attempt.
+        self.peak_gate_value: float | None = None
+        self.peak_gate_timestep: int = -1
+        self.evals_judged: int = 0
+        self.passes: int = 0
+        self.longest_streak: int = 0
+        self.prewindow_evals: int = 0
+        self.prewindow_passes: int = 0
+        self.prewindow_peak: float | None = None
+        carried = dict(record or {})
         if initial_state is not None:
             self._streak = int(initial_state.get("streak", 0))
             self._window.extend(float(v) for v in initial_state.get("window", []))
+            self.promoted = bool(initial_state.get("promoted", False))
             self._consumed = len(getattr(eval_callback, "results", []))
+            carried.update(initial_state.get("record") or {})
+        self._load_record(carried)
         hooks = getattr(eval_callback, "row_hooks", None)
         if hooks is not None:
             hooks.append(self._annotate)
+
+    _RECORD_KEYS = (
+        "peak_gate_value",
+        "peak_gate_timestep",
+        "evals_judged",
+        "passes",
+        "longest_streak",
+        "prewindow_evals",
+        "prewindow_passes",
+        "prewindow_peak",
+    )
+
+    _FLOAT_RECORD_KEYS = frozenset({"peak_gate_value", "prewindow_peak"})
+
+    def _load_record(self, record: Mapping[str, Any]) -> None:
+        for key in self._RECORD_KEYS:
+            value = record.get(key)
+            if value is not None:
+                setattr(self, key, float(value) if key in self._FLOAT_RECORD_KEYS else int(value))
+
+    def record(self) -> dict[str, Any]:
+        """The gate record (see the class docstring) plus the gate's settings, for a stall report / config.json."""
+        return {
+            "criterion": self.criterion,
+            "score": self.score,
+            "threshold": self.threshold,
+            "patience": self.patience,
+            "rolling_k": self.rolling_k,
+            "confidence": self.confidence,
+            "min_timesteps": self.min_timesteps,
+            **{key: getattr(self, key) for key in self._RECORD_KEYS},
+        }
 
     def statistic(self, row: Mapping[str, Any]) -> float:
         """This gate's per-eval statistic for ``row`` (see :func:`gate_statistic`)."""
         return gate_statistic(row, criterion=self.criterion, score=self.score, z=self._z, seat_aggregate=self.seat_aggregate)
 
+    def _judge(self, value: float, window: Sequence[float]) -> tuple[float, bool, bool, list[float]]:
+        """``(gate_value, passed, compared, new_window)`` for a post-window eval whose statistic is ``value``.
+
+        ``compared`` is False while a rolling window is still filling (the
+        gate compares nothing yet).
+        """
+        if self.criterion == "rolling":
+            new_window = [*window, value][-self.rolling_k :]
+            gate_value = sum(new_window) / len(new_window)
+            compared = len(new_window) >= self.rolling_k
+            return gate_value, compared and gate_value >= self.threshold, compared, new_window
+        return value, value >= self.threshold, True, list(window)
+
+    def _in_prewindow(self, timesteps: int) -> bool:
+        return self.min_timesteps > 0 and int(timesteps) - self._stage_start_step < self.min_timesteps
+
     def _annotate(self, row: dict) -> None:
-        row["gate_statistic"] = self.statistic(row)
+        # Runs inside the eval callback's step, before this callback consumes
+        # the row on the same step, so the window it judges with is the one
+        # the consumption below uses.
+        value = self.statistic(row)
+        row["gate_statistic"] = value
         row["gate_criterion"] = self.criterion
+        if self._in_prewindow(int(row.get("timesteps", 0))):
+            row["gate_value"], row["gate_passed"] = None, False
+            return
+        gate_value, passed, _, _ = self._judge(value, list(self._window))
+        row["gate_value"], row["gate_passed"] = gate_value, bool(passed)
 
     def state_dict(self) -> dict[str, Any]:
-        """Streak and rolling window, for a resume (see ``initial_state``)."""
-        return {"streak": self._streak, "window": list(self._window), "promoted": self.promoted}
+        """Streak, rolling window, promotion and gate record, for a resume (see ``initial_state``)."""
+        return {"streak": self._streak, "window": list(self._window), "promoted": self.promoted, "record": self.record()}
 
     def _on_training_start(self) -> None:
         # See ``EntropyScheduleCallback._on_training_start`` — same pattern:
@@ -775,7 +905,16 @@ class PromotionCallback(BaseCallback):
         if self._fixed_start_step is None:
             self._stage_start_step = int(self.num_timesteps)
 
+    def _row_statistic(self, row: Mapping[str, Any]) -> float:
+        if row.get("gate_criterion") == self.criterion and "gate_statistic" in row:
+            return float(row["gate_statistic"])
+        return self.statistic(row)
+
     def _on_step(self) -> bool:
+        if self.promoted:
+            # Restored from a checkpoint taken on the promoting eval: the
+            # stage is done (the runner does not even call learn()).
+            return False
         # Pre-window: stage hasn't trained enough yet for promotion to
         # fire. Advance the consumed pointer past any pre-window evals
         # (they don't contribute to the post-window streak) and reset
@@ -784,9 +923,15 @@ class PromotionCallback(BaseCallback):
         # threshold on the first eval and promotes a stage with ~0
         # stage-specific learning. ``min_timesteps`` is stage-relative
         # (steps since this stage's learn() began), not cumulative.
-        stage_elapsed = int(self.num_timesteps) - self._stage_start_step
-        if self.min_timesteps > 0 and stage_elapsed < self.min_timesteps:
-            self._consumed = len(self.eval_callback.results)
+        results = self.eval_callback.results
+        if self._in_prewindow(int(self.num_timesteps)):
+            while self._consumed < len(results):
+                value = self._row_statistic(results[self._consumed])
+                self._consumed += 1
+                self.prewindow_evals += 1
+                self.prewindow_passes += int(value >= self.threshold)
+                if self.prewindow_peak is None or value > self.prewindow_peak:
+                    self.prewindow_peak = value
             self._streak = 0
             self._window.clear()
             return True
@@ -794,24 +939,23 @@ class PromotionCallback(BaseCallback):
         # looked. Iterating handles the unusual case of multiple new results
         # in a single step (shouldn't happen in practice but is cheap to
         # support and keeps the streak accounting correct).
-        results = self.eval_callback.results
         while self._consumed < len(results):
             row = results[self._consumed]
-            if row.get("gate_criterion") == self.criterion and "gate_statistic" in row:
-                value = float(row["gate_statistic"])
-            else:
-                value = self.statistic(row)
+            value = self._row_statistic(row)
             self.last_statistic = value
-            if self.criterion == "rolling":
-                self._window.append(value)
-                gate_value = sum(self._window) / len(self._window)
-                passed = len(self._window) >= self.rolling_k and gate_value >= self.threshold
-            else:
-                gate_value = value
-                passed = value >= self.threshold
+            gate_value, passed, compared, window = self._judge(value, list(self._window))
+            self._window.clear()
+            self._window.extend(window)
             self.last_gate_value = gate_value
             self._streak = self._streak + 1 if passed else 0
             self._consumed += 1
+            if compared:
+                self.evals_judged += 1
+                self.passes += int(passed)
+                if self.peak_gate_value is None or gate_value > self.peak_gate_value:
+                    self.peak_gate_value = gate_value
+                    self.peak_gate_timestep = int(row.get("timesteps", self.num_timesteps))
+            self.longest_streak = max(self.longest_streak, self._streak)
             if self._streak >= self.patience:
                 self.promoted = True
                 if self.verbose:
@@ -849,6 +993,12 @@ class RollingCheckpointCallback(BaseCallback):
     the same step, so the manifest's snapshot of eval / promotion state is
     consistent with the saved weights. ``start_step`` (the resumed
     checkpoint's timestep) keeps the cadence of a resumed stage.
+
+    The checkpoint is a resume convenience, so a periodic save that fails
+    (a transient I/O error) is reported -- to ``on_error`` inside the
+    ``except``, else as a logged warning -- and training goes on; the next
+    save is attempted a ``save_freq`` later. ``save_now`` (the interrupt
+    path) raises, and its caller decides.
     """
 
     def __init__(
@@ -857,6 +1007,7 @@ class RollingCheckpointCallback(BaseCallback):
         save_freq: int,
         *,
         on_save: Callable[[int], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
         start_step: int | None = None,
         verbose: int = 0,
     ) -> None:
@@ -866,25 +1017,39 @@ class RollingCheckpointCallback(BaseCallback):
         self.path = Path(path)
         self.save_freq = int(save_freq)
         self.on_save = on_save
+        self.on_error = on_error
         self._fixed_start_step = start_step
         self._last_save: int = int(start_step) if start_step is not None else 0
         self.saves = 0
+        self.failures = 0
 
     def _on_training_start(self) -> None:
         if self._fixed_start_step is None:
             self._last_save = int(self.num_timesteps)
 
     def save_now(self) -> None:
-        """Save immediately (an interrupted run's last checkpoint)."""
+        """Save immediately (an interrupted run's last checkpoint).
+
+        Stamped with the model's own ``num_timesteps``: on an interrupt this
+        callback's cached counter can be a step behind (it runs last in the
+        callback list), and the manifest must name the step the zip holds.
+        """
+        timesteps = int(self.model.num_timesteps)
         save_model_atomically(self.model, self.path)
-        self._last_save = int(self.num_timesteps)
+        self._last_save = timesteps
         self.saves += 1
         if self.on_save is not None:
-            self.on_save(int(self.num_timesteps))
+            self.on_save(timesteps)
 
     def _on_step(self) -> bool:
         if int(self.num_timesteps) - self._last_save >= self.save_freq:
-            self.save_now()
+            try:
+                self.save_now()
+            except Exception:  # noqa: BLE001 - a resume convenience must not end the run
+                self.failures += 1
+                self._last_save = int(self.num_timesteps)
+                _report_write_failure(self.on_error, f"save the rolling checkpoint {self.path}")
+                return True
             if self.verbose:
                 print(f"  [checkpoint] {self.path} @ {self.num_timesteps:,}")
         return True

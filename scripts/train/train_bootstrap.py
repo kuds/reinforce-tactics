@@ -31,9 +31,12 @@ A killed run (preemption, a wall-clock limit, Ctrl-C) continues with
 ``--resume <output-dir>``: the promoted stages are skipped and the stage that
 was running continues from its rolling ``<stage>/latest.zip`` (written every
 ``eval.checkpoint_freq`` steps, and on SIGTERM) with the rest of its budget.
-Without ``--config`` the run's own ``resolved_config.yaml`` is used; a config
-that differs from it materially (curriculum, env, ppo, eval, seed) is refused
-unless ``--force``.
+Without ``--config`` the run's own ``resolved_config.yaml`` is used (a record
+written before the eval-gate change keeps its greedy gate and no stall
+retries); a config that differs from it materially (curriculum, env, ppo,
+eval, seed) is refused unless ``--force``. So is a run that was started with
+``--build-bc`` and stopped before the warm start was built (``--force``
+resumes it without one).
 
 Exit codes (so a scheduler can tell the outcomes apart):
 
@@ -81,6 +84,10 @@ EXIT_STALLED = 3
 EXIT_TERMINATED = 128 + signal.SIGTERM
 
 DEFAULT_CONFIG = "configs/ppo/bootstrap.yaml"
+
+# Present in a run directory while its --build-bc warm start is being built:
+# a run stopped then has no warm_start_path in its resolved_config.yaml yet.
+BC_PENDING_MARKER = "bc_warmstart.pending"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -187,14 +194,15 @@ def _apply_set_overrides(cfg, set_items):
     return apply_overrides(cfg, overrides)
 
 
-def _write_resolved_config(cfg, output_dir: Path) -> None:
+def _write_resolved_config(cfg, output_dir: Path) -> bool:
     """Record the config the run uses, with the runner's derived values filled in.
 
     ``resolve_config`` fills ``env.pad_to_size`` and
     ``env.flat_action_version`` the way ``run_curriculum`` will, so the
     record rebuilds the run's observation and action spaces; the unresolved
     dump left pad_to_size null for every mixed-size curriculum (review
-    rltrain-13). Best-effort: a dump failure must not stop the run.
+    rltrain-13). Best-effort: a dump failure must not stop the run. Returns
+    whether the record was written.
     """
     from reinforcetactics.rl.config import save_config
 
@@ -202,6 +210,8 @@ def _write_resolved_config(cfg, output_dir: Path) -> None:
         save_config(cfg, output_dir / "resolved_config.yaml")
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] could not write resolved_config.yaml: {exc}")
+        return False
+    return True
 
 
 def _print_stage_table(cfg) -> None:
@@ -527,15 +537,27 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"--resume {resume_dir} writes into that directory; drop --output-dir {args.output_dir}")
         if not (resume_dir / "resolved_config.yaml").is_file():
             raise SystemExit(f"--resume {resume_dir}: no resolved_config.yaml there (not a train_bootstrap.py run directory)")
+        if (resume_dir / BC_PENDING_MARKER).exists():
+            if not args.force:
+                raise SystemExit(
+                    f"--resume {resume_dir}: this run was started with --build-bc and stopped before the BC warm start "
+                    "was built, so resuming it would train stage 1 without one. Start a new run, or pass --force to "
+                    "resume it without the warm start."
+                )
+            print(f"  [warn] {resume_dir} never finished its --build-bc warm start; resuming without one (--force)")
     elif args.force:
         raise SystemExit("--force only applies to --resume")
     if args.config:
         config_path = Path(args.config)
+        cfg = load_config(config_path)
     elif resume_dir is not None:
         config_path = resume_dir / "resolved_config.yaml"
+        # With the meaning it had when written (a pre-change record gated on
+        # the greedy policy and had no stall retries).
+        cfg = bootstrap.load_recorded_config(config_path)
     else:
         config_path = Path(DEFAULT_CONFIG)
-    cfg = load_config(config_path)
+        cfg = load_config(config_path)
     cfg = _apply_set_overrides(cfg, args.set)
     cfg.ppo.device = _resolve_device(args.device or cfg.ppo.device)
     # Fail before any output or training on a warm-start checkpoint that is
@@ -559,7 +581,10 @@ def main(argv: list[str] | None = None) -> int:
     if resume_dir is not None:
         # Refuse to continue a run with a config that trains or measures
         # something else (a different curriculum, env, gate, ...) unless told to.
-        differences = bootstrap.resume_config_differences(cfg, resume_dir)
+        try:
+            differences = bootstrap.resume_config_differences(cfg, resume_dir)
+        except bootstrap.ResumeError as exc:
+            raise SystemExit(f"--resume {resume_dir}: {exc}") from None
         if differences and not args.force:
             listed = "\n".join(f"  {d}" for d in differences[:40])
             raise SystemExit(
@@ -602,9 +627,14 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = EXIT_OK
     try:
         if args.build_bc:
+            # Until resolved_config.yaml names the warm start, a --resume of
+            # this directory must not train without it.
+            marker = output_dir / BC_PENDING_MARKER
+            marker.write_text("--build-bc started; removed once resolved_config.yaml names the warm start\n")
             bc_model, bc_dataset, bc_stats = _bc_build(cfg, output_dir, args)
             cfg = bootstrap.resolve_config(cfg)
-            _write_resolved_config(cfg, output_dir)
+            if _write_resolved_config(cfg, output_dir):
+                marker.unlink(missing_ok=True)
             if not args.skip_plots:
                 _bc_diagnostics(bc_dataset, bc_stats, charts_dir, plt)
             _bc_sanity_eval(cfg, bc_model)
@@ -617,9 +647,13 @@ def main(argv: list[str] | None = None) -> int:
                 # ``resume`` only when resuming, so a stand-in run_curriculum
                 # with the historical signature keeps working.
                 if resume_dir is not None:
-                    result = bootstrap.run_curriculum(cfg, output_dir=output_dir, resume=True)
+                    result = bootstrap.run_curriculum(cfg, output_dir=output_dir, resume=True, force=args.force)
                 else:
                     result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
+        except bootstrap.ResumeError as exc:
+            # A run that cannot be resumed (it stalled, a record is lost, the
+            # config differs): say why, without a traceback.
+            raise SystemExit(f"--resume {resume_dir}: {exc}") from None
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()

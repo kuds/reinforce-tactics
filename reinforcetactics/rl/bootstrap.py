@@ -99,6 +99,14 @@ class CurriculumStalled(RuntimeError):
         metrics_callback: ``TrainingMetricsCallback`` accumulated over
             the partial run, exposed for the same reason as
             ``history``.
+        gate_record: The promotion gate's record over every attempt
+            (:meth:`PromotionCallback.record`): the criterion, the peak of
+            the value it compared with the threshold (``peak_gate_value``),
+            how many evals passed, the longest run of passes, and the evals
+            before ``min_timesteps``. The message is worded from it; without
+            it (older callers) from ``achieved_win_rate``.
+        trained_timesteps: Env steps the stage trained over all its
+            attempts (``timesteps`` is the per-attempt budget).
     """
 
     def __init__(
@@ -113,6 +121,8 @@ class CurriculumStalled(RuntimeError):
         best_model_path: str | None = None,
         patience: int | None = None,
         retries: int = 0,
+        gate_record: dict[str, Any] | None = None,
+        trained_timesteps: int | None = None,
     ) -> None:
         self.stage_name = stage_name
         self.achieved_win_rate = achieved_win_rate
@@ -120,25 +130,20 @@ class CurriculumStalled(RuntimeError):
         self.timesteps = timesteps
         self.patience = patience
         self.retries = retries
+        self.gate_record = dict(gate_record) if gate_record else None
+        self.trained_timesteps = trained_timesteps
         self.history = history or []
         self.final_model_path = final_model_path
         self.best_model_path = best_model_path
         self.metrics_callback = metrics_callback
-        attempts = f" (after {retries} retr{'y' if retries == 1 else 'ies'})" if retries else ""
-        if achieved_win_rate is None:
-            verdict = "no eval ran"
-        elif achieved_win_rate >= threshold:
-            # Most stalls peak at or above the gate before collapsing; saying
-            # the stage "did not reach" its threshold sent people tuning the
-            # wrong thing (review rltrain-7).
-            held = f"patience={patience}" if patience is not None else "the patience window"
-            verdict = (
-                f"win_rate peaked at {achieved_win_rate:.1%} (>= threshold {threshold:.1%}) "
-                f"but never held it for {held} consecutive evals"
-            )
+        retried = f"after {retries} retr{'y' if retries == 1 else 'ies'}" if retries else ""
+        if trained_timesteps is not None:
+            spent = f"{trained_timesteps:,} timesteps trained, budget {timesteps:,}" + (" per attempt" if retries else "")
+            where = f"stalled ({'; '.join(p for p in (retried, spent) if p)})"
         else:
-            verdict = f"peak win_rate {achieved_win_rate:.1%} did not reach threshold {threshold:.1%}"
-        super().__init__(f"Stage '{stage_name}' stalled at {timesteps:,} timesteps{attempts}: {verdict}")
+            where = f"stalled at {timesteps:,} timesteps" + (f" ({retried})" if retried else "")
+        verdict = stall_verdict(achieved_win_rate, threshold, patience, gate_record)
+        super().__init__(f"Stage '{stage_name}' {where}: {verdict}")
 
     def partial_result(self) -> dict[str, Any]:
         """Return the same dict shape ``run_curriculum`` returns on success.
@@ -159,6 +164,78 @@ class CurriculumStalled(RuntimeError):
             "stalled": True,
             "stalled_stage": self.stage_name,
         }
+
+
+def gate_label(criterion: str, score: str = "win_rate", *, rolling_k: int = 3, confidence: float = 0.95) -> str:
+    """What a promotion criterion compares with its threshold, in words ("Wilson 95% lower bound of win_rate")."""
+    measured = "win+draw/2 score" if score == "win_plus_half_draw" else "win_rate"
+    if criterion == "wilson":
+        return f"Wilson {confidence:.0%} lower bound of {measured}"
+    if criterion == "rolling":
+        return f"rolling-{rolling_k} mean {measured}"
+    return measured
+
+
+def stall_verdict(
+    achieved_win_rate: float | None,
+    threshold: float,
+    patience: int | None,
+    gate_record: dict[str, Any] | None = None,
+) -> str:
+    """Why a stage did not promote, in the terms of the gate that judged it (review rltrain-7).
+
+    Worded from the gate record (see :class:`CurriculumStalled`): the peak
+    of the value the criterion actually compared, so a Wilson-bound, rolling
+    or win+draw/2 stall is not reported as the win-only point estimate's.
+    ``achieved_win_rate`` (the peak gate win rate) is added when the gate
+    compared something else.
+    """
+    held = f"patience={patience}" if patience is not None else "the patience window"
+    record = gate_record or {}
+    if not record:
+        if achieved_win_rate is None:
+            return "no eval ran"
+        if achieved_win_rate >= threshold:
+            return (
+                f"win_rate peaked at {achieved_win_rate:.1%} (>= threshold {threshold:.1%}) "
+                f"but never held it for {held} consecutive evals"
+            )
+        return f"peak win_rate {achieved_win_rate:.1%} did not reach threshold {threshold:.1%}"
+
+    criterion = str(record.get("criterion", "point"))
+    score = str(record.get("score", "win_rate"))
+    what = gate_label(
+        criterion, score, rolling_k=int(record.get("rolling_k", 3)), confidence=float(record.get("confidence", 0.95))
+    )
+    peak = record.get("peak_gate_value")
+    passes = int(record.get("passes", 0) or 0)
+    judged = int(record.get("evals_judged", 0) or 0)
+    plain = criterion == "point" and score == "win_rate"
+    steps = int(record.get("min_timesteps", 0) or 0)
+    window = f" after the first {steps:,} stage steps (min_timesteps_before_promotion)" if steps else ""
+    if peak is None:
+        if achieved_win_rate is None and not int(record.get("prewindow_evals", 0) or 0):
+            return "no eval ran"
+        if criterion == "rolling":
+            verdict = f"the {what} never had {int(record.get('rolling_k', 3))} evals{window} to average"
+        else:
+            verdict = f"no eval came{window}, so none counted"
+    elif passes:
+        verdict = (
+            f"{what} peaked at {float(peak):.1%} (>= threshold {threshold:.1%}) but never held it for {held} "
+            f"consecutive evals (passed on {passes} of {judged} evals, longest run {int(record.get('longest_streak', 0))})"
+        )
+    else:
+        verdict = f"peak {what} {float(peak):.1%} did not reach threshold {threshold:.1%}"
+    if not plain and achieved_win_rate is not None:
+        verdict += f" (win_rate peaked at {achieved_win_rate:.1%})"
+    prewindow_passes = int(record.get("prewindow_passes", 0) or 0)
+    if prewindow_passes:
+        verdict += (
+            f"; {prewindow_passes} eval(s) inside the first {steps:,} stage steps (min_timesteps_before_promotion) "
+            "passed but do not count"
+        )
+    return verdict
 
 
 # ---------------------------------------------------------------------------
@@ -469,15 +546,24 @@ def _default_model_loader(path: Path, vec_env: Any, cfg: TrainingConfig, output_
 class _MetadataFailures:
     """Best-effort write failures of a run (review rltrain-21).
 
-    Metadata writes (config.json, eval_results.json, the CSV, the manifest,
-    ...) must not abort training, but they used to fail in silence. Each
-    failure is now logged with its traceback and counted; run_status.json
-    reports the count as ``metadata_write_failures``.
+    Metadata writes (config.json, eval_results.json, the CSVs, the eval
+    JSONL, the rolling checkpoint, the manifest, ...) must not abort
+    training, but they used to fail in silence. Each failure is now logged
+    with its traceback and counted; run_status.json reports the count as
+    ``metadata_write_failures``. The manifest carries the count and the
+    descriptions, and a resumed run starts from them (:meth:`carry_over`),
+    so the count covers every session of the run.
     """
 
     def __init__(self) -> None:
         self.count = 0
         self.what: list[str] = []
+
+    def carry_over(self, manifest: dict[str, Any] | None) -> None:
+        """Start from the failures an earlier session of the run recorded in its manifest."""
+        manifest = manifest or {}
+        self.count += int(manifest.get("metadata_write_failures", 0) or 0)
+        self.what = [str(w) for w in manifest.get("metadata_write_failure_log") or []] + self.what
 
     def record(self, what: str) -> None:
         self.count += 1
@@ -634,13 +720,19 @@ def _write_run_status(
         logger.warning("could not write run_status.json", exc_info=True)
 
 
-def _write_json_atomically(path: Path, payload: Any) -> None:
-    """Write ``payload`` as JSON via a ``.partial`` sibling, so ``path`` is never half-written."""
+def _write_json_atomically(path: Path, payload: Any, *, default: Callable[[Any], Any] = str) -> None:
+    """Write ``payload`` as JSON via a ``.partial`` sibling, so ``path`` is never half-written.
+
+    ``--resume`` reads these files (config.json, eval_results.json, the
+    manifest): a kill mid-write must leave the previous file or the new one,
+    never a torn one it cannot parse.
+    """
     from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + PARTIAL_SUFFIX)
     try:
-        partial.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        partial.write_text(json.dumps(payload, indent=2, default=default), encoding="utf-8")
         os.replace(partial, path)
     except BaseException:
         partial.unlink(missing_ok=True)
@@ -759,6 +851,14 @@ def _write_stage_config(
 # ``units_built``, ``combat_stats``) intentionally stay in the JSON sibling
 # -- they don't flatten cleanly into a CSV row, and the diagnostics charts
 # read them straight from the JSON.
+#
+# ``win_rate`` and the counts describe the eval's gate mode, which since the
+# eval-gate change is the stochastic policy by default: ``deterministic``
+# says which (empty in a pre-change CSV, whose rows were all greedy), and
+# ``win_rate_stochastic`` / ``win_rate_greedy`` carry both modes when both
+# were measured. ``gate_win_rate`` is the seat-aggregated rate best_model.zip
+# and the peak compare; ``gate_value`` / ``gate_passed`` are what the
+# promotion criterion compared with the threshold and whether it passed.
 _RESULTS_CSV_COLUMNS = (
     "stage",
     "map_file",
@@ -775,6 +875,18 @@ _RESULTS_CSV_COLUMNS = (
     "losses",
     "draws",
     "episodes",
+    "deterministic",
+    "win_rate_stochastic",
+    "win_rate_greedy",
+    "draw_rate",
+    "loss_rate",
+    "gate_win_rate",
+    "gate_criterion",
+    "gate_statistic",
+    "gate_value",
+    "gate_passed",
+    "attempt",
+    "best_eligible",
 )
 
 
@@ -808,9 +920,11 @@ def _write_results_csv(history: Sequence[dict[str, Any]], csv_path: Path) -> Non
 #
 # ``run_manifest.json`` records where an unfinished run is: the stage in
 # progress, its attempt, the rolling ``<stage>/latest.zip`` and the gate /
-# best-model bookkeeping at that checkpoint. Finished stages are read from
-# their ``config.json`` (``extra.promoted``). ``run_status.json`` keeps its
-# meaning (written only when a run ends; absent = the run was killed).
+# best-model bookkeeping at that checkpoint, and every stage that finished
+# (with the summary its history entry needs). Finished stages are read from
+# their ``config.json`` (``extra.promoted``), or from the manifest when that
+# best-effort write failed. ``run_status.json`` keeps its meaning (written
+# only when a run ends; absent = the run was killed).
 # ---------------------------------------------------------------------------
 
 MANIFEST_NAME = "run_manifest.json"
@@ -820,15 +934,39 @@ MANIFEST_VERSION = 1
 # what is trained nor what is measured.
 RESUME_NONMATERIAL_PATHS: tuple[str, ...] = ("ppo.device", "logging.", "total_timesteps", "algorithm")
 
+# What a resolved_config.yaml written before the eval-gate change meant by
+# the fields it does not have: the gate measured the greedy policy, measured
+# only that mode, and a stall ended the run. New defaults would silently
+# change all three for a resumed pre-change run.
+LEGACY_RECORD_DEFAULTS: dict[tuple[str, str], Any] = {
+    ("eval", "eval_deterministic"): True,
+    ("eval", "eval_both_modes"): False,
+    ("curriculum", "max_retries"): 0,
+}
+
+# How many failure descriptions the manifest / run_status.json keep (the
+# count is exact).
+_FAILURE_LOG_LIMIT = 50
+
 
 class ResumeError(ValueError):
     """A run directory cannot be resumed as asked."""
 
 
 def _read_json(path: Path) -> Any:
+    """``path``'s JSON, or None when it does not exist (a torn file raises ``json.JSONDecodeError``)."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        return None
+
+
+def _read_json_lenient(path: Path) -> Any:
+    """:func:`_read_json`, with an unreadable file (cut short by a kill, say) treated as missing."""
+    try:
+        return _read_json(path)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning("%s is unreadable; ignoring it", path, exc_info=True)
         return None
 
 
@@ -867,31 +1005,75 @@ def _diff_paths(recorded: Any, current: Any, prefix: str, out: list[str]) -> Non
         out.append(prefix)
 
 
-def resume_config_differences(cfg: TrainingConfig, run_dir: ConfigPath) -> list[str]:
-    """Dotted paths at which ``cfg`` (resolved) differs materially from ``<run_dir>/resolved_config.yaml``.
+def load_recorded_config(path: ConfigPath) -> TrainingConfig:
+    """Load a run's ``resolved_config.yaml`` with the meaning it had when it was written.
 
-    Paths in :data:`RESUME_NONMATERIAL_PATHS` (the device, logging, the
+    A record written before the eval-gate change lacks the fields in
+    :data:`LEGACY_RECORD_DEFAULTS`; loading it with today's defaults would
+    resume that run with a stochastic gate, both eval modes and a stall
+    retry it never had. Those absent fields get their historical values
+    instead (fields a record does have are kept).
+    """
+    import yaml
+
+    from reinforcetactics.rl.config import load_config
+
+    path = Path(path)
+    cfg = load_config(path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    for (section, key), value in LEGACY_RECORD_DEFAULTS.items():
+        written = raw.get(section) if isinstance(raw, dict) else None
+        if not isinstance(written, dict) or key not in written:
+            setattr(getattr(cfg, section), key, value)
+    return cfg
+
+
+def resume_config_differences(cfg: TrainingConfig, run_dir: ConfigPath) -> list[str]:
+    """Dotted paths at which ``cfg`` differs materially from the run's ``resolved_config.yaml``.
+
+    Both sides are resolved (:func:`resolve_config`), so a value only one of
+    them had filled in -- ``eval.eval_seats: null`` in an older record -- is
+    not a difference; the record is read with :func:`load_recorded_config`,
+    so a pre-change record that gated on the greedy policy differs from a
+    config that gates on the stochastic one. Paths in
+    :data:`RESUME_NONMATERIAL_PATHS` (the device, logging, the
     informational ``total_timesteps`` / ``algorithm``) are ignored.
 
     Raises:
         ResumeError: ``run_dir`` has no ``resolved_config.yaml``.
     """
-    from reinforcetactics.rl.config import load_config
-
     recorded_path = Path(run_dir) / "resolved_config.yaml"
     if not recorded_path.is_file():
         raise ResumeError(f"{run_dir} has no resolved_config.yaml: not a train_bootstrap.py run directory")
-    recorded = load_config(recorded_path).to_dict()
+    recorded = resolve_config(load_recorded_config(recorded_path)).to_dict()
     current = resolve_config(cfg).to_dict()
     diffs: list[str] = []
     _diff_paths(recorded, current, "", diffs)
     return [d for d in diffs if not any(d == p or d.startswith(p) for p in RESUME_NONMATERIAL_PATHS)]
 
 
+def resume_mismatches(cfg: TrainingConfig, run_dir: ConfigPath) -> list[str]:
+    """Why ``cfg`` should not continue the run in ``run_dir`` (empty: it may).
+
+    The :func:`resume_config_differences` against ``resolved_config.yaml``
+    when the run has one, and a curriculum that differs from the one
+    ``run_manifest.json`` recorded (its ``curriculum_hash``).
+    """
+    run_dir = Path(run_dir)
+    problems: list[str] = []
+    if (run_dir / "resolved_config.yaml").is_file():
+        problems.extend(resume_config_differences(cfg, run_dir))
+    manifest = _read_json_lenient(run_dir / MANIFEST_NAME)
+    recorded_hash = manifest.get("curriculum_hash") if isinstance(manifest, dict) else None
+    if recorded_hash is not None and recorded_hash != _curriculum_hash(cfg):
+        problems.append(f"curriculum (run_manifest.json's curriculum_hash {recorded_hash} != {_curriculum_hash(cfg)})")
+    return problems
+
+
 def _history_entry_from_disk(stage: CurriculumStage, stage_dir: Path, extra: dict[str, Any]) -> dict[str, Any]:
-    """A finished stage's ``history`` entry, rebuilt from its config.json and eval results."""
-    results = _read_json(stage_dir / "eval_results.json")
-    if results is None:
+    """A finished stage's ``history`` entry, rebuilt from its config.json (or manifest record) and eval results."""
+    results = _read_json_lenient(stage_dir / "eval_results.json")
+    if not isinstance(results, list):
         results = _read_jsonl(stage_dir / "eval_results.jsonl")
     return {
         "stage": stage.name,
@@ -905,6 +1087,7 @@ def _history_entry_from_disk(stage: CurriculumStage, stage_dir: Path, extra: dic
         "retries": int(extra.get("retries_used", 0) or 0),
         "attempts": extra.get("attempts") or [],
         "regression_restores": extra.get("regression_restores") or [],
+        "gate": extra.get("gate"),
         "results": list(results or []),
         "stage_final_path": str(stage_dir / "stage_final.zip"),
         "from_previous_session": True,
@@ -922,6 +1105,9 @@ class _ResumePlan:
         # Checkpoint the continued model is loaded from (None: build a fresh
         # model, i.e. stage 1 starts over).
         self.model_path: Path | None = None
+        # The step count to give the loaded model (a retry restarted from the
+        # checkpoint it began from, whose own count is older).
+        self.num_timesteps: int | None = None
         # A promoted stage's best_model.zip to load into it afterwards (the
         # between-stage restore the interrupted run had not reached yet).
         self.restore_best_path: Path | None = None
@@ -932,44 +1118,86 @@ class _ResumePlan:
         self.warm_start_info: dict[str, Any] | None = None
 
 
-def _plan_resume(cfg: TrainingConfig, output_dir: Path) -> _ResumePlan:
+def _stage_has_output(stage_dir: Path) -> bool:
+    return stage_dir.is_dir() and any(p.is_file() for p in stage_dir.rglob("*"))
+
+
+def _plan_resume(cfg: TrainingConfig, output_dir: Path, *, force: bool = False) -> _ResumePlan:
     """Work out where to continue the run in ``output_dir``.
 
     Finished stages are the leading stages whose ``config.json`` says
-    ``promoted: true``. The first unfinished stage resumes from its rolling
-    ``latest.zip`` when the manifest names it, else from the previous
-    stage's ``stage_final.zip`` (plus its ``best_model.zip`` when
-    ``restore_best_checkpoint_between_stages``); with neither, stage 1
-    starts over.
+    ``promoted: true`` -- or, when that best-effort write failed or was cut
+    short, whose promotion ``run_manifest.json`` recorded (with their
+    ``stage_final.zip`` on disk). The first unfinished stage resumes from
+    its rolling ``latest.zip`` when the manifest names it (a retry killed
+    before its first checkpoint: from the checkpoint the retry started
+    from), else from the previous stage's ``stage_final.zip`` (plus its
+    ``best_model.zip`` when ``restore_best_checkpoint_between_stages``);
+    with neither, stage 1 starts over.
 
     Raises:
-        ResumeError: The run stalled (``run_status.json`` or a stage's
-            ``config.json`` says so), or a checkpoint it needs is missing.
+        ResumeError: The run stalled (``run_status.json``, a stage's
+            ``config.json`` or the manifest says so), a stage's
+            ``config.json`` is unreadable and the manifest does not vouch
+            for it, a checkpoint it needs is missing, or -- unless
+            ``force`` -- later stages already have output, which resuming
+            here would overwrite.
     """
     stages = cfg.curriculum.stages
-    status = _read_json(output_dir / "run_status.json") or {}
+    status = _read_json_lenient(output_dir / "run_status.json") or {}
     if status.get("status") == "curriculum_stalled":
         raise ResumeError(
             f"{output_dir} stalled at stage '{status.get('stalled_stage')}' (run_status.json); --resume continues "
             "interrupted runs. To try that stage again, start a new run with warm_start_path set to its best_model.zip."
         )
-    manifest = _read_json(output_dir / MANIFEST_NAME)
+    manifest = _read_json_lenient(output_dir / MANIFEST_NAME)
     if manifest is not None and not isinstance(manifest, dict):
         manifest = None
+    finished_by_manifest: dict[str, dict[str, Any]] = {
+        entry["stage"]: entry
+        for entry in (manifest or {}).get("completed") or []
+        if isinstance(entry, dict) and entry.get("stage")
+    }
     history: list[dict[str, Any]] = []
     warm: dict[str, Any] | None = (manifest or {}).get("warm_start")
     start = 0
     for index, stage in enumerate(stages):
-        record = _read_json(output_dir / stage.name / "config.json")
-        if record is None:
-            break
-        extra = record.get("extra") or {}
-        if not extra.get("promoted"):
+        stage_dir = output_dir / stage.name
+        config_path = stage_dir / "config.json"
+        unreadable: Exception | None = None
+        try:
+            record = _read_json(config_path)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            record, unreadable = None, exc
+        entry = finished_by_manifest.get(stage.name)
+        if isinstance(record, dict):
+            extra = record.get("extra") or {}
+            if not extra.get("promoted"):
+                raise ResumeError(
+                    f"stage '{stage.name}' of {output_dir} ended without promoting (its config.json says promoted: "
+                    "false); --resume continues interrupted runs, not stalled ones"
+                )
+        elif entry is not None and not entry.get("promoted"):
             raise ResumeError(
-                f"stage '{stage.name}' of {output_dir} ended without promoting (its config.json says promoted: false); "
-                "--resume continues interrupted runs, not stalled ones"
+                f"stage '{stage.name}' of {output_dir} ended without promoting ({MANIFEST_NAME}); --resume continues "
+                "interrupted runs, not stalled ones"
             )
-        history.append(_history_entry_from_disk(stage, output_dir / stage.name, extra))
+        elif entry is not None and (stage_dir / "stage_final.zip").is_file():
+            # The stage finished and promoted, but its config.json was never
+            # written (a best-effort write that failed) or was cut short: the
+            # manifest's record of it stands in, rather than the run
+            # restarting from this stage and overwriting everything after it.
+            why = "is unreadable" if unreadable is not None else "is missing"
+            print(f"  note: {config_path} {why}; using {MANIFEST_NAME}'s record of the promoted stage '{stage.name}'")
+            extra = {**(entry.get("summary") or {}), "promoted": True}
+        elif unreadable is not None:
+            raise ResumeError(
+                f"{config_path} is unreadable ({unreadable}) and {MANIFEST_NAME} has no record of stage "
+                f"'{stage.name}' finishing; restore or remove that file to resume"
+            )
+        else:
+            break
+        history.append(_history_entry_from_disk(stage, stage_dir, extra))
         warm = warm or extra.get("warm_start")
         start = index + 1
     plan = _ResumePlan(start_index=start, history=history, manifest=manifest)
@@ -981,27 +1209,69 @@ def _plan_resume(cfg: TrainingConfig, output_dir: Path) -> _ResumePlan:
     stage = stages[start]
     stage_dir = output_dir / stage.name
     current = (manifest or {}).get("current") or {}
+    # Resuming here retrains this stage and every one after it. Output from a
+    # later stage means the run got further than the records above show
+    # (a lost record the manifest cannot vouch for): refuse rather than
+    # silently overwrite it.
+    names = [s.name for s in stages]
+    later = [s.name for s in stages[start + 1 :] if _stage_has_output(output_dir / s.name)]
+    if current.get("stage") in names[start + 1 :] and current["stage"] not in later:
+        later.append(str(current["stage"]))
+    if later and not force:
+        raise ResumeError(
+            f"cannot resume {output_dir} at stage '{stage.name}': later stage(s) {later} already have output, so the "
+            f"run got further than its records show (a lost config.json?). Resuming here would retrain and "
+            "overwrite them; pass --force (run_curriculum(force=True)) to do that anyway."
+        )
     latest = stage_dir / "latest.zip"
-    if current.get("stage") == stage.name and current.get("latest_timesteps") is not None and latest.is_file():
+    if current.get("stage") == stage.name:
         attempt = int(current.get("attempt", 0))
-        latest_ts = int(current["latest_timesteps"])
         rows = _read_jsonl(stage_dir / "eval_results.jsonl")
-        plan.prior_attempt_rows = [r for r in rows if int(r.get("attempt", 0)) < attempt]
-        plan.kept_rows = [r for r in rows if int(r.get("attempt", 0)) == attempt and int(r.get("timesteps", 0)) <= latest_ts]
-        dropped = [r for r in rows if int(r.get("attempt", 0)) == attempt and int(r.get("timesteps", 0)) > latest_ts]
-        eval_state = dict(current.get("eval_state") or {})
-        # Evals after the checkpoint are replayed, but a best_model.zip one
-        # of them saved is on disk: keep the bookkeeping true to the file.
-        for row in dropped:
-            gate = row.get("gate_win_rate", row.get("win_rate"))
-            if row.get("saved_best") and int(row["timesteps"]) > int(eval_state.get("best_timestep", -1)):
-                eval_state.update(best_win_rate=gate, best_reward=row.get("avg_reward"), best_timestep=int(row["timesteps"]))
-            peak = eval_state.get("peak_win_rate")
-            if gate is not None and (peak is None or gate > peak):
-                eval_state.update(peak_win_rate=gate, peak_timestep=int(row["timesteps"]))
-        plan.stage_state = {**current, "eval_state": eval_state}
-        plan.model_path = latest
-        return plan
+        prior = [r for r in rows if int(r.get("attempt", 0)) < attempt]
+        this_attempt = [r for r in rows if int(r.get("attempt", 0)) == attempt]
+        if current.get("latest_timesteps") is not None and latest.is_file():
+            latest_ts = int(current["latest_timesteps"])
+            last_block = current.get("last_eval_block")
+            eval_freq = int(cfg.eval.eval_freq)
+
+            def committed(row: dict[str, Any]) -> bool:
+                # An eval is part of the checkpoint when it ran at or before
+                # the checkpoint's step and its eval block was committed
+                # (a row written by an eval an interrupt cut short is not).
+                ts = int(row.get("timesteps", 0))
+                return ts <= latest_ts and (last_block is None or ts // eval_freq <= int(last_block))
+
+            plan.prior_attempt_rows = prior
+            plan.kept_rows = [r for r in this_attempt if committed(r)]
+            dropped = [r for r in this_attempt if not committed(r)]
+            eval_state = dict(current.get("eval_state") or {})
+            # Evals after the checkpoint are replayed, but a best_model.zip one
+            # of them saved is on disk: keep the bookkeeping true to the file.
+            for row in dropped:
+                gate = row.get("gate_win_rate", row.get("win_rate"))
+                if row.get("saved_best") and int(row["timesteps"]) > int(eval_state.get("best_timestep", -1)):
+                    eval_state.update(
+                        best_win_rate=gate, best_reward=row.get("avg_reward"), best_timestep=int(row["timesteps"])
+                    )
+                peak = eval_state.get("peak_win_rate")
+                if gate is not None and (peak is None or gate > peak):
+                    eval_state.update(peak_win_rate=gate, peak_timestep=int(row["timesteps"]))
+            plan.stage_state = {**current, "eval_state": eval_state}
+            plan.model_path = latest
+            return plan
+        restored = current.get("restored_from")
+        restart_from = stage_dir / Path(str(restored)).name if restored else None
+        if attempt > 0 and restart_from is not None and restart_from.is_file():
+            # Killed after a retry began but before its first checkpoint: the
+            # retry restarts from the checkpoint it started from (keeping the
+            # earlier attempts), not the stage from its beginning.
+            attempt_start = int(current.get("attempt_start_timesteps", 0))
+            plan.prior_attempt_rows = prior
+            plan.kept_rows = []
+            plan.stage_state = {**current, "latest_timesteps": None, "restart_attempt": True}
+            plan.model_path = restart_from
+            plan.num_timesteps = attempt_start
+            return plan
     if start > 0:
         prev_dir = output_dir / stages[start - 1].name
         final = prev_dir / "stage_final.zip"
@@ -1028,11 +1298,12 @@ class _RunManifest:
         self.path = output_dir / MANIFEST_NAME
         self.failures = failures
         prev = previous or {}
+        completed = [e for e in prev.get("completed", []) if isinstance(e, dict)] if resumed else []
         self.data: dict[str, Any] = {
             "version": MANIFEST_VERSION,
             "curriculum_hash": _curriculum_hash(cfg),
             "stages": [s.name for s in cfg.curriculum.stages],
-            "completed": list(prev.get("completed", [])) if resumed else [],
+            "completed": completed,
             "current": prev.get("current") if resumed else None,
             "warm_start": prev.get("warm_start"),
             "resume_count": int(prev.get("resume_count", 0)) + (1 if resumed else 0),
@@ -1044,6 +1315,9 @@ class _RunManifest:
 
     def write(self) -> None:
         self.data["updated_at"] = datetime.now(UTC).isoformat()
+        # Every session's failures, so a resumed run reports them all.
+        self.data["metadata_write_failures"] = self.failures.count
+        self.data["metadata_write_failure_log"] = self.failures.what[-_FAILURE_LOG_LIMIT:]
         self.failures.attempt(f"write {MANIFEST_NAME}", _write_json_atomically, self.path, self.data)
 
     def begin_attempt(self, **fields: Any) -> None:
@@ -1056,8 +1330,10 @@ class _RunManifest:
         self.data["current"].update(fields)
         self.write()
 
-    def complete_stage(self, name: str, promoted: bool) -> None:
-        self.data["completed"].append({"stage": name, "promoted": promoted})
+    def complete_stage(self, name: str, promoted: bool, summary: dict[str, Any] | None = None) -> None:
+        """Record a finished stage (once: a stage finished again replaces its entry)."""
+        self.data["completed"] = [e for e in self.data["completed"] if e.get("stage") != name]
+        self.data["completed"].append({"stage": name, "promoted": promoted, "summary": summary or {}})
         self.data["current"] = None
         self.write()
 
@@ -1109,6 +1385,7 @@ def run_curriculum(
     model_loader: Callable[..., Any] | None = None,
     progress_bar: bool = False,
     resume: bool = False,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Train through every stage in ``cfg.curriculum.stages``.
 
@@ -1143,7 +1420,12 @@ def run_curriculum(
             buffer and the envs' in-flight episodes (a new rollout starts),
             the RNG streams, and the in-memory train_metrics records (the
             CSV on disk keeps its rows). A completed run returns its history
-            without training.
+            without training. ``cfg`` must match the run's: a material
+            difference from its ``resolved_config.yaml`` or its manifest's
+            curriculum (:func:`resume_mismatches`) is refused.
+        force: With ``resume``, continue despite such a difference, or
+            although later stages already have output (see
+            :func:`_plan_resume`). The CLI's ``--force``.
 
     Returns:
         Dict with keys ``model``, ``history`` (list of per-stage dicts),
@@ -1152,7 +1434,8 @@ def run_curriculum(
     Raises:
         CurriculumStalled: if a stage's last attempt hits its
             ``max_timesteps`` without the promotion criterion.
-        ResumeError: ``resume`` and the run cannot be continued.
+        ResumeError: ``resume`` and the run cannot be continued (or, without
+            ``force``, not with this ``cfg``).
     """
     from reinforcetactics.rl.callbacks import (
         EntropyScheduleCallback,
@@ -1190,6 +1473,16 @@ def run_curriculum(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if resume and not force:
+        # Mixing two curricula (or two gates) in one stage's timeline and
+        # promotion streak is never what a resume means.
+        mismatches = resume_mismatches(cfg, output_dir)
+        if mismatches:
+            listed = "\n".join(f"  {m}" for m in mismatches[:40])
+            raise ResumeError(
+                f"cannot resume {output_dir} with this config; it differs from the run's at:\n{listed}\n"
+                "Resume with the run's own config, or pass force=True (--force) to continue with this one."
+            )
 
     # Resolve cross-stage pad_to_size (required for the policy to be
     # reusable across stages when the curriculum mixes map sizes: set_env in
@@ -1219,6 +1512,7 @@ def run_curriculum(
     # stage's policy collapsed. One continuous file across all stages; rows
     # carry the stage name via ``metrics_callback.context`` (set below).
     metrics_callback = TrainingMetricsCallback(csv_path=output_dir / "train_metrics.csv")
+    metrics_callback.on_write_failure = failures.record
     history: list[dict[str, Any]] = []
     model = None
     # Provenance of the warm-start checkpoint, filled in the first time
@@ -1230,8 +1524,9 @@ def run_curriculum(
     # branch, the metadata stays accurate without code changes here.
     warm_start_info: dict[str, Any] = {"used": False, "path": None, "sha256": None}
 
-    plan = _plan_resume(cfg, output_dir) if resume else None
+    plan = _plan_resume(cfg, output_dir, force=force) if resume else None
     if plan is not None:
+        failures.carry_over(plan.manifest)
         history = list(plan.history)
         if plan.warm_start_info:
             warm_start_info = dict(plan.warm_start_info)
@@ -1270,6 +1565,10 @@ def run_curriculum(
         if model is None:
             if plan is not None and plan.model_path is not None:
                 model = model_loader(plan.model_path, vec_env, cfg, output_dir)
+                if plan.num_timesteps is not None:
+                    # A retry restarted from the checkpoint it began from: the
+                    # step count is the retry's start, not that checkpoint's.
+                    model.num_timesteps = plan.num_timesteps
                 if plan.restore_best_path is not None:
                     print(f"  restoring {plan.restore_best_path} before '{stage.name}'")
                     model.set_parameters(str(plan.restore_best_path), exact_match=True)
@@ -1364,6 +1663,9 @@ def run_curriculum(
             best_state: dict[str, Any] | None = resume_state.get("eval_state")
             guard_restores: list[dict[str, Any]] = list(resume_state.get("regression_restores") or [])
             restored_from: str | None = resume_state.get("restored_from")
+            # The gate record the attempt began with; a checkpoint's
+            # promotion_state carries the newer one.
+            gate_record: dict[str, Any] | None = resume_state.get("gate_record")
             # Only this stage's own rows are rewritten below; the timeline
             # after the checkpoint is replayed.
             kept = [*stage_results, *(plan.kept_rows if plan is not None else [])]
@@ -1376,6 +1678,7 @@ def run_curriculum(
             best_state = None
             guard_restores = []
             restored_from = None
+            gate_record = None
             # A stage starting afresh begins an empty timeline (a resumed run
             # restarting a stage it never checkpointed would otherwise
             # append to the aborted attempt's rows).
@@ -1394,13 +1697,17 @@ def run_curriculum(
         eval_cb: Any = None
         resume_pending = resume_state is not None
         while True:
+            # A retry killed before its first checkpoint restarts from the
+            # weights it began with: a fresh attempt in all but its number.
+            restart = resume_pending and bool((resume_state or {}).get("restart_attempt"))
             if resume_pending:
                 assert resume_state is not None and plan is not None
                 attempt_start = int(resume_state.get("attempt_start_timesteps", stage_start_timesteps))
-                kept_rows = list(plan.kept_rows)
-                promotion_state = resume_state.get("promotion_state")
-                last_eval_block = resume_state.get("last_eval_block")
-                latest_timesteps: int | None = int(resume_state["latest_timesteps"])
+                kept_rows = [] if restart else list(plan.kept_rows)
+                promotion_state = None if restart else resume_state.get("promotion_state")
+                last_eval_block = None if restart else resume_state.get("last_eval_block")
+                resumed_at = resume_state.get("latest_timesteps")
+                latest_timesteps: int | None = int(resumed_at) if resumed_at is not None else attempt_start
                 pinned_start: int | None = attempt_start
             else:
                 attempt_start = int(model.num_timesteps)
@@ -1472,6 +1779,7 @@ def run_curriculum(
                 # replaced by a better eval.
                 best_state=best_state,
                 row_extra={"attempt": attempt},
+                on_write_failure=failures.record,
             )
             eval_cb.results.extend(kept_rows)
             promote_cb = PromotionCallback(
@@ -1485,7 +1793,10 @@ def run_curriculum(
                 score=promotion["score"],
                 seat_aggregate=cfg.eval.seat_aggregate,
                 start_step=pinned_start,
+                # A resume restores the streak / window / promotion; a retry
+                # carries only the gate record (what a stall reports).
                 initial_state=promotion_state if resume_pending else None,
+                record=gate_record,
             )
             callbacks: list[Any] = [metrics_callback, eval_cb, promote_cb]
             guard_cb = None
@@ -1517,6 +1828,7 @@ def run_curriculum(
                 stage_dir / "latest.zip",
                 cfg.eval.checkpoint_freq,
                 on_save=_on_checkpoint,
+                on_error=failures.record,
                 start_step=latest_timesteps,
             )
             if ent_schedule is not None:
@@ -1556,7 +1868,11 @@ def run_curriculum(
                 )
             callbacks.append(rolling_cb)
 
-            if not resume_pending:
+            if not resume_pending or restart:
+                # Everything a resume needs to restart this attempt from the
+                # weights it begins with (``restored_from`` for a retry) if it
+                # is killed before its first checkpoint: the best / peak and
+                # gate record carried from earlier attempts included.
                 manifest.begin_attempt(
                     stage=stage.name,
                     index=stage_index,
@@ -1565,19 +1881,30 @@ def run_curriculum(
                     attempt_start_timesteps=attempt_start,
                     attempts=list(attempts),
                     restored_from=restored_from,
+                    eval_state=best_state,
+                    gate_record=gate_record,
+                    regression_restores=list(guard_restores),
                 )
                 # Checkpoint the attempt's starting weights, so a kill before
                 # the first rolling save still resumes this attempt.
                 if failures.attempt("save latest.zip", save_model_atomically, model, stage_dir / "latest.zip"):
                     _on_checkpoint(attempt_start)
-            elif attempt > 0 or budget < stage.max_timesteps:
+            if resume_pending and promote_cb.promoted:
+                # The checkpoint was taken on the promoting eval, and the run
+                # died before the stage was written up: finish it, don't
+                # train it again.
+                print(f"  resuming '{stage.name}': it promoted at {int(model.num_timesteps):,} steps; finishing the stage")
+            elif resume_pending and (attempt > 0 or budget < stage.max_timesteps):
                 print(
                     f"  resuming '{stage.name}' attempt {attempt + 1} at {int(model.num_timesteps):,} "
                     f"({budget:,} of {stage.max_timesteps:,} steps left)"
                 )
             _clear_episode_buffers(model)
+            # Whether this attempt trained (a resumed stage that had already
+            # promoted, or had no budget left, does not).
+            learned = budget > 0 and not promote_cb.promoted
             try:
-                if budget > 0:
+                if learned:
                     model.learn(
                         total_timesteps=budget,
                         callback=callbacks,
@@ -1593,6 +1920,7 @@ def run_curriculum(
             if guard_cb is not None:
                 guard_restores.extend(guard_cb.restores)
             best_state = eval_cb.best_state()
+            gate_record = promote_cb.record()
             attempt_rows = list(eval_cb.results)
             stage_results.extend(attempt_rows)
             gates = [r.get("gate_win_rate", r.get("win_rate")) for r in attempt_rows]
@@ -1621,11 +1949,18 @@ def run_curriculum(
             if restore is not None:
                 model.set_parameters(str(restore), exact_match=True)
             restored_from = str(restore) if restore is not None else None
-            peak = eval_cb.peak_win_rate
+            why = stall_verdict(eval_cb.peak_win_rate, float(promotion["threshold"]), int(promotion["patience"]), gate_record)
             print(
-                f"  [retry] '{stage.name}' stalled (peak {'n/a' if peak is None else f'{peak:.1%}'}); "
+                f"  [retry] '{stage.name}' stalled ({why}); "
                 f"attempt {attempt + 1}/{max_retries + 1} from {restore.name if restore is not None else 'the current weights'}"
             )
+
+        if promoted and learned and rolling_cb._last_save != int(model.num_timesteps):
+            # The promotion is on disk before the stage-end writes start: a
+            # kill during them resumes into finishing the stage (the
+            # manifest's promotion_state says promoted) rather than
+            # retraining it from an earlier checkpoint.
+            failures.attempt("save latest.zip at promotion", rolling_cb.save_now)
 
         final_state = best_state or {}
         best_win_rate = final_state.get("best_win_rate")
@@ -1649,6 +1984,9 @@ def run_curriculum(
             "stage_start_timesteps": stage_start_timesteps,
             "stage_end_timesteps": int(model.num_timesteps),
             "last_eval": _eval_summary(stage_results[-1] if stage_results else None),
+            # What the promotion criterion compared, over every attempt: its
+            # peak (``peak_gate_value``), passes and longest run.
+            "gate": gate_record,
             "resumed": resume_state is not None,
         }
         # Per-stage run config -- written next to ``best_model.zip`` and
@@ -1686,9 +2024,10 @@ def run_curriculum(
         # ``history``). Every attempt's evals, in order.
         failures.attempt(
             f"write {stage.name}/eval_results.json",
-            (stage_dir / "eval_results.json").write_text,
-            json.dumps(stage_results, indent=2, default=float),
-            encoding="utf-8",
+            _write_json_atomically,
+            stage_dir / "eval_results.json",
+            stage_results,
+            default=float,
         )
 
         history.append(
@@ -1704,6 +2043,7 @@ def run_curriculum(
                 "retries": attempt,
                 "attempts": attempts,
                 "regression_restores": guard_restores,
+                "gate": gate_record,
                 "results": stage_results,
                 "stage_final_path": str(stage_final),
             }
@@ -1730,7 +2070,20 @@ def run_curriculum(
                     logger.warning("could not close an env of stage '%s'", stage.name, exc_info=True)
 
         # The stage is over: its resume point and retry fallback go.
-        manifest.complete_stage(stage.name, promoted)
+        # With the summary its history entry needs, so a resume can skip this
+        # stage even if its config.json write failed.
+        manifest.complete_stage(
+            stage.name,
+            promoted,
+            {
+                "best_win_rate": best_win_rate,
+                "peak_win_rate": peak_win_rate,
+                "best_checkpoint_timestep": best_timestep,
+                "best_checkpoint_stage_steps": best_stage_steps,
+                "warm_start": warm_start_info,
+                **stage_summary,
+            },
+        )
         for leftover in ("latest.zip", "stage_start.zip"):
             try:
                 (stage_dir / leftover).unlink(missing_ok=True)
@@ -1766,6 +2119,11 @@ def run_curriculum(
                 threshold=stage.promotion_win_rate,
                 patience=stage.patience,
                 promotion=promotion,
+                # What the criterion compared with the threshold (its peak,
+                # passes and longest run), next to the win-rate peak.
+                peak_gate_value=(gate_record or {}).get("peak_gate_value"),
+                gate=gate_record,
+                trained_timesteps=int(model.num_timesteps) - stage_start_timesteps,
                 retries_used=attempt,
                 retries=retries_by_stage,
                 best_model_path=stalled_best_path,
@@ -1777,6 +2135,7 @@ def run_curriculum(
                 warm_start=warm_start_info,
                 resume_count=manifest.resume_count,
                 metadata_write_failures=failures.count,
+                metadata_write_failure_log=failures.what[-_FAILURE_LOG_LIMIT:],
             )
             raise CurriculumStalled(
                 stage_name=stage.name,
@@ -1789,6 +2148,8 @@ def run_curriculum(
                 metrics_callback=metrics_callback,
                 patience=stage.patience,
                 retries=attempt,
+                gate_record=gate_record,
+                trained_timesteps=int(model.num_timesteps) - stage_start_timesteps,
             )
 
         # Stage promoted (the stall branch above raises). PPO drifts
@@ -1836,6 +2197,7 @@ def run_curriculum(
         retries=retries_by_stage,
         resume_count=manifest.resume_count,
         metadata_write_failures=failures.count,
+        metadata_write_failure_log=failures.what[-_FAILURE_LOG_LIMIT:],
     )
 
     return {
@@ -2093,9 +2455,13 @@ def record_curriculum_replays(
         use_pixel_art: Use the pixel-art renderer instead of the
             vector renderer.
         deterministic: Use deterministic argmax actions during replay
-            recording. ``True`` matches what ``evaluate_model``'s
-            default eval mode does so the replay is representative
-            of the eval-time policy.
+            recording (the default): one greedy game shows the policy's
+            modal behaviour, where a single sampled game shows one draw of
+            it. This is not the curriculum gate's mode by default
+            (``eval.eval_deterministic`` is False: the gate measures the
+            stochastic policy, and records the greedy win rate beside
+            it); pass ``cfg.eval.eval_deterministic`` to replay the mode
+            the gate judged.
         prefer_best: When True, prefer ``best_model.zip`` over
             ``stage_final.zip`` for the replay. Mirrors the
             in-notebook default.

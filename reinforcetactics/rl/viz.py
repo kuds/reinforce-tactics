@@ -947,7 +947,11 @@ def plot_curriculum_summary(
     cumulative-timestep axis, with a dotted horizontal segment at the
     stage's ``promotion_win_rate`` and a dashed vertical line at the
     stage's last eval timestep marking the transition to the next
-    stage. Returns ``None`` if no stage has any eval results.
+    stage. Where a stage's rows carry a ``gate_value`` (what its promotion
+    criterion compared with the threshold) that differs from ``win_rate``
+    -- a Wilson bound, a rolling mean, a win+draw/2 score, the weaker seat
+    -- that value is drawn too, thin and dashed. Returns ``None`` if no
+    stage has any eval results.
 
     Args:
         history: ``run_curriculum`` result's ``"history"`` list — each
@@ -963,6 +967,7 @@ def plot_curriculum_summary(
     fig, ax = plt.subplots(figsize=(12, 5))
     cmap = plt.get_cmap("tab10")
     stage_lookup = {s.name: s for s in stages}
+    drew_gate = False
     for i, h in enumerate(history):
         if not h["results"]:
             continue
@@ -970,6 +975,14 @@ def plot_curriculum_summary(
         ys = [r["win_rate"] for r in h["results"]]
         color = cmap(i % 10)
         ax.plot(xs, ys, "-", label=h["stage"], color=color)
+        # The dotted threshold is compared with the gate value (a Wilson
+        # bound, a rolling mean, a win+draw/2 score or the weaker seat's
+        # rate), not always with the pooled win rate: draw it where the two
+        # differ, so the chart compares like with like.
+        gate = [(x, r.get("gate_value")) for x, r in zip(xs, h["results"]) if r.get("gate_value") is not None]
+        if any(abs(float(g) - float(r["win_rate"])) > 1e-9 for r in h["results"] if (g := r.get("gate_value")) is not None):
+            ax.plot(*zip(*gate), "--", color=color, linewidth=1.0, alpha=0.8)
+            drew_gate = True
         # Stage-entry (carry-in) evals hollow: they measure the inherited policy.
         filled = [(x, y) for x, y, r in zip(xs, ys, h["results"]) if not _is_carry_in(r)]
         hollow = [(x, y) for x, y, r in zip(xs, ys, h["results"]) if _is_carry_in(r)]
@@ -991,7 +1004,12 @@ def plot_curriculum_summary(
     ax.set_xlabel("Cumulative env timesteps")
     ax.set_ylabel("Eval win rate")
     ax.set_ylim(-0.02, 1.02)
-    ax.set_title("Curriculum win rate (dotted = stage threshold, dashed = transition, hollow = carry-in eval)")
+    title = "Curriculum win rate (dotted = stage threshold, dashed = transition, hollow = carry-in eval"
+    if drew_gate:
+        title += ",\nthin dashed = the gate value the threshold is compared with)"
+    else:
+        title += ")"
+    ax.set_title(title)
     ax.grid(alpha=0.3)
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()

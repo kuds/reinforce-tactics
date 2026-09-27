@@ -536,11 +536,13 @@ class TestResume:
         )
         assert result["resumed"] is True and len(result["history"]) == 2
 
-        # Killed between stages: b has no config.json and the manifest names no stage.
+        # Killed between stages: b has no config.json, and the manifest names no
+        # stage in progress and has not recorded b as finished.
         (tmp_path / "b" / "config.json").unlink()
         (tmp_path / "run_status.json").unlink()
         manifest = json.loads((tmp_path / "run_manifest.json").read_text())
         manifest["current"] = None
+        manifest["completed"] = [e for e in manifest["completed"] if e["stage"] != "b"]
         (tmp_path / "run_manifest.json").write_text(json.dumps(manifest))
         plan = _plan_resume(cfg, tmp_path)
         assert plan.start_index == 1 and plan.model_path == tmp_path / "a" / "stage_final.zip"

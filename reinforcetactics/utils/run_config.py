@@ -280,9 +280,20 @@ def write_run_config(config: Mapping[str, Any], path: PathLike) -> Path:
     """Serialise ``config`` to ``path`` as pretty-printed JSON.
 
     Parent directories are created as needed. Non-JSON-serialisable
-    values (``Path`` etc.) are coerced via ``str``.
+    values (``Path`` etc.) are coerced via ``str``. Written through a
+    ``.partial`` sibling and renamed into place, so a kill mid-write leaves
+    the previous file (or none), never a torn one: the curriculum's
+    ``--resume`` reads a stage's config.json to decide whether it finished.
     """
+    from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
+
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(config, indent=2, default=str), encoding="utf-8")
+    partial = p.with_name(p.name + PARTIAL_SUFFIX)
+    try:
+        partial.write_text(json.dumps(config, indent=2, default=str), encoding="utf-8")
+        os.replace(partial, p)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     return p
