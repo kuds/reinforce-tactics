@@ -231,8 +231,53 @@ eval:
   # that need tighter CIs.
   eval_freq: 50_000
   n_eval_episodes: 80
+  # Gate settings left at their defaults (see EvalConfig). Since the eval-gate
+  # change the gate measures the *stochastic* policy (eval_deterministic:
+  # false) and every eval also records the greedy win rate on the same seeds
+  # (eval_both_modes: true). The promotion_win_rate values below were tuned
+  # on greedy evals; if stages stop promoting, compare win_rate_greedy with
+  # win_rate_stochastic in eval_results.jsonl before lowering them.
+  #
+  # Eval cost: measured with an untrained policy on 4 CPUs, one default eval
+  # (both modes) takes 2.3-2.5x the old greedy-only eval (starter, 40
+  # episodes: 4.2s greedy + 6.1s stochastic against 4.6s before; beginner, 16
+  # episodes: 19.0s against 7.5s). That gives back much of what the move from
+  # eval_freq 20_000 to 50_000 saved. n_eval_envs: 4 (batched predict, one
+  # process) brings it to ~1.45x (starter: 2.7s + 4.0s). Since a stochastic
+  # eval samples from its own seeded stream, n_eval_envs changes neither the
+  # training run nor the greedy numbers, but the stochastic gate numbers are a
+  # different (equally valid, reproducible) sample than the serial path's, so
+  # switch it at a run boundary, not mid-comparison. eval_both_modes: false
+  # halves the cost again at the price of the greedy number.
+  #
+  # Also recommended once validated: eval_seats: [1, 2] with env.agent_seat:
+  # random, so checkpoints are trained and gated in the seat they are
+  # deployed in half the time. checkpoint_freq (default 50_000) is the
+  # rolling latest.zip that train_bootstrap.py --resume continues from.
+  #
+  # Promotion / recovery settings (curriculum section) are also left at their
+  # defaults (see CurriculumConfig): promotion_criterion point (the gate these
+  # thresholds were tuned for), max_retries 1 (a stalled stage gets one more
+  # budget from its best_model.zip), regression_guard_evals 0 (off).
+  # Recommended to try on the noisy *_random_N stages: promotion_criterion:
+  # rolling with promotion_rolling_k: 3 and patience: 1, or wilson with
+  # lowered thresholds. A Wilson gate (one-sided 95%) as hard as today's point
+  # gate at 80 episodes is 7-9 points lower: 0.65 -> 0.56, 0.70 -> 0.61,
+  # 0.75 -> 0.66, 0.85 -> 0.77, 0.90 -> 0.83; with eval_seats [1, 2] (160
+  # pooled episodes) 4.5-6.5 points lower: 0.65 -> 0.59, 0.70 -> 0.64,
+  # 0.75 -> 0.69, 0.85 -> 0.80, 0.90 -> 0.85. In general T' =
+  # wilson_lower_bound(ceil(n * T), n, z_for_confidence(0.95)) from
+  # reinforcetactics.rl.evaluation, n the episodes pooled per eval. Also:
+  # promotion_score: win_plus_half_draw where max_turns draws dominate;
+  # regression_guard_evals: 3 with regression_guard_drop: 0.25;
+  # anneal_horizon near the steps a stage typically needs to promote, so
+  # ent_coef schedules finish cooling.
 
 curriculum:
+  # Stage order against the measured scripted-bot ladder: see
+  # docs/bot_ladder_2026-09.md (flags and a recommended order, not applied
+  # here). Re-check with:
+  #   python scripts/eval/bot_ladder.py --config configs/ppo/bootstrap.yaml --out-dir <dir>
   stages:
     - name: starter_random
       map_file: maps/1v1/starter.csv
@@ -253,6 +298,10 @@ curriculum:
     # on top of a solved problem. 0.05 matches the convention used by
     # every other simple/medium stage in the curriculum.
     - name: starter_simple
+      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. On this map
+      # RandomBot beats SimpleBot 41-7-2 (50 seeded games, both seats), so
+      # this stage is no step up from starter_random. Suggested: run it
+      # before starter_random, or drop it.
       map_file: maps/1v1/starter.csv
       opponent: simple
       promotion_win_rate: 0.90
@@ -345,6 +394,10 @@ curriculum:
         schedule: linear
 
     - name: beginner_simple
+      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. RandomBot with
+      # max_actions 20 beats SimpleBot 26-17-7 on this map, so this stage
+      # is easier than beginner_random_20. SimpleBot ties random_15 and
+      # edges random_10. Suggested: run it right after beginner_random_10.
       map_file: maps/1v1/beginner.csv
       opponent: simple
       promotion_win_rate: 0.70
@@ -395,9 +448,11 @@ curriculum:
       # flanking stages; budget (4.5M) sits halfway between them,
       # mirroring the simple -> mixed_50 -> medium spacing.
       #
-      # Not re-validated since the rule-bot legality fixes (review
-      # rulebots-1/6/8/14/19): see beginner_advanced below. Its "hard"
-      # half no longer previews a harder opponent.
+      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. Since the rule-bot
+      # legality fixes (review rulebots-1/6/8/14/19) this bot loses to
+      # MediumBot 15-0-35, so the stage is easier than beginner_medium: its
+      # "hard" half no longer previews a harder opponent. Suggested: run it
+      # between beginner_advanced and beginner_medium (see beginner_advanced).
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs:
@@ -420,14 +475,15 @@ curriculum:
       # tighter play forcing the policy to convert draws into wins on
       # the same map geometry.
       #
-      # Not re-validated since the rule-bot legality fixes (review
-      # rulebots-1/6/8/14/19): the premise above may no longer hold.
-      # AdvancedBot now loses 45 of 50 seeded 75-turn games to MediumBot
-      # on this map (33 of 50 before the fixes), so this stage and
-      # beginner_mixed_med_adv_50 may now be easier than beginner_medium.
-      # Re-check the ladder before a run relies on them (the curriculum
-      # re-baseline in docs/REVIEW_full_2026-09-26.md §8, week 4; numbers
-      # under rulebots-1 in docs/REVIEW_full_2026-09-26_findings.md).
+      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. The premise above
+      # no longer holds after the rule-bot legality fixes (review
+      # rulebots-1/6/8/14/19). AdvancedBot now loses 46 of 50 games to
+      # MediumBot on this map (33 of 50 before the fixes) and goes 17-0-33
+      # against beginner_mixed_med_adv_50's bot, so this stage and that one
+      # are easier than beginner_medium. Suggested: beginner_mixed_50 ->
+      # beginner_advanced -> beginner_mixed_med_adv_50 -> beginner_medium,
+      # which rises at every step. Re-baseline the budgets and thresholds
+      # with the move (docs/REVIEW_full_2026-09-26.md §8, week 4).
       map_file: maps/1v1/beginner.csv
       opponent: advanced
       promotion_win_rate: 0.70
@@ -521,6 +577,10 @@ curriculum:
       ent_coef: 0.05
 
     - name: intermediate_medium
+      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but the largest
+      # step on this map (MediumBot beats SimpleBot 45-1-4). A
+      # mixed {easy: simple, hard: medium, p_hard: 0.5} bridge before it
+      # splits the step evenly (0.72 / 0.75 head-to-head scores).
       map_file: maps/1v1/intermediate.csv
       opponent: medium
       promotion_win_rate: 0.65
@@ -559,6 +619,10 @@ curriculum:
         schedule: linear
 
     - name: skirmish_random_15
+      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but no
+      # measurable step. RandomBot with max_actions 10, 15 and 20 rates the
+      # same here and draws itself; with skirmish_random_20, a candidate to
+      # drop.
       map_file: maps/1v1/skirmish.csv
       opponent: random
       opponent_kwargs:
@@ -574,6 +638,7 @@ curriculum:
         schedule: linear
 
     - name: skirmish_random_20
+      # Bot ladder: no measurable step over skirmish_random_15 (see there).
       map_file: maps/1v1/skirmish.csv
       opponent: random
       opponent_kwargs:
@@ -692,6 +757,9 @@ curriculum:
         schedule: linear
 
     - name: corner_points_random_20
+      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but no
+      # measurable step over corner_points_random_15 (same rating, all draws
+      # head to head). A candidate to drop.
       map_file: maps/1v1/corner_points.csv
       opponent: random
       opponent_kwargs:
@@ -757,6 +825,10 @@ curriculum:
       ent_coef: 0.05
 
     - name: corner_points_medium
+      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. On this map at
+      # 200 turns SimpleBot beats MediumBot 31-16-3 (and AdvancedBot and
+      # MasterBot), so this stage is easier than corner_points_simple.
+      # Suggested: swap the two (mixed_50 -> medium -> simple).
       map_file: maps/1v1/corner_points.csv
       opponent: medium
       promotion_win_rate: 0.65

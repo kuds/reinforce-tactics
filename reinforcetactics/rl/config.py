@@ -49,7 +49,7 @@ from reinforcetactics.rl.env_schema import (
     validate_opponent_kwargs,
     validate_reward_config,
 )
-from reinforcetactics.rl.gym_env import FLAT_ACTION_VERSIONS
+from reinforcetactics.rl.gym_env import AGENT_SEATS, FLAT_ACTION_VERSIONS, parse_agent_seat
 from reinforcetactics.rules import ALL_UNIT_TYPES
 
 try:
@@ -133,6 +133,14 @@ class EnvConfig:
     # ignores it, as it ignores ``opponent``: set
     # :attr:`CurriculumStage.opponent_kwargs` on each stage instead.
     opponent_kwargs: dict[str, Any] | None = None
+    # The seat the agent trains in: 1 (the first mover; the default and the
+    # only seat every run before this field trained), 2, or "random" (drawn
+    # from each env's np_random on every reset). Forwarded to every env the
+    # curriculum builds (training, eval, replays) and to the feudal / flat
+    # trainers; train_self_play.py applies it to its bot workers and eval
+    # env (self-play workers follow self_play.swap_players). Which seats the
+    # curriculum's evals measure is ``eval.eval_seats``.
+    agent_seat: int | str = 1
 
 
 @dataclass
@@ -151,9 +159,11 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     use_action_masking: bool = True
     device: str = "auto"
-    # LR schedule applied across the total budget. ``constant`` keeps the base
-    # LR; ``linear`` anneals to zero. Consumed by feudal training; SB3's PPO
-    # uses its own scheduler API so this field is ignored on the SB3 path.
+    # LR schedule. ``constant`` keeps the base LR; ``linear`` anneals it to
+    # zero. Feudal training anneals over its total budget; the curriculum
+    # runner anneals per stage, from ``learning_rate`` to 0 over the stage's
+    # budget (or ``anneal_horizon``), via ``LRScheduleCallback`` (a stage's
+    # own ``learning_rate`` override wins). train_self_play.py ignores it.
     lr_schedule: str = "constant"
     # Forwarded to MaskablePPO/PPO as ``policy_kwargs``. Use to set
     # ``net_arch`` (e.g. ``{"net_arch": {"pi": [256, 256], "vf": [256, 256]}}``)
@@ -256,6 +266,17 @@ class AlphaZeroConfig:
 # "self" is not a curriculum opponent: the runner has no self-play wrapper,
 # and a bare 'self' env plays no opponent at all.
 _CURRICULUM_OPPONENTS: tuple[str, ...] = accepted_bot_names()
+
+# Promotion gate vocabulary (review rltrain-12 / prior-5). See
+# :class:`CurriculumConfig` for what each one means.
+PROMOTION_CRITERIA: tuple[str, ...] = ("point", "wilson", "rolling")
+PROMOTION_SCORES: tuple[str, ...] = ("win_rate", "win_plus_half_draw")
+# How per-seat eval results combine into one gate value (``eval.seat_aggregate``).
+SEAT_AGGREGATES: tuple[str, ...] = ("mean", "min")
+# Schedule kinds of a ``{start, end, schedule, horizon}`` mapping. A learning
+# rate may also be ``constant`` (``start`` held for the whole stage).
+_ANNEAL_SCHEDULES: tuple[str, ...] = ("linear", "cosine")
+_LR_SCHEDULES: tuple[str, ...] = ("linear", "cosine", "constant")
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +428,7 @@ def _normalize_fields(obj: Any, prefix: str) -> None:
 
 
 def _normalize_schedule(value: Any, where: str) -> Any:
-    """Coerce the numeric ``start`` / ``end`` of a ``{start, end, schedule}`` mapping."""
+    """Coerce the numeric ``start`` / ``end`` / ``horizon`` of a ``{start, end, schedule, horizon}`` mapping."""
     if not isinstance(value, Mapping):
         return value
     out = dict(value)
@@ -417,6 +438,61 @@ def _normalize_schedule(value: Any, where: str) -> Any:
                 out[key] = _coerce_to(out[key], float, f"{where}.{key}")
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{where}.{key} must be a non-negative number, got {out[key]!r} ({exc})") from None
+    if out.get("horizon") is not None:
+        try:
+            out["horizon"] = _coerce_to(out["horizon"], int, f"{where}.horizon")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{where}.horizon must be a positive step count, got {out['horizon']!r} ({exc})") from None
+    return out
+
+
+def _check_schedule_mapping(
+    value: Mapping[str, Any],
+    where: str,
+    *,
+    kinds: tuple[str, ...],
+    lo: float = 0.0,
+    hi: float | None = None,
+    positive: bool = False,
+) -> None:
+    """Validate a ``{start, end, schedule, horizon}`` mapping (``start`` / ``end`` required).
+
+    ``start`` / ``end`` must lie in ``[lo, hi]`` (``hi=None``: unbounded),
+    strictly above ``lo`` with ``positive``; ``schedule`` (default
+    ``linear``) one of ``kinds``; ``horizon`` (optional) a positive step
+    count over which the value anneals before holding ``end``.
+    """
+    valid = ("start", "end", "schedule", "horizon")
+    unknown = set(value.keys()) - set(valid)
+    if unknown:
+        raise ValueError(f"{where} schedule has unknown keys {sorted(unknown)}. Valid keys: {', '.join(valid)}")
+    for required in ("start", "end"):
+        if required not in value:
+            raise ValueError(f"{where} schedule missing required key '{required}'")
+        val = value[required]
+        ok = isinstance(val, (int, float)) and not isinstance(val, bool)
+        ok = ok and (val > lo if positive else val >= lo) and (hi is None or val <= hi)
+        if not ok:
+            bound = f"> {lo}" if positive else f">= {lo}"
+            bound += f" and <= {hi}" if hi is not None else ""
+            raise ValueError(f"{where}.{required} must be a number {bound}, got {val!r}")
+    kind = value.get("schedule", "linear")
+    if kind not in kinds:
+        raise ValueError(f"{where}.schedule must be {' or '.join(repr(k) for k in kinds)}, got {kind!r}")
+    horizon = value.get("horizon")
+    if horizon is not None and (isinstance(horizon, bool) or not isinstance(horizon, int) or horizon <= 0):
+        raise ValueError(f"{where}.horizon must be a positive step count (or null), got {horizon!r}")
+
+
+def _schedule_descriptor(value: Mapping[str, Any]) -> dict[str, Any]:
+    """``{start, end, schedule}`` (plus ``horizon`` when the mapping sets one), defaults filled in."""
+    out: dict[str, Any] = {
+        "start": float(value["start"]),
+        "end": float(value["end"]),
+        "schedule": str(value.get("schedule", "linear")),
+    }
+    if value.get("horizon") is not None:
+        out["horizon"] = int(value["horizon"])
     return out
 
 
@@ -557,6 +633,32 @@ class CurriculumStage:
     # or a ``{start, end, schedule}`` mapping (same layout as ``ent_coef``)
     # that drives :class:`PurchaseExploreScheduleCallback`.
     purchase_explore_eps: float | dict[str, Any] | None = None
+    # Per-stage learning rate (review rltrain-8 / prior-6): a constant, or a
+    # ``{start, end, schedule, horizon}`` mapping (schedule ``linear`` |
+    # ``cosine`` | ``constant``) driven by ``LRScheduleCallback``. ``None``
+    # (default) = ``ppo.learning_rate``, annealed per stage to 0 when
+    # ``ppo.lr_schedule`` is ``linear``. Stage-relative, like every schedule
+    # here: progress counts this stage's own steps, not the cumulative
+    # ``num_timesteps``.
+    learning_rate: float | dict[str, Any] | None = None
+    # Env steps over which this stage's schedules (``ent_coef``,
+    # ``learning_rate``, ``purchase_explore_eps``, ``ppo.lr_schedule``) run
+    # before holding their ``end`` value. ``None`` = ``max_timesteps``, so a
+    # stage that promotes long before its budget no longer stops mid-anneal
+    # when set to the steps it is expected to need. A schedule mapping's own
+    # ``horizon`` wins.
+    anneal_horizon: int | None = None
+    # Promotion-gate overrides; ``None`` inherits the curriculum-level
+    # default of the same name (:class:`CurriculumConfig`).
+    promotion_criterion: str | None = None
+    promotion_rolling_k: int | None = None
+    promotion_confidence: float | None = None
+    promotion_score: str | None = None
+    # Stall recovery overrides; ``None`` inherits the curriculum-level
+    # ``max_retries`` / ``regression_guard_evals`` / ``regression_guard_drop``.
+    max_retries: int | None = None
+    regression_guard_evals: int | None = None
+    regression_guard_drop: float | None = None
 
     def validate(self) -> None:
         """Coerce every field to its annotated type, then check values.
@@ -570,6 +672,7 @@ class CurriculumStage:
         self.purchase_explore_eps = _normalize_schedule(
             self.purchase_explore_eps, f"stage '{self.name}': purchase_explore_eps"
         )
+        self.learning_rate = _normalize_schedule(self.learning_rate, f"stage '{self.name}': learning_rate")
         if not self.name:
             raise ValueError("stage.name must be non-empty")
         if not self.map_file:
@@ -600,67 +703,65 @@ class CurriculumStage:
             raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
         if self.max_turns is not None and self.max_turns <= 0:
             raise ValueError(f"stage '{self.name}': max_turns override must be > 0")
+        where = f"stage '{self.name}'"
         if self.ent_coef is not None:
             if isinstance(self.ent_coef, Mapping):
-                unknown = set(self.ent_coef.keys()) - {"start", "end", "schedule"}
-                if unknown:
-                    raise ValueError(
-                        f"stage '{self.name}': ent_coef schedule has unknown keys {sorted(unknown)}. "
-                        "Valid keys: start, end, schedule"
-                    )
-                for required in ("start", "end"):
-                    if required not in self.ent_coef:
-                        raise ValueError(f"stage '{self.name}': ent_coef schedule missing required key '{required}'")
-                    val = self.ent_coef[required]
-                    if not isinstance(val, (int, float)) or val < 0:
-                        raise ValueError(
-                            f"stage '{self.name}': ent_coef.{required} must be a non-negative number, got {val!r}"
-                        )
-                schedule_kind = self.ent_coef.get("schedule", "linear")
-                if schedule_kind not in ("linear", "cosine"):
-                    raise ValueError(
-                        f"stage '{self.name}': ent_coef.schedule must be 'linear' or 'cosine', got {schedule_kind!r}"
-                    )
+                _check_schedule_mapping(self.ent_coef, f"{where}: ent_coef", kinds=_ANNEAL_SCHEDULES)
             elif isinstance(self.ent_coef, (int, float)):
                 if self.ent_coef < 0:
-                    raise ValueError(f"stage '{self.name}': ent_coef override must be >= 0")
+                    raise ValueError(f"{where}: ent_coef override must be >= 0")
             else:
                 raise TypeError(
-                    f"stage '{self.name}': ent_coef must be a number or a "
+                    f"{where}: ent_coef must be a number or a "
                     f"{{start, end, schedule}} mapping, got {type(self.ent_coef).__name__}"
                 )
         if self.purchase_explore_eps is not None:
             if isinstance(self.purchase_explore_eps, Mapping):
-                unknown = set(self.purchase_explore_eps.keys()) - {"start", "end", "schedule"}
-                if unknown:
-                    raise ValueError(
-                        f"stage '{self.name}': purchase_explore_eps schedule has unknown keys {sorted(unknown)}. "
-                        "Valid keys: start, end, schedule"
-                    )
-                for required in ("start", "end"):
-                    if required not in self.purchase_explore_eps:
-                        raise ValueError(
-                            f"stage '{self.name}': purchase_explore_eps schedule missing required key '{required}'"
-                        )
-                    val = self.purchase_explore_eps[required]
-                    if not isinstance(val, (int, float)) or not 0.0 <= float(val) <= 1.0:
-                        raise ValueError(
-                            f"stage '{self.name}': purchase_explore_eps.{required} must be in [0, 1], got {val!r}"
-                        )
-                schedule_kind = self.purchase_explore_eps.get("schedule", "linear")
-                if schedule_kind not in ("linear", "cosine"):
-                    raise ValueError(
-                        f"stage '{self.name}': purchase_explore_eps.schedule must be 'linear' or 'cosine', "
-                        f"got {schedule_kind!r}"
-                    )
+                _check_schedule_mapping(
+                    self.purchase_explore_eps, f"{where}: purchase_explore_eps", kinds=_ANNEAL_SCHEDULES, hi=1.0
+                )
             elif isinstance(self.purchase_explore_eps, (int, float)):
                 if not 0.0 <= float(self.purchase_explore_eps) <= 1.0:
-                    raise ValueError(f"stage '{self.name}': purchase_explore_eps override must be in [0, 1]")
+                    raise ValueError(f"{where}: purchase_explore_eps override must be in [0, 1]")
             else:
                 raise TypeError(
-                    f"stage '{self.name}': purchase_explore_eps must be a number or a "
+                    f"{where}: purchase_explore_eps must be a number or a "
                     f"{{start, end, schedule}} mapping, got {type(self.purchase_explore_eps).__name__}"
                 )
+        if self.learning_rate is not None:
+            if isinstance(self.learning_rate, Mapping):
+                # end may be 0 (anneal to zero); start may not.
+                _check_schedule_mapping(self.learning_rate, f"{where}: learning_rate", kinds=_LR_SCHEDULES)
+                if self.learning_rate["start"] <= 0:
+                    raise ValueError(f"{where}: learning_rate.start must be > 0, got {self.learning_rate['start']!r}")
+            elif isinstance(self.learning_rate, (int, float)):
+                if self.learning_rate <= 0:
+                    raise ValueError(f"{where}: learning_rate override must be > 0, got {self.learning_rate}")
+            else:
+                raise TypeError(
+                    f"{where}: learning_rate must be a number or a "
+                    f"{{start, end, schedule}} mapping, got {type(self.learning_rate).__name__}"
+                )
+        if self.anneal_horizon is not None and self.anneal_horizon <= 0:
+            raise ValueError(f"{where}: anneal_horizon must be > 0 env steps (or null for max_timesteps)")
+        if self.promotion_criterion is not None and self.promotion_criterion not in PROMOTION_CRITERIA:
+            raise ValueError(
+                f"{where}: promotion_criterion must be one of {PROMOTION_CRITERIA} (or null), got {self.promotion_criterion!r}"
+            )
+        if self.promotion_score is not None and self.promotion_score not in PROMOTION_SCORES:
+            raise ValueError(
+                f"{where}: promotion_score must be one of {PROMOTION_SCORES} (or null), got {self.promotion_score!r}"
+            )
+        if self.promotion_rolling_k is not None and self.promotion_rolling_k < 1:
+            raise ValueError(f"{where}: promotion_rolling_k must be >= 1 (or null), got {self.promotion_rolling_k}")
+        if self.promotion_confidence is not None and not 0.5 <= self.promotion_confidence < 1.0:
+            raise ValueError(f"{where}: promotion_confidence must be in [0.5, 1) (or null), got {self.promotion_confidence}")
+        if self.max_retries is not None and self.max_retries < 0:
+            raise ValueError(f"{where}: max_retries must be >= 0 (or null), got {self.max_retries}")
+        if self.regression_guard_evals is not None and self.regression_guard_evals < 0:
+            raise ValueError(f"{where}: regression_guard_evals must be >= 0 (0 = off, null = inherit)")
+        if self.regression_guard_drop is not None and not 0.0 < self.regression_guard_drop <= 1.0:
+            raise ValueError(f"{where}: regression_guard_drop must be in (0, 1] (or null), got {self.regression_guard_drop}")
         if self.reward_config is not None and not isinstance(self.reward_config, Mapping):
             raise TypeError(
                 f"stage '{self.name}': reward_config override must be a mapping, got {type(self.reward_config).__name__}"
@@ -713,11 +814,7 @@ class CurriculumStage:
         for this stage with ``total_timesteps=stage.max_timesteps``.
         """
         if isinstance(self.ent_coef, Mapping):
-            return {
-                "start": float(self.ent_coef["start"]),
-                "end": float(self.ent_coef["end"]),
-                "schedule": str(self.ent_coef.get("schedule", "linear")),
-            }
+            return _schedule_descriptor(self.ent_coef)
         return None
 
     def resolve_purchase_explore_eps(self, ppo: PPOConfig) -> float:
@@ -737,12 +834,74 @@ class CurriculumStage:
     def resolve_purchase_explore_eps_schedule(self) -> dict[str, Any] | None:
         """Return ``{start, end, schedule}`` if the override is a mapping, else ``None``."""
         if isinstance(self.purchase_explore_eps, Mapping):
-            return {
-                "start": float(self.purchase_explore_eps["start"]),
-                "end": float(self.purchase_explore_eps["end"]),
-                "schedule": str(self.purchase_explore_eps.get("schedule", "linear")),
-            }
+            return _schedule_descriptor(self.purchase_explore_eps)
         return None
+
+    def resolve_horizon(self, schedule: Mapping[str, Any] | None = None) -> int:
+        """Env steps a schedule of this stage anneals over.
+
+        The schedule mapping's own ``horizon``, else the stage's
+        ``anneal_horizon``, else ``max_timesteps`` (the historical horizon).
+        """
+        if schedule is not None and schedule.get("horizon") is not None:
+            return int(schedule["horizon"])
+        if self.anneal_horizon is not None:
+            return int(self.anneal_horizon)
+        return int(self.max_timesteps)
+
+    def resolve_learning_rate(self, ppo: PPOConfig) -> float:
+        """The stage's *initial* learning rate (a schedule's ``start``)."""
+        if self.learning_rate is None:
+            return float(ppo.learning_rate)
+        if isinstance(self.learning_rate, Mapping):
+            return float(self.learning_rate["start"])
+        return float(self.learning_rate)
+
+    def resolve_learning_rate_schedule(self, ppo: PPOConfig) -> dict[str, Any] | None:
+        """``{start, end, schedule, horizon}`` for this stage's learning rate, or ``None``.
+
+        ``None`` means nothing is configured -- no stage override and
+        ``ppo.lr_schedule: constant`` -- and the runner leaves the model's
+        learning rate alone (the historical behaviour). A constant stage
+        override is ``schedule: constant``; ``ppo.lr_schedule: linear``
+        anneals ``ppo.learning_rate`` to 0 over the stage's horizon.
+        """
+        if isinstance(self.learning_rate, Mapping):
+            out = _schedule_descriptor(self.learning_rate)
+            out["horizon"] = self.resolve_horizon(self.learning_rate)
+            return out
+        if self.learning_rate is not None:
+            value = float(self.learning_rate)
+            return {"start": value, "end": value, "schedule": "constant", "horizon": self.resolve_horizon()}
+        if ppo.lr_schedule == "linear":
+            return {"start": float(ppo.learning_rate), "end": 0.0, "schedule": "linear", "horizon": self.resolve_horizon()}
+        return None
+
+    def resolve_promotion(self, curriculum: CurriculumConfig) -> dict[str, Any]:
+        """The promotion gate for this stage: its overrides over the curriculum defaults."""
+
+        def pick(name: str) -> Any:
+            value = getattr(self, name)
+            return value if value is not None else getattr(curriculum, name)
+
+        return {
+            "criterion": pick("promotion_criterion"),
+            "rolling_k": int(pick("promotion_rolling_k")),
+            "confidence": float(pick("promotion_confidence")),
+            "score": pick("promotion_score"),
+            "threshold": float(self.promotion_win_rate),
+            "patience": int(self.patience),
+        }
+
+    def resolve_max_retries(self, curriculum: CurriculumConfig) -> int:
+        """Retries this stage gets after a stall: its override, else ``curriculum.max_retries``."""
+        return int(self.max_retries if self.max_retries is not None else curriculum.max_retries)
+
+    def resolve_regression_guard(self, curriculum: CurriculumConfig) -> dict[str, Any]:
+        """``{evals, drop}`` of the within-stage regression guard (``evals == 0``: off)."""
+        evals = self.regression_guard_evals if self.regression_guard_evals is not None else curriculum.regression_guard_evals
+        drop = self.regression_guard_drop if self.regression_guard_drop is not None else curriculum.regression_guard_drop
+        return {"evals": int(evals), "drop": float(drop)}
 
     def resolve_reward_config(self, env: EnvConfig) -> dict[str, float] | None:
         """Return the reward config to use for this stage.
@@ -775,9 +934,62 @@ class CurriculumConfig:
     # the peak random_10 snapshot cleared it trivially -- v30). Set
     # False to reproduce the legacy carry-end-of-stage behaviour.
     restore_best_checkpoint_between_stages: bool = True
+    # -- Promotion gate defaults (each stage may override; review rltrain-12,
+    # prior-5). A stage promotes once ``patience`` consecutive evals pass:
+    #   point   -- the eval's point estimate >= promotion_win_rate (the
+    #              historical gate; the shipped thresholds were tuned for it)
+    #   wilson  -- the Wilson score lower bound of the eval's successes /
+    #              episodes, at one-sided ``promotion_confidence``, >=
+    #              promotion_win_rate. Much harder near the threshold: lower
+    #              the thresholds when switching.
+    #   rolling -- the mean point estimate of the last ``promotion_rolling_k``
+    #              evals >= promotion_win_rate (needs k evals in the stage;
+    #              pair it with patience 1 to gate on the rolling mean alone).
+    # ``promotion_score``: ``win_rate`` counts a draw as a loss (historical);
+    # ``win_plus_half_draw`` scores win + 0.5 * draw.
+    promotion_criterion: str = "point"
+    promotion_rolling_k: int = 3
+    promotion_confidence: float = 0.95
+    promotion_score: str = "win_rate"
+    # -- Stall recovery (review rltrain-7, prior-3). On a stall, a stage is
+    # retried up to ``max_retries`` times: best_model.zip (else the stage's
+    # starting weights) is restored, the stage's entropy / LR schedules
+    # restart, and the stage gets its full budget again with fresh
+    # callbacks (the promotion streak, min_timesteps_before_promotion and
+    # best-eligibility windows count from the retry's start; the stage's
+    # best so far carries over). 0 raises CurriculumStalled on the first
+    # stall, as before.
+    max_retries: int = 1
+    # Within-stage regression guard: after ``regression_guard_evals``
+    # consecutive evals more than ``regression_guard_drop`` below the stage's
+    # best (gate win rate), restore best_model.zip and keep training. 0 = off.
+    regression_guard_evals: int = 0
+    regression_guard_drop: float = 0.2
 
     def validate(self) -> None:
         _normalize_fields(self, "curriculum.")
+        _require(
+            self.promotion_criterion in PROMOTION_CRITERIA,
+            f"curriculum.promotion_criterion must be one of {PROMOTION_CRITERIA}, got {self.promotion_criterion!r}",
+        )
+        _require(
+            self.promotion_score in PROMOTION_SCORES,
+            f"curriculum.promotion_score must be one of {PROMOTION_SCORES}, got {self.promotion_score!r}",
+        )
+        _require(self.promotion_rolling_k >= 1, f"curriculum.promotion_rolling_k must be >= 1, got {self.promotion_rolling_k}")
+        _require(
+            0.5 <= self.promotion_confidence < 1.0,
+            f"curriculum.promotion_confidence must be in [0.5, 1), got {self.promotion_confidence}",
+        )
+        _require(self.max_retries >= 0, f"curriculum.max_retries must be >= 0, got {self.max_retries}")
+        _require(
+            self.regression_guard_evals >= 0,
+            f"curriculum.regression_guard_evals must be >= 0 (0 = off), got {self.regression_guard_evals}",
+        )
+        _require(
+            0.0 < self.regression_guard_drop <= 1.0,
+            f"curriculum.regression_guard_drop must be in (0, 1], got {self.regression_guard_drop}",
+        )
         seen: set = set()
         for stage in self.stages:
             if not isinstance(stage, CurriculumStage):
@@ -794,6 +1006,9 @@ class EvalConfig:
 
     eval_freq: int = 10000
     n_eval_episodes: int = 10
+    # Curriculum: stage-relative env steps between rolling checkpoints
+    # (``<stage>/latest.zip`` plus ``run_manifest.json``), the point
+    # ``train_bootstrap.py --resume`` continues an interrupted stage from.
     checkpoint_freq: int = 50000
     # Offset added to ``cfg.seed`` when constructing the eval env and when
     # seeding per-episode resets inside ``PeriodicEvalCallback``. Keeps eval
@@ -815,6 +1030,39 @@ class EvalConfig:
     # any block-boundary eval immediately after it). Set 0 to let the carry-in
     # policy compete for the stage's best checkpoint, as it used to.
     best_eligible_after: int | None = None
+    # Which policy the promotion gate, best_model.zip and the stall verdict
+    # measure (review rltrain-4 / prior-5): False (default) samples actions
+    # from the policy PPO trains; True takes its argmax, which every eval
+    # measured before this field existed (an argmax over a positional
+    # flat_discrete list can flip completely after a small weight change).
+    eval_deterministic: bool = False
+    # Also evaluate the other mode on the same seeds, so every eval row,
+    # TensorBoard and config.json carry both ``win_rate_stochastic`` and
+    # ``win_rate_greedy``. Doubles eval time; False evaluates the gate mode only.
+    eval_both_modes: bool = True
+    # Seats each eval plays (episodes per seat = n_eval_episodes, same seeds
+    # per seat): [1], [2] or [1, 2]. ``None`` follows ``env.agent_seat``
+    # (1 -> [1], 2 -> [2], random -> [1, 2]); resolve_config records the
+    # resolved list. Per-seat win rates land in every eval row.
+    eval_seats: list[int] | None = None
+    # How per-seat results combine into the gate when several seats are
+    # evaluated: ``mean`` (all episodes pooled) or ``min`` (the weakest seat).
+    seat_aggregate: str = "mean"
+    # Eval envs stepped together, with one batched predict per step (review
+    # rltrain-11). 1 (default) keeps the serial evaluate_model path; > 1 uses
+    # evaluate_model_vec, which plays the same per-episode seeds (identical
+    # results for eval_deterministic: true; the stochastic samples differ).
+    n_eval_envs: int = 1
+    # With n_eval_envs > 1: step the eval envs in worker processes
+    # (SubprocVecEnv) instead of in-process (DummyVecEnv).
+    eval_use_subprocess: bool = False
+
+    def resolve_eval_seats(self, env: EnvConfig) -> list[int]:
+        """The seats each eval plays: ``eval_seats``, else what ``env.agent_seat`` trains."""
+        if self.eval_seats is not None:
+            return [int(s) for s in self.eval_seats]
+        seat = env.agent_seat
+        return [1, 2] if seat == "random" else [int(seat)]
 
 
 @dataclass
@@ -910,6 +1158,10 @@ class TrainingConfig:
         )
         for name in ("gold_scale", "turn_scale", "unit_count_scale"):
             _require(getattr(env, name) > 0, f"env.{name} must be > 0 (it divides a tanh input), got {getattr(env, name)}")
+        try:
+            env.agent_seat = parse_agent_seat(env.agent_seat)
+        except ValueError:
+            raise ValueError(f"env.agent_seat must be one of {AGENT_SEATS}, got {env.agent_seat!r}") from None
         if env.enabled_units is not None:
             # A typo used to pass here and crash on the first action mask
             # (a bare KeyError, a broken pipe inside a SubprocVecEnv worker),
@@ -976,6 +1228,16 @@ class TrainingConfig:
             ev.best_eligible_after is None or ev.best_eligible_after >= 0,
             f"eval.best_eligible_after must be >= 0 (or null), got {ev.best_eligible_after}",
         )
+        _require(
+            ev.eval_seats is None
+            or (bool(ev.eval_seats) and set(ev.eval_seats) <= {1, 2} and len(set(ev.eval_seats)) == len(ev.eval_seats)),
+            f"eval.eval_seats must be null (follow env.agent_seat) or [1], [2] or [1, 2], got {ev.eval_seats!r}",
+        )
+        _require(
+            ev.seat_aggregate in SEAT_AGGREGATES,
+            f"eval.seat_aggregate must be one of {SEAT_AGGREGATES}, got {ev.seat_aggregate!r}",
+        )
+        _require(ev.n_eval_envs >= 1, f"eval.n_eval_envs must be >= 1, got {ev.n_eval_envs}")
 
         # -- self_play ------------------------------------------------------
         _require(
@@ -1097,9 +1359,9 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
             )
         stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
     kwargs: dict[str, Any] = {"stages": stages}
-    if "restore_best_checkpoint_between_stages" in raw:
-        # Coerced in validate() (``bool("false")`` used to be True here).
-        kwargs["restore_best_checkpoint_between_stages"] = raw["restore_best_checkpoint_between_stages"]
+    # Every other curriculum-level field as given; coerced in validate()
+    # (``bool("false")`` used to be True here).
+    kwargs.update({k: v for k, v in raw.items() if k != "stages"})
     return CurriculumConfig(**kwargs)
 
 

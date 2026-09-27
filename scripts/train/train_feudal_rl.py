@@ -78,6 +78,9 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
                 "opponent_kwargs": cfg_env.opponent_kwargs,
                 "pad_to_size": cfg_env.pad_to_size,
                 "fog_of_war": cfg_env.fog_of_war,
+                # 1 (default), 2 or "random": StrategyGameEnv applies it
+                # with set_agent_seat, and every maskable builder forwards it.
+                "agent_seat": cfg_env.agent_seat,
             }
         )
         if cfg_env.flat_action_version is not None:
@@ -719,6 +722,7 @@ _ENV_FIELDS_FROM_CFG = frozenset(
         "env.opponent_kwargs",
         "env.pad_to_size",
         "env.fog_of_war",
+        "env.agent_seat",
     }
 )
 _FLAT_ONLY_FIELDS = frozenset({"ppo.use_action_masking"})

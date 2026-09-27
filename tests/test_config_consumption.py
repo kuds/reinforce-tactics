@@ -277,13 +277,19 @@ class TestIgnoredFieldReport:
 
     def test_non_default_unread_fields_are_reported(self):
         cfg = config_from_dict(
-            {"eval": {"checkpoint_freq": 5}, "logging": {"wandb": True}, "ppo": {"lr_schedule": "linear", "gamma": 0.9}}
+            {"feudal": {"manager_horizon": 3}, "logging": {"wandb": True}, "ppo": {"use_action_masking": False, "gamma": 0.9}}
         )
         assert ignored_config_fields(cfg, CONSUMED_CONFIG_FIELDS) == [
-            "ppo.lr_schedule",
-            "eval.checkpoint_freq",
+            "ppo.use_action_masking",
+            "feudal.manager_horizon",
             "logging.wandb",
         ]
+
+    def test_lr_schedule_and_checkpoint_freq_are_now_read(self):
+        # rltrain-8 / rltrain-5: the curriculum anneals ppo.lr_schedule per
+        # stage and keeps a rolling checkpoint every eval.checkpoint_freq.
+        cfg = config_from_dict({"eval": {"checkpoint_freq": 5}, "ppo": {"lr_schedule": "linear"}})
+        assert ignored_config_fields(cfg, CONSUMED_CONFIG_FIELDS) == []
 
     def test_section_wildcards_and_algorithm_labels(self):
         cfg = config_from_dict({"algorithm": "feudal", "feudal": {"manager_horizon": 3}})
@@ -291,12 +297,12 @@ class TestIgnoredFieldReport:
         assert ignored_config_fields(cfg, ["feudal.*"], algorithms=["feudal"]) == []
 
     def test_warns_by_default_and_raises_when_strict(self):
-        cfg = config_from_dict({"eval": {"checkpoint_freq": 5}})
-        with pytest.warns(IgnoredConfigFieldWarning, match=r"eval.checkpoint_freq = 5  \(saved per stage\)"):
+        cfg = config_from_dict({"logging": {"log_dir": "elsewhere"}})
+        with pytest.warns(IgnoredConfigFieldWarning, match=r"logging.log_dir = 'elsewhere'  \(under --output-dir\)"):
             check_ignored_config_fields(
-                cfg, CONSUMED_CONFIG_FIELDS, entry_point="x", hints={"eval.checkpoint_freq": "saved per stage"}
+                cfg, CONSUMED_CONFIG_FIELDS, entry_point="x", hints={"logging.log_dir": "under --output-dir"}
             )
-        with pytest.raises(IgnoredConfigFieldError, match="eval.checkpoint_freq"):
+        with pytest.raises(IgnoredConfigFieldError, match="logging.log_dir"):
             check_ignored_config_fields(cfg, CONSUMED_CONFIG_FIELDS, entry_point="x", strict=True)
 
 

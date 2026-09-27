@@ -270,6 +270,28 @@ FLAT_ACTION_VERSION_LEGACY = 1
 FLAT_ACTION_VERSION_LATEST = 2
 FLAT_ACTION_VERSIONS: tuple[int, ...] = (FLAT_ACTION_VERSION_LEGACY, FLAT_ACTION_VERSION_LATEST)
 
+# The seats ``StrategyGameEnv(agent_seat=...)`` / ``set_agent_seat`` accept:
+# a fixed seat, or "random" (drawn from np_random on every reset).
+AGENT_SEATS: tuple[int | str, ...] = (1, 2, "random")
+
+
+def parse_agent_seat(value: Any) -> int | str:
+    """``value`` as an agent seat: ``1``, ``2`` or ``"random"`` (``"1"`` / ``"2"`` become ints).
+
+    For command-line flags and config values. Raises ``ValueError`` for
+    anything else.
+    """
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text == "random":
+            return "random"
+        if text in ("1", "2"):
+            return int(text)
+    elif not isinstance(value, bool) and isinstance(value, (int, np.integer)) and int(value) in (1, 2):
+        return int(value)
+    raise ValueError(f"agent seat must be 1, 2 or 'random'; got {value!r}")
+
+
 # Version 2's truncation order: the action-type groups dropped first come
 # first. end_turn (5) is never dropped.
 _V2_DROP_ORDER: tuple[frozenset[int], ...] = (
@@ -753,6 +775,7 @@ class StrategyGameEnv(gym.Env):
         unit_count_scale: float = UNIT_COUNT_SCALE,  # tanh divisor for own_units/opp_units
         engine_overrides: dict[str, Any] | None = None,  # sparse overlay over rules.py (balance sweeps)
         flat_action_version: int = FLAT_ACTION_VERSION_LATEST,  # flat_discrete decode-table layout
+        agent_seat: int | str = 1,  # 1, 2 or "random" (drawn per reset); see set_agent_seat
     ):
         """
         Initialize environment.
@@ -829,6 +852,11 @@ class StrategyGameEnv(gym.Env):
                 action space is sized to ``max_flat_actions`` and is
                 therefore already grid-independent; multi_discrete's action
                 space depends on grid dims and would need separate padding.
+            agent_seat: The seat the agent plays: ``1`` (the default, the
+                first mover), ``2``, or ``"random"`` to draw it from
+                ``np_random`` on every reset. Applied with
+                :meth:`set_agent_seat`, so it takes effect at the first
+                reset; with seat 2, reset() plays player 1's opening turn.
         """
         super().__init__()
 
@@ -918,6 +946,7 @@ class StrategyGameEnv(gym.Env):
         # When True, reset() draws ``agent_player`` from np_random every
         # episode (see ``set_agent_seat``).
         self._random_agent_seat = False
+        self.set_agent_seat(agent_seat)
 
         # Reward weights: the defaults overlaid with ``reward_config``
         # (validated above, so every key is one the env reads). Indexed
@@ -1299,6 +1328,11 @@ class StrategyGameEnv(gym.Env):
         """
         self._self_play_opponent_factory = factory
 
+    @property
+    def agent_seat(self) -> int | str:
+        """The seat mode :meth:`set_agent_seat` last set: ``1``, ``2`` or ``"random"``."""
+        return "random" if self._random_agent_seat else int(self.agent_player)
+
     def set_agent_seat(self, seat: int | str) -> None:
         """Choose which player the agent controls, starting with the next reset().
 
@@ -1316,7 +1350,7 @@ class StrategyGameEnv(gym.Env):
                 raise ValueError(f"agent seat must be 1, 2 or 'random'; got {seat!r}")
             self._random_agent_seat = True
             return
-        if seat not in (1, 2):
+        if isinstance(seat, bool) or seat not in (1, 2):
             raise ValueError(f"agent seat must be 1, 2 or 'random'; got {seat!r}")
         self._random_agent_seat = False
         self.agent_player = int(seat)

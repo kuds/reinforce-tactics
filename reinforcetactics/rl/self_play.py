@@ -1226,6 +1226,7 @@ def _env_kwargs(
     turn_scale: float | None,
     unit_count_scale: float | None,
     flat_action_version: int | None,
+    agent_seat: int | str = 1,
 ) -> dict[str, Any]:
     """The StrategyGameEnv construction kwargs shared by self-play and bot workers.
 
@@ -1254,6 +1255,9 @@ def _env_kwargs(
         "unit_count_scale": unit_count_scale,
         "fog_of_war": bool(fog_of_war),
         "flat_action_version": flat_action_version,
+        # The bot workers' seat. A self-play worker's seat follows
+        # ``swap_players`` instead: SelfPlayEnv sets it on the base env.
+        "agent_seat": agent_seat,
     }
 
 
@@ -1295,6 +1299,7 @@ def make_self_play_env(
     unit_count_scale: float | None = None,
     flat_action_version: int | None = None,
     latest_opponent_prob: float = 0.0,
+    agent_seat: int | str = 1,
 ) -> SelfPlayEnv:
     """
     Create a single self-play environment.
@@ -1321,6 +1326,8 @@ def make_self_play_env(
         flat_action_version: flat_discrete decode-table layout (``None``
             keeps the env default, the latest version)
         latest_opponent_prob: See :class:`SelfPlayEnv`.
+        agent_seat: Accepted for a uniform env-kwargs set and ignored: a
+            self-play env's seat follows ``swap_players``.
 
     Returns:
         SelfPlayEnv ready for training
@@ -1349,6 +1356,7 @@ def make_self_play_env(
             turn_scale=turn_scale,
             unit_count_scale=unit_count_scale,
             flat_action_version=flat_action_version,
+            agent_seat=agent_seat,
         ),
         opponent_pool,
         swap_players,
@@ -1472,6 +1480,7 @@ def make_self_play_vec_env(
     flat_action_version: int | None = None,
     bot_opponent_kwargs: dict[str, Any] | None = None,
     latest_opponent_prob: float = 0.0,
+    agent_seat: int | str = 1,
 ):
     """
     Create vectorized self-play environments for parallel training.
@@ -1506,6 +1515,8 @@ def make_self_play_vec_env(
             worker plays the latest snapshot rather than a pool sample once
             the pool has entries (see :class:`SelfPlayEnv`). The default 0.0
             keeps the long-standing pool-only behaviour.
+        agent_seat: The bot workers' seat (``1``, ``2`` or ``"random"``).
+            The self-play workers' seat follows ``swap_players``.
 
     Returns:
         Vectorized environment ready for MaskablePPO. Wrap it in
@@ -1546,6 +1557,7 @@ def make_self_play_vec_env(
         turn_scale=turn_scale,
         unit_count_scale=unit_count_scale,
         flat_action_version=flat_action_version,
+        agent_seat=agent_seat,
     )
     env_fns: list[Callable[[], gym.Env]] = [
         _make_self_play_env_fn(

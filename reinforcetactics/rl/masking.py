@@ -182,6 +182,7 @@ def _build_strategy_env(
     unit_count_scale: float | None,
     fog_of_war: bool,
     flat_action_version: int | None,
+    agent_seat: int | str,
 ) -> StrategyGameEnv:
     """Construct a ``StrategyGameEnv`` from the shared parameter set.
 
@@ -219,6 +220,7 @@ def _build_strategy_env(
         pad_to_size=pad_to_size,
         engine_overrides=engine_overrides,
         fog_of_war=fog_of_war,
+        agent_seat=agent_seat,
         **optional_kwargs,
     )
 
@@ -245,6 +247,7 @@ def make_maskable_env(
     engine_overrides: dict[str, Any] | None = None,
     fog_of_war: bool = False,
     flat_action_version: int | None = None,
+    agent_seat: int | str = 1,
 ) -> ActionMaskedEnv:
     """
     Create a single environment ready for use with MaskablePPO.
@@ -266,6 +269,9 @@ def make_maskable_env(
             observation in self-play).
         flat_action_version: flat_discrete decode-table layout; ``None``
             keeps the env's default (``FLAT_ACTION_VERSION_LATEST``).
+        agent_seat: The agent's seat: ``1`` (default), ``2``, or
+            ``"random"`` (drawn per reset); see
+            :meth:`StrategyGameEnv.set_agent_seat`.
 
     Returns:
         ActionMaskedEnv ready for training
@@ -300,6 +306,7 @@ def make_maskable_env(
         unit_count_scale=unit_count_scale,
         fog_of_war=fog_of_war,
         flat_action_version=flat_action_version,
+        agent_seat=agent_seat,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -328,6 +335,7 @@ def _make_env_fn(
     engine_overrides: dict[str, Any] | None = None,
     fog_of_war: bool = False,
     flat_action_version: int | None = None,
+    agent_seat: int | str = 1,
 ) -> Callable[[], gym.Env]:
     """
     Create a function that creates an environment.
@@ -364,6 +372,7 @@ def _make_env_fn(
             unit_count_scale=unit_count_scale,
             fog_of_war=fog_of_war,
             flat_action_version=flat_action_version,
+            agent_seat=agent_seat,
         )
         env.reset(seed=seed + rank)
         # Monitor must be the outer wrapper: it injects the ``episode``
@@ -402,6 +411,7 @@ def make_maskable_vec_env(
     engine_overrides: dict[str, Any] | None = None,
     fog_of_war: bool = False,
     flat_action_version: int | None = None,
+    agent_seat: int | str = 1,
 ):
     """
     Create vectorized environments for parallel training with MaskablePPO.
@@ -420,6 +430,8 @@ def make_maskable_vec_env(
         enabled_units: List of enabled unit types (default all)
         action_space_type: 'multi_discrete' (default) or 'flat_discrete'
         max_flat_actions: Max actions for flat_discrete mode (default 512)
+        agent_seat: Every worker's seat: ``1`` (default), ``2`` or
+            ``"random"`` (drawn per reset from each worker's ``np_random``).
 
     Returns:
         Vectorized environment ready for MaskablePPO
@@ -460,6 +472,7 @@ def make_maskable_vec_env(
             engine_overrides=engine_overrides,
             fog_of_war=fog_of_war,
             flat_action_version=flat_action_version,
+            agent_seat=agent_seat,
         )
         for i in range(n_envs)
     ]
