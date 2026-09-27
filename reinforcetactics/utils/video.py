@@ -162,6 +162,11 @@ def record_evaluation_to_video(
             - total_reward: Total episode reward
             - steps: Number of steps taken
     """
+    # A flat_discrete checkpoint replayed on another decode table records
+    # actions it never chose.
+    from reinforcetactics.rl.gym_env import check_flat_action_version
+
+    check_flat_action_version(model, env, what="the replay env")
     _ensure_headless_pygame()
     from reinforcetactics.ui.renderer import Renderer
 

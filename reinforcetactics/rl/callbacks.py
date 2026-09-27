@@ -317,6 +317,12 @@ class PeriodicEvalCallback(BaseCallback):
 
     def _on_training_start(self) -> None:
         self._stage_start_step = int(self.num_timesteps)
+        # Fail at the start of learn(), not at the first eval: a flat_discrete
+        # policy scored on another decode table measures actions it never
+        # chose (evaluate_model makes the same check).
+        from reinforcetactics.rl.gym_env import check_flat_action_version
+
+        check_flat_action_version(self.model, self.eval_env, what="the eval env")
 
     def _on_step(self) -> bool:
         # Trigger when num_timesteps crosses an eval_freq boundary. Using

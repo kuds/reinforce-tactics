@@ -325,8 +325,11 @@ def checkpoint_flat_action_version(path: str | Any) -> int:
     envs are built *before* the model is. Unstamped checkpoints read as
     :data:`FLAT_ACTION_VERSION_LEGACY` (see :func:`flat_action_version_of`).
 
+    ``path`` may leave out the ``.zip`` suffix, as ``MaskablePPO.load``
+    allows (SB3's ``open_path`` appends it when the bare path is missing).
+
     Raises:
-        FileNotFoundError: ``path`` does not exist.
+        FileNotFoundError: Neither ``path`` nor ``path + '.zip'`` exists.
         ValueError: ``path`` is not an SB3 checkpoint with an action space.
     """
     import json
@@ -335,6 +338,9 @@ def checkpoint_flat_action_version(path: str | Any) -> int:
 
     from stable_baselines3.common.save_util import json_to_data
 
+    path = os.fspath(path)
+    if not os.path.isfile(path) and os.path.isfile(f"{path}.zip"):
+        path = f"{path}.zip"
     if not os.path.isfile(path):
         raise FileNotFoundError(f"checkpoint '{path}' does not exist")
     try:
@@ -370,6 +376,86 @@ def resolve_flat_action_version(
     if action_space_type == "flat_discrete" and checkpoint_path:
         return checkpoint_flat_action_version(checkpoint_path)
     return FLAT_ACTION_VERSION_LATEST
+
+
+class FlatActionVersionMismatch(ValueError):
+    """A flat_discrete policy is paired with an env that decodes its indices with another table."""
+
+
+def env_flat_action_version(env: Any) -> int | None:
+    """The flat_discrete table version ``env`` decodes action indices with.
+
+    ``env`` is a :class:`StrategyGameEnv`, any gymnasium wrapper over one
+    (``ActionMaskedEnv``, ``SelfPlayEnv``, ...), or an SB3 VecEnv of them.
+    Read from the envs' ``flat_action_version`` attribute, which is what
+    their ``step()`` decodes with.
+
+    Returns:
+        The version, or ``None`` when ``env`` is not a flat_discrete
+        StrategyGameEnv (a multi_discrete env, or anything else).
+
+    Raises:
+        FlatActionVersionMismatch: A VecEnv whose workers disagree.
+    """
+    if hasattr(env, "num_envs") and hasattr(env, "get_attr"):  # an SB3 VecEnv
+        # has_attr first: a get_attr of a missing attribute kills a
+        # SubprocVecEnv worker.
+        if not (env.has_attr("action_space_type") and env.has_attr("flat_action_version")):
+            return None
+        kinds = env.get_attr("action_space_type")
+        versions = {int(v) for k, v in zip(kinds, env.get_attr("flat_action_version"), strict=True) if k == "flat_discrete"}
+        if len(versions) > 1:
+            raise FlatActionVersionMismatch(
+                f"The vec env's workers decode with different flat_action_versions {sorted(versions)}"
+            )
+        return versions.pop() if versions else None
+    base = getattr(env, "unwrapped", env)
+    if getattr(base, "action_space_type", None) != "flat_discrete":
+        return None
+    version = getattr(base, "flat_action_version", None)
+    return None if version is None else _check_flat_action_version(version)
+
+
+def check_flat_action_version(model: Any, env: Any, *, what: str = "this env") -> None:
+    """Refuse to pair a flat_discrete ``model`` with an env that decodes another table.
+
+    A flat_discrete policy outputs an index into the env's per-state action
+    table, and the table's layout depends on ``flat_action_version`` once
+    the legal set exceeds ``max_flat_actions``. SB3's space check compares
+    only ``Discrete.n``, so an old (version-1, unstamped) checkpoint loaded
+    into, or evaluated on, a default (version-2) env ran without a word,
+    playing different actions than it was trained to at every truncated
+    decision point -- and a continued checkpoint kept the old stamp, so
+    ModelBot then decoded it with the wrong table too.
+
+    Nothing to check (returns) when the env is not a flat_discrete
+    StrategyGameEnv or the model has no Discrete action space.
+
+    Raises:
+        FlatActionVersionMismatch: The model's version
+            (:func:`flat_action_version_of`) differs from the env's
+            (:func:`env_flat_action_version`). Build the env with
+            ``flat_action_version=flat_action_version_of(model)`` (or
+            :func:`checkpoint_flat_action_version` of its file), or, to
+            deliberately continue training on the env's table, call
+            ``stamp_flat_action_version(model, <env version>)`` first.
+    """
+    env_version = env_flat_action_version(env)
+    if env_version is None:
+        return
+    space = getattr(model, "action_space", None)
+    if not isinstance(space, spaces.Discrete):
+        return
+    model_version = flat_action_version_of(space)
+    if model_version != env_version:
+        raise FlatActionVersionMismatch(
+            f"The model decodes flat_discrete actions with flat_action_version {model_version}, but {what} "
+            f"uses version {env_version}: every decision point with more legal actions than max_flat_actions "
+            f"would play a different action than the policy chose. Build the env with "
+            f"flat_action_version={model_version} (flat_action_version_of(model), or "
+            "checkpoint_flat_action_version(path) for a saved checkpoint), or, to continue training the "
+            f"policy on version {env_version}, call stamp_flat_action_version(model, {env_version}) first."
+        )
 
 
 class _RateLimitedWarning:
@@ -761,7 +847,13 @@ class StrategyGameEnv(gym.Env):
             map_data = FileIO.generate_random_map(20, 20, num_players=2)
 
         self.initial_map_data = map_data
-        # Store enabled units (default to all if not specified)
+        # Store enabled units (default to all if not specified). An unknown
+        # code used to pass here and raise a bare KeyError from the first
+        # action mask (a broken pipe inside a SubprocVecEnv worker).
+        if enabled_units is not None:
+            unknown_units = [u for u in enabled_units if u not in self.ALL_UNIT_TYPES]
+            if unknown_units:
+                raise ValueError(f"Unknown enabled_units {unknown_units}; unit codes are {', '.join(self.ALL_UNIT_TYPES)}")
         self.enabled_units = enabled_units if enabled_units is not None else self.ALL_UNIT_TYPES.copy()
         # Fog of war setting
         self.fog_of_war = fog_of_war
@@ -987,14 +1079,23 @@ class StrategyGameEnv(gym.Env):
             "kills": 0,
             "attacks": 0,
             "seize_attempts": 0,
+            # Damage the agent's units dealt: their own attacks, plus the
+            # counter-attacks they made when attacked during the opponent's
+            # turn (also broken out in ``counter_damage_dealt``). Nominal
+            # damage, as the engine reports it, like ``damage_scale`` pays.
             "damage_dealt": 0.0,
+            "counter_damage_dealt": 0.0,
             # HP the agent's units lost to combat: the opponent's attacks
             # during its turn (not netted against the agent's turn-start
             # structure healing, which lands in the same window) plus the
             # counter-attacks the agent's own attacks drew, which are also
-            # broken out in ``counter_damage_taken``.
+            # broken out in ``counter_damage_taken``. HP actually lost: a
+            # unit killed by a hit bigger than its HP loses only what it had.
             "damage_taken": 0.0,
             "counter_damage_taken": 0.0,
+            # Enemy units the agent killed (``kills``, which includes these):
+            # ones that died to its counter-attack during the opponent's turn.
+            "counter_kills": 0,
             # Agent units that died: to a counter-attack on its own attack,
             # or to the opponent during its turn.
             "units_lost": 0,
@@ -1404,6 +1505,7 @@ class StrategyGameEnv(gym.Env):
                 unit = gs.get_unit_at_position(*from_pos)
                 target = gs.get_unit_at_position(*to_pos)
                 if unit and target and env_check(unit, target, player):
+                    attacker_hp_before = unit.health
                     outcome = gs.apply_action(kind, {ACTOR_KEYS[kind]: unit, "target": target})
                     if kind == "attack":
                         result_info["damage"] = outcome.result["damage"]
@@ -1412,6 +1514,13 @@ class StrategyGameEnv(gym.Env):
                         # rlenv-9): combat shaping charges it on this step.
                         result_info["counter_damage"] = outcome.result["counter_damage"]
                         result_info["attacker_alive"] = outcome.result["attacker_alive"]
+                        # The HP the counter actually took. ``counter_damage``
+                        # is the nominal hit, overkill included: a 1-HP
+                        # attacker killed by a 5-damage counter loses 1 HP,
+                        # which is what the opponent-turn measurement (an HP
+                        # delta) charges for the same loss. Unit.take_damage
+                        # clamps health at 0, so this is exact either way.
+                        result_info["attacker_hp_lost"] = attacker_hp_before - unit.health
                     # The engine refuses an illegal action (spent or paralyzed
                     # unit, out of range, hidden by fog, wrong turn) and
                     # changes nothing. multi_discrete per-dimension masks
@@ -1468,12 +1577,14 @@ class StrategyGameEnv(gym.Env):
                 # this attack drew is damage taken, charged here rather than
                 # left to the unit_diff potential -- otherwise a trade that
                 # loses more HP to the counter than it deals still pays, and a
-                # suicide attack costs nothing.
-                counter = result_info["counter_damage"]
-                if counter:
-                    reward += counter * rc["damage_taken_scale"]
-                    self.episode_stats["damage_taken"] += float(counter)
-                    self.episode_stats["counter_damage_taken"] += float(counter)
+                # suicide attack costs nothing. Charged as the HP the attacker
+                # actually lost, as the opponent-turn window measures it: the
+                # nominal counter overcharged a unit that had less HP left.
+                hp_lost = result_info["attacker_hp_lost"]
+                if hp_lost:
+                    reward += hp_lost * rc["damage_taken_scale"]
+                    self.episode_stats["damage_taken"] += float(hp_lost)
+                    self.episode_stats["counter_damage_taken"] += float(hp_lost)
                 if not result_info["attacker_alive"]:
                     reward += rc["unit_lost"]
                     self.episode_stats["units_lost"] += 1
@@ -1536,6 +1647,9 @@ class StrategyGameEnv(gym.Env):
                         # on the agent's reward (the action_type==3 branch
                         # only credits the agent's own captures).
                         pre_owners = {id(t): t.player for t in self.game_state.grid.get_capturable_tiles()}
+                        # Where the opponent's records start, to credit the
+                        # agent's counter-attacks below.
+                        history_start = len(self.game_state.action_history)
                         self._opponent_turn()
                         # Safety net: if the opponent's take_turn() did not end its
                         # turn for some reason, end it here so play returns to the agent.
@@ -1557,6 +1671,15 @@ class StrategyGameEnv(gym.Env):
                         if units_lost:
                             reward += units_lost * rc["unit_lost"]
                             self.episode_stats["units_lost"] += units_lost
+                        # The other half of the exchanges the opponent
+                        # started: the agent's counter-attacks. Credited like
+                        # the agent's own attacks (nominal damage *
+                        # damage_scale, ``kill`` per enemy killed), so combat
+                        # shaping scores an exchange the same whichever side
+                        # swings first. Only the damage taken used to count
+                        # here: a mutual trade the opponent started always
+                        # netted negative, and a counter-kill paid nothing.
+                        reward += self._credit_counter_attacks(history_start)
                         # Tiered opponent-capture penalty. ``neutral_lost``
                         # fires when the opponent seized an unowned tile
                         # (we lost a race); ``owned_lost`` fires when the
@@ -1597,6 +1720,32 @@ class StrategyGameEnv(gym.Env):
                 reward += rc["attack_buff"]
 
         return reward, is_valid
+
+    def _credit_counter_attacks(self, history_start: int) -> float:
+        """Reward the agent's counter-attacks on the opponent's attacks since ``history_start``.
+
+        Reads the engine's ``attack`` records (``GameState.action_history``)
+        made by the opponent: each carries the counter the defending agent
+        unit dealt (``counter_damage``) and whether it killed the attacker
+        (``attacker_killed``). Counter-attacks are the only damage the agent
+        deals during the opponent's turn.
+        """
+        rc = self.reward_config
+        opp = 3 - self.agent_player
+        reward = 0.0
+        for record in self.game_state.action_history[history_start:]:
+            if record.get("type") != "attack" or record.get("player") != opp:
+                continue
+            counter = record.get("counter_damage") or 0
+            if counter:
+                reward += counter * rc["damage_scale"]
+                self.episode_stats["damage_dealt"] += float(counter)
+                self.episode_stats["counter_damage_dealt"] += float(counter)
+            if record.get("attacker_killed"):
+                reward += rc["kill"]
+                self.episode_stats["kills"] += 1
+                self.episode_stats["counter_kills"] += 1
+        return reward
 
     def _healed_hp(self, player: int) -> int:
         """HP structure auto-heal has restored to ``player``'s units this game (``GameState.healing_totals``)."""

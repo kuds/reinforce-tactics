@@ -49,7 +49,12 @@ from typing import Any, cast
 import gymnasium as gym
 import numpy as np
 
-from reinforcetactics.rl.gym_env import StrategyGameEnv, build_flat_actions, build_per_dim_masks
+from reinforcetactics.rl.gym_env import (
+    StrategyGameEnv,
+    build_flat_actions,
+    build_per_dim_masks,
+    check_flat_action_version,
+)
 from reinforcetactics.rl.observation import build_observation
 
 logger = logging.getLogger(__name__)
@@ -490,7 +495,13 @@ class SelfPlayEnv(gym.Wrapper):
         is installed with :meth:`update_opponent_from_current` (or
         :meth:`set_opponent_snapshot`, which is what SelfPlayCallback uses
         and which also works across processes).
+
+        Raises:
+            FlatActionVersionMismatch: A flat_discrete ``model`` whose
+                decode table differs from this env's, which the opponent's
+                indices are decoded with.
         """
+        check_flat_action_version(model, self, what="this self-play env")
         self.opponent_model = model
 
     def set_opponent_snapshot(self, snapshot: Mapping[str, Any]) -> None:
@@ -1070,6 +1081,15 @@ def _make_callback_class():
 
         def _on_training_start(self) -> None:
             """Validate the wiring and initialize opponents with the current model."""
+            # A flat_discrete model continued on envs of another decode table
+            # (an old checkpoint loaded into default envs, say) would train
+            # on one table while its saved checkpoints -- and every snapshot
+            # the opponents play -- claim another.
+            if self._explicit_envs is not None:
+                for env in self._explicit_envs:
+                    check_flat_action_version(self.model, env, what="the self-play env")
+            else:
+                check_flat_action_version(self.model, self.env, what="the self-play training env")
             if (
                 self.opponent_pool is None
                 and self._uses_env_method()

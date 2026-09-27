@@ -145,7 +145,18 @@ def evaluate_model(
         Default trigger captures only ``max_steps_truncate`` episodes
         (the stalling failure mode); pass an empty tuple to disable.
         The returned dict gains a ``traces`` list of dumped file paths.
+
+    Raises:
+        FlatActionVersionMismatch: A flat_discrete ``model`` whose decode
+            table (``flat_action_version_of(model)``) differs from the
+            env's: the evaluation would score actions the policy never
+            chose. Build the env with the model's version.
     """
+    # Imported here: gym_env pulls in the engine, and this module stays
+    # importable on its own (see UNIT_TYPE_LETTERS).
+    from reinforcetactics.rl.gym_env import check_flat_action_version
+
+    check_flat_action_version(model, env, what="the evaluation env")
     wins, losses, draws = 0, 0, 0
     rewards = []
     lengths = []

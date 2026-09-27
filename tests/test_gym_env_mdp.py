@@ -273,6 +273,95 @@ class TestCombatShaping:
         assert info["reward_breakdown"]["action"] == pytest.approx(-stub.damage)
         env.close()
 
+    def test_a_counter_that_kills_charges_only_the_hp_the_attacker_had(self):
+        """The nominal counter (5) overcharged a 1-HP attacker 5x (review follow-up)."""
+        env = _env(reward_config={**_ISOLATE, "damage_taken_scale": -1.0})
+        gs = env.game_state
+        attacker = gs.place_unit("W", 2, 2, 1)
+        attacker.health = 1
+        gs.place_unit("W", 5, 5, 1)  # a survivor, so the game goes on
+        gs.place_unit("W", 3, 2, 2)
+        _, _, terminated, _, info = env.step(np.array([2, 0, 2, 2, 3, 2]))
+        assert not terminated and attacker not in gs.units
+        assert gs.action_history[-1]["counter_damage"] > 1  # the nominal hit
+        assert info["reward_breakdown"]["action"] == pytest.approx(-1.0)
+        assert env.episode_stats["damage_taken"] == pytest.approx(1.0)
+        assert env.episode_stats["counter_damage_taken"] == pytest.approx(1.0)
+        env.close()
+
+    def test_losing_a_1hp_unit_costs_the_same_on_either_step(self):
+        """Killed by its own attack's counter, or by the opponent: the same 1 HP."""
+        rc = {**_ISOLATE, "damage_taken_scale": -1.0}
+        own = _env(reward_config=rc)
+        gs = own.game_state
+        attacker = gs.place_unit("W", 2, 2, 1)
+        attacker.health = 1
+        gs.place_unit("W", 5, 5, 1)
+        gs.place_unit("W", 3, 2, 2)
+        _, _, _, _, own_info = own.step(np.array([2, 0, 2, 2, 3, 2]))
+
+        theirs = _env(reward_config=rc)
+        gs = theirs.game_state
+        mine = gs.place_unit("W", 3, 3, 1)
+        mine.health = 1
+        gs.place_unit("W", 5, 5, 1)
+        theirs.opponent = _AttackOnce(gs, gs.place_unit("W", 3, 4, 2), mine)
+        _, _, _, _, their_info = theirs.step(END_TURN)
+        assert own_info["reward_breakdown"]["action"] == their_info["reward_breakdown"]["action"] == pytest.approx(-1.0)
+        assert own.episode_stats["damage_taken"] == theirs.episode_stats["damage_taken"] == pytest.approx(1.0)
+        own.close()
+        theirs.close()
+
+    _SYMMETRIC = {
+        "income_diff": 0.0,
+        "unit_diff": 0.0,
+        "structure_control": 0.0,
+        "damage_scale": 1.0,
+        "damage_taken_scale": -1.0,
+        "kill": 5.0,
+    }
+
+    def test_an_exchange_scores_the_same_whichever_side_swings_first(self):
+        """The opponent-turn window used to charge the damage taken but credit no counter."""
+        first = _env(reward_config=self._SYMMETRIC)
+        gs = first.game_state
+        gs.place_unit("W", 2, 2, 1)
+        gs.place_unit("W", 3, 2, 2)
+        _, _, _, _, info = first.step(np.array([2, 0, 2, 2, 3, 2]))
+        record = gs.action_history[-1]
+        dealt, taken = record["damage"], record["counter_damage"]
+        assert info["reward_breakdown"]["action"] == pytest.approx(dealt - taken)
+
+        second = _env(reward_config=self._SYMMETRIC)
+        gs = second.game_state
+        mine = gs.place_unit("W", 2, 2, 1)
+        second.opponent = _AttackOnce(gs, gs.place_unit("W", 3, 2, 2), mine)
+        _, _, _, _, info = second.step(END_TURN)
+        # Mirror image: the opponent's hit is taken, the agent's counter dealt.
+        assert info["reward_breakdown"]["action"] == pytest.approx(taken - dealt)
+        assert second.episode_stats["damage_dealt"] == pytest.approx(taken)
+        assert second.episode_stats["counter_damage_dealt"] == pytest.approx(taken)
+        assert second.episode_stats["damage_taken"] == pytest.approx(dealt)
+        first.close()
+        second.close()
+
+    def test_a_counter_kill_on_the_opponent_turn_pays_kill(self):
+        env = _env(reward_config=self._SYMMETRIC)
+        gs = env.game_state
+        mine = gs.place_unit("W", 2, 2, 1)
+        enemy = gs.place_unit("W", 3, 2, 2)
+        enemy.health = 2
+        gs.place_unit("W", 5, 5, 2)  # a survivor, so the game goes on
+        stub = _AttackOnce(gs, enemy, mine)
+        env.opponent = stub
+        _, _, terminated, _, info = env.step(END_TURN)
+        record = next(r for r in reversed(gs.action_history) if r["type"] == "attack")
+        assert not terminated and record["attacker_killed"] and enemy not in gs.units
+        expected = record["counter_damage"] * 1.0 + 5.0 - stub.damage
+        assert info["reward_breakdown"]["action"] == pytest.approx(expected)
+        assert env.episode_stats["kills"] == env.episode_stats["counter_kills"] == 1
+        env.close()
+
     def test_units_killed_on_the_opponent_turn_cost_unit_lost(self):
         env = _env(reward_config={**_ISOLATE, "unit_lost": -40.0, "damage_taken_scale": 0.0})
         gs = env.game_state
