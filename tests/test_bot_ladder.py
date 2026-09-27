@@ -67,6 +67,7 @@ def test_opponent_specs_are_canonical(ladder):
     assert spec.parse("bot") == spec.create("simple")
     assert spec.parse("random").label == "random_20"
     assert spec.parse("random:max_actions=10").label == "random_10"
+    assert spec.parse("random_10") == spec.parse("random:max_actions=10") and spec.parse("random_20") == spec.parse("random")
     mixed = spec.parse("mixed:easy=medium,hard=advanced,p_hard=0.5")
     assert mixed == spec.parse('mixed:{"easy": "medium", "hard": "advanced", "p_hard": 0.5}')
     assert mixed.label == "mix(medium/advanced,0.5)"
@@ -145,24 +146,27 @@ def test_curriculum_check_flags_a_stage_weaker_than_the_one_before(ladder):
         stage("b_medium", BEGINNER, 75, medium),
         stage("b_medium_again", BEGINNER, 75, medium),
         stage("b_advanced", BEGINNER, 75, advanced),
+        stage("b_master", BEGINNER, 75, spec("master")),  # left out of the ladder
         stage("unplayed", "maps/1v1/skirmish.csv", 120, simple),
     ]
     checks = {c.stage.name: c for c in ladder.check_curriculum(stages, result)}
-    assert set(checks) == {"b_simple", "b_medium", "b_medium_again", "b_advanced"}
+    assert set(checks) == {"b_simple", "b_medium", "b_medium_again", "b_advanced", "b_master"}
+    assert checks["b_master"].verdict == "not played" and not checks["b_master"].flagged
     assert checks["b_simple"].verdict == "first on map" and not checks["b_simple"].flagged
-    assert checks["b_medium"].verdict == "harder" and checks["b_medium"].significance == "significant"
+    assert checks["b_medium"].verdict == "harder" and checks["b_medium"].h2h == "higher" and not checks["b_medium"].flagged
     assert checks["b_medium_again"].verdict == "same opponent"
     flagged = checks["b_advanced"]
     assert flagged.flagged and flagged.previous.name == "b_medium_again"
-    assert str(flagged.head_to_head) == "5-0-45" and flagged.significance == "significant"
-    assert flagged.ci[1] < 0.5
+    assert str(flagged.head_to_head) == "5-0-45" and flagged.h2h == "lower" and flagged.ci[1] < 0.5
+    assert flagged.flag_reasons == ("rating", "h2h")
 
     order = [s.name for s, _ in ladder.rating_sorted_order(stages, result)]
-    assert order == ["b_simple", "b_advanced", "b_medium", "b_medium_again", "unplayed"]
+    assert order == ["b_simple", "b_advanced", "b_medium", "b_medium_again", "b_master", "unplayed"]
 
     markdown = ladder.render_markdown(result, list(checks.values()), ladder.rating_sorted_order(stages, result))
-    assert "**FLAG: weaker** (significant)" in markdown
-    assert "| 5 | unplayed | simple | n/a |" in markdown
+    assert "**FLAG: weaker** (rating weaker; H2H lower)" in markdown
+    assert "rating harder; H2H higher" in markdown
+    assert "| 6 | unplayed | simple | n/a |" in markdown
 
 
 def test_bots_that_only_draw_each_other_are_tied_not_flagged(ladder):
@@ -173,7 +177,29 @@ def test_bots_that_only_draw_each_other_are_tied_not_flagged(ladder):
     result = ladder.LadderResult([br], n_seeds=25, seed_base=0)
     stages = [ladder.StageRef("r10", BEGINNER, 75, r10), ladder.StageRef("r15", BEGINNER, 75, r15)]
     (_, second) = ladder.check_curriculum(stages, result)
-    assert second.verdict == "tied" and not second.flagged and second.significance == "within noise"
+    assert second.verdict == "tied" and not second.flagged and second.h2h == "even"
+
+
+def test_a_stage_that_loses_the_head_to_head_is_flagged_even_if_it_rates_higher(ladder):
+    """Ratings pool every opponent: a bot that farms the weak ones can out-rate the bot it loses to."""
+    spec = ladder.OpponentSpec.create
+    simple, medium = spec("simple"), spec("medium")
+    r10, bal = spec("random", {"max_actions": 10}), spec("balanced_random")
+    board = ladder.Board(BEGINNER, 75)
+    results = {
+        (simple, medium): (31, 16, 3),
+        (medium, r10): (50, 0, 0),
+        (medium, bal): (50, 0, 0),
+        (simple, r10): (5, 45, 0),
+        (simple, bal): (20, 30, 0),
+        (r10, bal): (0, 50, 0),
+    }
+    result = ladder.LadderResult([_board_result(ladder, board, results)], n_seeds=25, seed_base=0)
+    stages = [ladder.StageRef("simple", BEGINNER, 75, simple), ladder.StageRef("medium", BEGINNER, 75, medium)]
+    (_, check) = ladder.check_curriculum(stages, result)
+    assert check.verdict == "harder" and check.h2h == "lower"
+    assert check.flagged and check.flag_reasons == ("h2h",)
+    assert "**FLAG: loses H2H** (rating harder; H2H lower)" in ladder.render_markdown(result, [check])
 
 
 # --------------------------------------------------------------------------
@@ -236,6 +262,7 @@ def test_cli_checks_a_curriculum_and_fails_on_flag(ladder, tmp_path, capsys):
     assert "| s_noop | starter@20 | noop |" in report and "**FLAG: weaker**" in report
     data = json.loads((out / "ladder.json").read_text())
     assert [c["flagged"] for c in data["curriculum_check"]] == [False, True]
+    assert {"git_commit", "git_dirty", "n_seeds", "argv"} <= set(data["meta"])
     assert ladder.main([*argv, "--fail-on-flag"]) == ladder.EXIT_FLAGGED
     # Re-rendered from the JSON: same check, no games played.
     assert ladder.main(["--from-json", str(out / "ladder.json"), "--config", str(config), "--quiet", "--fail-on-flag"]) == 3

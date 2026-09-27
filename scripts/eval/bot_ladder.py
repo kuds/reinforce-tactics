@@ -14,8 +14,8 @@ opponents against each other on seeded games, in both seats, and reports:
   and one virtual loss against an average opponent keeps the ratings finite
   when a bot wins or loses every game) and each bot's mean score;
 * a curriculum check: each stage's opponent against the opponent of the
-  previous stage on the same map, flagged when it rates weaker, with the
-  head-to-head score of the two and its 95% Wilson interval;
+  previous stage on the same map, flagged when it rates weaker or scores
+  significantly below half in their head-to-head (95% Wilson interval);
 * the curriculum's stages re-sorted by opponent rating inside each map block
   (a mechanical order to read next to the flags, not a curriculum edit).
 
@@ -28,7 +28,7 @@ Opponents
     ``random_20``). ``--opponents`` replaces the list and ``--add-opponents``
     extends it; each entry is ``name`` or ``name:key=value,key=value``
     (values parsed as YAML) or ``name:{json}``, e.g. ``random:max_actions=10``
-    or ``mixed:easy=simple,hard=medium,p_hard=0.5``.
+    (or its label, ``random_10``) or ``mixed:easy=simple,hard=medium,p_hard=0.5``.
 
 Maps and game length
     A board is one (map, max_turns) pair. With ``--config`` each map is played
@@ -159,8 +159,15 @@ class OpponentSpec:
 
     @classmethod
     def parse(cls, text: str) -> OpponentSpec:
-        """``name``, ``name:key=value,key=value`` (values as YAML) or ``name:{json}``."""
+        """``name``, ``name:key=value,key=value`` (values as YAML) or ``name:{json}``.
+
+        ``random_<n>`` (the label :attr:`label` gives RandomBot) also reads
+        as ``random:max_actions=<n>``.
+        """
         name, sep, rest = text.strip().partition(":")
+        prefix, _, max_actions = name.partition("_")
+        if prefix == "random" and max_actions.isdigit() and not sep:
+            return cls.create("random", {"max_actions": int(max_actions)})
         if not sep or not rest.strip():
             return cls.create(name)
         rest = rest.strip()
@@ -723,19 +730,30 @@ class StageCheck:
     previous_beaten: float | None = None
     head_to_head: WDL | None = None  # this stage's opponent vs the previous stage's
     ci: tuple[float, float] | None = None
-    verdict: str = "first on map"  # first on map | same opponent | harder | tied | weaker
+    verdict: str = "first on map"  # first on map | same opponent | not played | by rating: harder, tied, weaker
 
     @property
-    def flagged(self) -> bool:
-        return self.verdict == "weaker"
-
-    @property
-    def significance(self) -> str:
-        """Whether the head-to-head backs the verdict at 95%: ``significant`` or ``within noise``."""
+    def h2h(self) -> str:
+        """The head-to-head at 95%: ``higher`` / ``lower`` (this stage's opponent scores
+        significantly above / below 0.5 against the previous one), ``even``, or ``""`` (none)."""
         if self.ci is None:
             return ""
         low, high = self.ci
-        return "significant" if high < 0.5 or low > 0.5 else "within noise"
+        return "higher" if low > 0.5 else "lower" if high < 0.5 else "even"
+
+    @property
+    def flag_reasons(self) -> tuple[str, ...]:
+        """Why the stage is flagged: ``rating`` (it rates weaker) and/or ``h2h`` (it loses the head-to-head)."""
+        reasons = []
+        if self.verdict == "weaker":
+            reasons.append("rating")
+        if self.h2h == "lower":
+            reasons.append("h2h")
+        return tuple(reasons)
+
+    @property
+    def flagged(self) -> bool:
+        return bool(self.flag_reasons)
 
 
 def stages_from_config(cfg: Any, max_turns_override: int | None = None, default_max_turns: int = 100) -> list[StageRef]:
@@ -779,12 +797,16 @@ def check_curriculum(stages: Sequence[StageRef], result: LadderResult) -> list[S
     """Compare each stage's opponent with the previous stage's on the same map.
 
     Both are rated on the current stage's board (the ladder plays every
-    opponent on every board). A stage is flagged ``weaker`` when its
-    opponent's rating is below the previous one's by at least ``TIE_ELO``
-    (``tied`` within it: two bots that only ever draw each other rate the
-    same up to rounding); ``significance`` says whether the direct
-    head-to-head between the two confirms the order. Stages on a map the
-    ladder did not play are skipped.
+    opponent on every board). ``verdict`` compares the ratings: ``weaker``
+    or ``harder`` by at least ``TIE_ELO``, else ``tied`` (two bots that only
+    ever draw each other rate the same up to rounding). A stage is flagged
+    when its opponent rates weaker *or* scores significantly below 0.5 in the
+    direct head-to-head with the previous opponent: the ratings pool results
+    against every bot, so a bot that farms the weak ones can out-rate a bot
+    it loses to (SimpleBot and MediumBot on corner_points), and the
+    head-to-head is the closer proxy for "an agent that just beat the
+    previous opponent meets this one". Stages on a map the ladder did not
+    play are skipped.
     """
     checks = []
     last_on_map: dict[str, StageRef] = {}
@@ -806,7 +828,10 @@ def check_curriculum(stages: Sequence[StageRef], result: LadderResult) -> list[S
             check.previous_rating, check.previous_beaten = theirs.elo, theirs.beaten
         if previous.opponent == stage.opponent:
             check.verdict = "same opponent"
-        elif check.rating is not None and check.previous_rating is not None:
+        elif check.rating is None or check.previous_rating is None:
+            # One of the two opponents was left out of the ladder (--opponents).
+            check.verdict = "not played"
+        else:
             diff = check.rating - check.previous_rating
             check.verdict = "tied" if abs(diff) < TIE_ELO else ("weaker" if diff < 0 else "harder")
             h2h = br.head_to_head(stage.opponent, previous.opponent)
@@ -924,12 +949,17 @@ def _crosstable(ranked: Sequence[OpponentSpec], cell: Callable[[OpponentSpec, Op
     return lines
 
 
+_H2H_TEXT = {"higher": "H2H higher", "lower": "H2H lower", "even": "H2H within noise", "": "no H2H"}
+
+
 def _verdict_text(check: StageCheck) -> str:
+    if check.verdict in ("first on map", "same opponent", "not played"):
+        return check.verdict
+    detail = f"rating {check.verdict}; {_H2H_TEXT[check.h2h]}"
     if check.flagged:
-        return f"**FLAG: weaker** ({check.significance})" if check.significance else "**FLAG: weaker**"
-    if check.verdict in ("harder", "tied") and check.significance:
-        return f"{check.verdict} ({check.significance})"
-    return check.verdict
+        what = "weaker" if check.verdict == "weaker" else "loses H2H"
+        return f"**FLAG: {what}** ({detail})"
+    return detail
 
 
 def _checks_markdown(checks: Sequence[StageCheck], h: str) -> list[str]:
@@ -938,7 +968,8 @@ def _checks_markdown(checks: Sequence[StageCheck], h: str) -> list[str]:
         "",
         "Each stage's opponent against the previous stage's on the same map, both rated on this stage's board. "
         "Beaten as in the ordering tables. H2H: this stage's opponent's W-D-L against the previous one and its "
-        "score with the 95% Wilson interval; *significant* when the interval excludes 0.5.",
+        "score with the 95% Wilson interval (*higher* / *lower* when it excludes 0.5). "
+        "Flagged when the opponent rates weaker or its H2H is lower.",
         "",
         "| Stage | Board | Opponent | Rating | Beaten | Previous stage (opponent) | Rating | Beaten | H2H | Score [95% CI] | Verdict |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
@@ -1059,14 +1090,18 @@ def write_csv(result: LadderResult, path: Path) -> None:
                 )
 
 
-def _git_commit() -> str | None:
+def _git(*args: str) -> str | None:
     try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=10, check=False
-        )
+        out = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout.strip() or None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def git_state() -> dict[str, Any]:
+    """The checkout the games ran on: HEAD and whether the working tree had uncommitted changes."""
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return {"git_commit": _git("rev-parse", "HEAD") or None, "git_dirty": None if status is None else bool(status)}
 
 
 def _spec_json(spec: OpponentSpec) -> dict[str, Any]:
@@ -1095,7 +1130,6 @@ def to_json(
             "seed_base": result.seed_base,
             "games_per_pairing": 2 * result.n_seeds,
             "elapsed_s": round(result.elapsed_s, 1),
-            "git_commit": _git_commit(),
             "game_record_fields": ["seed", "a_seat", "winner", "end_reason", "turns", "forced_end_turns", "error"],
         },
         "boards": [
@@ -1151,7 +1185,8 @@ def to_json(
                 "ci95": [round(x, 4) for x in c.ci] if c.ci else None,
                 "verdict": c.verdict,
                 "flagged": c.flagged,
-                "significance": c.significance,
+                "h2h": c.h2h,
+                "flag_reasons": list(c.flag_reasons),
             }
             for c in checks
         ],
@@ -1296,9 +1331,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--seeds must be >= 1")
     if args.max_turns is not None and args.max_turns < 1:
         parser.error("--max-turns must be >= 1")
+    provenance: dict[str, Any] = git_state()
     try:
         if args.from_json:
-            result = load_json(json.loads(Path(args.from_json).read_text(encoding="utf-8")), prior=args.prior)
+            data = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
+            result = load_json(data, prior=args.prior)
+            provenance = {"from_json": args.from_json, "source_meta": data.get("meta", {})}
             cfg = _load_config(args.config) if args.config else None
             stages = stages_from_config(cfg, args.max_turns, args.default_max_turns) if cfg is not None else []
         else:
@@ -1339,6 +1377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         (out / "ladder.md").write_text(markdown + "\n", encoding="utf-8")
         write_csv(result, out / "ladder.csv")
         meta = {"config": args.config, "argv": list(argv) if argv is not None else sys.argv[1:], "workers": args.workers}
+        meta.update(provenance)
         # Compact: the per-game records run to tens of thousands of rows.
         payload = json.dumps(to_json(result, checks, order, meta), separators=(",", ":"))
         (out / "ladder.json").write_text(payload + "\n", encoding="utf-8")
