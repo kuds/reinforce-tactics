@@ -159,6 +159,8 @@ def record_evaluation_to_video(
         Dict with keys:
             - video_path: Path to the saved video
             - winner: Winner of the game (1, 2, or None)
+            - agent_player: The seat the agent played (the winner is the
+              agent when it equals this)
             - total_reward: Total episode reward
             - steps: Number of steps taken
     """
@@ -209,6 +211,10 @@ def record_evaluation_to_video(
     _has_masks = hasattr(env, "action_masks") and callable(env.action_masks)
 
     obs, info = env.reset()
+    # Re-read the seat: an env with agent_seat="random" draws it in reset().
+    # ``_snapshot`` reads these two names at call time.
+    agent_player = getattr(_inner, "agent_player", 1)
+    opponent_player = 3 - agent_player
     # Create headless renderer after reset so game_state is fresh
     renderer = Renderer(_get_gs(), replay_mode=True, headless=True, pixel_art=use_pixel_art)
 
@@ -313,6 +319,8 @@ def record_evaluation_to_video(
         "video_path": video_path,
         "replay_path": replay_path,
         "winner": winner,
+        # The seat the agent played: compare ``winner`` against this, not 1.
+        "agent_player": agent_player,
         "end_reason": info.get("end_reason"),
         "total_reward": total_reward,
         "steps": steps,

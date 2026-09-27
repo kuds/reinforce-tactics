@@ -125,6 +125,29 @@ def _save_and_return(fig: plt.Figure, charts_dir: Any | None, name: str) -> plt.
     return fig
 
 
+def _is_carry_in(r: Mapping[str, Any]) -> bool:
+    """An eval of the policy a stage inherited (``best_eligible`` False: the stage-entry eval)."""
+    return r.get("best_eligible") is False
+
+
+def _episodes(r: Mapping[str, Any]) -> int:
+    """Episodes behind an eval row (per-seat evals double it), for per-episode normalisation."""
+    return max(1, int(r.get("episodes", 1) or 1))
+
+
+def format_win_rate(value: Any) -> str:
+    """A win rate for a chart label: ``'n/a'`` for ``None`` or the old ``-1.0`` "no best" sentinel."""
+    if value is None:
+        return "n/a"
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if value < 0:
+        return "n/a"
+    return f"{value * 100:5.1f}%"
+
+
 def plot_eval_curves(
     results: Sequence[dict],
     train_records: Sequence[dict] | None = None,
@@ -132,6 +155,7 @@ def plot_eval_curves(
     opponent_label: str = "",
     charts_dir: Any | None = None,
     stage_boundaries: Sequence[int] | None = None,
+    target_win_rate: float | None = None,
 ) -> plt.Figure:
     """Win rate / avg reward / episode length / approx_kl / explained_variance / value_loss.
 
@@ -161,6 +185,14 @@ def plot_eval_curves(
             to draw vertical stage-transition lines on every panel.
             Useful for the bootstrap-curriculum view where one
             ``metrics_callback`` spans multiple stages.
+        target_win_rate: Optional win rate (0-1) to draw as a dashed target
+            line. None (default) draws none: a fixed 70% line misread every
+            curriculum stage whose own threshold differs (review rltrain-20).
+
+    The win-rate panel plots the gate mode's win rate and, when the rows
+    record both (``eval.eval_both_modes``), the greedy and stochastic win
+    rates as thinner lines. Carry-in evals (``best_eligible`` False) are
+    drawn as hollow markers.
     """
     if train_records:
         fig, axes_grid = plt.subplots(2, 3, figsize=(15, 8))
@@ -177,7 +209,18 @@ def plot_eval_curves(
     # Panel 1: win rate
     ax = axes[0]
     wr = [r["win_rate"] * 100 for r in results]
-    ax.plot(eval_ts, wr, "o-", color="#2196F3", linewidth=2, markersize=6)
+    ax.plot(eval_ts, wr, "-", color="#2196F3", linewidth=2, label="win rate (gate mode)")
+    eligible = [(t, w) for t, w, r in zip(eval_ts, wr, results) if not _is_carry_in(r)]
+    carry_in = [(t, w) for t, w, r in zip(eval_ts, wr, results) if _is_carry_in(r)]
+    if eligible:
+        ax.plot(*zip(*eligible), "o", color="#2196F3", markersize=6)
+    if carry_in:
+        ax.plot(*zip(*carry_in), "o", color="#2196F3", markersize=6, markerfacecolor="none", label="carry-in eval")
+    for key, color, label in (("win_rate_greedy", "#1565c0", "greedy"), ("win_rate_stochastic", "#ff7043", "stochastic")):
+        pairs = [(t, r[key] * 100) for t, r in zip(eval_ts, results) if r.get(key) is not None]
+        # Only when both modes were recorded: with one, it is the line above.
+        if pairs and all(r.get("win_rate_greedy") is not None and r.get("win_rate_stochastic") is not None for r in results):
+            ax.plot(*zip(*pairs), "--", color=color, linewidth=1, alpha=0.8, label=label)
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Win Rate (%)")
     ax.set_title(f"Win Rate vs {opponent_label}" if opponent_label else "Win Rate")
@@ -185,7 +228,8 @@ def plot_eval_curves(
     # previous log scale was added to surface the t=4 baseline eval but
     # made the panel hard to compare with the rest of the dashboard.
     ax.set_ylim(-5, 105)
-    ax.axhline(y=70, color="green", linestyle="--", alpha=0.5, label="70% target")
+    if target_win_rate is not None:
+        ax.axhline(y=target_win_rate * 100, color="green", linestyle="--", alpha=0.5, label=f"{target_win_rate:.0%} target")
     _draw_stage_lines(ax)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
@@ -284,11 +328,14 @@ def plot_eval_curves(
     return _save_and_return(fig, charts_dir, "eval_curves.png")
 
 
-def _stack_inputs(results: Sequence[dict], key: str, names: Iterable[str]) -> tuple[list[int], dict[str, list[float]]]:
+def _stack_inputs(
+    results: Sequence[dict], key: str, names: Iterable[str], *, per_episode: bool = False
+) -> tuple[list[int], dict[str, list[float]]]:
     """Pivot results[i][key][name] -> {name: [values aligned with timesteps]}.
 
     Skips evals that don't have the breakdown dict (e.g. older runs from
-    before track_breakdown was wired up).
+    before track_breakdown was wired up). ``per_episode`` divides each
+    eval's values by its ``episodes``.
     """
     timesteps: list[int] = []
     series: dict[str, list[float]] = {n: [] for n in names}
@@ -297,8 +344,9 @@ def _stack_inputs(results: Sequence[dict], key: str, names: Iterable[str]) -> tu
         if not breakdown:
             continue
         timesteps.append(int(r["timesteps"]))
+        scale = 1.0 / _episodes(r) if per_episode else 1.0
         for name in series:
-            series[name].append(float(breakdown.get(name, 0.0)))
+            series[name].append(float(breakdown.get(name, 0.0)) * scale)
     return timesteps, series
 
 
@@ -311,7 +359,9 @@ def plot_reward_decomposition(
     """Stacked area of summed reward components per eval.
 
     Reads from ``r["reward_components"]`` produced when ``evaluate_model``
-    is called with ``track_breakdown=True``. Returns ``None`` if the
+    is called with ``track_breakdown=True``, divided by the eval's
+    ``episodes`` so evals of different sizes (a stage's own
+    ``n_eval_episodes``, per-seat evals) compare. Returns ``None`` if the
     breakdown is missing from every entry (older runs).
 
     Reading guide:
@@ -322,7 +372,7 @@ def plot_reward_decomposition(
     - growing orange ``terminal`` band over time: agent is learning to
       win.
     """
-    timesteps, series = _stack_inputs(results, "reward_components", REWARD_COMPONENTS)
+    timesteps, series = _stack_inputs(results, "reward_components", REWARD_COMPONENTS, per_episode=True)
     if not timesteps:
         print("No reward_components recorded — re-run training with track_breakdown=True.")
         return None
@@ -342,7 +392,7 @@ def plot_reward_decomposition(
     _draw_stage_boundaries(ax, stage_boundaries)
 
     ax.set_xlabel("Timesteps")
-    ax.set_ylabel("Summed reward across eval episodes")
+    ax.set_ylabel("Mean reward per eval episode")
     ax.set_title("Reward decomposition per eval")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.3, axis="y")
@@ -430,14 +480,22 @@ def plot_outcome_breakdown(
     charts_dir: Any | None = None,
     drop_unused: bool = True,
     stage_boundaries: Sequence[int] | None = None,
+    carry_in: str = "hatch",
 ) -> plt.Figure | None:
-    """Stacked bar of outcome × end-reason per eval.
+    """Stacked bar of outcome × end-reason per eval, as a share of the eval's episodes.
 
     Reads from ``r["outcome_reasons"]`` (always populated by
-    ``evaluate_model``). Shows whether wins are coming from HQ captures
+    ``evaluate_model``) divided by ``r["episodes"]``, so evals of different
+    sizes compare. Shows whether wins are coming from HQ captures
     (the intended goal) or from elimination, and whether losses are
     structural (HQ-captured by opponent) or symmetric (own units wiped
     out). Surfaces failure modes invisible in a single win-rate number.
+
+    ``carry_in`` decides the stage-entry evals (``best_eligible`` False,
+    which measure the policy the stage inherited): ``"hatch"`` (default)
+    draws them hatched, ``"drop"`` leaves them out -- on a curriculum-wide
+    axis a stage-entry bar lands right on top of the previous stage's
+    promoting eval and hides it.
 
     Reading guide:
     - mostly dark green ``wins_by_hq_capture``: agent has learned the
@@ -447,19 +505,27 @@ def plot_outcome_breakdown(
       lucky outcomes rather than goal-directed play.
     - grey ``draws_by_max_turns_draw`` band: agent is timing out.
     """
+    if carry_in not in ("hatch", "drop"):
+        raise ValueError(f"carry_in must be 'hatch' or 'drop', got {carry_in!r}")
     timesteps = []
     rows: list[dict] = []
+    hatched: list[bool] = []
+    shares: list[float] = []
     for r in results:
         if "outcome_reasons" not in r:
             continue
+        if carry_in == "drop" and _is_carry_in(r):
+            continue
         timesteps.append(r["timesteps"])
         rows.append(r["outcome_reasons"])
+        hatched.append(_is_carry_in(r))
+        shares.append(100.0 / _episodes(r))
     if not timesteps:
         print("No outcome_reasons recorded — re-run training with the updated evaluate_model.")
         return None
 
     keys = [f"{outcome}_by_{reason}" for outcome in ("wins", "losses", "draws") for reason in END_REASONS]
-    arr = np.array([[row.get(k, 0) for row in rows] for k in keys], dtype=float)
+    arr = np.array([[row.get(k, 0) * share for row, share in zip(rows, shares)] for k in keys], dtype=float)
 
     if drop_unused:
         keep = [i for i, _ in enumerate(keys) if arr[i].max() > 0]
@@ -474,13 +540,20 @@ def plot_outcome_breakdown(
     bottom = np.zeros(len(timesteps))
     width = max(1, int((max(timesteps) - min(timesteps)) / max(1, len(timesteps) - 1) * 0.8)) if len(timesteps) > 1 else 1
     for k, color, counts in zip(keys, colors, arr):
-        ax.bar(timesteps, counts, bottom=bottom, color=color, label=k, width=width, edgecolor="white", linewidth=0.3)
+        bars = ax.bar(timesteps, counts, bottom=bottom, color=color, label=k, width=width, edgecolor="white", linewidth=0.3)
+        for bar, is_carry_in in zip(bars, hatched):
+            if is_carry_in:
+                bar.set_hatch("//")
+                bar.set_alpha(0.55)
         bottom = bottom + counts
     _draw_stage_boundaries(ax, stage_boundaries)
 
     ax.set_xlabel("Timesteps")
-    ax.set_ylabel("Episodes")
-    ax.set_title("Eval outcome × end-reason per eval")
+    ax.set_ylabel("Share of eval episodes (%)")
+    title = "Eval outcome × end-reason per eval"
+    if any(hatched):
+        title += " (hatched: stage-entry carry-in eval)"
+    ax.set_title(title)
     ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=8)
     ax.grid(True, alpha=0.3, axis="y")
     fig.tight_layout()
@@ -773,7 +846,18 @@ def plot_individual_game_stats(
     # a glance.
     ax = axes[1, 2]
     ax.set_axis_off()
-    winner_str = {1: "Agent wins", 2: "Opponent wins", None: "Draw"}.get(result.get("winner"), "Unknown")
+    # Compare against the seat the agent played (a seat-2 or random-seat
+    # replay used to read player 1's win as the agent's; critic-gaps-2).
+    winner = result.get("winner")
+    agent_player = result.get("agent_player", 1)
+    if winner is None:
+        winner_str = "Draw"
+    elif winner == agent_player:
+        winner_str = f"Agent wins (P{agent_player})"
+    elif winner in (1, 2):
+        winner_str = f"Opponent wins (P{winner})"
+    else:
+        winner_str = "Unknown"
     end_reason = result.get("end_reason") or "n/a"
     final_step = step_stats[-1]
     create_lines = [f"  {n}: {c}" for n, c in sorted(action_counts.items()) if n.startswith("create_")]
@@ -863,7 +947,11 @@ def plot_curriculum_summary(
     cumulative-timestep axis, with a dotted horizontal segment at the
     stage's ``promotion_win_rate`` and a dashed vertical line at the
     stage's last eval timestep marking the transition to the next
-    stage. Returns ``None`` if no stage has any eval results.
+    stage. Where a stage's rows carry a ``gate_value`` (what its promotion
+    criterion compared with the threshold) that differs from ``win_rate``
+    -- a Wilson bound, a rolling mean, a win+draw/2 score, the weaker seat
+    -- that value is drawn too, thin and dashed. Returns ``None`` if no
+    stage has any eval results.
 
     Args:
         history: ``run_curriculum`` result's ``"history"`` list — each
@@ -879,13 +967,29 @@ def plot_curriculum_summary(
     fig, ax = plt.subplots(figsize=(12, 5))
     cmap = plt.get_cmap("tab10")
     stage_lookup = {s.name: s for s in stages}
+    drew_gate = False
     for i, h in enumerate(history):
         if not h["results"]:
             continue
         xs = [r["timesteps"] for r in h["results"]]
         ys = [r["win_rate"] for r in h["results"]]
         color = cmap(i % 10)
-        ax.plot(xs, ys, marker="o", label=h["stage"], color=color)
+        ax.plot(xs, ys, "-", label=h["stage"], color=color)
+        # The dotted threshold is compared with the gate value (a Wilson
+        # bound, a rolling mean, a win+draw/2 score or the weaker seat's
+        # rate), not always with the pooled win rate: draw it where the two
+        # differ, so the chart compares like with like.
+        gate = [(x, r.get("gate_value")) for x, r in zip(xs, h["results"]) if r.get("gate_value") is not None]
+        if any(abs(float(g) - float(r["win_rate"])) > 1e-9 for r in h["results"] if (g := r.get("gate_value")) is not None):
+            ax.plot(*zip(*gate), "--", color=color, linewidth=1.0, alpha=0.8)
+            drew_gate = True
+        # Stage-entry (carry-in) evals hollow: they measure the inherited policy.
+        filled = [(x, y) for x, y, r in zip(xs, ys, h["results"]) if not _is_carry_in(r)]
+        hollow = [(x, y) for x, y, r in zip(xs, ys, h["results"]) if _is_carry_in(r)]
+        if filled:
+            ax.plot(*zip(*filled), "o", color=color)
+        if hollow:
+            ax.plot(*zip(*hollow), "o", color=color, markerfacecolor="none")
         stage_cfg = stage_lookup.get(h["stage"])
         if stage_cfg is not None:
             ax.hlines(
@@ -900,7 +1004,12 @@ def plot_curriculum_summary(
     ax.set_xlabel("Cumulative env timesteps")
     ax.set_ylabel("Eval win rate")
     ax.set_ylim(-0.02, 1.02)
-    ax.set_title("Curriculum win rate (dotted = stage threshold, dashed = transition)")
+    title = "Curriculum win rate (dotted = stage threshold, dashed = transition, hollow = carry-in eval"
+    if drew_gate:
+        title += ",\nthin dashed = the gate value the threshold is compared with)"
+    else:
+        title += ")"
+    ax.set_title(title)
     ax.grid(alpha=0.3)
     ax.legend(loc="best", fontsize=9)
     fig.tight_layout()
@@ -990,6 +1099,7 @@ def plot_curriculum_metrics(
                 all_results,
                 charts_dir=sub_dir,
                 stage_boundaries=stage_boundaries,
+                carry_in="drop",
             ),
             "outcome_breakdown.png",
             "curriculum_outcome_breakdown.png",
@@ -1115,7 +1225,7 @@ def plot_curriculum_composition_summary(
             {
                 "stage": h.get("stage", "?"),
                 "promoted": bool(h.get("promoted", False)),
-                "best_wr": float(h.get("best_win_rate", 0.0)),
+                "best_wr": h.get("best_win_rate"),
                 "pct": pct,
                 "kills": kills,
                 "abilities": int(para + haste + atk_buf + def_buf),
@@ -1172,12 +1282,11 @@ def plot_curriculum_composition_summary(
 
     # Left margin: best WR + promoted flag.
     for i, row in enumerate(rows_plot):
-        wr_pct = row["best_wr"] * 100
         flag = "OK" if row["promoted"] else "X"
         ax.text(
             -2.0,
             y_positions[i],
-            f"{flag} {wr_pct:5.1f}%",
+            f"{flag} {format_win_rate(row['best_wr']):>6}",
             ha="right",
             va="center",
             fontsize=9,

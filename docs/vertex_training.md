@@ -151,13 +151,50 @@ up as a success; the entrypoint passes the code through unchanged.
 | `0` | Every curriculum stage promoted | Complete, uploaded |
 | `1` | Failure: an exception during the run (see the traceback in the log), or an invalid `--config` / `--set` value at startup | Whatever the run wrote, uploaded (nothing for a startup error) |
 | `2` | Command-line usage error (argparse) | None; the run never started |
-| `3` | **Stalled**: a stage used its `max_timesteps` budget without reaching its promotion win rate | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
+| `3` | **Stalled**: a stage used its `max_timesteps` budget, and its retries (`curriculum.max_retries`, default 1: one more full budget from the stage's `best_model.zip`), without meeting its promotion criterion | Partial run post-processed (charts, videos, sanity eval) and uploaded; `run_status.json` says `curriculum_stalled` |
 | `130` | Interrupted with Ctrl-C (`SIGINT`) | Uploaded |
 | `143` | Terminated by `SIGTERM` (Vertex cancel/preemption, `docker stop`) | Uploaded on the way out, within the grace period |
 
 A `SIGTERM` that arrives once the run has ended, while its upload is in
 progress, is ignored so the upload can finish; the exit code then still reports
 how the run ended.
+
+#### Resuming an interrupted run
+
+A run that ended with `143` (or `130`, or was killed outright) can continue
+where it stopped. Download its directory (or run in the same container) and
+pass it to `--resume`:
+
+```bash
+python3 scripts/train/train_bootstrap.py --resume ./bootstrap_run --device cuda
+```
+
+The stages whose `config.json` says `promoted: true` are skipped (so are
+stages whose `config.json` write failed but whose promotion `run_manifest.json`
+recorded); the stage that was running continues from its rolling
+`<stage>/latest.zip` (saved every `eval.checkpoint_freq` stage steps, on
+promotion, and on `SIGTERM`) with the rest of its budget, its eval timeline,
+promotion streak, best-model record and schedule positions (see
+`run_manifest.json`). A stage whose checkpoint was taken on its promoting eval
+is finished rather than trained again, and a retry killed before its first
+checkpoint restarts from the checkpoint it began from. A run killed after its
+last stage promoted but before `final_model.zip` / `run_status.json` is written
+up without training: `final_model.zip` comes from the last stage's
+`best_model.zip` (with `restore_best_checkpoint_between_stages`) or
+`stage_final.zip`, and `run_status.json` says `completed_curriculum` with
+`finished_on_resume: true`. `num_timesteps` and the
+TensorBoard curves continue. Without `--config` the run's own
+`resolved_config.yaml` is used (a record written before the eval-gate change
+keeps its greedy gate, greedy-only evals, no stall retries and a constant
+learning rate, since `ppo.lr_schedule` was not applied then); a config that
+differs from it in what is trained or measured is refused unless `--force`.
+`--force` is also needed to resume a run whose records stop short of stages
+that already have output (resuming would overwrite them), or a `--build-bc`
+run stopped before its warm start was built (it then resumes without one). A
+stalled run (`run_status.json` says `curriculum_stalled`) is not resumed: start
+a new run with `warm_start_path` set to the stalled stage's `best_model.zip`.
+`metadata_write_failures` in `run_status.json` counts the best-effort writes
+that failed in every session of the run.
 
 ### Configuration (environment variables)
 

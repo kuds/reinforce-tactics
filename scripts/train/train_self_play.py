@@ -52,6 +52,7 @@ from reinforcetactics.rl.callbacks import AtomicCheckpointCallback, SaveModelAto
 from reinforcetactics.rl.gym_env import (
     FLAT_ACTION_VERSIONS,
     flat_action_version_of,
+    parse_agent_seat,
     resolve_flat_action_version,
     stamp_flat_action_version,
 )
@@ -107,6 +108,9 @@ def build_env_kwargs(args) -> dict[str, Any]:
         "gold_scale": args.gold_scale,
         "turn_scale": args.turn_scale,
         "unit_count_scale": args.unit_count_scale,
+        # The bot workers' and the eval env's seat (self-play workers follow
+        # --swap-players).
+        "agent_seat": args.agent_seat,
         "flat_action_version": resolve_flat_action_version(
             args.flat_action_version,
             action_space_type=args.action_space_type,
@@ -354,6 +358,7 @@ _ARG_TO_CONFIG_PATH = {
     "pad_to_size": "env.pad_to_size",
     "enabled_units": "env.enabled_units",
     "fog_of_war": "env.fog_of_war",
+    "agent_seat": "env.agent_seat",
     "engine_overrides": "env.engine_overrides",
     "gold_scale": "env.gold_scale",
     "turn_scale": "env.turn_scale",
@@ -591,6 +596,13 @@ def build_parser(config_path: str | None = None, *, cfg=None) -> argparse.Argume
     parser.add_argument("--enabled-units", type=str, default=None, help="Comma-separated list of enabled unit types")
     parser.add_argument(
         "--fog-of-war", action=argparse.BooleanOptionalAction, default=False, help="Partial observability for both seats"
+    )
+    parser.add_argument(
+        "--agent-seat",
+        type=parse_agent_seat,
+        default=1,
+        help="Seat of the bot workers (mixed mode) and the eval env: 1, 2 or random (drawn per episode). "
+        "Self-play workers follow --swap-players.",
     )
     parser.add_argument(
         "--engine-overrides",

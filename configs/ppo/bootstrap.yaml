@@ -231,6 +231,47 @@ eval:
   # that need tighter CIs.
   eval_freq: 50_000
   n_eval_episodes: 80
+  # Gate settings left at their defaults (see EvalConfig). Since the eval-gate
+  # change the gate measures the *stochastic* policy (eval_deterministic:
+  # false) and every eval also records the greedy win rate on the same seeds
+  # (eval_both_modes: true). The promotion_win_rate values below were tuned
+  # on greedy evals; if stages stop promoting, compare win_rate_greedy with
+  # win_rate_stochastic in eval_results.jsonl before lowering them.
+  #
+  # Eval cost: measured with an untrained policy on 4 CPUs, one default eval
+  # (both modes) takes 2.3-2.5x the old greedy-only eval (starter, 40
+  # episodes: 4.2s greedy + 6.1s stochastic against 4.6s before; beginner, 16
+  # episodes: 19.0s against 7.5s). That gives back much of what the move from
+  # eval_freq 20_000 to 50_000 saved. n_eval_envs: 4 (batched predict, one
+  # process) brings it to ~1.45x (starter: 2.7s + 4.0s). Since a stochastic
+  # eval samples from its own seeded stream, n_eval_envs changes neither the
+  # training run nor the greedy numbers, but the stochastic gate numbers are a
+  # different (equally valid, reproducible) sample than the serial path's, so
+  # switch it at a run boundary, not mid-comparison. eval_both_modes: false
+  # halves the cost again at the price of the greedy number.
+  #
+  # Also recommended once validated: eval_seats: [1, 2] with env.agent_seat:
+  # random, so checkpoints are trained and gated in the seat they are
+  # deployed in half the time. checkpoint_freq (default 50_000) is the
+  # rolling latest.zip that train_bootstrap.py --resume continues from.
+  #
+  # Promotion / recovery settings (curriculum section) are also left at their
+  # defaults (see CurriculumConfig): promotion_criterion point (the gate these
+  # thresholds were tuned for), max_retries 1 (a stalled stage gets one more
+  # budget from its best_model.zip), regression_guard_evals 0 (off).
+  # Recommended to try on the noisy *_random_N stages: promotion_criterion:
+  # rolling with promotion_rolling_k: 3 and patience: 1, or wilson with
+  # lowered thresholds. A Wilson gate (one-sided 95%) as hard as today's point
+  # gate at 80 episodes is 7-9 points lower: 0.65 -> 0.56, 0.70 -> 0.61,
+  # 0.75 -> 0.66, 0.85 -> 0.77, 0.90 -> 0.83; with eval_seats [1, 2] (160
+  # pooled episodes) 4.5-6.5 points lower: 0.65 -> 0.59, 0.70 -> 0.64,
+  # 0.75 -> 0.69, 0.85 -> 0.80, 0.90 -> 0.85. In general T' =
+  # wilson_lower_bound(ceil(n * T), n, z_for_confidence(0.95)) from
+  # reinforcetactics.rl.evaluation, n the episodes pooled per eval. Also:
+  # promotion_score: win_plus_half_draw where max_turns draws dominate;
+  # regression_guard_evals: 3 with regression_guard_drop: 0.25;
+  # anneal_horizon near the steps a stage typically needs to promote, so
+  # ent_coef schedules finish cooling.
 
 curriculum:
   stages:

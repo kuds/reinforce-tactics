@@ -513,8 +513,10 @@ class TestRunCurriculumReportsIgnoredFields:
     """Only the CLI scripts reported them; the notebook calls run_curriculum directly."""
 
     def test_run_curriculum_warns_before_building_anything(self, tmp_path):
+        # (eval.checkpoint_freq was the example here until the curriculum
+        # started reading it for its rolling resume checkpoint.)
         cfg = config_from_dict(
-            {"eval": {"checkpoint_freq": 5}, "logging": {"wandb": True}, "curriculum": {"stages": [_stage()]}}
+            {"ppo": {"use_action_masking": False}, "logging": {"wandb": True}, "curriculum": {"stages": [_stage()]}}
         )
 
         class _Built(Exception):
@@ -523,7 +525,7 @@ class TestRunCurriculumReportsIgnoredFields:
         def train_env_factory(stage, cfg):
             raise _Built
 
-        with pytest.warns(IgnoredConfigFieldWarning, match="(?s)run_curriculum.*eval.checkpoint_freq.*logging.wandb"):
+        with pytest.warns(IgnoredConfigFieldWarning, match="(?s)run_curriculum.*ppo.use_action_masking.*logging.wandb"):
             with pytest.raises(_Built):
                 bootstrap.run_curriculum(cfg, tmp_path / "out", train_env_factory=train_env_factory)
 
@@ -541,7 +543,7 @@ class TestRunCurriculumReportsIgnoredFields:
             tmp_path / "c.yaml",
             {
                 "env": {"n_envs": 1, "use_subprocess": False},
-                "eval": {"checkpoint_freq": 5},
+                "logging": {"log_dir": "elsewhere"},
                 "curriculum": {"stages": [_stage()]},
             },
         )

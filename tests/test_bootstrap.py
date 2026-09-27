@@ -286,8 +286,9 @@ class TestBestEligibleAfter:
         promote = PromotionCallback(eval_callback=cb, threshold=0.8, patience=2, verbose=0)
         assert _step_promote(promote, num_timesteps=5_100) is False
         assert promote.promoted is True
-        # ...while nothing was ever saved as best.
-        assert cb.best_win_rate == -1.0
+        # ...while nothing was ever saved as best: no best at all (None, not
+        # the old -1.0 sentinel that reached config.json; review rltrain-6).
+        assert cb.best_win_rate is None
         assert not (tmp_path / "best_model.zip").exists()
 
 
@@ -1414,6 +1415,8 @@ class TestRunCurriculum:
             "b": [0.95, 0.95],
         }
         cfg, mf, tef, eef, _, _, get_model = _setup_run(stages, program, tmp_path)
+        # The first stall is final (the default retries once; see TestStallRetry).
+        cfg.curriculum.max_retries = 0
 
         with pytest.raises(CurriculumStalled) as excinfo:
             run_curriculum(
@@ -1783,6 +1786,7 @@ class TestWriteResultsCsv:
         stages = [_stage("a", patience=2), _stage("b", "simple", patience=2, threshold=0.99)]
         program = {"a": [0.95, 0.95], "b": [0.5, 0.5]}
         cfg, mf, tef, eef, _, _, _ = _setup_run(stages, program, tmp_path)
+        cfg.curriculum.max_retries = 0
         with pytest.raises(CurriculumStalled):
             run_curriculum(
                 cfg,
