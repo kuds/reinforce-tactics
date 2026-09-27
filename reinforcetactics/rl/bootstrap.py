@@ -51,6 +51,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -166,9 +167,22 @@ class CurriculumStalled(RuntimeError):
         }
 
 
-def gate_label(criterion: str, score: str = "win_rate", *, rolling_k: int = 3, confidence: float = 0.95) -> str:
-    """What a promotion criterion compares with its threshold, in words ("Wilson 95% lower bound of win_rate")."""
+def gate_label(
+    criterion: str,
+    score: str = "win_rate",
+    *,
+    rolling_k: int = 3,
+    confidence: float = 0.95,
+    weaker_seat: bool = False,
+) -> str:
+    """What a promotion criterion compares with its threshold, in words ("Wilson 95% lower bound of win_rate").
+
+    ``weaker_seat``: the gate takes the weaker of several seats
+    (``eval.seat_aggregate: min``), not the pooled rate.
+    """
     measured = "win+draw/2 score" if score == "win_plus_half_draw" else "win_rate"
+    if weaker_seat:
+        measured = f"weaker-seat {measured}"
     if criterion == "wilson":
         return f"Wilson {confidence:.0%} lower bound of {measured}"
     if criterion == "rolling":
@@ -188,7 +202,9 @@ def stall_verdict(
     of the value the criterion actually compared, so a Wilson-bound, rolling
     or win+draw/2 stall is not reported as the win-only point estimate's.
     ``achieved_win_rate`` (the peak gate win rate) is added when the gate
-    compared something else.
+    compared something else. When the gate took the weaker of several
+    seats (``seat_aggregate: min``) that is said, and the peak pooled
+    ``win_rate`` -- the eval rows' ``win_rate`` column -- is added too.
     """
     held = f"patience={patience}" if patience is not None else "the patience window"
     record = gate_record or {}
@@ -204,13 +220,21 @@ def stall_verdict(
 
     criterion = str(record.get("criterion", "point"))
     score = str(record.get("score", "win_rate"))
+    # The gate took the weaker of several seats: its peak (and the gate win
+    # rate's, ``achieved_win_rate``) is that seat's, not the pooled win_rate
+    # of the eval rows.
+    weaker_seat = record.get("seat_aggregate") == "min" and len(record.get("seats") or []) > 1
     what = gate_label(
-        criterion, score, rolling_k=int(record.get("rolling_k", 3)), confidence=float(record.get("confidence", 0.95))
+        criterion,
+        score,
+        rolling_k=int(record.get("rolling_k", 3)),
+        confidence=float(record.get("confidence", 0.95)),
+        weaker_seat=weaker_seat,
     )
     peak = record.get("peak_gate_value")
     passes = int(record.get("passes", 0) or 0)
     judged = int(record.get("evals_judged", 0) or 0)
-    plain = criterion == "point" and score == "win_rate"
+    point_win_rate = criterion == "point" and score == "win_rate"
     steps = int(record.get("min_timesteps", 0) or 0)
     window = f" after the first {steps:,} stage steps (min_timesteps_before_promotion)" if steps else ""
     if peak is None:
@@ -227,8 +251,14 @@ def stall_verdict(
         )
     else:
         verdict = f"peak {what} {float(peak):.1%} did not reach threshold {threshold:.1%}"
-    if not plain and achieved_win_rate is not None:
-        verdict += f" (win_rate peaked at {achieved_win_rate:.1%})"
+    peaks = []
+    if not point_win_rate and achieved_win_rate is not None:
+        peaks.append(f"{'weaker-seat ' if weaker_seat else ''}win_rate peaked at {achieved_win_rate:.1%}")
+    pooled = record.get("peak_pooled_win_rate")
+    if weaker_seat and pooled is not None:
+        peaks.append(f"pooled win_rate peaked at {float(pooled):.1%}")
+    if peaks:
+        verdict += f" ({'; '.join(peaks)})"
     prewindow_passes = int(record.get("prewindow_passes", 0) or 0)
     if prewindow_passes:
         verdict += (
@@ -944,6 +974,15 @@ LEGACY_RECORD_DEFAULTS: dict[tuple[str, str], Any] = {
     ("curriculum", "max_retries"): 0,
 }
 
+# Fields a pre-change record does have, but whose value this runner used to
+# ignore: ``ppo.lr_schedule`` was reported as not implemented (the learning
+# rate stayed constant), and today ``linear`` anneals every stage's LR to 0.
+# A record that lacks any LEGACY_RECORD_DEFAULTS field is pre-change, and
+# these get the value that was in effect.
+LEGACY_RECORD_OVERRIDES: dict[tuple[str, str], Any] = {
+    ("ppo", "lr_schedule"): "constant",
+}
+
 # How many failure descriptions the manifest / run_status.json keep (the
 # count is exact).
 _FAILURE_LOG_LIMIT = 50
@@ -1012,7 +1051,10 @@ def load_recorded_config(path: ConfigPath) -> TrainingConfig:
     :data:`LEGACY_RECORD_DEFAULTS`; loading it with today's defaults would
     resume that run with a stochastic gate, both eval modes and a stall
     retry it never had. Those absent fields get their historical values
-    instead (fields a record does have are kept).
+    instead, and so do the fields in :data:`LEGACY_RECORD_OVERRIDES`, which
+    such a record has but which had no effect then (a ``ppo.lr_schedule:
+    linear`` left the learning rate constant). A record that has every
+    field is taken as written.
     """
     import yaml
 
@@ -1021,9 +1063,14 @@ def load_recorded_config(path: ConfigPath) -> TrainingConfig:
     path = Path(path)
     cfg = load_config(path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    pre_change = False
     for (section, key), value in LEGACY_RECORD_DEFAULTS.items():
         written = raw.get(section) if isinstance(raw, dict) else None
         if not isinstance(written, dict) or key not in written:
+            setattr(getattr(cfg, section), key, value)
+            pre_change = True
+    if pre_change:
+        for (section, key), value in LEGACY_RECORD_OVERRIDES.items():
             setattr(getattr(cfg, section), key, value)
     return cfg
 
@@ -1320,6 +1367,17 @@ class _RunManifest:
         self.data["metadata_write_failure_log"] = self.failures.what[-_FAILURE_LOG_LIMIT:]
         self.failures.attempt(f"write {MANIFEST_NAME}", _write_json_atomically, self.path, self.data)
 
+    def flush_failures(self) -> None:
+        """Rewrite the manifest if write failures were recorded since its last write.
+
+        Best effort, like every manifest write. The manifest is how a
+        resumed run learns an earlier session's failures
+        (:meth:`_MetadataFailures.carry_over`); on an interrupt this is the
+        last chance to record the ones since the last checkpoint.
+        """
+        if self.data.get("metadata_write_failures") != self.failures.count:
+            self.write()
+
     def begin_attempt(self, **fields: Any) -> None:
         self.data["current"] = {**fields, "latest_checkpoint": None, "latest_timesteps": None}
         self.write()
@@ -1375,6 +1433,134 @@ def _clear_episode_buffers(model: Any) -> None:
             buffer.clear()
 
 
+def _copy_file_atomically(source: Path, target: Path) -> None:
+    """Copy ``source`` to ``target`` via a ``.partial`` sibling, so ``target`` is never half-written."""
+    from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
+
+    partial = target.with_name(target.name + PARTIAL_SUFFIX)
+    try:
+        shutil.copyfile(source, partial)
+        os.replace(partial, target)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+
+def _finish_completed_run(
+    cfg: TrainingConfig,
+    output_dir: Path,
+    plan: _ResumePlan,
+    history: list[dict[str, Any]],
+    failures: _MetadataFailures,
+    warm_start_info: dict[str, Any],
+) -> str:
+    """Write up a run whose every stage promoted but which stopped before its last records.
+
+    A kill after the last stage's ``config.json`` but before the run's
+    ``run_status.json`` (closing SubprocVecEnv workers alone takes seconds)
+    left every stage promoted and no ``final_model.zip`` / ``run_status.json``:
+    the run read as aborted, had no final model for a self-play warm start,
+    and a --resume said there was nothing to do. Nothing is trained here; the
+    missing records are rebuilt:
+
+    * ``final_model.zip`` from the last stage's ``best_model.zip`` when
+      ``restore_best_checkpoint_between_stages`` is set and it exists (the
+      policy the run would have saved; the zip's step counter is that
+      eval's), else from its ``stage_final.zip`` (the file the run would
+      have saved);
+    * the last stage's ``eval_results.json`` if missing, ``bootstrap_results.csv``,
+      the manifest's record of the finished stages, and any leftover
+      ``latest.zip`` / ``stage_start.zip``;
+    * then ``run_status.json`` as ``completed_curriculum``, counting this
+      session as a resume (``finished_on_resume``), with the write failures
+      of every session.
+
+    A run whose ``run_status.json`` already says ``completed_curriculum``
+    only gets a missing ``final_model.zip`` back.
+
+    Returns:
+        The path of ``final_model.zip``.
+
+    Raises:
+        ResumeError: ``final_model.zip`` is missing and the last stage has no
+            checkpoint to rebuild it from.
+    """
+    final = output_dir / "final_model.zip"
+    status = _read_json_lenient(output_dir / "run_status.json")
+    finished = isinstance(status, dict) and status.get("status") == "completed_curriculum"
+    if finished and final.is_file():
+        print(f"  {output_dir}: every stage already promoted; nothing to resume")
+        return str(final)
+    missing = [name for name, there in (("final_model.zip", final.is_file()), ("run_status.json", finished)) if not there]
+    print(f"  {output_dir}: every stage already promoted, but the run stopped before writing {' and '.join(missing)}")
+    stages = cfg.curriculum.stages
+    last_dir = output_dir / stages[-1].name
+    if not final.is_file():
+        candidates = [last_dir / "stage_final.zip"]
+        if cfg.curriculum.restore_best_checkpoint_between_stages:
+            candidates.insert(0, last_dir / "best_model.zip")
+        source = next((p for p in candidates if p.is_file()), None)
+        if source is None:
+            raise ResumeError(f"cannot write {final}: none of {[str(p) for p in candidates]} exists to rebuild it from")
+        _copy_file_atomically(source, final)
+        print(f"  wrote {final} from {source}")
+    if finished:
+        return str(final)
+
+    last = history[-1] if history else None
+    if last is not None and last.get("results") and not (last_dir / "eval_results.json").is_file():
+        failures.attempt(
+            f"write {stages[-1].name}/eval_results.json",
+            _write_json_atomically,
+            last_dir / "eval_results.json",
+            last["results"],
+            default=float,
+        )
+    failures.attempt("write bootstrap_results.csv", _write_results_csv, history, output_dir / "bootstrap_results.csv")
+    for stage in stages:
+        for leftover in ("latest.zip", "stage_start.zip"):
+            try:
+                (output_dir / stage.name / leftover).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("could not remove %s", output_dir / stage.name / leftover, exc_info=True)
+    manifest = _RunManifest(output_dir, cfg, failures, plan.manifest, resumed=True)
+    recorded = {e.get("stage") for e in manifest.data["completed"]}
+    for entry in history:
+        if entry["stage"] in recorded:
+            continue
+        summary = {
+            key: entry.get(key)
+            for key in (
+                "best_win_rate",
+                "peak_win_rate",
+                "best_checkpoint_timestep",
+                "best_checkpoint_stage_steps",
+                "attempts",
+                "regression_restores",
+                "gate",
+            )
+        }
+        summary.update(retries_used=int(entry.get("retries", 0) or 0), warm_start=warm_start_info)
+        manifest.data["completed"].append({"stage": entry["stage"], "promoted": True, "summary": summary})
+    manifest.data["current"] = None
+    manifest.data["warm_start"] = warm_start_info
+    manifest.write()
+    _write_run_status(
+        output_dir,
+        "completed_curriculum",
+        stages_completed=len(stages),
+        stage_count=len(stages),
+        curriculum_hash=_curriculum_hash(cfg),
+        warm_start=warm_start_info,
+        retries={h["stage"]: int(h.get("retries", 0) or 0) for h in history},
+        resume_count=manifest.resume_count,
+        metadata_write_failures=failures.count,
+        metadata_write_failure_log=failures.what[-_FAILURE_LOG_LIMIT:],
+        finished_on_resume=True,
+    )
+    return str(final)
+
+
 def run_curriculum(
     cfg: TrainingConfig,
     output_dir: ConfigPath,
@@ -1419,10 +1605,13 @@ def run_curriculum(
             schedules and min-timesteps window. Not restored: the rollout
             buffer and the envs' in-flight episodes (a new rollout starts),
             the RNG streams, and the in-memory train_metrics records (the
-            CSV on disk keeps its rows). A completed run returns its history
-            without training. ``cfg`` must match the run's: a material
-            difference from its ``resolved_config.yaml`` or its manifest's
-            curriculum (:func:`resume_mismatches`) is refused.
+            CSV on disk keeps its rows). A run whose every stage promoted
+            returns its history without training; if it was killed before
+            its ``final_model.zip`` / ``run_status.json``, they are written
+            now (:func:`_finish_completed_run`). ``cfg`` must match the
+            run's: a material difference from its ``resolved_config.yaml``
+            or its manifest's curriculum (:func:`resume_mismatches`) is
+            refused.
         force: With ``resume``, continue despite such a difference, or
             although later stages already have output (see
             :func:`_plan_resume`). The CLI's ``--force``.
@@ -1531,12 +1720,11 @@ def run_curriculum(
         if plan.warm_start_info:
             warm_start_info = dict(plan.warm_start_info)
         if plan.completed:
-            final = output_dir / "final_model.zip"
-            print(f"  {output_dir}: every stage already promoted; nothing to resume")
+            final_model_path = _finish_completed_run(cfg, output_dir, plan, history, failures, warm_start_info)
             return {
                 "model": None,
                 "history": history,
-                "final_model_path": str(final) if final.exists() else None,
+                "final_model_path": final_model_path,
                 "metrics_callback": metrics_callback,
                 "resumed": True,
             }
@@ -1914,7 +2102,13 @@ def run_curriculum(
             except (KeyboardInterrupt, SystemExit):
                 # SIGTERM reaches here as SystemExit (train_bootstrap.py). A
                 # last checkpoint on the way out, so --resume loses nothing.
-                failures.attempt("save latest.zip on interrupt", rolling_cb.save_now)
+                try:
+                    failures.attempt("save latest.zip on interrupt", rolling_cb.save_now)
+                finally:
+                    # A failure since the manifest's last write (that save's,
+                    # which skips the manifest update a successful save
+                    # makes) reaches the resumed run only through the manifest.
+                    manifest.flush_failures()
                 raise
             resume_pending = False
             if guard_cb is not None:

@@ -177,10 +177,16 @@ promotion, and on `SIGTERM`) with the rest of its budget, its eval timeline,
 promotion streak, best-model record and schedule positions (see
 `run_manifest.json`). A stage whose checkpoint was taken on its promoting eval
 is finished rather than trained again, and a retry killed before its first
-checkpoint restarts from the checkpoint it began from. `num_timesteps` and the
+checkpoint restarts from the checkpoint it began from. A run killed after its
+last stage promoted but before `final_model.zip` / `run_status.json` is written
+up without training: `final_model.zip` comes from the last stage's
+`best_model.zip` (with `restore_best_checkpoint_between_stages`) or
+`stage_final.zip`, and `run_status.json` says `completed_curriculum` with
+`finished_on_resume: true`. `num_timesteps` and the
 TensorBoard curves continue. Without `--config` the run's own
 `resolved_config.yaml` is used (a record written before the eval-gate change
-keeps its greedy gate, greedy-only evals and no stall retries); a config that
+keeps its greedy gate, greedy-only evals, no stall retries and a constant
+learning rate, since `ppo.lr_schedule` was not applied then); a config that
 differs from it in what is trained or measured is refused unless `--force`.
 `--force` is also needed to resume a run whose records stop short of stages
 that already have output (resuming would overwrite them), or a `--build-bc`

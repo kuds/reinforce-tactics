@@ -743,10 +743,14 @@ class PromotionCallback(BaseCallback):
     the peak of the value the criterion compared with the threshold (the
     point estimate, the Wilson bound or the rolling mean, of the chosen
     score, seat-aggregated), how many evals passed, the longest run of
-    passes, and the same for the evals before ``min_timesteps``, which do
-    not count. Every row also gets ``gate_value`` / ``gate_passed`` (what
-    the gate compared on it and whether it passed; ``None`` / False before
-    ``min_timesteps``).
+    passes, the same for the evals before ``min_timesteps``, which do not
+    count, and the peak pooled ``win_rate`` (``peak_pooled_win_rate``: with
+    ``seat_aggregate='min'`` over several seats, :attr:`weaker_seat`, the
+    gate compares the weaker seat's rate instead). Every row also gets
+    ``gate_value`` / ``gate_passed`` (what the gate compared on it and
+    whether it passed; ``None`` / False before
+    ``min_timesteps`` and while a rolling window is still filling, when the
+    gate compares nothing).
     """
 
     def __init__(
@@ -788,13 +792,20 @@ class PromotionCallback(BaseCallback):
         self.confidence = float(confidence)
         self.score = score
         self.seat_aggregate = seat_aggregate
+        # The seats each eval plays (None: the eval env's own seat). With
+        # several and ``seat_aggregate='min'`` the gate compares the weaker
+        # seat's rate, not the pooled ``win_rate``.
+        seats = getattr(eval_callback, "seats", None)
+        self.seats: list[int] | None = [int(s) for s in seats] if seats is not None else None
+        self.weaker_seat = seat_aggregate == "min" and len(self.seats or []) > 1
         self._z = z_for_confidence(self.confidence) if criterion == "wilson" else 0.0
         self._consumed: int = 0
         self._streak: int = 0
         self._window: deque[float] = deque(maxlen=self.rolling_k)
         self.promoted: bool = False
         # Last per-eval statistic and the value the gate compared (the
-        # rolling mean for 'rolling'); None before the first post-window eval.
+        # rolling mean for 'rolling'); None before the first post-window eval
+        # and while a rolling window is still filling.
         self.last_statistic: float | None = None
         self.last_gate_value: float | None = None
         # Timestep count at the start of this stage's ``learn()`` call.
@@ -817,6 +828,9 @@ class PromotionCallback(BaseCallback):
         self.prewindow_evals: int = 0
         self.prewindow_passes: int = 0
         self.prewindow_peak: float | None = None
+        # The peak pooled ``win_rate`` over every eval (pre-window ones too),
+        # which a weaker-seat gate's stall report names next to its own peak.
+        self.peak_pooled_win_rate: float | None = None
         carried = dict(record or {})
         if initial_state is not None:
             self._streak = int(initial_state.get("streak", 0))
@@ -838,9 +852,10 @@ class PromotionCallback(BaseCallback):
         "prewindow_evals",
         "prewindow_passes",
         "prewindow_peak",
+        "peak_pooled_win_rate",
     )
 
-    _FLOAT_RECORD_KEYS = frozenset({"peak_gate_value", "prewindow_peak"})
+    _FLOAT_RECORD_KEYS = frozenset({"peak_gate_value", "prewindow_peak", "peak_pooled_win_rate"})
 
     def _load_record(self, record: Mapping[str, Any]) -> None:
         for key in self._RECORD_KEYS:
@@ -858,6 +873,8 @@ class PromotionCallback(BaseCallback):
             "rolling_k": self.rolling_k,
             "confidence": self.confidence,
             "min_timesteps": self.min_timesteps,
+            "seat_aggregate": self.seat_aggregate,
+            "seats": self.seats,
             **{key: getattr(self, key) for key in self._RECORD_KEYS},
         }
 
@@ -891,8 +908,10 @@ class PromotionCallback(BaseCallback):
         if self._in_prewindow(int(row.get("timesteps", 0))):
             row["gate_value"], row["gate_passed"] = None, False
             return
-        gate_value, passed, _, _ = self._judge(value, list(self._window))
-        row["gate_value"], row["gate_passed"] = gate_value, bool(passed)
+        gate_value, passed, compared, _ = self._judge(value, list(self._window))
+        # A rolling window still filling compared nothing: no gate value (the
+        # partial mean would chart as a comparison that never happened).
+        row["gate_value"], row["gate_passed"] = (gate_value if compared else None), bool(passed)
 
     def state_dict(self) -> dict[str, Any]:
         """Streak, rolling window, promotion and gate record, for a resume (see ``initial_state``)."""
@@ -904,6 +923,11 @@ class PromotionCallback(BaseCallback):
         # measures steps trained *within this stage*.
         if self._fixed_start_step is None:
             self._stage_start_step = int(self.num_timesteps)
+
+    def _note_pooled(self, row: Mapping[str, Any]) -> None:
+        pooled = row.get("win_rate")
+        if pooled is not None and (self.peak_pooled_win_rate is None or float(pooled) > self.peak_pooled_win_rate):
+            self.peak_pooled_win_rate = float(pooled)
 
     def _row_statistic(self, row: Mapping[str, Any]) -> float:
         if row.get("gate_criterion") == self.criterion and "gate_statistic" in row:
@@ -927,6 +951,7 @@ class PromotionCallback(BaseCallback):
         if self._in_prewindow(int(self.num_timesteps)):
             while self._consumed < len(results):
                 value = self._row_statistic(results[self._consumed])
+                self._note_pooled(results[self._consumed])
                 self._consumed += 1
                 self.prewindow_evals += 1
                 self.prewindow_passes += int(value >= self.threshold)
@@ -942,11 +967,12 @@ class PromotionCallback(BaseCallback):
         while self._consumed < len(results):
             row = results[self._consumed]
             value = self._row_statistic(row)
+            self._note_pooled(row)
             self.last_statistic = value
             gate_value, passed, compared, window = self._judge(value, list(self._window))
             self._window.clear()
             self._window.extend(window)
-            self.last_gate_value = gate_value
+            self.last_gate_value = gate_value if compared else None
             self._streak = self._streak + 1 if passed else 0
             self._consumed += 1
             if compared:
@@ -960,8 +986,9 @@ class PromotionCallback(BaseCallback):
                 self.promoted = True
                 if self.verbose:
                     what = {"point": "win_rate", "wilson": "Wilson LB", "rolling": f"rolling-{self.rolling_k} mean"}
+                    seat = " (weaker seat)" if self.weaker_seat else ""
                     print(
-                        f"  [promote] {what[self.criterion]} {gate_value:.1%} >= {self.threshold:.0%} for "
+                        f"  [promote] {what[self.criterion]}{seat} {gate_value:.1%} >= {self.threshold:.0%} for "
                         f"{self._streak} consecutive evals at "
                         f"{self.num_timesteps:,} steps — advancing"
                     )

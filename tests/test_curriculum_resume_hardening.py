@@ -1,19 +1,23 @@
 """Review fixes on the eval-gate / lifecycle package: stall verdicts, run records and --resume hardening.
 
 * Stall verdicts and records are worded from what the promotion criterion
-  compared (Wilson bound, rolling mean, win+draw/2 score), not from the
-  win-only point peak; the steps a stage trained over its attempts are
-  reported.
+  compared (Wilson bound, rolling mean, win+draw/2 score, the weaker seat
+  with the pooled win_rate peak next to it), not from the win-only point
+  peak; the steps a stage trained over its attempts are reported. A rolling
+  window still filling records no gate value.
 * bootstrap_results.csv says which mode ``win_rate`` measured and what the gate
   compared.
 * --resume: a promoted stage whose config.json write failed is not
-  retrained; a checkpoint taken on the promoting eval finishes the stage; an
-  interrupt mid-eval leaves the eval pending and the best record true to
-  best_model.zip; torn records are handled; a retry killed before its first
-  checkpoint restarts from the checkpoint it began from; the config check
-  lives in run_curriculum; a pre-change record keeps its meaning.
-* Write failures (rolling checkpoint, eval JSONL, train-metrics CSV) are
-  reported and counted, over every session of a run.
+  retrained; a checkpoint taken on the promoting eval finishes the stage; a
+  run killed after its last stage promoted gets its final_model.zip and
+  run_status.json; an interrupt mid-eval leaves the eval pending and the best
+  record true to best_model.zip; torn records are handled; a retry killed
+  before its first checkpoint restarts from the checkpoint it began from; the
+  config check lives in run_curriculum; a pre-change record keeps its meaning
+  (including a ``ppo.lr_schedule`` that had no effect then).
+* Write failures (rolling checkpoint, eval JSONL, train-metrics CSV, the
+  interrupt-path checkpoint) are reported and counted, over every session of
+  a run.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ def _run(
     *,
     evaluate=_fake_evaluate,
     interrupt_at: tuple[str, int, int] | None = None,
+    env_factory=lambda s, c: _Env(),
 ):
     monkeypatch.setattr("reinforcetactics.rl.callbacks.evaluate_model", evaluate)
     names = [s.name for s in cfg.curriculum.stages]
@@ -69,7 +74,7 @@ def _run(
         return holder["model"]
 
     result = run_curriculum(
-        cfg, out, train_env_factory=lambda s, c: _Env(), eval_env_factory=lambda s, c: _Env(), model_factory=factory
+        cfg, out, train_env_factory=env_factory, eval_env_factory=lambda s, c: _Env(), model_factory=factory
     )
     return result, holder["model"]
 
@@ -119,6 +124,30 @@ def _manifest(out: Path) -> dict[str, Any]:
     return json.loads((out / "run_manifest.json").read_text())
 
 
+def _two_seat_evaluate(model, env, **kwargs):
+    """Seat 1 wins at the scripted rate, seat 2 at half of it; 20 episodes per seat."""
+    wr = float(model.current_wr)
+    w1, w2, n = round(wr * 20), round(wr * 10), 40
+    wins = w1 + w2
+    return {
+        "win_rate": wins / n,
+        "avg_reward": wr,
+        "std_reward": 0.0,
+        "avg_length": 1.0,
+        "avg_turns": 1.0,
+        "wins": wins,
+        "losses": n - wins,
+        "draws": 0,
+        "episodes": n,
+        "draw_rate": 0.0,
+        "loss_rate": (n - wins) / n,
+        "by_seat": {
+            "1": {"wins": w1, "losses": 20 - w1, "draws": 0, "episodes": 20, "win_rate": w1 / 20},
+            "2": {"wins": w2, "losses": 20 - w2, "draws": 0, "episodes": 20, "win_rate": w2 / 20},
+        },
+    }
+
+
 def _draw_evaluate(model, env, **kwargs):
     """Like ``_fake_evaluate``, but every game the agent does not win is a draw."""
     m = _fake_evaluate(model, env, **kwargs)
@@ -160,10 +189,83 @@ class TestStallVerdict:
             excinfo.value
         )
         # Each row records what the gate compared and its verdict; nothing is
-        # compared until the window holds 3 evals.
+        # compared until the window holds 3 evals, so the first two rows have
+        # no gate value (a partial mean would chart as a comparison).
         rows = json.loads((tmp_path / "a" / "eval_results.json").read_text())
         assert [r["gate_passed"] for r in rows] == [False] * 4
-        assert [r["gate_value"] for r in rows][2:] == [pytest.approx(0.65), pytest.approx(0.65)]
+        assert [r["gate_value"] for r in rows] == [None, None, pytest.approx(0.65), pytest.approx(0.65)]
+        with (tmp_path / "bootstrap_results.csv").open(encoding="utf-8") as fh:
+            assert [r["gate_value"] for r in csv.DictReader(fh)][:2] == ["", ""]
+
+    def test_filling_rolling_window_has_no_gate_value(self, tmp_path, monkeypatch):
+        # The first eval (95%) is above the threshold on its own, but the
+        # rolling-3 gate compared nothing there: no gate value to chart.
+        cfg = _cfg(_stage("a", patience=1, max_retries=0, promotion_criterion="rolling", promotion_rolling_k=3))
+        with pytest.raises(CurriculumStalled):
+            _run(cfg, tmp_path, {"a": [[0.95, 0.5, 0.5, 0.5]]}, monkeypatch)
+        rows = json.loads((tmp_path / "a" / "eval_results.json").read_text())
+        assert [r["gate_value"] for r in rows] == [None, None, pytest.approx(0.65), pytest.approx(0.5)]
+        assert _status(tmp_path)["peak_gate_value"] == pytest.approx(0.65)
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        from reinforcetactics.rl.viz import plot_curriculum_summary
+
+        fig = plot_curriculum_summary([{"stage": "a", "results": rows}], cfg.curriculum.stages)
+        drawn = [tuple(round(float(v), 4) for v in line.get_ydata()) for line in fig.axes[0].lines]
+        plt.close(fig)
+        # The thin dashed gate line starts where the gate first compared.
+        assert (0.65, 0.5) in drawn
+        assert (0.95, 0.725, 0.65, 0.5) not in drawn
+
+    def test_weaker_seat_gate_names_the_seat_and_the_pooled_peak(self, tmp_path, monkeypatch):
+        # Pooled over both seats the first evals win 75% / 72.5% (above 70%),
+        # but the gate takes the weaker seat, which peaks at 50%.
+        cfg = _cfg(
+            _stage("a", promotion_win_rate=0.7, patience=2, max_retries=0),
+            eval={"eval_seats": [1, 2], "seat_aggregate": "min"},
+        )
+        with pytest.raises(CurriculumStalled) as excinfo:
+            _run(cfg, tmp_path, {"a": [[1.0, 0.95, 0.6, 0.5]]}, monkeypatch, evaluate=_two_seat_evaluate)
+        assert str(excinfo.value).endswith(
+            "peak weaker-seat win_rate 50.0% did not reach threshold 70.0% (pooled win_rate peaked at 75.0%)"
+        )
+        gate = _status(tmp_path)["gate"]
+        assert gate["seat_aggregate"] == "min" and gate["seats"] == [1, 2]
+        assert gate["peak_pooled_win_rate"] == pytest.approx(0.75)
+        assert _config_json(tmp_path, "a")["extra"]["gate"]["peak_pooled_win_rate"] == pytest.approx(0.75)
+
+    def test_pooled_two_seat_gate_keeps_the_plain_wording(self, tmp_path, monkeypatch):
+        cfg = _cfg(
+            _stage("a", promotion_win_rate=0.8, patience=2, max_retries=0),
+            eval={"eval_seats": [1, 2], "seat_aggregate": "mean"},
+        )
+        with pytest.raises(CurriculumStalled) as excinfo:
+            _run(cfg, tmp_path, {"a": [[1.0, 0.95, 0.6, 0.5]]}, monkeypatch, evaluate=_two_seat_evaluate)
+        assert str(excinfo.value).endswith("peak win_rate 75.0% did not reach threshold 80.0%")
+
+    def test_weaker_seat_wording_for_other_criteria(self):
+        record = {
+            "criterion": "wilson",
+            "score": "win_rate",
+            "confidence": 0.95,
+            "seat_aggregate": "min",
+            "seats": [1, 2],
+            "peak_gate_value": 0.31,
+            "passes": 0,
+            "evals_judged": 4,
+            "peak_pooled_win_rate": 0.75,
+        }
+        assert bootstrap.stall_verdict(0.5, 0.7, 2, record) == (
+            "peak Wilson 95% lower bound of weaker-seat win_rate 31.0% did not reach threshold 70.0% "
+            "(weaker-seat win_rate peaked at 50.0%; pooled win_rate peaked at 75.0%)"
+        )
+        # One seat: 'min' is the pooled rate, nothing to name.
+        single = {**record, "criterion": "point", "seats": [1], "peak_gate_value": 0.5}
+        assert bootstrap.stall_verdict(0.5, 0.7, 2, single) == "peak win_rate 50.0% did not reach threshold 70.0%"
 
     def test_half_draw_score_that_passed_but_never_held(self, tmp_path, monkeypatch):
         # 17 wins + 3 draws scores 92.5% (>= 90%) while the win rate is 85%.
@@ -298,6 +400,88 @@ class TestResumeRecords:
         assert extra["promoted"] is True and [a["promoted"] for a in extra["attempts"]] == [True]
         assert [r["timesteps"] for r in result["history"][0]["results"]] == [10, 20]
         assert _status(tmp_path)["status"] == "completed_curriculum"
+
+    def test_kill_after_the_last_stage_is_written_up_on_resume(self, tmp_path, monkeypatch, capsys):
+        # Killed while closing the last stage's envs: every stage's config.json
+        # says promoted, but there is no final_model.zip or run_status.json,
+        # and the manifest still names 'b' in progress.
+        cfg = _cfg(_stage("a", patience=1), _stage("b", patience=2))
+        programs = {"a": [[0.95]], "b": [[0.5, 0.95, 0.95]]}
+
+        class _KilledOnClose(_Env):
+            def close(self) -> None:
+                raise _Interrupted
+
+        def envs(stage, c):
+            return _KilledOnClose() if stage.name == "b" else _Env()
+
+        with pytest.raises(KeyboardInterrupt):
+            _run(cfg, tmp_path, programs, monkeypatch, env_factory=envs)
+        assert _config_json(tmp_path, "b")["extra"]["promoted"] is True
+        assert not (tmp_path / "final_model.zip").exists() and not (tmp_path / "run_status.json").exists()
+        assert _manifest(tmp_path)["current"]["stage"] == "b"
+        assert (tmp_path / "b" / "latest.zip").exists()
+
+        result, loaded = _resume(cfg, tmp_path, programs)
+        assert loaded == {}  # nothing is trained
+        final = tmp_path / "final_model.zip"
+        assert result["final_model_path"] == str(final)
+        # The policy the run would have saved: b's best (restore_best_checkpoint_between_stages).
+        assert final.read_bytes() == (tmp_path / "b" / "best_model.zip").read_bytes()
+        status = _status(tmp_path)
+        assert status["status"] == "completed_curriculum" and status["finished_on_resume"] is True
+        assert status["resume_count"] == 1 and status["retries"] == {"a": 0, "b": 0}
+        assert status["stages_completed"] == 2 and status["metadata_write_failures"] == 0
+        manifest = _manifest(tmp_path)
+        assert manifest["current"] is None and [e["stage"] for e in manifest["completed"]] == ["a", "b"]
+        assert manifest["resume_count"] == 1
+        assert not (tmp_path / "b" / "latest.zip").exists()
+        with (tmp_path / "bootstrap_results.csv").open(encoding="utf-8") as fh:
+            assert [r["stage"] for r in csv.DictReader(fh)] == ["a", "b", "b", "b"]
+        assert "stopped before writing final_model.zip and run_status.json" in capsys.readouterr().out
+
+        # Written up once: a second resume has nothing to do.
+        written_at = status["written_at"]
+        again, _ = _resume(cfg, tmp_path, programs)
+        assert again["final_model_path"] == str(final) and _status(tmp_path)["written_at"] == written_at
+        assert "nothing to resume" in capsys.readouterr().out
+
+    def test_completed_run_missing_its_final_records(self, tmp_path, monkeypatch):
+        cfg = _cfg(
+            _stage("a", patience=1), _stage("b", patience=1), curriculum={"restore_best_checkpoint_between_stages": False}
+        )
+        programs = {"a": [[0.95]], "b": [[0.5, 0.95]]}
+        _run(cfg, tmp_path, programs, monkeypatch)
+        final = tmp_path / "final_model.zip"
+
+        # Killed between final_model.zip and run_status.json.
+        (tmp_path / "run_status.json").unlink()
+        _resume(cfg, tmp_path, programs)
+        assert _status(tmp_path)["status"] == "completed_curriculum"
+
+        # Both gone: without the best-checkpoint restore the final model is
+        # the last stage's end-of-stage policy.
+        (tmp_path / "run_status.json").unlink()
+        final.unlink()
+        result, _ = _resume(cfg, tmp_path, programs)
+        assert result["final_model_path"] == str(final)
+        assert final.read_bytes() == (tmp_path / "b" / "stage_final.zip").read_bytes()
+        assert _status(tmp_path)["resume_count"] == 2
+
+        # A finished run whose final_model.zip was lost gets it back; its
+        # run_status.json is left as it was.
+        written_at = _status(tmp_path)["written_at"]
+        final.unlink()
+        _resume(cfg, tmp_path, programs)
+        assert final.is_file() and _status(tmp_path)["written_at"] == written_at
+
+        # Nothing to rebuild it from: a clear refusal, not a run without a final model.
+        final.unlink()
+        (tmp_path / "run_status.json").unlink()
+        (tmp_path / "b" / "stage_final.zip").unlink()
+        with pytest.raises(ResumeError, match="cannot write .*final_model.zip"):
+            _resume(cfg, tmp_path, programs)
+        assert not (tmp_path / "run_status.json").exists()
 
     def test_interrupt_mid_eval_leaves_the_eval_pending(self, tmp_path, monkeypatch):
         # eval_freq 20 with 10-step increments: b evaluates at 20, 40, 60, ...
@@ -484,6 +668,25 @@ class TestPreChangeRecord:
         assert {"eval.eval_deterministic", "eval.eval_both_modes", "curriculum.max_retries"} <= set(differences)
         assert "eval.eval_seats" not in differences
 
+    def test_lr_schedule_it_ignored_stays_ignored(self, tmp_path):
+        # Before the change ppo.lr_schedule was reported as not implemented
+        # and the LR stayed constant; today 'linear' anneals every stage to 0.
+        cfg = _cfg(_stage("a"), ppo={"lr_schedule": "linear"})
+        _old_record(cfg, tmp_path / "resolved_config.yaml")
+        assert yaml.safe_load((tmp_path / "resolved_config.yaml").read_text())["ppo"]["lr_schedule"] == "linear"
+        recorded = bootstrap.load_recorded_config(tmp_path / "resolved_config.yaml")
+        assert recorded.ppo.lr_schedule == "constant"
+        assert recorded.curriculum.stages[0].resolve_learning_rate_schedule(recorded.ppo) is None
+        assert bootstrap.resume_config_differences(recorded, tmp_path) == []
+        # Resuming it with the linear schedule would change what is trained.
+        assert "ppo.lr_schedule" in bootstrap.resume_config_differences(cfg, tmp_path)
+
+    def test_record_written_after_the_change_keeps_its_lr_schedule(self, tmp_path):
+        cfg = _cfg(_stage("a"), ppo={"lr_schedule": "linear"})
+        save_config(bootstrap.resolve_config(cfg), tmp_path / "resolved_config.yaml")
+        assert bootstrap.load_recorded_config(tmp_path / "resolved_config.yaml").ppo.lr_schedule == "linear"
+        assert bootstrap.resume_config_differences(cfg, tmp_path) == []
+
 
 # ---------------------------------------------------------------------------
 # Write failures: reported, counted, never fatal
@@ -506,6 +709,34 @@ class TestWriteFailures:
         assert status["status"] == "completed_curriculum"
         assert status["metadata_write_failures"] == 1
         assert "rolling checkpoint" in status["metadata_write_failure_log"][0]
+
+    def test_failed_interrupt_save_is_carried_into_the_resumed_run(self, tmp_path, monkeypatch):
+        # The last checkpoint on the way out fails. A successful save rewrites
+        # the manifest (on_save); a failed one used to leave the manifest
+        # without the failure, so the resumed run reported 0.
+        real = callbacks.save_model_atomically
+
+        def fails_while_interrupted(model, path):
+            if Path(path).name == "latest.zip" and isinstance(sys.exc_info()[1], KeyboardInterrupt):
+                raise OSError(5, "EIO on the interrupt save")
+            return real(model, path)
+
+        monkeypatch.setattr(callbacks, "save_model_atomically", fails_while_interrupted)
+        cfg = _cfg(_stage("a", patience=1), _stage("b"))
+        programs = {"a": [[0.95]], "b": [[0.1, 0.2, 0.3, 0.95, 0.95]]}
+        with pytest.raises(KeyboardInterrupt):
+            _run(cfg, tmp_path, programs, monkeypatch, interrupt_at=("b", 0, 3))
+        manifest = _manifest(tmp_path)
+        assert manifest["metadata_write_failures"] == 1
+        assert manifest["metadata_write_failure_log"] == ["save latest.zip on interrupt"]
+        # The manifest still describes the last good checkpoint.
+        assert manifest["current"]["stage"] == "b" and manifest["current"]["latest_timesteps"] == 30
+
+        _resume(cfg, tmp_path, programs, stage_offset=1)
+        status = _status(tmp_path)
+        assert status["status"] == "completed_curriculum"
+        assert status["metadata_write_failures"] == 1
+        assert status["metadata_write_failure_log"] == ["save latest.zip on interrupt"]
 
     def test_eval_jsonl_append_failures_are_counted(self, tmp_path, monkeypatch):
         def broken(*args, **kwargs):
