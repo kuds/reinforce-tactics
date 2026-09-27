@@ -876,3 +876,35 @@ def test_bootstrap_yaml_wilson_advice_matches_the_bound():
     z = z_for_confidence(0.95)
     for (threshold, advised), n in zip(pairs, [80] * 5 + [160] * 5, strict=True):
         assert advised == pytest.approx(round(wilson_lower_bound(math.ceil(n * threshold - 1e-9), n, z), 2))
+
+
+def test_a_stage_restarted_fresh_on_resume_drops_the_aborted_sessions_best(tmp_path, monkeypatch):
+    """A stage with no checkpoint to resume from starts over; its old best_model.zip must go with it.
+
+    The aborted session's best_model.zip stayed on disk, so the between-stages
+    restore (and a retry) loaded weights no eval of the restarted stage chose.
+    """
+    real = callbacks.save_model_atomically
+
+    def no_latest_for_b(model, path):
+        if Path(path).name == "latest.zip" and Path(path).parent.name == "b":
+            raise OSError(5, "EIO")
+        return real(model, path)
+
+    monkeypatch.setattr(callbacks, "save_model_atomically", no_latest_for_b)
+    cfg = _cfg(_stage("a", patience=1), _stage("b", patience=2))
+    programs = {"a": [[0.95]], "b": [[0.5, 0.6, 0.7, 0.7, 0.7]]}
+    with pytest.raises(KeyboardInterrupt):
+        _run(cfg, tmp_path, programs, monkeypatch, interrupt_at=("b", 0, 2))
+    stale = tmp_path / "b" / "best_model.zip"
+    assert stale.is_file() and not (tmp_path / "b" / "latest.zip").exists()
+
+    # The resumed session's evals of b are never best-eligible, so nothing it
+    # does saves a new best_model.zip for b.
+    resumed_cfg = _cfg(_stage("a", patience=1), _stage("b", patience=2), eval={"best_eligible_after": 10_000})
+    resumed = {"a": [[0.95]], "b": [[0.95, 0.95]]}
+    _, loaded = _resume(resumed_cfg, tmp_path, resumed, stage_offset=1, force=True)
+
+    assert _status(tmp_path)["status"] == "completed_curriculum"
+    assert str(stale) not in loaded["model"].set_parameters_calls
+    assert not stale.exists()

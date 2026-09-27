@@ -1869,8 +1869,12 @@ def run_curriculum(
             gate_record = None
             # A stage starting afresh begins an empty timeline (a resumed run
             # restarting a stage it never checkpointed would otherwise
-            # append to the aborted attempt's rows).
+            # append to the aborted attempt's rows), and without the aborted
+            # attempt's best_model.zip: the between-stages restore and a
+            # retry load that file whenever it exists, though no eval of
+            # this attempt chose it.
             (stage_dir / "eval_results.jsonl").unlink(missing_ok=True)
+            (stage_dir / "best_model.zip").unlink(missing_ok=True)
             if max_retries > 0:
                 # The weights a retry falls back to when the stage never
                 # saves a best_model.zip.
