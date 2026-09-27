@@ -19,7 +19,8 @@ import numpy as np
 import pytest
 
 from reinforcetactics.rl.bootstrap import _default_eval_env_factory, _default_train_env_factory, make_stage_env
-from reinforcetactics.rl.config import config_from_dict
+from reinforcetactics.rl.callbacks import PeriodicEvalCallback
+from reinforcetactics.rl.config import CurriculumStage, config_from_dict
 from reinforcetactics.rl.evaluation import EvalEnvPool, evaluate_model, evaluate_model_vec
 from reinforcetactics.rl.masking import make_maskable_env, make_maskable_vec_env
 
@@ -116,6 +117,30 @@ class TestSerialVectorizedParity:
             pool.close()
         assert _comparable(vec) == _comparable(serial)
 
+    def test_periodic_eval_uses_the_pool(self, tmp_path):
+        pool = EvalEnvPool.from_envs([_env(), _env()])
+        cb = PeriodicEvalCallback(eval_env=pool, eval_freq=10, n_eval_episodes=3, eval_seed_base=5, verbose=0, seats=[1])
+        cb.model = _PredictingModel()  # type: ignore[assignment]
+        cb.num_timesteps = 10
+        cb._last_eval_block = 1
+        try:
+            cb._do_eval()
+        finally:
+            pool.close()
+        serial = evaluate_model(_HashPolicy(), _env(), n_episodes=3, seed=5, deterministic=False, seats=[1])
+        assert cb.results[0]["rewards"] == serial["rewards"]
+
+
+class _PredictingModel(_HashPolicy):
+    """_HashPolicy plus the logger PeriodicEvalCallback writes to."""
+
+    class _Logger:
+        def record(self, key, value):
+            pass
+
+    logger = _Logger()
+    num_timesteps = 10
+
 
 # ---------------------------------------------------------------------------
 # Seats
@@ -198,6 +223,26 @@ class TestAgentSeatReachesEveryEnv:
             eval_env.close()
             stage_env.close()
 
+    def test_eval_seats_follow_the_training_seat(self):
+        from reinforcetactics.rl.bootstrap import resolve_config
+
+        assert self._cfg().eval.resolve_eval_seats(self._cfg().env) == [2]
+        assert resolve_config(self._cfg()).eval.eval_seats == [2]
+        cfg = self._cfg(eval_seats=[1, 2])
+        assert resolve_config(cfg).eval.eval_seats == [1, 2]
+        cfg.env.agent_seat = "random"
+        cfg.eval.eval_seats = None
+        assert cfg.eval.resolve_eval_seats(cfg.env) == [1, 2]
+
+    def test_pool_eval_env_factory(self):
+        cfg = self._cfg(n_eval_envs=3)
+        pool = _default_eval_env_factory(cfg.curriculum.stages[0], cfg)
+        try:
+            assert isinstance(pool, EvalEnvPool) and pool.num_envs == 3
+            assert pool.action_space_type == "flat_discrete"
+        finally:
+            pool.close()
+
     def test_feudal_and_self_play_forward_the_seat(self):
         import importlib.util
         from pathlib import Path
@@ -223,3 +268,24 @@ class TestAgentSeatReachesEveryEnv:
             assert vec.get_attr("agent_player") == [1, 2]
         finally:
             vec.close()
+
+
+def test_stage_config_records_the_seat(tmp_path):
+    import json
+
+    from reinforcetactics.rl.bootstrap import _write_stage_config, resolve_config
+
+    cfg = resolve_config(
+        config_from_dict(
+            {
+                "env": {"agent_seat": "random"},
+                "curriculum": {"stages": [{"name": "s", "map_file": MAP, "opponent": "noop", "max_timesteps": 100}]},
+            }
+        )
+    )
+    stage: CurriculumStage = cfg.curriculum.stages[0]
+    _write_stage_config(stage=stage, cfg=cfg, stage_dir=tmp_path, output_dir=tmp_path, promoted=True, best_win_rate=None)
+    record = json.loads((tmp_path / "config.json").read_text())
+    assert record["env_config"]["agent_seat"] == "random"
+    assert record["extra"]["eval_seats"] == [1, 2]
+    assert record["extra"]["best_win_rate"] is None

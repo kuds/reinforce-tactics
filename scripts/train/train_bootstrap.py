@@ -17,6 +17,7 @@ Everything is written under ``--output-dir`` (default
       videos/                   # <stage>.mp4 replay per stage
       bootstrap_results.csv
       final_model.zip
+      run_manifest.json         # progress of an unfinished run (read by --resume)
 
 When a GCS destination is configured (``--gcs-output gs://...`` or, on Vertex,
 the ``GCS_OUTPUT_URI`` / ``AIP_MODEL_DIR`` env), the whole output directory is
@@ -26,6 +27,14 @@ the ephemeral job. Under the image's entrypoint (scripts/cloud/vertex_train.py),
 whose final sync after this script exits covers the same destination, the
 script leaves that upload to the entrypoint (``GCS_WRAPPER_SYNC``).
 
+A killed run (preemption, a wall-clock limit, Ctrl-C) continues with
+``--resume <output-dir>``: the promoted stages are skipped and the stage that
+was running continues from its rolling ``<stage>/latest.zip`` (written every
+``eval.checkpoint_freq`` steps, and on SIGTERM) with the rest of its budget.
+Without ``--config`` the run's own ``resolved_config.yaml`` is used; a config
+that differs from it materially (curriculum, env, ppo, eval, seed) is refused
+unless ``--force``.
+
 Exit codes (so a scheduler can tell the outcomes apart):
 
     0    every curriculum stage promoted
@@ -33,8 +42,9 @@ Exit codes (so a scheduler can tell the outcomes apart):
          warm_start_path, or with --strict a config field the curriculum
          runner does not read)
     2    command-line usage error (argparse)
-    3    the curriculum stalled: a stage used its budget without promoting.
-         Partial artifacts are still post-processed and uploaded.
+    3    the curriculum stalled: a stage used its budget (and its retries,
+         curriculum.max_retries) without promoting. Partial artifacts are
+         still post-processed and uploaded.
     130  interrupted with Ctrl-C (SIGINT)
     143  terminated by SIGTERM; the output directory is uploaded on the way out
 
@@ -42,6 +52,7 @@ Examples:
     python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --device cuda
     python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml \\
         --build-bc --gcs-output gs://my-bucket/bootstrap
+    python3 scripts/train/train_bootstrap.py --resume benchmarks/bootstrap/20260927_101500
 """
 
 import argparse
@@ -69,14 +80,34 @@ EXIT_OK = 0
 EXIT_STALLED = 3
 EXIT_TERMINATED = 128 + signal.SIGTERM
 
+DEFAULT_CONFIG = "configs/ppo/bootstrap.yaml"
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Run the curriculum-bootstrap pipeline headlessly (CLI mirror of ppo_bootstrap.ipynb).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--config", type=str, default="configs/ppo/bootstrap.yaml", help="Path to the bootstrap YAML config")
+    p.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=f"Path to the bootstrap YAML config (default: {DEFAULT_CONFIG}, or with --resume the run's resolved_config.yaml)",
+    )
     p.add_argument("--output-dir", type=str, default=None, help="Output dir (default: benchmarks/bootstrap/<timestamp>)")
+    p.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        metavar="RUN_DIR",
+        help="Continue the interrupted run in RUN_DIR (its output dir): skip the promoted stages, resume the "
+        "running one from its latest checkpoint",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="With --resume: continue even though the config differs materially from RUN_DIR/resolved_config.yaml",
+    )
     p.add_argument(
         "--device", type=str, default=None, help="Device: cpu, cuda, or auto (default: the config's ppo.device, 'auto')"
     )
@@ -382,12 +413,27 @@ def _final_sanity_eval(result, cfg, episodes: int) -> None:
     # exists to cross-check.
     env = make_stage_env(stage, cfg.env, seed=cfg.seed + 9999, gamma=cfg.ppo.gamma)
     model = MaskablePPO.load(result["final_model_path"])
-    metrics = evaluate_model(model, env, n_episodes=episodes, seed=cfg.seed + 9999)
-    env.close()
-    print(
-        f"Sanity eval ({stage.name}, n={episodes}): WR={metrics['win_rate']:.1%} "
-        f"reward={metrics['avg_reward']:+.1f} W/L/D={metrics['wins']}/{metrics['losses']}/{metrics['draws']}"
-    )
+    seats = cfg.eval.resolve_eval_seats(cfg.env)
+    # The gate's mode first, then the other one: both win rates, as every
+    # in-training eval records them (review rltrain-4).
+    modes = [cfg.eval.eval_deterministic]
+    if cfg.eval.eval_both_modes:
+        modes.append(not cfg.eval.eval_deterministic)
+    try:
+        for deterministic in modes:
+            metrics = evaluate_model(
+                model, env, n_episodes=episodes, seed=cfg.seed + 9999, deterministic=deterministic, seats=seats
+            )
+            per_seat = ""
+            if len(metrics.get("by_seat") or {}) > 1:
+                per_seat = "  " + " ".join(f"P{s}={v['win_rate']:.1%}" for s, v in metrics["by_seat"].items())
+            print(
+                f"Sanity eval ({stage.name}, {'greedy' if deterministic else 'stochastic'}, n={metrics['episodes']}): "
+                f"WR={metrics['win_rate']:.1%} reward={metrics['avg_reward']:+.1f} "
+                f"W/L/D={metrics['wins']}/{metrics['losses']}/{metrics['draws']}{per_seat}"
+            )
+    finally:
+        env.close()
 
 
 def _record_videos(result, cfg, output_dir: Path, stage_checkpoints):
@@ -473,7 +519,22 @@ def main(argv: list[str] | None = None) -> int:
     from reinforcetactics.rl.bootstrap import CurriculumStalled
     from reinforcetactics.rl.config import IgnoredConfigFieldWarning, check_ignored_config_fields, load_config
 
-    config_path = Path(args.config)
+    resume_dir = Path(args.resume) if args.resume else None
+    if resume_dir is not None:
+        if args.build_bc:
+            raise SystemExit("--resume continues a run; it cannot be combined with --build-bc")
+        if args.output_dir and Path(args.output_dir).resolve() != resume_dir.resolve():
+            raise SystemExit(f"--resume {resume_dir} writes into that directory; drop --output-dir {args.output_dir}")
+        if not (resume_dir / "resolved_config.yaml").is_file():
+            raise SystemExit(f"--resume {resume_dir}: no resolved_config.yaml there (not a train_bootstrap.py run directory)")
+    elif args.force:
+        raise SystemExit("--force only applies to --resume")
+    if args.config:
+        config_path = Path(args.config)
+    elif resume_dir is not None:
+        config_path = resume_dir / "resolved_config.yaml"
+    else:
+        config_path = Path(DEFAULT_CONFIG)
     cfg = load_config(config_path)
     cfg = _apply_set_overrides(cfg, args.set)
     cfg.ppo.device = _resolve_device(args.device or cfg.ppo.device)
@@ -495,24 +556,46 @@ def main(argv: list[str] | None = None) -> int:
     # --build-bc sets warm_start_path.
     cfg = bootstrap.resolve_config(cfg)
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(args.output_dir) if args.output_dir else Path("benchmarks") / "bootstrap" / run_id
+    if resume_dir is not None:
+        # Refuse to continue a run with a config that trains or measures
+        # something else (a different curriculum, env, gate, ...) unless told to.
+        differences = bootstrap.resume_config_differences(cfg, resume_dir)
+        if differences and not args.force:
+            listed = "\n".join(f"  {d}" for d in differences[:40])
+            raise SystemExit(
+                f"--resume {resume_dir}: the config differs from the run's resolved_config.yaml at:\n{listed}\n"
+                "Resume with the run's own config (omit --config), or pass --force to continue with this one."
+            )
+        run_id = resume_dir.name
+        output_dir = resume_dir
+    else:
+        differences = []
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(args.output_dir) if args.output_dir else Path("benchmarks") / "bootstrap" / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     charts_dir = output_dir / "charts"
     charts_dir.mkdir(parents=True, exist_ok=True)
 
     import shutil
 
-    # The source YAML, for provenance...
-    shutil.copy2(config_path, output_dir / config_path.name)
-    # ...and the config actually used. ``_apply_set_overrides`` and the device
-    # resolution above already mutated ``cfg``, so the copied YAML alone would
-    # record ``gamma: 0.99`` for a run launched with
-    # ``--set ppo.gamma=0.997``; without this a --set sweep is unreproducible
-    # from its own record.
-    _write_resolved_config(cfg, output_dir)
+    if resume_dir is None:
+        # The source YAML, for provenance...
+        shutil.copy2(config_path, output_dir / config_path.name)
+        # ...and the config actually used. ``_apply_set_overrides`` and the
+        # device resolution above already mutated ``cfg``, so the copied YAML
+        # alone would record ``gamma: 0.99`` for a run launched with
+        # ``--set ppo.gamma=0.997``; without this a --set sweep is
+        # unreproducible from its own record.
+        _write_resolved_config(cfg, output_dir)
+    elif differences:
+        # --force: keep the record of what the first session ran, and record
+        # what this one runs.
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy2(output_dir / "resolved_config.yaml", output_dir / f"resolved_config.before_resume_{stamp}.yaml")
+        _write_resolved_config(cfg, output_dir)
 
-    print(f"\n🚀 Bootstrap run {run_id} on {cfg.ppo.device}")
+    verb = "Resuming bootstrap run" if resume_dir is not None else "Bootstrap run"
+    print(f"\n🚀 {verb} {run_id} on {cfg.ppo.device}")
     print(f"Output dir: {output_dir}")
     _print_stage_table(cfg)
 
@@ -531,7 +614,12 @@ def main(argv: list[str] | None = None) -> int:
                 # Reported above (an error under --strict); run_curriculum
                 # would repeat the same report.
                 warnings.simplefilter("ignore", IgnoredConfigFieldWarning)
-                result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
+                # ``resume`` only when resuming, so a stand-in run_curriculum
+                # with the historical signature keeps working.
+                if resume_dir is not None:
+                    result = bootstrap.run_curriculum(cfg, output_dir=output_dir, resume=True)
+                else:
+                    result = bootstrap.run_curriculum(cfg, output_dir=output_dir)
         except CurriculumStalled as exc:
             print(f"\n⚠️  STALLED: {exc}")
             result = exc.partial_result()
