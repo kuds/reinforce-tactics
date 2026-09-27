@@ -1402,6 +1402,50 @@ def _make_bot_env_fn(
     return _init
 
 
+def check_worker_split(
+    n_envs: int,
+    bot_ratio: float,
+    *,
+    bot_opponent: Any = "bot",
+    bot_opponent_kwargs: Mapping[str, Any] | None = None,
+    latest_opponent_prob: float = 0.0,
+) -> int:
+    """Check :func:`make_self_play_vec_env`'s worker settings; return the number of bot workers.
+
+    Everything the vec-env builder rejects before building a worker, as one
+    function, so an entry point can run the same checks when it parses its
+    arguments -- before it creates any output -- rather than restate them.
+
+    Raises:
+        ValueError: ``bot_ratio`` outside [0, 1), a ratio that leaves no
+            worker of one kind, ``latest_opponent_prob`` outside [0, 1], or
+            (with bot workers) a ``bot_opponent`` that is not a scripted bot
+            or kwargs it does not take.
+        TypeError: Non-mapping ``bot_opponent_kwargs`` (with bot workers).
+    """
+    if not 0.0 <= bot_ratio < 1.0:
+        raise ValueError(f"bot_ratio must be in [0, 1); got {bot_ratio}")
+    n_bot = int(round(n_envs * bot_ratio))
+    if bot_ratio > 0 and not 0 < n_bot < n_envs:
+        raise ValueError(
+            f"bot_ratio={bot_ratio} with n_envs={n_envs} gives {n_bot} bot workers; mixed training needs at "
+            "least one bot worker and one self-play worker"
+        )
+    if not 0.0 <= latest_opponent_prob <= 1.0:
+        raise ValueError(f"latest_opponent_prob must be in [0, 1]; got {latest_opponent_prob}")
+    if n_bot:
+        # Checked in the trainer process: inside a SubprocVecEnv worker the
+        # env's own ValueError surfaces only as a broken pipe. 'self' (or
+        # None) would leave the bot workers with no opponent at all.
+        from reinforcetactics.game.bot_registry import accepted_names, is_scripted_name
+        from reinforcetactics.rl.env_schema import validate_opponent_kwargs
+
+        if not (isinstance(bot_opponent, str) and is_scripted_name(bot_opponent)):
+            raise ValueError(f"bot_opponent must be a scripted bot ({', '.join(accepted_names())}); got {bot_opponent!r}")
+        validate_opponent_kwargs(bot_opponent, bot_opponent_kwargs)
+    return n_bot
+
+
 def make_self_play_vec_env(
     n_envs: int = 4,
     map_file: str | None = None,
@@ -1477,26 +1521,13 @@ def make_self_play_vec_env(
     """
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-    if not 0.0 <= bot_ratio < 1.0:
-        raise ValueError(f"bot_ratio must be in [0, 1); got {bot_ratio}")
-    n_bot = int(round(n_envs * bot_ratio))
-    if bot_ratio > 0 and not 0 < n_bot < n_envs:
-        raise ValueError(
-            f"bot_ratio={bot_ratio} with n_envs={n_envs} gives {n_bot} bot workers; mixed training needs at "
-            "least one bot worker and one self-play worker"
-        )
-    if not 0.0 <= latest_opponent_prob <= 1.0:
-        raise ValueError(f"latest_opponent_prob must be in [0, 1]; got {latest_opponent_prob}")
-    if n_bot:
-        # Checked here, in the trainer process: inside a SubprocVecEnv worker
-        # the env's own ValueError surfaces only as a broken pipe. 'self' (or
-        # None) would leave the bot workers with no opponent at all.
-        from reinforcetactics.game.bot_registry import accepted_names, is_scripted_name
-        from reinforcetactics.rl.env_schema import validate_opponent_kwargs
-
-        if not (isinstance(bot_opponent, str) and is_scripted_name(bot_opponent)):
-            raise ValueError(f"bot_opponent must be a scripted bot ({', '.join(accepted_names())}); got {bot_opponent!r}")
-        validate_opponent_kwargs(bot_opponent, bot_opponent_kwargs)
+    n_bot = check_worker_split(
+        n_envs,
+        bot_ratio,
+        bot_opponent=bot_opponent,
+        bot_opponent_kwargs=bot_opponent_kwargs,
+        latest_opponent_prob=latest_opponent_prob,
+    )
 
     env_kwargs = _env_kwargs(
         map_file=map_file,

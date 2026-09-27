@@ -267,9 +267,10 @@ def parse_args(argv: list[str] | None = None):
             hints=IGNORED_FIELD_HINTS,
         )
     # The flags override the validated config's values: validate what the
-    # run will actually use (a bad value is a usage error).
+    # run will actually use (a bad value is a usage error), and run with the
+    # validated values as coerced (write_back).
     try:
-        effective_config(cfg, args, _ARG_TO_CONFIG_PATH)
+        effective_config(cfg, args, _ARG_TO_CONFIG_PATH, write_back=True)
     except (TypeError, ValueError) as exc:
         parser.error(str(exc))
     return args

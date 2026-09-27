@@ -1197,6 +1197,14 @@ def save_config(cfg: TrainingConfig, path: ConfigPath) -> None:
         raise ValueError(f"Unsupported config extension '{suffix}' for {p}")
 
 
+def _get_nested(cfg: TrainingConfig, dotted_key: str) -> Any:
+    """The value at ``dotted_key`` (``"env.max_steps"``, ``"seed"``)."""
+    value: Any = cfg
+    for part in dotted_key.split("."):
+        value = getattr(value, part)
+    return value
+
+
 def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
     parts = dotted_key.split(".")
     target: Any = cfg
@@ -1278,6 +1286,7 @@ def effective_config(
     mapping: Mapping[str, str],
     *,
     convert: Mapping[str, Callable[[Any], Any]] | None = None,
+    write_back: bool = False,
 ) -> TrainingConfig:
     """The config a CLI run actually uses, validated: ``cfg`` with every mapped argument written in.
 
@@ -1298,15 +1307,26 @@ def effective_config(
         convert: Per-``dest`` conversion from the argparse value to the
             config field's shape (a comma-separated ``--enabled-units``
             string to a list, say).
+        write_back: Replace each argument written into the config with the
+            validated config's value for it, so the run uses exactly what
+            was validated. Validation coerces a copy: without this, a flag
+            that validates only once coerced (``--reward-config
+            '{"win": "1e3"}'``, bot kwargs ``{"max_actions": 10.0}``)
+            passed parsing and then reached the envs raw, which reject it
+            -- after the run had created its output directory. The
+            ``"null"`` sentinel becomes ``None``, and a converted argument
+            takes the config field's shape (``enabled_units`` a list).
 
     ``None`` values are skipped, as :func:`apply_overrides` skips them: an
-    unset optional flag leaves the field as it is.
+    unset optional flag leaves the field as it is (and, with
+    ``write_back``, stays ``None``).
 
     Raises:
         TypeError, ValueError: The effective config does not validate.
     """
     base = cfg if cfg is not None else TrainingConfig()
     overrides: dict[str, Any] = {}
+    written: dict[str, str] = {}
     for dest, path in mapping.items():
         if not hasattr(args, dest) or not _is_config_path(path):
             continue
@@ -1314,7 +1334,13 @@ def effective_config(
         if convert and dest in convert:
             value = convert[dest](value)
         overrides[path] = value
-    return apply_overrides(base, overrides)
+        if value is not None:
+            written[dest] = path
+    effective = apply_overrides(base, overrides)
+    if write_back:
+        for dest, path in written.items():
+            setattr(args, dest, _get_nested(effective, path))
+    return effective
 
 
 # ---------------------------------------------------------------------------

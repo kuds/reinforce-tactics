@@ -358,6 +358,98 @@ class TestCliFlagsAreValidated:
             config_from_dict({"env": {"engine_overrides": {"unit_data": {"Z": {"attack": 1}}}}})
 
 
+class TestSelfPlayRunsWhatItValidated:
+    """Flags were validated on a coerced copy of the config and then used raw.
+
+    ``--bot-opponent-kwargs '{"max_actions": 10.0}'`` and ``--reward-config
+    '{"win": "1e3"}'`` passed parse_args (the copy held 10 and 1000.0) and
+    the envs then rejected the raw values; ``env.opponent: self`` in mixed
+    mode passed parse_args even with --strict, and the vec-env builder
+    rejected it. Each failed only after the run had created its log
+    directory.
+    """
+
+    def test_bot_kwargs_run_as_validated(self, self_play_script):
+        from reinforcetactics.rl.self_play import make_self_play_vec_env
+
+        argv = ["--mode", "mixed", "--n-envs", "2", "--bot-ratio", "0.5", "--bot-opponent", "random", "--map-file", MAP]
+        args = self_play_script.parse_args([*argv, "--bot-opponent-kwargs", '{"max_actions": 10.0}'])
+        assert args.bot_opponent_kwargs == {"max_actions": 10}
+        assert type(args.bot_opponent_kwargs["max_actions"]) is int
+        vec_env = make_self_play_vec_env(
+            n_envs=args.n_envs,
+            use_subprocess=False,
+            bot_ratio=args.bot_ratio,
+            bot_opponent=args.bot_opponent,
+            bot_opponent_kwargs=args.bot_opponent_kwargs,
+            **self_play_script.build_env_kwargs(args),
+        )
+        vec_env.close()
+
+    def test_reward_config_runs_as_validated(self, self_play_script):
+        from reinforcetactics.rl.masking import make_maskable_env
+
+        args = self_play_script.parse_args(["--map-file", MAP, "--reward-config", '{"win": "1e3", "loss": -5}'])
+        assert args.reward_config == {"win": 1000.0, "loss": -5.0}
+        env = make_maskable_env(opponent="simple", **self_play_script.build_env_kwargs(args))
+        assert env.unwrapped.reward_config["win"] == 1000.0
+        env.close()
+
+    def test_every_written_flag_takes_the_validated_value(self, self_play_script):
+        args = self_play_script.parse_args(
+            ["--enabled-units", "W,M", "--pad-to-size", "8", "9", "--wandb-entity", "null", "--max-turns", "7"]
+        )
+        assert args.enabled_units == ["W", "M"]  # the config field's shape
+        assert args.pad_to_size == (8, 9)
+        assert args.wandb_entity is None  # the "null" sentinel, as validated
+        assert args.max_turns == 7
+        # An unset optional flag stays unset rather than taking the config default.
+        assert args.flat_action_version is None and args.engine_overrides is None
+
+    @pytest.mark.parametrize("strict", [[], ["--strict"]])
+    def test_env_opponent_self_in_mixed_mode_is_a_usage_error(self, self_play_script, capsys, tmp_path, strict):
+        config = _yaml(
+            tmp_path / "sp.yaml",
+            {"env": {"opponent": "self"}, "self_play": {"mixed_training": True, "bot_ratio": 0.5}},
+        )
+        log_dir = tmp_path / "logs"
+        with pytest.raises(SystemExit) as excinfo:
+            self_play_script.main(["--config", config, *strict, "--log-dir", str(log_dir), "--no-subprocess"])
+        assert excinfo.value.code == 2
+        err = capsys.readouterr().err
+        assert "--mode mixed: bot_opponent must be a scripted bot" in err and "got 'self'" in err
+        assert "env.opponent" in err
+        assert not log_dir.exists()  # rejected before the run created any output
+
+    def test_env_opponent_self_is_fine_where_no_bot_worker_reads_it(self, self_play_script, tmp_path):
+        config = _yaml(tmp_path / "sp.yaml", {"env": {"opponent": "self"}})
+        with pytest.warns(IgnoredConfigFieldWarning, match="env.opponent = 'self'"):
+            assert self_play_script.parse_args(["--config", config]).mode == "self-play"
+
+    @pytest.mark.parametrize(
+        ("argv", "message"),
+        [
+            (["--n-envs", "1", "--bot-ratio", "0.3"], "gives 0 bot workers"),
+            (["--n-envs", "2", "--bot-ratio", "0.9"], "gives 2 bot workers"),
+        ],
+    )
+    def test_the_worker_split_is_checked_at_parse_time(self, self_play_script, capsys, argv, message):
+        with pytest.raises(SystemExit) as excinfo:
+            self_play_script.parse_args(["--mode", "mixed", *argv])
+        assert excinfo.value.code == 2
+        assert message in capsys.readouterr().err
+
+    def test_a_missing_resume_checkpoint_is_a_usage_error(self, self_play_script, capsys, tmp_path):
+        with pytest.raises(SystemExit) as excinfo:
+            self_play_script.parse_args(["--resume-from", str(tmp_path / "nope.zip")])
+        assert excinfo.value.code == 2
+        assert "--resume-from" in capsys.readouterr().err
+
+    def test_feudal_and_alphazero_run_with_the_validated_values_too(self, feudal_script, alphazero_script):
+        assert feudal_script.parse_args(["--wandb-entity", "null"]).wandb_entity is None
+        assert alphazero_script.parse_args(["--map-file", "null"]).map_file is None
+
+
 # ---------------------------------------------------------------------------
 # train_feudal_rl forwards ppo.gamma to the env
 # ---------------------------------------------------------------------------

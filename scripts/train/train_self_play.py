@@ -61,6 +61,7 @@ from reinforcetactics.rl.masking import make_maskable_env
 from reinforcetactics.rl.self_play import (
     OpponentPool,
     SelfPlayCallback,
+    check_worker_split,
     make_self_play_vec_env,
 )
 
@@ -150,6 +151,10 @@ def train_self_play(args) -> Path:
     logger.info("Mixed Training (Self-Play + Bots)" if mixed else "Self-Play Training")
     logger.info("=" * 60 + "\n")
 
+    # Resolved before any output exists: it reads a --resume-from
+    # checkpoint's flat table, which can fail.
+    env_kwargs = build_env_kwargs(args)
+
     # Create output directories
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = Path(args.log_dir) / f"{'mixed_training' if mixed else 'self_play'}_{timestamp}"
@@ -169,7 +174,6 @@ def train_self_play(args) -> Path:
         opponent_pool = OpponentPool(max_size=args.pool_size, selection_strategy=args.pool_strategy, save_dir=str(pool_dir))
         logger.info("Created opponent pool (max size: %d, strategy: %s)", args.pool_size, args.pool_strategy)
 
-    env_kwargs = build_env_kwargs(args)
     logger.info("Env: %s", env_kwargs)
 
     # One VecEnv for everything. In mixed mode ``round(n_envs * bot_ratio)``
@@ -672,7 +676,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     Every mapped flag is then written back into the config and validated
     (:func:`reinforcetactics.rl.config.effective_config`), so a flag cannot
     carry a value the config file would have been rejected for; a bad one
-    is a usage error.
+    is a usage error. The run then uses the validated values: the returned
+    arguments carry them as coerced (``--reward-config '{"win": "1e3"}'``
+    becomes 1000.0, bot kwargs ``{"max_actions": 10.0}`` become 10), not as
+    typed. Validation used to coerce a copy that was then thrown away, so
+    such values passed here and the envs rejected them raw.
+
+    The vec-env builder's own worker checks run here too
+    (:func:`reinforcetactics.rl.self_play.check_worker_split`): in mixed
+    mode ``env.opponent: self`` passes config validation (and argparse does
+    not check config-seeded defaults against ``--bot-opponent``'s choices),
+    but leaves the bot workers without a scripted opponent. So does a
+    ``--resume-from`` checkpoint that does not exist. Each used to fail only
+    once the run had created its log directory.
     """
     from reinforcetactics.rl.config import check_ignored_config_fields, effective_config, load_config
 
@@ -692,9 +708,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             hints=IGNORED_FIELD_HINTS,
         )
     try:
-        effective_config(cfg, args, _ARG_TO_CONFIG_PATH, convert={"enabled_units": _enabled_units_list})
+        effective_config(cfg, args, _ARG_TO_CONFIG_PATH, convert={"enabled_units": _enabled_units_list}, write_back=True)
     except (TypeError, ValueError) as exc:
         parser.error(str(exc))
+    try:
+        check_worker_split(
+            args.n_envs,
+            args.bot_ratio if args.mode == "mixed" else 0.0,
+            bot_opponent=args.bot_opponent,
+            bot_opponent_kwargs=args.bot_opponent_kwargs,
+            latest_opponent_prob=args.latest_opponent_prob,
+        )
+    except (TypeError, ValueError) as exc:
+        parser.error(
+            f"--mode {args.mode}: {exc}. The workers are set by --n-envs, --bot-ratio, --bot-opponent and "
+            "--bot-opponent-kwargs (with --config: env.n_envs, self_play.bot_ratio, env.opponent, env.opponent_kwargs)"
+        )
+    if args.resume_from and not any(Path(p).is_file() for p in (args.resume_from, f"{args.resume_from}.zip")):
+        # MaskablePPO.load, like the flat-table version read, also tries the
+        # path with ".zip" appended.
+        parser.error(f"--resume-from: checkpoint '{args.resume_from}' does not exist")
     return args
 
 
