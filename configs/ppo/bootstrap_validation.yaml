@@ -39,9 +39,9 @@
 # scaling to the full curriculum.
 algorithm: maskable_ppo
 seed: 42
-# Total is informational; per-stage budgets drive run length.
-# Sum below: 0.4 + 0.5 + 0.6 + 0.5 + 0.8 + 1.0 = 3.8M
-total_timesteps: 3_800_000
+# Per-stage budgets drive run length; the curriculum runner ignores a
+# top-level total_timesteps (train_bootstrap.py reports it, and --strict
+# rejects it). Worst case: 0.4 + 0.5 + 0.6 + 0.5 + 0.8 + 1.0 = 3.8M env steps.
 
 env:
   n_envs: 8

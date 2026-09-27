@@ -10,7 +10,9 @@
 # tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 22_000_000  # informational; per-stage budgets drive run length
+# Worst-case budget: ~22M env steps, the sum of the stages' max_timesteps.
+# The curriculum runner ignores a top-level total_timesteps (train_bootstrap.py
+# reports it, and --strict rejects it), so the number lives in this comment.
 
 env:
   # 8 envs leaves headroom on a 12-vCPU machine for the main process
@@ -48,6 +50,17 @@ env:
   # enabled_units roster) without clipping legitimate play.
   max_actions_per_turn: null
   action_space_type: flat_discrete
+  # max_flat_actions stays at the 512 default (decision recorded for review
+  # rlenv-11 / prior-13, which proposed 1024 here). The case for 1024 was
+  # that on skirmish / corner_points (728-744 legal actions) truncation
+  # dropped casts, heals and attacks first, so a big army could not fight.
+  # flat_action_version 2 (the env default for new runs) drops only moves
+  # there, shared round-robin across units, and keeps every attack, heal,
+  # cast, seize and end_turn. What it still drops is visible now
+  # (episode_stats truncated_steps / max_legal_actions, eval
+  # flat_truncated_rate); raise the cap if the validation run shows it
+  # biting. 1024 remains a sweep axis (v52b / v53 / v54): it doubles the
+  # Discrete head and makes 512-head checkpoints unusable as warm starts.
   # engine_overrides: optional sparse overlay over the non-YAML engine
   # constants (constants.py) so balance is a first-class, swept,
   # auto-recorded config axis instead of an invisible module constant.

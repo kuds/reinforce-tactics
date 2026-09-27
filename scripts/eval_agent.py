@@ -10,6 +10,7 @@ import pandas as pd
 from stable_baselines3 import PPO
 from tqdm import tqdm
 
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.rl.gym_env import StrategyGameEnv
 
 
@@ -158,7 +159,9 @@ def main():
 
     parser.add_argument("--model", type=str, required=True, help="Path to trained model (or directory for comparison)")
     parser.add_argument("--n-episodes", type=int, default=100, help="Number of evaluation episodes")
-    parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random"], help="Opponent type")
+    parser.add_argument(
+        "--opponent", type=str, default="bot", choices=accepted_names(), help="Scripted opponent (bot registry name)"
+    )
     parser.add_argument("--render", action="store_true", help="Render episodes")
     parser.add_argument("--save-replays", action="store_true", help="Save game replays")
     parser.add_argument("--compare", action="store_true", help="Compare multiple models in directory")

@@ -1056,6 +1056,7 @@ class GameState:
         if not self._may_target("attack", attacker, target):
             return self._noop_attack_result()
 
+        attacker_hp_before, target_hp_before = attacker.health, target.health
         result = self.mechanics.attack_unit(
             attacker, target, self.grid, self.units, damage_model=self.damage_model, rng=self.rng, teams=self.teams
         )
@@ -1067,6 +1068,9 @@ class GameState:
         # RNG (mechanics.py: ``random.random() < evade_chance``) and
         # recomputes damage against the replay's potentially-diverged
         # unit HP. Recording the outcome lets replay apply it directly.
+        # ``damage`` and ``counter_damage`` are the nominal hits, overkill
+        # included; ``*_hp_before - *_hp_after`` is the HP each side
+        # actually lost (what the RL env's combat shaping pays and charges).
         self.record_action(
             "attack",
             attacker_type=attacker.type,
@@ -1077,6 +1081,8 @@ class GameState:
             target_killed=not result["target_alive"],
             attacker_killed=not result["attacker_alive"],
             counter_damage=result["counter_damage"],
+            attacker_hp_before=attacker_hp_before,
+            target_hp_before=target_hp_before,
             attacker_hp_after=attacker.health if result["attacker_alive"] else 0,
             target_hp_after=target.health if result["target_alive"] else 0,
             evade=result["evade"],

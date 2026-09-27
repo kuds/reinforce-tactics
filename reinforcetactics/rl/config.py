@@ -9,7 +9,15 @@ reproducible without editing source. Supports:
   ``alphazero``, ``curriculum``, ``eval``, ``logging``
 - CLI overrides: values passed via ``--key value`` beat file values
 - Dotted override keys (``ppo.learning_rate=1e-4``) for nested updates
-- Dataclass validation with typed sections
+- Dataclass validation with typed sections: every value is coerced to its
+  field's annotated type (so YAML's ``3e-4``, which PyYAML reads as a
+  string, becomes a float) and range-checked, reward_config keys are checked
+  against the env's :data:`KNOWN_REWARD_KEYS`, and opponents against the bot
+  registry (review rltrain-10, rltrain-22)
+- :func:`check_ignored_config_fields`: an entry point declares the fields it
+  reads, and a config that sets any other field away from its default gets
+  a warning (an error under ``--strict``) instead of silently doing nothing
+  (review rltrain-9)
 
 Usage:
     from reinforcetactics.rl.config import load_config, apply_overrides
@@ -23,10 +31,26 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Mapping
+import math
+import numbers
+import types
+import warnings
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union, get_args, get_origin, get_type_hints
+
+from reinforcetactics.core.engine_config import EngineConfig
+from reinforcetactics.game.bot_registry import accepted_names as accepted_bot_names
+from reinforcetactics.game.bot_registry import canonical_name as canonical_bot_name
+from reinforcetactics.game.bot_registry import resolve_scripted
+from reinforcetactics.rl.env_schema import (
+    accepted_opponents,
+    validate_opponent_kwargs,
+    validate_reward_config,
+)
+from reinforcetactics.rl.gym_env import FLAT_ACTION_VERSIONS
+from reinforcetactics.rules import ALL_UNIT_TYPES
 
 try:
     import yaml
@@ -42,13 +66,28 @@ class EnvConfig:
     """Environment construction parameters."""
 
     map_file: str | None = None
-    opponent: str = "bot"
+    # ``'self'`` (train_feudal_rl.py --mode feudal only) or a bot-registry
+    # name, exactly as ``bot_registry.accepted_names()`` lists it; validated
+    # in :meth:`TrainingConfig.validate`. ``null`` is rejected: an env built
+    # with no opponent trains against nothing. Curriculum runs ignore it:
+    # each stage names its own opponent. train_self_play.py reads it as the
+    # scripted opponent of the bot workers (mixed mode).
+    opponent: str | None = "bot"
     max_steps: int = 200
     max_turns: int | None = None
     fog_of_war: bool = False
+    # Unit codes the agent (and the scripted opponents) may build, a
+    # non-empty subset of ``rules.ALL_UNIT_TYPES``; ``None`` = all of them.
     enabled_units: list[str] | None = None
     action_space_type: str = "multi_discrete"
     max_flat_actions: int = 512
+    # flat_discrete decode-table layout (``gym_env.FLAT_ACTION_VERSIONS``;
+    # it only matters once the legal set exceeds ``max_flat_actions``).
+    # ``None`` (default) means: the version of the checkpoint a run warm
+    # starts or resumes from, so its policy keeps the table it was trained
+    # on, else ``gym_env.FLAT_ACTION_VERSION_LATEST``. The resolved value is
+    # what ``resolved_config.yaml`` and each stage's ``config.json`` record.
+    flat_action_version: int | None = None
     # Optional hard cap on agent actions per game-turn. When set, the
     # action mask narrows to end_turn-only once the agent has executed
     # this many actions in the current game-turn. Defends against the
@@ -86,11 +125,13 @@ class EnvConfig:
     gold_scale: float = 1000.0
     turn_scale: float = 60.0
     unit_count_scale: float = 20.0
-    # Extra kwargs forwarded to the opponent bot's constructor (e.g.
+    # Extra kwargs forwarded to ``opponent``'s constructor (e.g.
     # ``{max_actions: 10}`` for ``RandomBot``, ``{easy: simple, hard: medium,
-    # p_hard: 0.5}`` for ``MixedBot``). For the curriculum bootstrap path the
-    # per-stage :attr:`CurriculumStage.opponent_kwargs` takes precedence; for
-    # non-curriculum runs (feudal, flat baseline) this is the only knob.
+    # p_hard: 0.5}`` for ``MixedBot``); validated against that bot. Read by
+    # the non-curriculum entry points (feudal, the flat baseline, the bot
+    # workers of train_self_play.py's mixed mode). The curriculum runner
+    # ignores it, as it ignores ``opponent``: set
+    # :attr:`CurriculumStage.opponent_kwargs` on each stage instead.
     opponent_kwargs: dict[str, Any] | None = None
 
 
@@ -165,6 +206,15 @@ class SelfPlayConfig:
     pool_strategy: str = "uniform"
     add_to_pool_freq: int = 50000
     min_win_rate_for_pool: float = 0.55
+    # Once the opponent pool holds any snapshot, each self-play episode's
+    # opponent is drawn at reset: the latest snapshot (the one
+    # ``opponent_update_freq`` pushes) with this probability, otherwise a
+    # pool sample. The default 0.0 is the long-standing behaviour: with a
+    # non-empty pool every episode plays a pool sample, and the latest
+    # snapshot only plays out the episodes already running when it is
+    # pushed. 1.0 always plays the latest snapshot (the pool then only
+    # records history). Consumed by train_self_play.py (``SelfPlayEnv``).
+    latest_opponent_prob: float = 0.0
     mixed_training: bool = False
     bot_ratio: float = 0.3
     # Feudal-specific self-play knobs (consumed by train_feudal_rl.py).
@@ -172,6 +222,8 @@ class SelfPlayConfig:
     # the rolling pool of the most-recent ``pool_size`` snapshots; evaluate
     # against a fixed opponent so eval scores don't drift with training.
     snapshot_freq: int = 10000
+    # A scripted bot (``bot_registry.accepted_names()``): an eval opponent
+    # that moves with the learner says nothing about progress.
     eval_opponent: str = "random"
 
 
@@ -197,16 +249,254 @@ class AlphaZeroConfig:
     weight_decay: float = 1e-4
 
 
-_CURRICULUM_OPPONENTS = (
-    "random",
-    "balanced_random",
-    "simple",
-    "bot",
-    "medium",
-    "mixed",
-    "advanced",
-    "noop",
-)
+# The scripted opponents a curriculum stage may name: derived from the bot
+# registry (every SCRIPTED_BOTS entry plus the "bot" alias), so a new bot is
+# accepted here as soon as it is registered. This used to be a hand-written
+# copy that had already drifted: it rejected "master" (review rltrain-22).
+# "self" is not a curriculum opponent: the runner has no self-play wrapper,
+# and a bare 'self' env plays no opponent at all.
+_CURRICULUM_OPPONENTS: tuple[str, ...] = accepted_bot_names()
+
+
+# ---------------------------------------------------------------------------
+# Type coercion (review rltrain-10)
+#
+# YAML, JSON and ``--set`` hand the loader raw values: PyYAML reads ``3e-4``
+# and even ``1.0e6`` as *strings* (YAML 1.1 wants ``3.0e-4`` / ``1.0e+6``),
+# and nothing stopped ``n_envs: 4.5`` or ``fog_of_war: "false"`` (a truthy
+# string) from reaching the trainer. Every field is coerced to its annotated
+# type instead: numeric strings become numbers, integral floats become ints,
+# ``"true"``/``"false"`` become bools, sequences become lists / tuples, and
+# anything that does not fit raises with the field's dotted path.
+# ---------------------------------------------------------------------------
+
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
+
+
+def _type_label(tp: Any) -> str:
+    return getattr(tp, "__name__", None) or str(tp).replace("typing.", "")
+
+
+def _coerce_to(value: Any, tp: Any, where: str) -> Any:
+    """Coerce a raw config value to the annotated type ``tp``.
+
+    Raises:
+        TypeError: The value has the wrong shape (a list for a mapping, a
+            bool for a number, ``None`` for a required field, ...).
+        ValueError: A string that does not parse, a non-finite or
+            non-integral number, or a tuple of the wrong length.
+    """
+    if tp is Any:
+        return value
+    origin = get_origin(tp)
+    if origin is Union or origin is types.UnionType:
+        members = get_args(tp)
+        if value is None:
+            if type(None) in members:
+                return None
+            raise TypeError(f"{where} must not be null")
+        candidates = [m for m in members if m is not type(None)]
+        # A mapping can only mean the dict member; anything else never does.
+        wants_dict = isinstance(value, Mapping)
+        candidates = [m for m in candidates if (get_origin(m) is dict) == wants_dict] or candidates
+        errors: list[Exception] = []
+        for member in candidates:
+            try:
+                return _coerce_to(value, member, where)
+            except (TypeError, ValueError) as exc:
+                errors.append(exc)
+        if len(errors) == 1:
+            raise errors[0]
+        raise TypeError(f"{where} must be {_type_label(tp)}, got {value!r} ({type(value).__name__})")
+    if value is None:
+        raise TypeError(f"{where} must be {_type_label(tp)}, got null")
+    if tp is bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in _TRUE_STRINGS:
+                return True
+            if lowered in _FALSE_STRINGS:
+                return False
+            raise ValueError(f"Cannot parse {value!r} as bool for {where}")
+        raise TypeError(f"{where} must be a bool, got {value!r} ({type(value).__name__})")
+    if tp is int:
+        if isinstance(value, bool):
+            raise TypeError(f"{where} must be an integer, got {value!r} (bool)")
+        if isinstance(value, numbers.Integral):
+            return int(value)
+        number = value
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                return int(text)
+            except ValueError:
+                try:
+                    number = float(text)
+                except ValueError:
+                    raise ValueError(f"{where} must be an integer, got {value!r}") from None
+        if isinstance(number, numbers.Real) and math.isfinite(float(number)) and float(number).is_integer():
+            return int(float(number))
+        raise ValueError(f"{where} must be an integer, got {value!r}")
+    if tp is float:
+        if isinstance(value, bool):
+            raise TypeError(f"{where} must be a number, got {value!r} (bool)")
+        if isinstance(value, numbers.Real):
+            number = float(value)
+        elif isinstance(value, str):
+            try:
+                number = float(value.strip())
+            except ValueError:
+                raise ValueError(f"{where} must be a number, got {value!r}") from None
+        else:
+            raise TypeError(f"{where} must be a number, got {value!r} ({type(value).__name__})")
+        if not math.isfinite(number):
+            raise ValueError(f"{where} must be finite, got {value!r}")
+        return number
+    if tp is str:
+        if isinstance(value, str):
+            return value
+        raise TypeError(f"{where} must be a string, got {value!r} ({type(value).__name__})")
+    if origin in (list, tuple):
+        if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+            raise TypeError(f"{where} must be a list, got {value!r} ({type(value).__name__})")
+        args = get_args(tp)
+        if origin is list:
+            elem = args[0] if args else Any
+            return [_coerce_to(v, elem, f"{where}[{i}]") for i, v in enumerate(value)]
+        if args and args[-1] is not Ellipsis:
+            if len(value) != len(args):
+                raise ValueError(f"{where} must have {len(args)} entries, got {len(value)}: {list(value)!r}")
+            return tuple(_coerce_to(v, a, f"{where}[{i}]") for i, (v, a) in enumerate(zip(value, args, strict=True)))
+        elem = args[0] if args else Any
+        return tuple(_coerce_to(v, elem, f"{where}[{i}]") for i, v in enumerate(value))
+    if origin is dict:
+        if not isinstance(value, Mapping):
+            raise TypeError(f"{where} must be a mapping, got {value!r} ({type(value).__name__})")
+        key_t, val_t = get_args(tp) or (Any, Any)
+        return {_coerce_to(k, key_t, f"{where} key {k!r}"): _coerce_to(v, val_t, f"{where}[{k!r}]") for k, v in value.items()}
+    return value
+
+
+_FIELD_TYPES: dict[type, dict[str, Any]] = {}
+
+
+def _field_types(cls: type) -> dict[str, Any]:
+    """``get_type_hints(cls)``, cached per dataclass."""
+    hints = _FIELD_TYPES.get(cls)
+    if hints is None:
+        hints = _FIELD_TYPES[cls] = get_type_hints(cls)
+    return hints
+
+
+def _normalize_fields(obj: Any, prefix: str) -> None:
+    """Coerce every non-section field of dataclass ``obj`` in place (see :func:`_coerce_to`)."""
+    hints = _field_types(type(obj))
+    for f in fields(obj):
+        tp = hints[f.name]
+        if isinstance(tp, type) and is_dataclass(tp):
+            continue  # a nested section, normalized by its own validate()
+        if get_origin(tp) is list and any(isinstance(a, type) and is_dataclass(a) for a in get_args(tp)):
+            continue  # curriculum.stages: each stage normalizes itself
+        value = getattr(obj, f.name)
+        coerced = _coerce_to(value, tp, f"{prefix}{f.name}")
+        if coerced is not value:
+            setattr(obj, f.name, coerced)
+
+
+def _normalize_schedule(value: Any, where: str) -> Any:
+    """Coerce the numeric ``start`` / ``end`` of a ``{start, end, schedule}`` mapping."""
+    if not isinstance(value, Mapping):
+        return value
+    out = dict(value)
+    for key in ("start", "end"):
+        if key in out:
+            try:
+                out[key] = _coerce_to(out[key], float, f"{where}.{key}")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{where}.{key} must be a non-negative number, got {out[key]!r} ({exc})") from None
+    return out
+
+
+def _check_reward_config(reward_config: Any, where: str) -> None:
+    try:
+        validate_reward_config(reward_config)
+    except (TypeError, ValueError) as exc:
+        raise type(exc)(f"{where}: {exc}") from None
+
+
+def _bot_kwarg_types(bot: str) -> dict[str, Any]:
+    """Annotated types of a scripted bot's constructor parameters (empty if unresolvable)."""
+    cls: Any = resolve_scripted(bot)
+    try:
+        return get_type_hints(cls.__init__)
+    except Exception:  # noqa: BLE001 - an unresolvable annotation just means "no coercion"
+        return {}
+
+
+def _coerce_bot_kwargs(bot: str, kwargs: Any, where: str) -> Any:
+    """Coerce scripted-bot kwargs to the bot constructor's annotated types.
+
+    The same coercion every other config value gets (:func:`_coerce_to`):
+    PyYAML reads ``max_actions: 1e1`` as the string ``'1e1'``, which
+    validation used to accept and RandomBot then crashed on at the stage's
+    first opponent turn, hours into a run. MixedBot's ``easy_kwargs`` /
+    ``hard_kwargs`` are coerced against the inner bots. Unknown keys and
+    non-mapping values pass through for :func:`validate_opponent_kwargs` to
+    reject.
+    """
+    if not isinstance(kwargs, Mapping) or not kwargs:
+        return kwargs
+    hints = _bot_kwarg_types(bot)
+    out = {k: (_coerce_to(v, hints[k], f"{where}[{k!r}]") if k in hints else v) for k, v in kwargs.items()}
+    if canonical_bot_name(bot) == "mixed":
+        for side, default in (("easy", "simple"), ("hard", "medium")):
+            inner, key = out.get(side, default), f"{side}_kwargs"
+            if key in out and isinstance(inner, str) and inner in accepted_bot_names():
+                out[key] = _coerce_bot_kwargs(inner, out[key], f"{where}[{key!r}]")
+    return out
+
+
+def _check_opponent(
+    opponent: Any, opponent_kwargs: Any, where: str, *, allowed: tuple[str, ...], kwargs_where: str = "opponent_kwargs"
+) -> Any:
+    """``opponent`` must be one of ``allowed``, and ``opponent_kwargs`` must suit it.
+
+    One acceptance rule for every config opponent field: the names exactly
+    as :func:`accepted_opponents` / ``bot_registry.accepted_names`` list
+    them. The env also resolves class names and any case (``'SimpleBot'``),
+    which ``env.opponent`` and ``self_play.eval_opponent`` used to accept
+    while a stage's opponent did not.
+
+    Returns:
+        ``opponent_kwargs`` coerced to the bot's constructor types.
+    """
+    if opponent is None:
+        raise ValueError(
+            f"{where} must be set: null plays no opponent at all. Expected one of: {', '.join(allowed)} "
+            "(see reinforcetactics.game.bot_registry)"
+        )
+    if not isinstance(opponent, str) or opponent not in allowed:
+        raise ValueError(
+            f"{where}: Unknown opponent {opponent!r}. Expected one of: {', '.join(allowed)} "
+            "(see reinforcetactics.game.bot_registry)"
+        )
+    kwargs = opponent_kwargs
+    if opponent in accepted_bot_names():
+        kwargs = _coerce_bot_kwargs(opponent, opponent_kwargs, kwargs_where)
+    try:
+        validate_opponent_kwargs(opponent, kwargs)
+    except (TypeError, ValueError, KeyError) as exc:
+        message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
+        raise type(exc)(f"{where}: {message}") from None
+    return kwargs
+
+
+def _require(ok: bool, message: str) -> None:
+    if not ok:
+        raise ValueError(message)
 
 
 @dataclass
@@ -252,7 +542,11 @@ class CurriculumStage:
     # legacy behaviour; set on the noisy ``*_random_N`` stages where it
     # matters most.
     min_timesteps_before_promotion: int = 0
-    n_eval_episodes: int = 30
+    # Eval episodes per eval for this stage. ``None`` (default) inherits
+    # ``cfg.eval.n_eval_episodes`` (:meth:`resolve_n_eval_episodes`). It used
+    # to default to a hidden 30 that ignored ``eval.n_eval_episodes``
+    # entirely (review rltrain-9).
+    n_eval_episodes: int | None = None
     # Optional per-stage overrides. None = inherit from cfg.env / cfg.ppo.
     max_steps: int | None = None
     max_turns: int | None = None
@@ -265,6 +559,17 @@ class CurriculumStage:
     purchase_explore_eps: float | dict[str, Any] | None = None
 
     def validate(self) -> None:
+        """Coerce every field to its annotated type, then check values.
+
+        Checks the opponent against the bot registry, ``opponent_kwargs``
+        against that bot's constructor (MixedBot's values in depth), and
+        ``reward_config`` keys against the env's ``KNOWN_REWARD_KEYS``.
+        """
+        _normalize_fields(self, f"stage '{self.name}': ")
+        self.ent_coef = _normalize_schedule(self.ent_coef, f"stage '{self.name}': ent_coef")
+        self.purchase_explore_eps = _normalize_schedule(
+            self.purchase_explore_eps, f"stage '{self.name}': purchase_explore_eps"
+        )
         if not self.name:
             raise ValueError("stage.name must be non-empty")
         if not self.map_file:
@@ -289,8 +594,8 @@ class CurriculumStage:
                 f"({self.min_timesteps_before_promotion}) must be <= max_timesteps "
                 f"({self.max_timesteps}); otherwise the stage can never promote."
             )
-        if self.n_eval_episodes <= 0:
-            raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0")
+        if self.n_eval_episodes is not None and self.n_eval_episodes <= 0:
+            raise ValueError(f"stage '{self.name}': n_eval_episodes must be > 0 (or null to inherit eval.n_eval_episodes)")
         if self.max_steps is not None and self.max_steps <= 0:
             raise ValueError(f"stage '{self.name}': max_steps override must be > 0")
         if self.max_turns is not None and self.max_turns <= 0:
@@ -364,6 +669,22 @@ class CurriculumStage:
             raise TypeError(
                 f"stage '{self.name}': opponent_kwargs override must be a mapping, got {type(self.opponent_kwargs).__name__}"
             )
+        _check_reward_config(self.reward_config, f"stage '{self.name}': reward_config")
+        # Kwargs the stage's bot does not take (anything given for the
+        # deterministic ladder, say) used to be dropped by the env without a
+        # word; MixedBot's inner names, p_hard and nested kwargs are checked
+        # here rather than at the reset whose coin flip first picks them.
+        self.opponent_kwargs = _check_opponent(
+            self.opponent,
+            self.opponent_kwargs,
+            f"stage '{self.name}'",
+            allowed=_CURRICULUM_OPPONENTS,
+            kwargs_where=f"stage '{self.name}': opponent_kwargs",
+        )
+
+    def resolve_n_eval_episodes(self, eval_cfg: EvalConfig) -> int:
+        """Eval episodes for this stage: its own override, else ``eval.n_eval_episodes``."""
+        return self.n_eval_episodes if self.n_eval_episodes is not None else eval_cfg.n_eval_episodes
 
     def resolve_max_steps(self, env: EnvConfig) -> int:
         return self.max_steps if self.max_steps is not None else env.max_steps
@@ -456,8 +777,11 @@ class CurriculumConfig:
     restore_best_checkpoint_between_stages: bool = True
 
     def validate(self) -> None:
+        _normalize_fields(self, "curriculum.")
         seen: set = set()
         for stage in self.stages:
+            if not isinstance(stage, CurriculumStage):
+                raise TypeError(f"curriculum.stages entries must be CurriculumStage, got {type(stage).__name__}")
             stage.validate()
             if stage.name in seen:
                 raise ValueError(f"duplicate stage name: '{stage.name}'")
@@ -531,39 +855,209 @@ class TrainingConfig:
 
     KNOWN_ALGORITHMS = ("ppo", "maskable_ppo", "feudal", "self_play", "mixed", "alphazero")
 
-    def validate(self) -> None:
-        """Raise ``ValueError`` if config is internally inconsistent."""
-        if self.algorithm not in self.KNOWN_ALGORITHMS:
-            raise ValueError(f"Unknown algorithm '{self.algorithm}'. Must be one of {self.KNOWN_ALGORITHMS}")
-        if self.total_timesteps <= 0:
-            raise ValueError("total_timesteps must be positive")
-        if self.env.n_envs <= 0:
-            raise ValueError("env.n_envs must be positive")
-        if self.env.max_steps <= 0:
-            raise ValueError("env.max_steps must be positive")
-        if self.env.max_actions_per_turn is not None and self.env.max_actions_per_turn <= 0:
-            raise ValueError("env.max_actions_per_turn must be positive (or None to disable)")
-        if not 0.0 <= self.ppo.gamma <= 1.0:
-            raise ValueError("ppo.gamma must be in [0, 1]")
-        if not 0.0 <= self.ppo.gae_lambda <= 1.0:
-            raise ValueError("ppo.gae_lambda must be in [0, 1]")
-        if self.ppo.batch_size <= 0:
-            raise ValueError("ppo.batch_size must be positive")
-        if self.ppo.n_steps <= 0:
-            raise ValueError("ppo.n_steps must be positive")
-        if self.env.action_space_type not in ("multi_discrete", "flat_discrete"):
-            raise ValueError(
-                f"env.action_space_type must be 'multi_discrete' or 'flat_discrete', got '{self.env.action_space_type}'"
+    def validate(self, *, check_files: bool = False) -> None:
+        """Coerce every field to its annotated type, then check ranges and cross-field rules.
+
+        Raises ``ValueError`` (``TypeError`` for a value of the wrong shape)
+        if the config is internally inconsistent. Values are normalized in
+        place: ``"3e-4"`` becomes ``0.0003``, ``pad_to_size: [10, 12]``
+        becomes ``(10, 12)``.
+
+        Args:
+            check_files: Also require ``warm_start_path`` (when set) to
+                exist. Off by default because a config may legitimately be
+                loaded before its checkpoint exists (``build_bc_warmstart.py``
+                reads the curriculum config that will later warm start from
+                the checkpoint it builds, and the shipped BC configs carry a
+                placeholder path); :func:`run_curriculum` and the entry points
+                turn it on before building any env.
+        """
+        self._normalize()
+        env, ppo, ev, sp, fd, az = self.env, self.ppo, self.eval, self.self_play, self.feudal, self.alphazero
+
+        _require(
+            self.algorithm in self.KNOWN_ALGORITHMS,
+            f"Unknown algorithm '{self.algorithm}'. Must be one of {self.KNOWN_ALGORITHMS}",
+        )
+        _require(self.total_timesteps > 0, "total_timesteps must be positive")
+        _require(self.seed >= 0, f"seed must be >= 0, got {self.seed}")
+        if check_files and self.warm_start_path and not Path(self.warm_start_path).is_file():
+            raise FileNotFoundError(
+                f"warm_start_path '{self.warm_start_path}' does not exist. "
+                "Provide a valid SB3 .zip checkpoint or unset warm_start_path for a cold start."
             )
-        if self.self_play.pool_strategy not in ("uniform", "recent", "prioritized"):
-            raise ValueError("self_play.pool_strategy must be 'uniform', 'recent', or 'prioritized'")
-        if not 0.0 <= self.self_play.min_win_rate_for_pool <= 1.0:
-            raise ValueError("self_play.min_win_rate_for_pool must be in [0, 1]")
+
+        # -- env ------------------------------------------------------------
+        _require(env.n_envs > 0, "env.n_envs must be positive")
+        _require(env.max_steps > 0, "env.max_steps must be positive")
+        _require(env.max_turns is None or env.max_turns > 0, "env.max_turns must be positive (or null for no limit)")
+        _require(
+            env.max_actions_per_turn is None or env.max_actions_per_turn > 0,
+            "env.max_actions_per_turn must be positive (or None to disable)",
+        )
+        _require(
+            env.action_space_type in ("multi_discrete", "flat_discrete"),
+            f"env.action_space_type must be 'multi_discrete' or 'flat_discrete', got '{env.action_space_type}'",
+        )
+        _require(env.max_flat_actions >= 1, f"env.max_flat_actions must be >= 1, got {env.max_flat_actions}")
+        _require(
+            env.flat_action_version is None or env.flat_action_version in FLAT_ACTION_VERSIONS,
+            f"env.flat_action_version must be one of {FLAT_ACTION_VERSIONS} (or null), got {env.flat_action_version}",
+        )
+        _require(
+            env.pad_to_size is None or all(v > 0 for v in env.pad_to_size),
+            f"env.pad_to_size must be two positive integers (height, width), got {env.pad_to_size}",
+        )
+        for name in ("gold_scale", "turn_scale", "unit_count_scale"):
+            _require(getattr(env, name) > 0, f"env.{name} must be > 0 (it divides a tanh input), got {getattr(env, name)}")
+        if env.enabled_units is not None:
+            # A typo used to pass here and crash on the first action mask
+            # (a bare KeyError, a broken pipe inside a SubprocVecEnv worker),
+            # and [] meant "buy nothing" to one trainer and "buy anything"
+            # to another.
+            unknown_units = [u for u in env.enabled_units if u not in ALL_UNIT_TYPES]
+            _require(
+                bool(env.enabled_units) and not unknown_units,
+                f"env.enabled_units must be null (all units) or a non-empty list of unit codes from "
+                f"{', '.join(ALL_UNIT_TYPES)}; got {env.enabled_units!r}",
+            )
+        try:
+            env.opponent_kwargs = _check_opponent(
+                env.opponent,
+                env.opponent_kwargs,
+                "env.opponent",
+                allowed=accepted_opponents(),
+                kwargs_where="env.opponent_kwargs",
+            )
+        except (TypeError, ValueError) as exc:
+            if self.curriculum.stages and env.opponent_kwargs:
+                raise type(exc)(
+                    f"{exc}. A curriculum reads neither env.opponent nor env.opponent_kwargs: "
+                    "set opponent_kwargs on the curriculum stage."
+                ) from None
+            raise
+        _check_reward_config(env.reward_config, "env.reward_config")
+        if env.engine_overrides is not None:
+            # Resolved the way every GameState will resolve it, so a typo
+            # fails here, in the trainer process, rather than in each env
+            # worker at construction.
+            try:
+                EngineConfig.from_overrides(env.engine_overrides)
+            except (TypeError, ValueError, KeyError) as exc:
+                message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
+                raise ValueError(f"env.engine_overrides: {message}") from None
+
+        # -- ppo ------------------------------------------------------------
+        _require(ppo.learning_rate > 0, f"ppo.learning_rate must be > 0, got {ppo.learning_rate}")
+        _require(ppo.n_steps > 0, "ppo.n_steps must be positive")
+        _require(ppo.batch_size > 0, "ppo.batch_size must be positive")
+        _require(ppo.n_epochs > 0, f"ppo.n_epochs must be positive, got {ppo.n_epochs}")
+        _require(0.0 <= ppo.gamma <= 1.0, "ppo.gamma must be in [0, 1]")
+        _require(0.0 <= ppo.gae_lambda <= 1.0, "ppo.gae_lambda must be in [0, 1]")
+        _require(ppo.clip_range > 0, f"ppo.clip_range must be > 0, got {ppo.clip_range}")
+        _require(ppo.ent_coef >= 0, f"ppo.ent_coef must be >= 0, got {ppo.ent_coef}")
+        _require(ppo.vf_coef >= 0, f"ppo.vf_coef must be >= 0, got {ppo.vf_coef}")
+        _require(ppo.max_grad_norm > 0, f"ppo.max_grad_norm must be > 0, got {ppo.max_grad_norm}")
+        _require(
+            ppo.lr_schedule in ("constant", "linear"),
+            f"ppo.lr_schedule must be 'constant' or 'linear', got {ppo.lr_schedule!r}",
+        )
+        _require(
+            0.0 <= ppo.purchase_explore_eps <= 1.0,
+            f"ppo.purchase_explore_eps must be in [0, 1], got {ppo.purchase_explore_eps}",
+        )
+
+        # -- eval -----------------------------------------------------------
+        _require(ev.eval_freq > 0, f"eval.eval_freq must be > 0, got {ev.eval_freq}")
+        _require(ev.n_eval_episodes > 0, f"eval.n_eval_episodes must be > 0, got {ev.n_eval_episodes}")
+        _require(ev.checkpoint_freq > 0, f"eval.checkpoint_freq must be > 0, got {ev.checkpoint_freq}")
+        _require(ev.seed_offset >= 0, f"eval.seed_offset must be >= 0, got {ev.seed_offset}")
+        _require(
+            ev.best_eligible_after is None or ev.best_eligible_after >= 0,
+            f"eval.best_eligible_after must be >= 0 (or null), got {ev.best_eligible_after}",
+        )
+
+        # -- self_play ------------------------------------------------------
+        _require(
+            sp.pool_strategy in ("uniform", "recent", "prioritized"),
+            "self_play.pool_strategy must be 'uniform', 'recent', or 'prioritized'",
+        )
+        _require(0.0 <= sp.min_win_rate_for_pool <= 1.0, "self_play.min_win_rate_for_pool must be in [0, 1]")
+        _require(
+            0.0 <= sp.latest_opponent_prob <= 1.0,
+            f"self_play.latest_opponent_prob must be in [0, 1], got {sp.latest_opponent_prob}",
+        )
+        _require(0.0 <= sp.bot_ratio < 1.0, f"self_play.bot_ratio must be in [0, 1), got {sp.bot_ratio}")
+        for name in ("opponent_update_freq", "pool_size", "add_to_pool_freq", "snapshot_freq"):
+            _require(getattr(sp, name) > 0, f"self_play.{name} must be positive, got {getattr(sp, name)}")
+        _check_opponent(sp.eval_opponent, None, "self_play.eval_opponent", allowed=accepted_bot_names())
+
+        # -- feudal ---------------------------------------------------------
+        _require(fd.manager_horizon > 0, f"feudal.manager_horizon must be positive, got {fd.manager_horizon}")
+        _require(
+            0.0 <= fd.worker_reward_alpha <= 1.0, f"feudal.worker_reward_alpha must be in [0, 1], got {fd.worker_reward_alpha}"
+        )
+        for name in ("manager_lr_scale", "worker_lr_scale", "reward_scale"):
+            _require(getattr(fd, name) > 0, f"feudal.{name} must be > 0, got {getattr(fd, name)}")
+
+        # -- alphazero ------------------------------------------------------
+        for name in (
+            "res_blocks",
+            "channels",
+            "num_simulations",
+            "iterations",
+            "games_per_iter",
+            "epochs_per_iter",
+            "batch_size",
+            "buffer_size",
+            "max_game_steps",
+            "eval_games",
+        ):
+            _require(getattr(az, name) > 0, f"alphazero.{name} must be positive, got {getattr(az, name)}")
+        _require(
+            az.temperature_threshold >= 0, f"alphazero.temperature_threshold must be >= 0, got {az.temperature_threshold}"
+        )
+        _require(az.c_puct > 0, f"alphazero.c_puct must be > 0, got {az.c_puct}")
+        _require(az.dirichlet_alpha > 0, f"alphazero.dirichlet_alpha must be > 0, got {az.dirichlet_alpha}")
+        _require(0.0 <= az.eval_threshold <= 1.0, f"alphazero.eval_threshold must be in [0, 1], got {az.eval_threshold}")
+        _require(az.lr > 0, f"alphazero.lr must be > 0, got {az.lr}")
+        _require(az.weight_decay >= 0, f"alphazero.weight_decay must be >= 0, got {az.weight_decay}")
+
         self.curriculum.validate()
 
+        # Purchase exploration resamples the ``unit_type`` sub-action of a
+        # multi_discrete create_unit; a flat_discrete action has none, so the
+        # hook would silently do nothing (review rltrain-10).
+        if env.action_space_type == "flat_discrete":
+            offenders = ["ppo"] if ppo.purchase_explore_eps > 0 else []
+            for stage in self.curriculum.stages:
+                eps = stage.purchase_explore_eps
+                values = [eps.get("start", 0.0), eps.get("end", 0.0)] if isinstance(eps, Mapping) else [eps or 0.0]
+                if any(float(v) > 0 for v in values):
+                    offenders.append(f"stage '{stage.name}'")
+            if offenders:
+                raise ValueError(
+                    f"purchase_explore_eps > 0 ({', '.join(offenders)}) needs action_space_type='multi_discrete': "
+                    "it resamples the unit_type sub-action, which flat_discrete does not have"
+                )
+
+    def _normalize(self) -> None:
+        _normalize_fields(self, "")
+        for section in _SECTION_TYPES:
+            obj = getattr(self, section)
+            expected = _SECTION_TYPES[section]
+            if not isinstance(obj, expected):
+                raise TypeError(f"Section '{section}' must be a {expected.__name__}, got {type(obj).__name__}")
+            if section != "curriculum":
+                _normalize_fields(obj, f"{section}.")
+
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a plain dict (suitable for JSON/YAML dumping)."""
-        return asdict(self)
+        """Serialize to a plain dict (suitable for JSON/YAML dumping).
+
+        Tuples (``env.pad_to_size``) become lists, so the dict dumps as
+        plain YAML and loads back to the same config.
+        """
+        return _plain(asdict(self))
 
 
 _SECTION_TYPES = {
@@ -604,7 +1098,8 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
         stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
     kwargs: dict[str, Any] = {"stages": stages}
     if "restore_best_checkpoint_between_stages" in raw:
-        kwargs["restore_best_checkpoint_between_stages"] = bool(raw["restore_best_checkpoint_between_stages"])
+        # Coerced in validate() (``bool("false")`` used to be True here).
+        kwargs["restore_best_checkpoint_between_stages"] = raw["restore_best_checkpoint_between_stages"]
     return CurriculumConfig(**kwargs)
 
 
@@ -667,11 +1162,24 @@ def _read_config_file(path: Path) -> dict[str, Any]:
 
 
 def load_config(path: ConfigPath) -> TrainingConfig:
-    """Load and validate a training config from a YAML or JSON file."""
+    """Load and validate a training config from a YAML or JSON file.
+
+    Validation is :meth:`TrainingConfig.validate` without ``check_files``:
+    a config can be loaded before the checkpoint it names exists.
+    """
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"Config file not found: {p}")
     return config_from_dict(_read_config_file(p))
+
+
+def _plain(value: Any) -> Any:
+    """``value`` with tuples turned into lists, recursively (for YAML/JSON dumps)."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
 
 
 def save_config(cfg: TrainingConfig, path: ConfigPath) -> None:
@@ -689,29 +1197,12 @@ def save_config(cfg: TrainingConfig, path: ConfigPath) -> None:
         raise ValueError(f"Unsupported config extension '{suffix}' for {p}")
 
 
-def _coerce_value(current: Any, new: str) -> Any:
-    """Best-effort coercion of a string override to the type of ``current``."""
-    if isinstance(new, str):
-        if isinstance(current, bool):
-            lowered = new.strip().lower()
-            if lowered in ("true", "1", "yes", "on"):
-                return True
-            if lowered in ("false", "0", "no", "off"):
-                return False
-            raise ValueError(f"Cannot parse '{new}' as bool")
-        if isinstance(current, int) and not isinstance(current, bool):
-            return int(new)
-        if isinstance(current, float):
-            return float(new)
-        if current is None:
-            # Try int, then float, else leave as string
-            for conv in (int, float):
-                try:
-                    return conv(new)
-                except (TypeError, ValueError):
-                    continue
-            return new
-    return new
+def _get_nested(cfg: TrainingConfig, dotted_key: str) -> Any:
+    """The value at ``dotted_key`` (``"env.max_steps"``, ``"seed"``)."""
+    value: Any = cfg
+    for part in dotted_key.split("."):
+        value = getattr(value, part)
+    return value
 
 
 def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
@@ -724,10 +1215,11 @@ def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
         if not is_dataclass(target):
             raise KeyError(f"'{part}' in '{dotted_key}' does not point to a config section")
     leaf = parts[-1]
-    if not hasattr(target, leaf):
+    if leaf not in {f.name for f in fields(target)}:
         raise KeyError(f"Unknown config key: '{dotted_key}'")
-    current = getattr(target, leaf)
-    setattr(target, leaf, _coerce_value(current, value))
+    # Coerced to the field's annotated type, as a file value would be:
+    # ``--set env.pad_to_size=[10,12]`` becomes a tuple, ``"1e-5"`` a float.
+    setattr(target, leaf, _coerce_to(value, _field_types(type(target))[leaf], dotted_key))
 
 
 def config_to_argparse_defaults(
@@ -778,3 +1270,187 @@ def apply_overrides(
         _set_nested(new_cfg, key, value)
     new_cfg.validate()
     return new_cfg
+
+
+def _is_config_path(dotted_path: str) -> bool:
+    """Whether ``dotted_path`` names a :class:`TrainingConfig` field (``"env.max_steps"``, ``"seed"``)."""
+    parts = dotted_path.split(".")
+    if len(parts) == 1:
+        return parts[0] in _TOP_LEVEL_FIELDS
+    return len(parts) == 2 and parts[0] in _SECTION_TYPES and parts[1] in {f.name for f in fields(_SECTION_TYPES[parts[0]])}
+
+
+def effective_config(
+    cfg: TrainingConfig | None,
+    args: Any,
+    mapping: Mapping[str, str],
+    *,
+    convert: Mapping[str, Callable[[Any], Any]] | None = None,
+    write_back: bool = False,
+) -> TrainingConfig:
+    """The config a CLI run actually uses, validated: ``cfg`` with every mapped argument written in.
+
+    The entry points load and validate ``--config``, turn its values into
+    argparse defaults (:func:`config_to_argparse_defaults`), and let flags
+    override them -- which used to happen after validation, so
+    ``--gamma 1.5`` or ``--eval-freq 0`` reached the trainer unchecked, and a
+    bad ``--reward-config`` / ``--engine-overrides`` JSON surfaced only
+    inside an env worker. This writes each parsed value back through
+    ``mapping`` (argparse ``dest`` -> dotted config path; paths that are not
+    config fields are skipped) and runs :meth:`TrainingConfig.validate` on
+    the result.
+
+    Args:
+        cfg: The loaded config, or ``None`` (the defaults) without ``--config``.
+        args: The parsed ``argparse.Namespace``.
+        mapping: The entry point's ``_ARG_TO_CONFIG_PATH``.
+        convert: Per-``dest`` conversion from the argparse value to the
+            config field's shape (a comma-separated ``--enabled-units``
+            string to a list, say).
+        write_back: Replace each argument written into the config with the
+            validated config's value for it, so the run uses exactly what
+            was validated. Validation coerces a copy: without this, a flag
+            that validates only once coerced (``--reward-config
+            '{"win": "1e3"}'``, bot kwargs ``{"max_actions": 10.0}``)
+            passed parsing and then reached the envs raw, which reject it
+            -- after the run had created its output directory. The
+            ``"null"`` sentinel becomes ``None``, and a converted argument
+            takes the config field's shape (``enabled_units`` a list).
+
+    ``None`` values are skipped, as :func:`apply_overrides` skips them: an
+    unset optional flag leaves the field as it is (and, with
+    ``write_back``, stays ``None``).
+
+    Raises:
+        TypeError, ValueError: The effective config does not validate.
+    """
+    base = cfg if cfg is not None else TrainingConfig()
+    overrides: dict[str, Any] = {}
+    written: dict[str, str] = {}
+    for dest, path in mapping.items():
+        if not hasattr(args, dest) or not _is_config_path(path):
+            continue
+        value = getattr(args, dest)
+        if convert and dest in convert:
+            value = convert[dest](value)
+        overrides[path] = value
+        if value is not None:
+            written[dest] = path
+    effective = apply_overrides(base, overrides)
+    if write_back:
+        for dest, path in written.items():
+            setattr(args, dest, _get_nested(effective, path))
+    return effective
+
+
+# ---------------------------------------------------------------------------
+# Fields an entry point does not read (review rltrain-9)
+#
+# One TrainingConfig schema serves every trainer, but no trainer reads every
+# field: the curriculum runner never looked at ``eval.checkpoint_freq``,
+# ``logging.*`` or ``ppo.lr_schedule``, and a stage without
+# ``n_eval_episodes`` silently ran 30 episodes whatever ``eval`` said. Each
+# entry point now declares the fields it consumes; a loaded config that sets
+# any other field away from its default is reported, as a warning by default
+# and as an error under the entry points' ``--strict`` flag.
+# ---------------------------------------------------------------------------
+
+_TOP_LEVEL_FIELDS = ("algorithm", "total_timesteps", "seed", "warm_start_path")
+
+
+class IgnoredConfigFieldWarning(UserWarning):
+    """A loaded config sets a field that the running entry point does not read."""
+
+
+class IgnoredConfigFieldError(ValueError):
+    """Raised instead of :class:`IgnoredConfigFieldWarning` in strict mode."""
+
+
+def config_field_values(cfg: TrainingConfig) -> dict[str, Any]:
+    """Every leaf field of ``cfg`` by dotted path (``"env.max_steps"``, ``"curriculum.stages"``, ...)."""
+    out: dict[str, Any] = {name: getattr(cfg, name) for name in _TOP_LEVEL_FIELDS}
+    for section in _SECTION_TYPES:
+        obj = getattr(cfg, section)
+        for f in fields(obj):
+            out[f"{section}.{f.name}"] = getattr(obj, f.name)
+    return out
+
+
+def _matches(path: str, patterns: Iterable[str]) -> bool:
+    """``path`` equals a pattern, or a pattern is ``"<section>.*"`` for its section."""
+    section = path.split(".", 1)[0]
+    return any(p == path or p == f"{section}.*" for p in patterns)
+
+
+def ignored_config_fields(
+    cfg: TrainingConfig,
+    consumed: Iterable[str],
+    *,
+    algorithms: Iterable[str] | None = None,
+) -> list[str]:
+    """Dotted paths of the fields ``cfg`` sets away from their default that the caller does not read.
+
+    Args:
+        cfg: The loaded config.
+        consumed: Paths the entry point reads: exact (``"env.max_steps"``)
+            or a whole section (``"curriculum.*"``).
+        algorithms: The ``algorithm`` values the entry point accepts as a
+            description of what it trains. ``algorithm`` is then reported
+            only when set to something else (it is a label, which no trainer
+            dispatches on).
+    """
+    consumed = tuple(consumed)
+    defaults = config_field_values(TrainingConfig())
+    ignored = []
+    for path, value in config_field_values(cfg).items():
+        if value == defaults[path] or _matches(path, consumed):
+            continue
+        if path == "algorithm" and algorithms is not None and value in tuple(algorithms):
+            continue
+        ignored.append(path)
+    return ignored
+
+
+def check_ignored_config_fields(
+    cfg: TrainingConfig,
+    consumed: Iterable[str],
+    *,
+    entry_point: str,
+    strict: bool = False,
+    algorithms: Iterable[str] | None = None,
+    hints: Mapping[str, str] | None = None,
+    strict_hint: str | None = "Pass --strict to make this an error.",
+) -> list[str]:
+    """Warn about (or, with ``strict``, reject) set fields the entry point ignores.
+
+    See :func:`ignored_config_fields` for ``consumed`` and ``algorithms``.
+    ``hints`` maps a path (or ``"<section>.*"``) to a short explanation shown
+    next to it. ``strict_hint`` ends the warning (``None``: nothing, for a
+    caller with no ``--strict`` flag).
+
+    Returns:
+        The ignored paths (empty when there is nothing to report).
+
+    Raises:
+        IgnoredConfigFieldError: ``strict`` and at least one field is ignored.
+    """
+    ignored = ignored_config_fields(cfg, consumed, algorithms=algorithms)
+    if not ignored:
+        return ignored
+    hints = hints or {}
+    values = config_field_values(cfg)
+    lines = []
+    for path in ignored:
+        hint = hints.get(path) or hints.get(path.split(".", 1)[0] + ".*")
+        shown = values[path]
+        if path == "curriculum.stages":
+            shown = f"[{len(shown)} stages]"
+        lines.append(f"  {path} = {shown!r}" + (f"  ({hint})" if hint else ""))
+    message = (
+        f"{entry_point} does not read {len(ignored)} field(s) this config sets away from their defaults, "
+        "so they have no effect on this run:\n" + "\n".join(lines)
+    )
+    if strict:
+        raise IgnoredConfigFieldError(message + "\nRemove them from the config, or run without --strict to only warn.")
+    warnings.warn(message + (f"\n{strict_hint}" if strict_hint else ""), IgnoredConfigFieldWarning, stacklevel=2)
+    return ignored

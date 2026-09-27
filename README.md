@@ -80,8 +80,8 @@ python main.py
 # Train with PPO against bot
 python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent bot
 
-# Train with self-play
-python main.py --mode train --algorithm ppo --timesteps 1000000 --opponent self
+# Train with self-play (main.py trains against scripted bots only)
+python scripts/train/train_self_play.py --config configs/self_play/self_play.yaml
 
 # Train with reward shaping
 python main.py --mode train --algorithm ppo --timesteps 500000 \
