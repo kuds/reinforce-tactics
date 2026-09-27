@@ -18,20 +18,31 @@ Both evaluators play the same episodes for the same arguments: episode
 ``s``, and every per-episode quantity is aggregated in episode order, so the
 serial and the vectorized path return identical results whenever the
 policy's actions are a deterministic function of the observation
-(``deterministic=True``). With sampled actions the environment side is
-identical (maps, opponents and combat rolls come from the episode seed) but
-the policy's samples come from torch's global generator, whose draws are
-consumed in a different order by a batched call.
+(``deterministic=True``).
+
+With sampled actions (``deterministic=False``) and a ``seed``, the policy
+samples from its own torch stream, forked from the global generator and
+restored afterwards: the evaluation neither consumes the random numbers
+training samples its actions from nor depends on them, so it is a function
+of the weights and the seed and can be re-run from a checkpoint. The serial
+path reseeds that stream at every episode (:func:`policy_sampling_seed` of
+the episode's seed and seat), so episode ``i`` draws the same numbers
+whatever ``n_episodes`` is; the vectorized path seeds it once per call,
+because one batched ``predict`` samples every env's action together, so its
+stochastic results are reproducible but not equal to the serial path's.
+Without a ``seed`` a stochastic evaluation samples from the global generator
+as before.
 """
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import logging
 import math
 import multiprocessing as mp
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from statistics import NormalDist
 from typing import Any
@@ -137,6 +148,53 @@ def wilson_lower_bound(successes: float, n: int, z: float) -> float:
     centre = p + z2 / (2.0 * n)
     margin = z * math.sqrt(p * (1.0 - p) / n + z2 / (4.0 * n * n))
     return max(0.0, (centre - margin) / denom)
+
+
+# ---------------------------------------------------------------------------
+# The policy's own random stream for a seeded stochastic evaluation
+# ---------------------------------------------------------------------------
+
+# Mixed into every policy-sampling seed so it never equals the episode's env
+# seed (the two streams stay unrelated).
+_POLICY_SEED_TAG = 0x5A3D_91C7
+
+
+def policy_sampling_seed(seed: int, seat: int | None = None) -> int:
+    """The torch seed a seeded stochastic evaluation samples episode ``seed`` (of ``seat``) with."""
+    entropy = [int(seed) % (1 << 63), int(seat or 0), _POLICY_SEED_TAG]
+    return int(np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint32)[0])
+
+
+@contextlib.contextmanager
+def _isolated_policy_rng(model: Any, enabled: bool) -> Iterator[Callable[[int], Any] | None]:
+    """Give a seeded stochastic evaluation its own torch random stream.
+
+    ``model.predict(deterministic=False)`` samples from torch's global
+    generator, the stream SB3 also samples training actions from. Without
+    this, an eval consumed training's random numbers (so ``n_eval_episodes``,
+    ``eval_both_modes``, ``eval_seats`` or ``n_eval_envs`` changed the policy
+    that was trained) and its own samples depended on whatever training had
+    drawn before (so a row could not be reproduced from its checkpoint and
+    eval seed). Inside the context the generator of the model's device is
+    forked -- restored on exit -- and the yielded ``reseed(seed)`` sets it.
+    Yields ``None`` (and changes nothing) when ``enabled`` is False.
+    """
+    if not enabled:
+        yield None
+        return
+    import torch
+
+    device = getattr(model, "device", None)
+    device_type = getattr(device, "type", "cpu") if device is not None else "cpu"
+    if device_type == "cpu":
+        # Only the CPU generator: torch.manual_seed would also queue a seed
+        # for a CUDA runtime this process may initialise later.
+        with torch.random.fork_rng(devices=[]):
+            yield torch.default_generator.manual_seed
+        return
+    count = torch.cuda.device_count() if device_type == "cuda" else 1
+    with torch.random.fork_rng(devices=list(range(max(1, count))), device_type=device_type):
+        yield torch.manual_seed
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +503,10 @@ def evaluate_model(
             passes ``eval.eval_deterministic`` (False by default: the
             stochastic policy PPO trains).
         seed: Optional integer seed. When provided, episode ``i`` is reset
-            with ``seed + i`` so results are reproducible across runs.
+            with ``seed + i`` so results are reproducible across runs; with
+            ``deterministic=False`` the policy's samples then also come from
+            a stream seeded per episode (:func:`policy_sampling_seed`), and
+            torch's global generator is left as it was.
         track_breakdown: When True, also accumulate per-step
             ``info["action_type"]`` counts and ``info["reward_breakdown"]``
             sums across the evaluation, returned under ``action_counts``
@@ -516,11 +577,52 @@ def evaluate_model(
     previous_seat = getattr(env, "agent_seat", None) if set_seat is not None else None
 
     records: list[dict[str, Any]] = []
+    # A seeded stochastic eval samples from its own stream (module docstring).
+    with _isolated_policy_rng(model, enabled=not deterministic and seed is not None) as reseed:
+        _evaluate_serial(
+            model,
+            env,
+            plan,
+            records,
+            deterministic=deterministic,
+            seed=seed,
+            reseed=reseed,
+            set_seat=set_seat,
+            previous_seat=previous_seat,
+            has_action_masks=has_action_masks,
+            track_breakdown=track_breakdown,
+            trace_dir_path=trace_dir_path,
+            trace_triggers=trace_triggers,
+            seat_tag=seat_tag,
+        )
+    return _aggregate(records, track_breakdown=track_breakdown, traced=trace_dir_path is not None)
+
+
+def _evaluate_serial(
+    model: Any,
+    env: Any,
+    plan: Sequence[tuple[int | None, int]],
+    records: list[dict[str, Any]],
+    *,
+    deterministic: bool,
+    seed: Any,
+    reseed: Callable[[int], Any] | None,
+    set_seat: Callable[[Any], Any] | None,
+    previous_seat: Any,
+    has_action_masks: bool,
+    track_breakdown: bool,
+    trace_dir_path: Path | None,
+    trace_triggers: set,
+    seat_tag: bool,
+) -> None:
+    """:func:`evaluate_model`'s episode loop: plays ``plan`` and appends one record per episode."""
     try:
         for index, (seat, i) in enumerate(plan):
             if seat is not None and set_seat is not None:
                 set_seat(seat)
             ep_seed = int(seed) + i if seed is not None else None
+            if reseed is not None and ep_seed is not None:
+                reseed(policy_sampling_seed(ep_seed, seat))
             obs, _ = env.reset(seed=ep_seed) if ep_seed is not None else env.reset()
             tracker = _EpisodeTracker(
                 index,
@@ -544,7 +646,6 @@ def evaluate_model(
     finally:
         if set_seat is not None and previous_seat is not None:
             set_seat(previous_seat)
-    return _aggregate(records, track_breakdown=track_breakdown, traced=trace_dir_path is not None)
 
 
 # ---------------------------------------------------------------------------
@@ -763,8 +864,10 @@ def evaluate_model_vec(
     episode order, so the returned dict -- keys, per-episode lists and all
     -- equals :func:`evaluate_model`'s for the same arguments whenever the
     policy acts deterministically (``deterministic=True``). With sampled
-    actions the episodes' environment side is the same but the samples are
-    drawn in a different order (see the module docstring).
+    actions and a ``seed`` the samples come from a stream of their own,
+    seeded once per call (the global generator is left as it was): the
+    result is reproducible for the same pool size, but the draws differ
+    from the serial path's (see the module docstring).
 
     The envs' seats are set per episode when ``seats`` is given and
     restored afterwards. ``pool`` stays open (the caller owns it).
@@ -813,39 +916,44 @@ def evaluate_model_vec(
                 keep_trace=trace_dir_path is not None,
             )
 
-    try:
-        assign(range(inner.num_envs))
-        while True:
-            active = [j for j in range(inner.num_envs) if trackers[j] is not None]
-            if not active:
-                break
-            batch_obs = _stack_obs([obs[j] for j in active])
-            predict_kwargs: dict[str, Any] = {"deterministic": deterministic}
-            if want_masks:
-                predict_kwargs["action_masks"] = np.stack([masks[j] for j in active])
-            actions, _ = model.predict(batch_obs, **predict_kwargs)
-            results = inner.step({j: actions[k] for k, j in enumerate(active)})
-            finished = []
-            for k, j in enumerate(active):
-                ob, reward, terminated, truncated, info, mask = results[j]
-                tracker = trackers[j]
-                assert tracker is not None
-                tracker.on_step(actions[k], reward, terminated, truncated, info)
-                if terminated or truncated:
-                    records[tracker.index] = tracker.finish(
-                        info, trace_dir=trace_dir_path, trace_triggers=trace_triggers, seat_tag=seat_tag
-                    )
-                    finished.append(j)
-                else:
-                    obs[j], masks[j] = ob, mask
-            if finished:
-                assign(finished)
-    finally:
-        if seats is not None:
-            for j in range(inner.num_envs):
-                previous = probe[j]["agent_seat"]
-                if previous is not None:
-                    inner.set_seat(j, previous)
+    # A seeded stochastic eval samples from its own stream, seeded once:
+    # one batched predict draws every in-play env's action together.
+    with _isolated_policy_rng(model, enabled=not deterministic and seed is not None) as reseed:
+        if reseed is not None:
+            reseed(policy_sampling_seed(int(seed)))
+        try:
+            assign(range(inner.num_envs))
+            while True:
+                active = [j for j in range(inner.num_envs) if trackers[j] is not None]
+                if not active:
+                    break
+                batch_obs = _stack_obs([obs[j] for j in active])
+                predict_kwargs: dict[str, Any] = {"deterministic": deterministic}
+                if want_masks:
+                    predict_kwargs["action_masks"] = np.stack([masks[j] for j in active])
+                actions, _ = model.predict(batch_obs, **predict_kwargs)
+                results = inner.step({j: actions[k] for k, j in enumerate(active)})
+                finished = []
+                for k, j in enumerate(active):
+                    ob, reward, terminated, truncated, info, mask = results[j]
+                    tracker = trackers[j]
+                    assert tracker is not None
+                    tracker.on_step(actions[k], reward, terminated, truncated, info)
+                    if terminated or truncated:
+                        records[tracker.index] = tracker.finish(
+                            info, trace_dir=trace_dir_path, trace_triggers=trace_triggers, seat_tag=seat_tag
+                        )
+                        finished.append(j)
+                    else:
+                        obs[j], masks[j] = ob, mask
+                if finished:
+                    assign(finished)
+        finally:
+            if seats is not None:
+                for j in range(inner.num_envs):
+                    previous = probe[j]["agent_seat"]
+                    if previous is not None:
+                        inner.set_seat(j, previous)
     done = [r for r in records if r is not None]
     assert len(done) == len(plan), "every planned episode must finish"
     return _aggregate(done, track_breakdown=track_breakdown, traced=trace_dir_path is not None)
