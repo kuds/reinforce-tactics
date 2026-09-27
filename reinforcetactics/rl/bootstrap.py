@@ -281,6 +281,7 @@ CONSUMED_CONFIG_FIELDS: frozenset[str] = frozenset(
         "env.gold_scale",
         "env.turn_scale",
         "env.unit_count_scale",
+        "env.agent_seat",
         "env.n_envs",
         "env.use_subprocess",
         # MaskablePPO's constructor kwargs (PPOConfig.as_sb3_kwargs) and the
@@ -1221,6 +1222,8 @@ def _stage_env_kwargs(
         # Was dropped here, so a curriculum with ``env.fog_of_war: true``
         # trained and evaluated with full information (review rltrain-9).
         "fog_of_war": env_cfg.fog_of_war,
+        # 1 (default), 2 or "random" (critic-gaps-2).
+        "agent_seat": env_cfg.agent_seat,
     }
 
 
@@ -1397,6 +1400,7 @@ def record_curriculum_replays(
                     "opponent": meta.get("opponent"),
                     "video_path": info.get("video_path"),
                     "winner": info.get("winner"),
+                    "agent_player": info.get("agent_player", 1),
                     "end_reason": info.get("end_reason"),
                     "steps": info.get("steps"),
                     "total_reward": info.get("total_reward"),

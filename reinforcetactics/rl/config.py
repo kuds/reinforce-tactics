@@ -49,7 +49,7 @@ from reinforcetactics.rl.env_schema import (
     validate_opponent_kwargs,
     validate_reward_config,
 )
-from reinforcetactics.rl.gym_env import FLAT_ACTION_VERSIONS
+from reinforcetactics.rl.gym_env import AGENT_SEATS, FLAT_ACTION_VERSIONS, parse_agent_seat
 from reinforcetactics.rules import ALL_UNIT_TYPES
 
 try:
@@ -133,6 +133,13 @@ class EnvConfig:
     # ignores it, as it ignores ``opponent``: set
     # :attr:`CurriculumStage.opponent_kwargs` on each stage instead.
     opponent_kwargs: dict[str, Any] | None = None
+    # The seat the agent trains in: 1 (the first mover; the default and the
+    # only seat every run before this field trained), 2, or "random" (drawn
+    # from each env's np_random on every reset). Forwarded to every env the
+    # curriculum builds (training, eval, replays) and to the feudal / flat
+    # trainers; train_self_play.py applies it to its bot workers and eval
+    # env (self-play workers follow self_play.swap_players).
+    agent_seat: int | str = 1
 
 
 @dataclass
@@ -910,6 +917,10 @@ class TrainingConfig:
         )
         for name in ("gold_scale", "turn_scale", "unit_count_scale"):
             _require(getattr(env, name) > 0, f"env.{name} must be > 0 (it divides a tanh input), got {getattr(env, name)}")
+        try:
+            env.agent_seat = parse_agent_seat(env.agent_seat)
+        except ValueError:
+            raise ValueError(f"env.agent_seat must be one of {AGENT_SEATS}, got {env.agent_seat!r}") from None
         if env.enabled_units is not None:
             # A typo used to pass here and crash on the first action mask
             # (a bare KeyError, a broken pipe inside a SubprocVecEnv worker),

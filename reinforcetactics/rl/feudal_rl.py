@@ -1856,7 +1856,11 @@ class FeudalRLAgent:
                 done = terminated or truncated
 
             rewards.append(ep_reward)
-            if info.get("winner") == self.agent_player:
+            # The env's seat for this episode: with agent_seat="random" it is
+            # drawn per reset, so the agent's construction-time seat is not
+            # necessarily the one it just played.
+            seat = getattr(getattr(env, "unwrapped", env), "agent_player", self.agent_player)
+            if info.get("winner") == seat:
                 wins += 1
 
         self.feature_extractor.train()
