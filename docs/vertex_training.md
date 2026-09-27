@@ -169,16 +169,26 @@ pass it to `--resume`:
 python3 scripts/train/train_bootstrap.py --resume ./bootstrap_run --device cuda
 ```
 
-The stages whose `config.json` says `promoted: true` are skipped; the stage that
-was running continues from its rolling `<stage>/latest.zip` (saved every
-`eval.checkpoint_freq` stage steps, and on `SIGTERM`) with the rest of its
-budget, its eval timeline, promotion streak, best-model record and schedule
-positions (see `run_manifest.json`). `num_timesteps` and the TensorBoard curves
-continue. Without `--config` the run's own `resolved_config.yaml` is used; a
-config that differs from it in what is trained or measured is refused unless
-`--force`. A stalled run (`run_status.json` says `curriculum_stalled`) is not
-resumed: start a new run with `warm_start_path` set to the stalled stage's
-`best_model.zip`.
+The stages whose `config.json` says `promoted: true` are skipped (so are
+stages whose `config.json` write failed but whose promotion `run_manifest.json`
+recorded); the stage that was running continues from its rolling
+`<stage>/latest.zip` (saved every `eval.checkpoint_freq` stage steps, on
+promotion, and on `SIGTERM`) with the rest of its budget, its eval timeline,
+promotion streak, best-model record and schedule positions (see
+`run_manifest.json`). A stage whose checkpoint was taken on its promoting eval
+is finished rather than trained again, and a retry killed before its first
+checkpoint restarts from the checkpoint it began from. `num_timesteps` and the
+TensorBoard curves continue. Without `--config` the run's own
+`resolved_config.yaml` is used (a record written before the eval-gate change
+keeps its greedy gate, greedy-only evals and no stall retries); a config that
+differs from it in what is trained or measured is refused unless `--force`.
+`--force` is also needed to resume a run whose records stop short of stages
+that already have output (resuming would overwrite them), or a `--build-bc`
+run stopped before its warm start was built (it then resumes without one). A
+stalled run (`run_status.json` says `curriculum_stalled`) is not resumed: start
+a new run with `warm_start_path` set to the stalled stage's `best_model.zip`.
+`metadata_write_failures` in `run_status.json` counts the best-effort writes
+that failed in every session of the run.
 
 ### Configuration (environment variables)
 
