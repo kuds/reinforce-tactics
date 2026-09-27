@@ -203,6 +203,10 @@ def upload_tree(local_dir, dest_uri, **kwargs):
     return len(files)
 
 bootstrap.run_curriculum = curriculum
+# The child runs in a scratch directory, where the config's relative map paths
+# do not resolve; resolving pad_to_size reads them (and is part of the stubbed
+# curriculum's job anyway).
+bootstrap.resolve_config = lambda cfg: cfg
 storage.upload_tree = upload_tree
 sys.exit(train_bootstrap.main(argv))
 """

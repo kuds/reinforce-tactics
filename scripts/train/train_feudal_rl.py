@@ -26,8 +26,9 @@ from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 # Local imports
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.rl.config import EnvConfig
-from reinforcetactics.rl.gym_env import StrategyGameEnv
+from reinforcetactics.rl.gym_env import StrategyGameEnv, accepted_opponents
 from reinforcetactics.rl.masking import ActionMaskedEnv, make_maskable_env, make_maskable_vec_env
 
 
@@ -42,8 +43,15 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
     observation-scale knobs, ``pad_to_size``) come from ``cfg_env`` because
     they can't be passed cleanly through argparse.
 
-    ``include_render`` toggles fields that ``StrategyGameEnv`` accepts but
-    the maskable factories don't (``render_mode``, ``fog_of_war``).
+    ``include_render`` adds ``render_mode``, which ``StrategyGameEnv``
+    accepts but the maskable factories don't. (``fog_of_war`` used to be
+    left out for the maskable factories too, so ``--use-action-masking``
+    runs trained with full information whatever the config said.)
+
+    ``gamma`` is the trainer's discount (``--gamma`` / ``ppo.gamma``): the
+    env's potential-based shaping ``gamma * Phi(s') - Phi(s)`` is only
+    policy-invariant for the discount the learner uses. It used to be left
+    out, so the envs shaped with 0.99 whatever the learner's discount was.
     """
     kwargs: dict = {
         "opponent": args.opponent,
@@ -51,6 +59,8 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
         "map_file": getattr(args, "map_file", None),
         "max_turns": getattr(args, "max_turns", None),
     }
+    if getattr(args, "gamma", None) is not None:
+        kwargs["gamma"] = args.gamma
     if include_render:
         kwargs["render_mode"] = None
     if cfg_env is not None:
@@ -67,11 +77,25 @@ def _env_kwargs_from_cfg(cfg_env: "EnvConfig | None", args, *, include_render: b
                 "unit_count_scale": cfg_env.unit_count_scale,
                 "opponent_kwargs": cfg_env.opponent_kwargs,
                 "pad_to_size": cfg_env.pad_to_size,
+                "fog_of_war": cfg_env.fog_of_war,
             }
         )
-        if include_render:
-            kwargs["fog_of_war"] = cfg_env.fog_of_war
+        if cfg_env.flat_action_version is not None:
+            kwargs["flat_action_version"] = cfg_env.flat_action_version
     return kwargs
+
+
+def _run_record(args) -> dict:
+    """``vars(args)`` as JSON-safe data for ``config.json``.
+
+    ``args._cfg`` (the loaded TrainingConfig) is not JSON-serializable; it is
+    recorded as ``config`` (its plain dict) instead. Dumping ``vars(args)``
+    with it raised at the very end of every ``--config`` run.
+    """
+    record = {k: v for k, v in vars(args).items() if k != "_cfg"}
+    cfg = getattr(args, "_cfg", None)
+    record["config"] = cfg.to_dict() if cfg is not None else None
+    return record
 
 
 def _make_strategy_env(args, *, seed: int | None = None):
@@ -236,7 +260,7 @@ def train_flat_baseline(args):
     print(f"\n✅ Training complete! Model saved to {final_path}")
 
     # Save training config
-    config = vars(args)
+    config = _run_record(args)
     config_path = log_dir / "config.json"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
@@ -389,13 +413,23 @@ def train_feudal_rl(args):
             return RandomBot(game_state, player=opponent_player)
 
     if self_play_enabled:
+        # Every env that plays episodes needs the factory: an opponent='self'
+        # env without one has no opponent at all. The vectorized rollout envs
+        # (n_envs > 1) used to be left out, so collect_rollout_vec trained
+        # every one of them against nothing.
         env.set_self_play_opponent_factory(_build_self_play_opponent)
+        for vec_env in vec_envs:
+            vec_env.set_self_play_opponent_factory(_build_self_play_opponent)
         # Take an initial snapshot so episode #1 already has a real opponent
         # (otherwise the first ``opponent_snapshot_freq`` steps would train
         # against RandomBot only, which is the same trap the bootstrap notebook
         # exists to escape).
         _add_snapshot(0)
+        # Reset (with the seeds they were built with) so the first episodes
+        # bind a snapshot opponent.
         env.reset(seed=args.seed)
+        for i, vec_env in enumerate(vec_envs):
+            vec_env.reset(seed=args.seed + i + 1)
         # Eval keeps using the originally-requested eval opponent (typically
         # 'random' or 'bot') — we don't want eval scores to drift with the
         # self-play opponent strength.
@@ -615,7 +649,7 @@ def train_feudal_rl(args):
             total_timesteps, best_eval_reward, best_eval_win_rate, last_eval_step, last_ckpt_step, last_snapshot_step
         ),
     )
-    config = vars(args)
+    config = _run_record(args)
     config_path = log_dir / "config.json"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
@@ -666,14 +700,91 @@ _ARG_TO_CONFIG_PATH = {
     "wandb_entity": "logging.wandb_entity",
 }
 
+# Config fields read by both modes: the argparse-mapped ones (minus the
+# mode-specific ones below) and the env fields ``_env_kwargs_from_cfg``
+# forwards. Anything else a --config sets away from its default is reported
+# (an error with --strict).
+_ENV_FIELDS_FROM_CFG = frozenset(
+    {
+        "env.reward_config",
+        "env.enabled_units",
+        "env.action_space_type",
+        "env.max_flat_actions",
+        "env.flat_action_version",
+        "env.max_actions_per_turn",
+        "env.engine_overrides",
+        "env.gold_scale",
+        "env.turn_scale",
+        "env.unit_count_scale",
+        "env.opponent_kwargs",
+        "env.pad_to_size",
+        "env.fog_of_war",
+    }
+)
+_FLAT_ONLY_FIELDS = frozenset({"ppo.use_action_masking"})
+_FEUDAL_ONLY_FIELDS = frozenset({"feudal.*", "ppo.lr_schedule"})
+# Read only when --mode feudal runs self-play (--opponent self): the
+# snapshot cadence, the snapshot pool and the fixed eval opponent. With a
+# scripted training opponent they used to count as read, so --strict passed
+# a config whose self_play section did nothing.
+_SELF_PLAY_FIELDS = frozenset({"self_play.snapshot_freq", "self_play.pool_size", "self_play.eval_opponent"})
+_COMMON_FIELDS = (
+    frozenset(p for p in _ARG_TO_CONFIG_PATH.values() if not p.startswith("feudal."))
+    - _FLAT_ONLY_FIELDS
+    - _FEUDAL_ONLY_FIELDS
+    - _SELF_PLAY_FIELDS
+) | _ENV_FIELDS_FROM_CFG
 
-def main():
-    """Main entry point for training script."""
+
+def consumed_config_fields(mode: str, opponent: str | None = None) -> frozenset[str]:
+    """The config fields a run in ``mode`` (``'flat'`` / ``'feudal'``) against ``opponent`` reads."""
+    if mode == "flat":
+        return _COMMON_FIELDS | _FLAT_ONLY_FIELDS
+    consumed = _COMMON_FIELDS | _FEUDAL_ONLY_FIELDS
+    if opponent == "self":
+        consumed |= _SELF_PLAY_FIELDS
+    return consumed
+
+
+# The widest set each mode reads (feudal: with --opponent self);
+# :func:`consumed_config_fields` gives a run's own.
+CONSUMED_CONFIG_FIELDS: dict[str, frozenset[str]] = {
+    "flat": consumed_config_fields("flat"),
+    "feudal": consumed_config_fields("feudal", "self"),
+}
+CONSUMED_ALGORITHMS: dict[str, tuple[str, ...]] = {"flat": ("ppo", "maskable_ppo"), "feudal": ("feudal",)}
+IGNORED_FIELD_HINTS: dict[str, str] = {
+    "algorithm": "the training mode is --mode (flat by default), not the config's algorithm",
+    "warm_start_path": "use --resume (feudal mode) to continue a checkpoint",
+    "curriculum.*": "read only by train_bootstrap.py",
+    "env.use_subprocess": "the flat baseline uses SubprocVecEnv whenever n_envs > 1",
+    "ppo.use_action_masking": "only the flat baseline (--mode flat) chooses PPO vs MaskablePPO",
+    "ppo.lr_schedule": "only --mode feudal applies an LR schedule",
+    "ppo.policy_kwargs": "not forwarded by this script",
+    "ppo.purchase_explore_eps": "only the curriculum runner installs the purchase-exploration hook",
+    "feudal.*": "only --mode feudal trains the feudal agent",
+    "self_play.*": "only --mode feudal with --opponent self runs self-play here",
+    "eval.seed_offset": "read only by train_bootstrap.py",
+    "eval.resample_eval_seeds": "read only by train_bootstrap.py",
+    "eval.best_eligible_after": "read only by train_bootstrap.py",
+    "logging.tensorboard": "TensorBoard logs always go to <log-dir>/tensorboard",
+    "alphazero.*": "read only by train_alphazero.py",
+}
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the command line (``argv``, default ``sys.argv``) into the training args.
+
+    With ``--config``, the config's values become the defaults, the loaded
+    config rides along as ``args._cfg``, and the fields the chosen ``--mode``
+    does not read are reported (an ``IgnoredConfigFieldError`` with
+    ``--strict``).
+    """
     # Pre-parse --config so YAML values become the parser's defaults; CLI
     # flags still override because argparse prefers user-supplied values.
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument("--config", type=str, default=None, help="Path to YAML/JSON training config")
-    pre_args, _ = pre_parser.parse_known_args()
+    pre_args, _ = pre_parser.parse_known_args(argv)
 
     parser = argparse.ArgumentParser(
         description="Train RL agents for Reinforce Tactics",
@@ -685,8 +796,20 @@ def main():
         "--mode", type=str, default="flat", choices=["flat", "feudal"], help="Training mode: flat baseline or feudal RL"
     )
 
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Make config fields this mode does not read an error (default: a warning)",
+    )
+
     # Environment args
-    parser.add_argument("--opponent", type=str, default="bot", choices=["bot", "random", "self"], help="Opponent type")
+    parser.add_argument(
+        "--opponent",
+        type=str,
+        default="bot",
+        choices=accepted_opponents(),
+        help="Opponent: a scripted bot from the registry, or 'self' (self-play, --mode feudal only)",
+    )
     parser.add_argument(
         "--map-file",
         type=str,
@@ -781,7 +904,8 @@ def main():
         "--eval-opponent",
         type=str,
         default="random",
-        help="Self-play only: opponent type to use for periodic evaluation. "
+        choices=accepted_names(),
+        help="Self-play only: scripted opponent to use for periodic evaluation. "
         "Defaults to 'random' so eval scores don't drift with training opponent strength.",
     )
 
@@ -803,12 +927,40 @@ def main():
         loaded_cfg = load_config(pre_args.config)
         parser.set_defaults(**config_to_argparse_defaults(loaded_cfg, _ARG_TO_CONFIG_PATH))
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    # An opponent='self' env without the feudal trainer's snapshot factory
+    # has no opponent at all: the flat baseline would train against nothing.
+    if args.opponent == "self" and args.mode != "feudal":
+        parser.error("--opponent self is only supported with --mode feudal (the flat baseline has no self-play opponent)")
+    from reinforcetactics.rl.config import check_ignored_config_fields, effective_config
+
+    if loaded_cfg is not None:
+        check_ignored_config_fields(
+            loaded_cfg,
+            consumed_config_fields(args.mode, args.opponent),
+            entry_point=f"train_feudal_rl.py --mode {args.mode}",
+            strict=args.strict,
+            algorithms=CONSUMED_ALGORITHMS[args.mode],
+            hints=IGNORED_FIELD_HINTS,
+        )
+    # The flags override the validated config's values: validate what the
+    # run will actually use (a bad value is a usage error), and run with the
+    # validated values as coerced (write_back).
+    try:
+        effective_config(loaded_cfg, args, _ARG_TO_CONFIG_PATH, write_back=True)
+    except (TypeError, ValueError) as exc:
+        parser.error(str(exc))
     # Carry the typed cfg through so env constructors can read non-scalar
     # fields (reward_config, engine_overrides, enabled_units, opponent_kwargs)
     # that argparse can't easily express. ``_make_strategy_env`` and the
     # maskable factories both consult ``args._cfg.env`` when present.
     args._cfg = loaded_cfg
+    return args
+
+
+def main(argv: list[str] | None = None):
+    """Main entry point for training script."""
+    args = parse_args(argv)
 
     # Set device
     if args.device == "auto":

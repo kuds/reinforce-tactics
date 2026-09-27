@@ -35,6 +35,7 @@ except ImportError:
     print("Error: sb3-contrib is required. Install with: pip install sb3-contrib")
     sys.exit(1)
 
+from reinforcetactics.game.bot_registry import accepted_names
 from reinforcetactics.rl import (
     load_scenarios_from_yaml,
     make_maskable_env,
@@ -46,7 +47,7 @@ from reinforcetactics.rl import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--demonstrator", default="medium", choices=["simple", "medium", "advanced"])
-    parser.add_argument("--opponent", default="medium", choices=["simple", "medium", "advanced", "random"])
+    parser.add_argument("--opponent", default="medium", choices=accepted_names())
     parser.add_argument("--n-episodes", type=int, default=50, help="Number of bot-vs-bot episodes to record")
     parser.add_argument("--bc-epochs", type=int, default=5, help="Behavior-cloning epochs")
     parser.add_argument("--bc-batch-size", type=int, default=64)

@@ -32,6 +32,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
@@ -41,7 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from reinforcetactics.rl.config import CurriculumStage, TrainingConfig
+from reinforcetactics.rl.config import CurriculumStage, TrainingConfig, check_ignored_config_fields
 
 ConfigPath = str | Path
 
@@ -189,7 +190,9 @@ def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> tuple[int, int] | None:
     if not map_files:
         return None
 
-    dims = [_read_map_dims(mf) for mf in map_files]
+    # Stages share a handful of maps: read each file once.
+    dims_by_file = {mf: _read_map_dims(mf) for mf in dict.fromkeys(map_files)}
+    dims = [dims_by_file[mf] for mf in map_files]
     max_h = max(h for h, _ in dims)
     max_w = max(w for _, w in dims)
 
@@ -219,6 +222,128 @@ def _resolve_curriculum_pad_size(cfg: TrainingConfig) -> tuple[int, int] | None:
             "'flat_discrete'; switch action_space_type or use a single map size."
         )
     return (max_h, max_w)
+
+
+def resolve_config(cfg: TrainingConfig) -> TrainingConfig:
+    """Return a copy of ``cfg`` with every value the runner derives filled in.
+
+    Pure: ``cfg`` is not modified. Resolves the two env settings that the
+    YAML alone does not determine, so a record written from the result
+    (``resolved_config.yaml``) can rebuild the run's observation and
+    action spaces (review rltrain-13):
+
+    - ``env.pad_to_size``: the curriculum-wide observation padding
+      (:func:`_resolve_curriculum_pad_size`; reads the stage maps).
+    - ``env.flat_action_version``: ``None`` becomes the warm-start
+      checkpoint's version (flat_discrete only), so a transplanted policy
+      keeps the decode table it was trained on, else the latest version
+      (:func:`reinforcetactics.rl.gym_env.resolve_flat_action_version`).
+
+    Idempotent: resolving a resolved config changes nothing.
+    """
+    from reinforcetactics.rl.gym_env import resolve_flat_action_version
+
+    resolved = copy.deepcopy(cfg)
+    resolved.env.pad_to_size = _resolve_curriculum_pad_size(cfg)
+    resolved.env.flat_action_version = resolve_flat_action_version(
+        cfg.env.flat_action_version,
+        action_space_type=cfg.env.action_space_type,
+        checkpoint_path=cfg.warm_start_path,
+    )
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# What the curriculum runner reads from a TrainingConfig (review rltrain-9).
+# ``check_ignored_config_fields(cfg, CONSUMED_CONFIG_FIELDS, ...)`` reports
+# every other field a config sets away from its default; train_bootstrap.py
+# warns by default and errors under --strict.
+# ---------------------------------------------------------------------------
+
+CONSUMED_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "seed",
+        "warm_start_path",
+        # Every EnvConfig field _stage_env_kwargs forwards (map_file, opponent
+        # and opponent_kwargs come from each stage instead), plus the
+        # vec-env knobs of the default train-env factory.
+        "env.max_steps",
+        "env.max_turns",
+        "env.fog_of_war",
+        "env.enabled_units",
+        "env.action_space_type",
+        "env.max_flat_actions",
+        "env.flat_action_version",
+        "env.max_actions_per_turn",
+        "env.reward_config",
+        "env.engine_overrides",
+        "env.pad_to_size",
+        "env.gold_scale",
+        "env.turn_scale",
+        "env.unit_count_scale",
+        "env.n_envs",
+        "env.use_subprocess",
+        # MaskablePPO's constructor kwargs (PPOConfig.as_sb3_kwargs) and the
+        # purchase-exploration hook.
+        "ppo.learning_rate",
+        "ppo.n_steps",
+        "ppo.batch_size",
+        "ppo.n_epochs",
+        "ppo.gamma",
+        "ppo.gae_lambda",
+        "ppo.clip_range",
+        "ppo.ent_coef",
+        "ppo.vf_coef",
+        "ppo.max_grad_norm",
+        "ppo.device",
+        "ppo.policy_kwargs",
+        "ppo.purchase_explore_eps",
+        "curriculum.*",
+        "eval.eval_freq",
+        "eval.n_eval_episodes",
+        "eval.seed_offset",
+        "eval.resample_eval_seeds",
+        "eval.best_eligible_after",
+    }
+)
+
+# Algorithm labels consistent with what the runner trains.
+CONSUMED_ALGORITHMS: tuple[str, ...] = ("maskable_ppo",)
+
+IGNORED_FIELD_HINTS: dict[str, str] = {
+    "total_timesteps": "run length is the sum of curriculum.stages[].max_timesteps",
+    "algorithm": "the curriculum always trains MaskablePPO",
+    "env.map_file": "each curriculum stage sets its own map_file",
+    "env.opponent": "each curriculum stage sets its own opponent",
+    "env.opponent_kwargs": "set opponent_kwargs on the curriculum stage",
+    "ppo.use_action_masking": "the curriculum always trains MaskablePPO with masks",
+    "ppo.lr_schedule": "not implemented for the SB3 trainers; the learning rate is constant",
+    "eval.checkpoint_freq": "the curriculum saves best_model.zip and stage_final.zip per stage",
+    "logging.*": "outputs go under --output-dir, TensorBoard logs to <output-dir>/tensorboard",
+    "feudal.*": "read only by train_feudal_rl.py",
+    "self_play.*": "read only by train_self_play.py / train_feudal_rl.py",
+    "alphazero.*": "read only by train_alphazero.py",
+}
+
+
+def _note_flat_version_change(checkpoint: Path, env_version: int | None) -> None:
+    """Say so when a warm-started flat_discrete policy continues on a different decode table.
+
+    Only possible when ``env.flat_action_version`` was set explicitly (the
+    default follows the checkpoint). The model keeps the env's stamp, so
+    checkpoints saved from here on record the table they now play.
+    """
+    from reinforcetactics.rl.gym_env import checkpoint_flat_action_version
+
+    try:
+        ckpt_version = checkpoint_flat_action_version(checkpoint)
+    except (OSError, ValueError):
+        return
+    if env_version is not None and ckpt_version != env_version:
+        print(
+            f"  note: {checkpoint.name} was trained on flat_action_version {ckpt_version}; "
+            f"this run continues it on version {env_version} (env.flat_action_version)"
+        )
 
 
 def _resolve_dotted(path: str) -> Any:
@@ -437,18 +562,13 @@ def _write_stage_config(
     if purchase_eps_schedule is not None:
         ppo_resolved["purchase_explore_eps_schedule"] = purchase_eps_schedule
 
-    env_resolved: dict[str, Any] = {
-        "map_file": stage.map_file,
-        "max_steps": stage.resolve_max_steps(cfg.env),
-        "max_turns": stage.resolve_max_turns(cfg.env),
-        "enabled_units": list(cfg.env.enabled_units) if cfg.env.enabled_units else None,
-        "action_space_type": cfg.env.action_space_type,
-        "max_flat_actions": cfg.env.max_flat_actions,
-        "max_actions_per_turn": cfg.env.max_actions_per_turn,
-        "reward_config": stage.resolve_reward_config(cfg.env),
-        "opponent_kwargs": dict(stage.opponent_kwargs) if stage.opponent_kwargs else None,
-        "engine_overrides": dict(cfg.env.engine_overrides) if cfg.env.engine_overrides else None,
-    }
+    # Exactly the kwargs the stage's envs were built with, from the same
+    # helper the env factories use. A hand-copied subset used to leave out
+    # pad_to_size and the observation scales, so the record could not
+    # rebuild the observation space (review rltrain-13).
+    env_resolved: dict[str, Any] = copy.deepcopy(_stage_env_kwargs(stage, cfg.env))
+    if env_resolved["pad_to_size"] is not None:
+        env_resolved["pad_to_size"] = list(env_resolved["pad_to_size"])
 
     run_config = build_run_config(
         run_type="ppo_bootstrap",
@@ -462,7 +582,7 @@ def _write_stage_config(
             "promotion_win_rate": stage.promotion_win_rate,
             "patience": stage.patience,
             "max_timesteps": stage.max_timesteps,
-            "n_eval_episodes": stage.n_eval_episodes,
+            "n_eval_episodes": stage.resolve_n_eval_episodes(cfg.eval),
             "n_envs": cfg.env.n_envs,
             "eval_freq": cfg.eval.eval_freq,
             "promoted": promoted,
@@ -585,20 +705,40 @@ def run_curriculum(
         install_purchase_explore_hook,
     )
 
-    cfg.validate()
+    # check_files: a missing warm_start_path fails here, before any env or
+    # model is built, rather than after the first stage's envs are up.
+    cfg.validate(check_files=True)
     if not cfg.curriculum.stages:
         raise ValueError("cfg.curriculum.stages is empty; nothing to run")
+    # Say which config fields this runner does not read (a warning; the
+    # train_bootstrap.py CLI reports them itself, before any output, and
+    # makes them an error under --strict). Notebooks call run_curriculum
+    # directly and used to get no report at all (review rltrain-9).
+    check_ignored_config_fields(
+        cfg,
+        CONSUMED_CONFIG_FIELDS,
+        entry_point="run_curriculum",
+        algorithms=CONSUMED_ALGORITHMS,
+        hints=IGNORED_FIELD_HINTS,
+        strict_hint="train_bootstrap.py --strict makes this an error.",
+    )
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve cross-stage pad_to_size before instantiating any env. When the
-    # curriculum mixes map sizes this is required for the policy to be
-    # reusable across stages (set_env in bootstrap rejects shape mismatches).
-    resolved_pad = _resolve_curriculum_pad_size(cfg)
-    if resolved_pad is not None and cfg.env.pad_to_size is None:
-        print(f"  curriculum spans multiple map sizes; auto-padding observations to {resolved_pad} (height, width)")
-    cfg.env.pad_to_size = resolved_pad
+    # Resolve cross-stage pad_to_size (required for the policy to be
+    # reusable across stages when the curriculum mixes map sizes: set_env in
+    # bootstrap rejects shape mismatches) and the flat_discrete table
+    # version before instantiating any env. Written back into ``cfg`` so
+    # callers that build stage envs after the run (sanity eval, replays)
+    # get the same values training used.
+    resolved = resolve_config(cfg)
+    if resolved.env.pad_to_size is not None and cfg.env.pad_to_size is None:
+        print(
+            f"  curriculum spans multiple map sizes; auto-padding observations to {resolved.env.pad_to_size} (height, width)"
+        )
+    cfg.env.pad_to_size = resolved.env.pad_to_size
+    cfg.env.flat_action_version = resolved.env.flat_action_version
 
     train_env_factory = train_env_factory or _default_train_env_factory
     eval_env_factory = eval_env_factory or _default_eval_env_factory
@@ -643,13 +783,8 @@ def run_curriculum(
             # curriculum. A space mismatch surfaces here with an
             # actionable SB3 error rather than a silent mis-load.
             if cfg.warm_start_path:
+                # Existence was checked by validate(check_files=True) above.
                 warm_path = Path(cfg.warm_start_path)
-                if not warm_path.exists():
-                    raise FileNotFoundError(
-                        f"warm_start_path '{warm_path}' does not exist. "
-                        "Provide a valid SB3 .zip checkpoint or unset "
-                        "warm_start_path for a cold start."
-                    )
                 # sha256 of the checkpoint bytes -- so per-stage config.json
                 # and run_status.json can distinguish two runs that loaded
                 # *different* BC builds from the same path (e.g. timestamped
@@ -657,6 +792,8 @@ def run_curriculum(
                 warm_sha = hashlib.sha256(warm_path.read_bytes()).hexdigest()
                 print(f"  warm-starting policy from {warm_path}  sha256={warm_sha[:12]}")
                 model.set_parameters(str(warm_path), exact_match=True)
+                if cfg.env.action_space_type == "flat_discrete":
+                    _note_flat_version_change(warm_path, cfg.env.flat_action_version)
                 warm_start_info = {
                     "used": True,
                     "path": str(warm_path),
@@ -721,7 +858,9 @@ def run_curriculum(
         eval_cb = PeriodicEvalCallback(
             eval_env=eval_env,
             eval_freq=cfg.eval.eval_freq,
-            n_eval_episodes=stage.n_eval_episodes,
+            # The stage's override, else eval.n_eval_episodes (which this
+            # runner used to ignore in favour of a hidden stage default).
+            n_eval_episodes=stage.resolve_n_eval_episodes(cfg.eval),
             # Seed eval episodes far above the training envs' range so a
             # given (eval_block, episode_idx) reproduces across runs and
             # never collides with a training rollout's seed.
@@ -1069,6 +1208,9 @@ def _stage_env_kwargs(
         # reject the checkpoint (or worse, evaluate a truncated action
         # space). This was the drift bug this helper exists to prevent.
         "max_flat_actions": env_cfg.max_flat_actions,
+        # ``None`` only before resolve_config (run_curriculum resolves it
+        # first); the env then uses FLAT_ACTION_VERSION_LATEST.
+        "flat_action_version": env_cfg.flat_action_version,
         "max_actions_per_turn": env_cfg.max_actions_per_turn,
         "pad_to_size": env_cfg.pad_to_size,
         "opponent_kwargs": opponent_kwargs,
@@ -1076,6 +1218,9 @@ def _stage_env_kwargs(
         "turn_scale": env_cfg.turn_scale,
         "unit_count_scale": env_cfg.unit_count_scale,
         "engine_overrides": env_cfg.engine_overrides,
+        # Was dropped here, so a curriculum with ``env.fog_of_war: true``
+        # trained and evaluated with full information (review rltrain-9).
+        "fog_of_war": env_cfg.fog_of_war,
     }
 
 
@@ -1104,8 +1249,11 @@ def make_stage_env(
         env_cfg: The run-wide :class:`EnvConfig` providing fallbacks for
             ``stage.resolve_*`` calls plus the scale factors,
             ``enabled_units``, ``action_space_type``,
-            ``max_actions_per_turn``, ``pad_to_size``, and
-            ``engine_overrides`` that the stage doesn't override.
+            ``max_actions_per_turn``, ``pad_to_size``, ``fog_of_war``,
+            ``flat_action_version`` and ``engine_overrides`` that the stage
+            doesn't override. Pass a :func:`resolve_config` result (or the
+            cfg a finished :func:`run_curriculum` resolved in place) so
+            ``pad_to_size`` and ``flat_action_version`` match training.
         seed: Per-env seed. Forwarded into ``env.reset(seed=...)`` so the
             episode RNG is deterministic. Required keyword to push
             callers to choose a fresh offset (e.g. ``cfg.seed + 9999``

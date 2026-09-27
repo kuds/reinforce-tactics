@@ -24,7 +24,9 @@ classification.
 
 from __future__ import annotations
 
+import inspect
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from reinforcetactics.game.bot import (
@@ -56,11 +58,19 @@ SCRIPTED_BOTS: dict[str, type] = {
 # streams for the two groups (see rl/imitation) key off this set.
 STOCHASTIC_BOTS = frozenset({"mixed", "random", "balanced_random"})
 
-# Accepted aliases → canonical short name. Class names resolve
-# case-insensitively ("SimpleBot" → "simple"); "bot" is the historic
-# alias for the default scripted opponent.
-_ALIASES: dict[str, str] = {"bot": "simple"}
+# Short aliases → canonical short name. "bot" is the historic alias for the
+# default scripted opponent. These, with the canonical names, are what
+# configs and CLIs list (see :func:`accepted_names`).
+_SHORT_ALIASES: dict[str, str] = {"bot": "simple"}
+
+# Every accepted alias → canonical short name. Class names also resolve,
+# case-insensitively ("SimpleBot" → "simple").
+_ALIASES: dict[str, str] = dict(_SHORT_ALIASES)
 _ALIASES.update({cls.__name__.lower(): name for name, cls in SCRIPTED_BOTS.items()})
+
+# Constructor arguments every scripted bot takes from its caller rather than
+# from ``kwargs`` (see :func:`build_scripted`); never valid as extra kwargs.
+_SUPPLIED_ARGS = frozenset({"game_state", "player", "rng"})
 
 _LLM_TYPES = frozenset({"openaibot", "claudebot", "geminibot", "llm"})
 # AlphaZeroBot plays a trained network too (through MCTS), so like ModelBot
@@ -85,6 +95,83 @@ def canonical_name(bot_type: Any) -> str:
     if key not in SCRIPTED_BOTS:
         raise KeyError(f"Unknown scripted bot type: {bot_type!r} (known: {', '.join(sorted(SCRIPTED_BOTS))})")
     return key
+
+
+def accepted_names() -> tuple[str, ...]:
+    """The scripted-opponent names configs, CLIs and the gym env accept, sorted.
+
+    Every canonical short name in :data:`SCRIPTED_BOTS` (``noop`` included)
+    plus the short aliases (``"bot"``). The single list that CLI ``choices``
+    and config validation derive from, so a new registry entry (``master``
+    was the one that drifted) is accepted everywhere at once.
+    :func:`canonical_name` also resolves class names (``"SimpleBot"``);
+    those are left out here to keep listings short.
+    """
+    return tuple(sorted(set(SCRIPTED_BOTS) | set(_SHORT_ALIASES)))
+
+
+def is_scripted_name(bot_type: Any) -> bool:
+    """Whether :func:`canonical_name` resolves ``bot_type`` (no exception)."""
+    key = _key_of(bot_type)
+    return _ALIASES.get(key, key) in SCRIPTED_BOTS
+
+
+def constructor_kwargs(bot_type: Any) -> frozenset[str] | None:
+    """The extra keyword arguments the scripted bot's constructor takes.
+
+    Everything but ``game_state`` / ``player`` / ``rng``, which callers
+    supply themselves. ``None`` means the constructor takes ``**kwargs``
+    (anything goes). Raises ``KeyError`` for an unknown bot.
+    """
+    cls = resolve_scripted(bot_type)
+    params = inspect.signature(cls).parameters.values()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        return None
+    return frozenset(
+        p.name
+        for p in params
+        if p.name not in _SUPPLIED_ARGS and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    )
+
+
+def validate_scripted_kwargs(bot_type: Any, kwargs: Mapping[str, Any] | None) -> None:
+    """Check extra constructor kwargs for a scripted bot before it is built.
+
+    Keys must be parameters of the bot's constructor (see
+    :func:`constructor_kwargs`): today only ``random`` (``max_actions``)
+    and ``mixed`` take any, so kwargs given for the deterministic ladder,
+    which the gym env used to drop silently, are rejected. The values are
+    checked too, by each bot's ``validate_config``: RandomBot's
+    ``max_actions`` must be an integer >= 1, and ``MixedBot``'s are checked
+    in depth (inner bot names, ``p_hard`` in ``[0, 1]``, and
+    ``easy_kwargs`` / ``hard_kwargs`` against the inner bots' own
+    constructors and values) so a bad bridge stage fails when it is
+    configured, not at the random reset whose coin flip first picks the bad
+    side.
+
+    Raises:
+        KeyError: ``bot_type`` names no scripted bot.
+        TypeError: ``kwargs`` (or a nested ``*_kwargs``) is not a mapping.
+        ValueError: A key the bot does not take, or a bad MixedBot value.
+    """
+    name = canonical_name(bot_type)
+    if kwargs is None:
+        return
+    if not isinstance(kwargs, Mapping):
+        raise TypeError(f"kwargs for scripted bot {name!r} must be a mapping, got {type(kwargs).__name__}")
+    if not kwargs:
+        return
+    allowed = constructor_kwargs(name)
+    if allowed is not None:
+        unknown = sorted(set(kwargs) - allowed)
+        if unknown:
+            raise ValueError(
+                f"unknown kwargs {unknown} for scripted bot {name!r}; it takes: {', '.join(sorted(allowed)) or '(none)'}"
+            )
+    if name == "mixed":
+        MixedBot.validate_config(**kwargs)
+    elif name == "random":
+        RandomBot.validate_config(**kwargs)
 
 
 def resolve_scripted(bot_type: Any) -> type:

@@ -48,6 +48,10 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         #                          via the shared build_flat_actions table)
         #                          or "multi_discrete" (6-vector actions).
         #   _max_flat_actions:     Discrete(n) size in flat mode.
+        #   _flat_action_version:  the decode-table layout the checkpoint
+        #                          was trained on (gym_env
+        #                          flat_action_version_of; unstamped
+        #                          checkpoints are version 1).
         #   _pad_to:               (pad_h, pad_w) when the checkpoint was
         #                          trained on padded observations larger
         #                          than the live map; None = no padding.
@@ -57,6 +61,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         #                          recent flat-mode predict call.
         self._action_mode: str = "multi_discrete"
         self._max_flat_actions: int = 0
+        self._flat_action_version: int = 1
         self._pad_to: tuple | None = None
         self._accepts_action_masks: bool = False
         self._flat_actions: list = []
@@ -201,8 +206,14 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
             )
 
         if isinstance(act_space, gym_spaces.Discrete):
+            from reinforcetactics.rl.gym_env import flat_action_version_of
+
             self._action_mode = "flat"
             self._max_flat_actions = int(act_space.n)
+            # The table layout rides on the saved action space; checkpoints
+            # from before versioning carry none and decode as version 1,
+            # exactly as they were trained.
+            self._flat_action_version = flat_action_version_of(act_space)
         elif isinstance(act_space, gym_spaces.MultiDiscrete):
             self._action_mode = "multi_discrete"
             nvec = [int(x) for x in act_space.nvec]
@@ -226,7 +237,7 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         logger.info(
             "ModelBot configured: mode=%s%s pad_to=%s masked_predict=%s",
             self._action_mode,
-            f"(n={self._max_flat_actions})" if self._action_mode == "flat" else "",
+            f"(n={self._max_flat_actions}, v{self._flat_action_version})" if self._action_mode == "flat" else "",
             self._pad_to,
             self._accepts_action_masks,
         )
@@ -362,11 +373,13 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         ``_configure_from_sb3_model``:
 
           * flat mode: build the legal-action table via the shared
-            :func:`reinforcetactics.rl.gym_env.build_flat_actions`, predict a
+            :func:`reinforcetactics.rl.gym_env.build_flat_actions` (in the
+            checkpoint's ``flat_action_version``), predict a
             ``Discrete`` index with the exact "first ``len(table)`` entries
             legal" mask, and decode the index through the table. An
             out-of-range index (only possible without masking, e.g. plain
-            DQN) falls back to end_turn -- same as ``StrategyGameEnv.step``.
+            DQN) falls back to end_turn so the bot's turn still ends
+            (``StrategyGameEnv.step`` instead scores it as invalid).
           * multi_discrete mode: predict the 6-vector directly, forwarding
             the per-dimension masks (concatenated, as MaskablePPO expects)
             when the model supports them.
@@ -382,7 +395,9 @@ class ModelBot(BaseBot):  # pylint: disable=too-few-public-methods
         predict_kwargs: dict = {"deterministic": True}
 
         if self._action_mode == "flat":
-            self._flat_actions = build_flat_actions(self.game_state, self.bot_player, self._max_flat_actions)
+            self._flat_actions = build_flat_actions(
+                self.game_state, self.bot_player, self._max_flat_actions, version=self._flat_action_version
+            )
             if self._accepts_action_masks:
                 mask = np.zeros(self._max_flat_actions, dtype=bool)
                 mask[: len(self._flat_actions)] = True

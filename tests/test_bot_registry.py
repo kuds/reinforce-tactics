@@ -25,10 +25,14 @@ from reinforcetactics.game.bot import (
 from reinforcetactics.game.bot_registry import (
     SCRIPTED_BOTS,
     STOCHASTIC_BOTS,
+    accepted_names,
     build_scripted,
     canonical_name,
+    constructor_kwargs,
+    is_scripted_name,
     player_type,
     resolve_scripted,
+    validate_scripted_kwargs,
 )
 from reinforcetactics.tournament.bots import BotType
 
@@ -140,3 +144,63 @@ def test_build_scripted_forwards_extra_kwargs(game):
 )
 def test_player_type(bot_type, expected):
     assert player_type(bot_type) == expected
+
+
+# ---------------------------------------------------------------------------
+# The accepted-name list and constructor-kwargs validation that the gym env,
+# the curriculum config and the CLIs derive from (review rlenv-10 /
+# rulebots-7 / rltrain-22).
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_names_are_the_registry_plus_short_aliases():
+    names = accepted_names()
+    assert names == tuple(sorted(names))
+    assert set(names) == set(SCRIPTED_BOTS) | {"bot"}
+    assert "master" in names and "noop" in names
+    for name in names:
+        canonical_name(name)  # every listed name resolves
+
+
+def test_is_scripted_name():
+    assert is_scripted_name("master") and is_scripted_name("SimpleBot") and is_scripted_name("bot")
+    assert not is_scripted_name("simpel") and not is_scripted_name("self") and not is_scripted_name("")
+
+
+def test_constructor_kwargs():
+    assert constructor_kwargs("random") == {"max_actions"}
+    assert constructor_kwargs("mixed") == {"easy", "hard", "p_hard", "easy_kwargs", "hard_kwargs"}
+    for name in ("simple", "medium", "advanced", "master", "balanced_random", "noop"):
+        assert constructor_kwargs(name) == frozenset(), name
+
+
+@pytest.mark.parametrize(
+    "bot_type,kwargs",
+    [
+        ("random", {"max_actions": 10}),
+        ("mixed", {"easy": "random", "hard": "simple", "p_hard": 0.25, "easy_kwargs": {"max_actions": 15}}),
+        ("mixed", {"easy": "medium", "hard": "master"}),
+        ("simple", {}),
+        ("simple", None),
+    ],
+)
+def test_validate_scripted_kwargs_accepts(bot_type, kwargs):
+    validate_scripted_kwargs(bot_type, kwargs)
+
+
+@pytest.mark.parametrize(
+    "bot_type,kwargs,exc",
+    [
+        ("simple", {"max_actions": 10}, ValueError),
+        ("random", {"max_action": 10}, ValueError),
+        ("mixed", {"easy": "simple", "hard": "bogus"}, ValueError),
+        ("mixed", {"p_hard": -0.1}, ValueError),
+        ("mixed", {"hard": "medium", "hard_kwargs": {"max_actions": 3}}, ValueError),
+        ("mixed", {"easy_kwargs": [1]}, TypeError),
+        ("random", [("max_actions", 1)], TypeError),
+        ("simpel", {}, KeyError),
+    ],
+)
+def test_validate_scripted_kwargs_rejects(bot_type, kwargs, exc):
+    with pytest.raises(exc):
+        validate_scripted_kwargs(bot_type, kwargs)

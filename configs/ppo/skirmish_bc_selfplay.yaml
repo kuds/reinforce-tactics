@@ -31,7 +31,10 @@ warm_start_path: benchmarks/bc/YYYYMMDD_HHMMSS/bc_warmstart.zip
 
 algorithm: maskable_ppo
 seed: 42
-total_timesteps: 1_500_000  # PROBE-SIZED 3-stage ramp; raise to ~10M once setup is validated
+# PROBE-SIZED 3-stage ramp (~1.5M env steps worst case). Run length is the
+# sum of the stages' max_timesteps: raise those (to ~10M in total) once the
+# setup is validated. A top-level total_timesteps would be ignored by the
+# curriculum runner.
 
 env:
   n_envs: 8

@@ -4,7 +4,8 @@ seed: 0
 
 env:
   map_file: null
-  max_steps: 400       # Also used as max_game_steps for MCTS self-play
+  # The self-play game length is alphazero.max_game_steps below;
+  # train_alphazero.py does not read env.max_steps.
 
 alphazero:
   res_blocks: 6
