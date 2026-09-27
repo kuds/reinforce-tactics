@@ -345,6 +345,92 @@ class TestCombatShaping:
         first.close()
         second.close()
 
+    # ``kill`` mirrored by ``unit_lost``, so the kill terms cancel too.
+    _MIRROR = {**_SYMMETRIC, "unit_lost": -5.0}
+
+    @staticmethod
+    def _last_attack(gs):
+        return next(r for r in reversed(gs.action_history) if r["type"] == "attack")
+
+    def _agent_swings(self, attacker, defender):
+        """The agent's ``attacker`` (type, HP or None for full) hits the opponent's ``defender``."""
+        env = _env(reward_config=self._MIRROR)
+        gs = env.game_state
+        mine = gs.place_unit(attacker[0], 2, 2, 1)
+        theirs = gs.place_unit(defender[0], 3, 2, 2)
+        gs.place_unit("W", 4, 4, 1)  # survivors, so the game goes on
+        gs.place_unit("W", 5, 5, 2)
+        mine.health = attacker[1] or mine.health
+        theirs.health = defender[1] or theirs.health
+        _, _, terminated, _, info = env.step(np.array([2, 0, 2, 2, 3, 2]))
+        assert not terminated
+        return env, info["reward_breakdown"]["action"], self._last_attack(gs)
+
+    def _opponent_swings(self, attacker, defender):
+        """The mirror image: the opponent's ``attacker`` hits the agent's ``defender``."""
+        env = _env(reward_config=self._MIRROR)
+        gs = env.game_state
+        mine = gs.place_unit(defender[0], 2, 2, 1)
+        theirs = gs.place_unit(attacker[0], 3, 2, 2)
+        gs.place_unit("W", 4, 4, 1)
+        gs.place_unit("W", 5, 5, 2)
+        mine.health = defender[1] or mine.health
+        theirs.health = attacker[1] or theirs.health
+        env.opponent = _AttackOnce(gs, theirs, mine)
+        _, _, terminated, _, info = env.step(END_TURN)
+        assert not terminated
+        return env, info["reward_breakdown"]["action"], self._last_attack(gs)
+
+    @pytest.mark.parametrize(
+        ("attacker", "defender"),
+        [
+            pytest.param(("W", None), ("W", None), id="nobody-dies"),
+            pytest.param(("W", None), ("W", 1), id="the-blow-overkills"),
+            pytest.param(("W", 1), ("W", None), id="the-counter-overkills"),
+            pytest.param(("W", 2), ("W", 1), id="the-blow-kills-before-a-counter"),
+            pytest.param(("K", None), ("W", 3), id="a-harder-blow-kills"),
+            pytest.param(("W", 1), ("K", None), id="a-harder-counter-kills"),
+        ],
+    )
+    def test_a_mirrored_exchange_scores_the_exact_negative(self, attacker, defender):
+        """Killing blows included: dealt damage used to count the nominal hit, overkill and all.
+
+        Damage taken was already the HP actually lost, so a killing blow the
+        agent dealt paid its full nominal damage while the same blow taken
+        charged only the HP the victim had: +7 vs -1 for a 7-damage blow on
+        a 1-HP unit, +6 vs -2 for a 1-HP attacker dying to a 5-damage counter.
+        """
+        first, first_reward, first_record = self._agent_swings(attacker, defender)
+        second, second_reward, second_record = self._opponent_swings(attacker, defender)
+        for record in (first_record, second_record):
+            assert record["target_hp_before"] - record["target_hp_after"] <= record["damage"]
+            assert record["attacker_hp_before"] - record["attacker_hp_after"] <= record["counter_damage"]
+        # The engine produced the same exchange both times ...
+        keys = ("damage", "counter_damage", "target_killed", "attacker_killed", "target_hp_after", "attacker_hp_after")
+        assert {k: first_record[k] for k in keys} == {k: second_record[k] for k in keys}
+        # ... which the agent scores as dealt HP - taken HP (+ kill - lost).
+        r = first_record
+        expected = (
+            (r["target_hp_before"] - r["target_hp_after"])
+            - (r["attacker_hp_before"] - r["attacker_hp_after"])
+            + 5.0 * r["target_killed"]
+            - 5.0 * r["attacker_killed"]
+        )
+        assert first_reward == pytest.approx(expected)
+        assert second_reward == pytest.approx(-expected)
+        # The two diagnostics mirror each other too.
+        assert first.episode_stats["damage_dealt"] == pytest.approx(second.episode_stats["damage_taken"])
+        assert first.episode_stats["damage_taken"] == pytest.approx(second.episode_stats["damage_dealt"])
+        first.close()
+        second.close()
+
+    def test_a_killing_blow_pays_only_the_hp_its_target_had(self):
+        env, reward, record = self._agent_swings(("W", None), ("W", 1))
+        assert record["damage"] > 1 and record["target_killed"]  # the nominal hit overkills
+        assert reward == pytest.approx(1.0 + 5.0)
+        assert env.episode_stats["damage_dealt"] == pytest.approx(1.0)
+        env.close()
+
     def test_a_counter_kill_on_the_opponent_turn_pays_kill(self):
         env = _env(reward_config=self._SYMMETRIC)
         gs = env.game_state
@@ -357,9 +443,12 @@ class TestCombatShaping:
         _, _, terminated, _, info = env.step(END_TURN)
         record = next(r for r in reversed(gs.action_history) if r["type"] == "attack")
         assert not terminated and record["attacker_killed"] and enemy not in gs.units
-        expected = record["counter_damage"] * 1.0 + 5.0 - stub.damage
+        assert record["counter_damage"] > 2  # the nominal counter overkills
+        # The counter removed the 2 HP the attacker had, not its nominal damage.
+        expected = 2 * 1.0 + 5.0 - stub.damage
         assert info["reward_breakdown"]["action"] == pytest.approx(expected)
         assert env.episode_stats["kills"] == env.episode_stats["counter_kills"] == 1
+        assert env.episode_stats["damage_dealt"] == env.episode_stats["counter_damage_dealt"] == pytest.approx(2.0)
         env.close()
 
     def test_units_killed_on_the_opponent_turn_cost_unit_lost(self):

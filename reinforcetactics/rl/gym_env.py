@@ -1081,8 +1081,9 @@ class StrategyGameEnv(gym.Env):
             "seize_attempts": 0,
             # Damage the agent's units dealt: their own attacks, plus the
             # counter-attacks they made when attacked during the opponent's
-            # turn (also broken out in ``counter_damage_dealt``). Nominal
-            # damage, as the engine reports it, like ``damage_scale`` pays.
+            # turn (also broken out in ``counter_damage_dealt``). HP actually
+            # removed, as ``damage_scale`` pays it: a killing blow counts only
+            # the HP its target had left, not the engine's nominal overkill.
             "damage_dealt": 0.0,
             "counter_damage_dealt": 0.0,
             # HP the agent's units lost to combat: the opponent's attacks
@@ -1505,7 +1506,7 @@ class StrategyGameEnv(gym.Env):
                 unit = gs.get_unit_at_position(*from_pos)
                 target = gs.get_unit_at_position(*to_pos)
                 if unit and target and env_check(unit, target, player):
-                    attacker_hp_before = unit.health
+                    attacker_hp_before, target_hp_before = unit.health, target.health
                     outcome = gs.apply_action(kind, {ACTOR_KEYS[kind]: unit, "target": target})
                     if kind == "attack":
                         result_info["damage"] = outcome.result["damage"]
@@ -1514,12 +1515,17 @@ class StrategyGameEnv(gym.Env):
                         # rlenv-9): combat shaping charges it on this step.
                         result_info["counter_damage"] = outcome.result["counter_damage"]
                         result_info["attacker_alive"] = outcome.result["attacker_alive"]
-                        # The HP the counter actually took. ``counter_damage``
-                        # is the nominal hit, overkill included: a 1-HP
-                        # attacker killed by a 5-damage counter loses 1 HP,
-                        # which is what the opponent-turn measurement (an HP
-                        # delta) charges for the same loss. Unit.take_damage
-                        # clamps health at 0, so this is exact either way.
+                        # The HP each side actually lost. ``damage`` and
+                        # ``counter_damage`` are the nominal hits, overkill
+                        # included: a 7-damage blow on a 1-HP unit removes
+                        # 1 HP, which is what the opponent-turn window (an
+                        # HP delta, and the attack records' *_hp_before -
+                        # *_hp_after) measures for the same blow. Combat
+                        # shaping pays and charges these, so an exchange
+                        # scores the same whichever side swings first.
+                        # Unit.take_damage clamps health at 0, so they are
+                        # exact either way.
+                        result_info["target_hp_lost"] = target_hp_before - target.health
                         result_info["attacker_hp_lost"] = attacker_hp_before - unit.health
                     # The engine refuses an illegal action (spent or paralyzed
                     # unit, out of range, hidden by fog, wrong turn) and
@@ -1566,10 +1572,13 @@ class StrategyGameEnv(gym.Env):
             elif action_type == 1:
                 reward += rc["move"]
             elif action_type == 2:
-                damage = result_info["damage"]
-                reward += damage * rc["damage_scale"]
+                # HP the target actually lost, not the nominal hit: overkill
+                # on a killing blow used to pay extra here while the same
+                # blow taken (either window) charged only the HP lost.
+                dealt = result_info["target_hp_lost"]
+                reward += dealt * rc["damage_scale"]
                 self.episode_stats["attacks"] += 1
-                self.episode_stats["damage_dealt"] += float(damage)
+                self.episode_stats["damage_dealt"] += float(dealt)
                 if not result_info["target_alive"]:
                     reward += rc["kill"]
                     self.episode_stats["kills"] += 1
@@ -1673,7 +1682,7 @@ class StrategyGameEnv(gym.Env):
                             self.episode_stats["units_lost"] += units_lost
                         # The other half of the exchanges the opponent
                         # started: the agent's counter-attacks. Credited like
-                        # the agent's own attacks (nominal damage *
+                        # the agent's own attacks (HP removed *
                         # damage_scale, ``kill`` per enemy killed), so combat
                         # shaping scores an exchange the same whichever side
                         # swings first. Only the damage taken used to count
@@ -1725,8 +1734,10 @@ class StrategyGameEnv(gym.Env):
         """Reward the agent's counter-attacks on the opponent's attacks since ``history_start``.
 
         Reads the engine's ``attack`` records (``GameState.action_history``)
-        made by the opponent: each carries the counter the defending agent
-        unit dealt (``counter_damage``) and whether it killed the attacker
+        made by the opponent: each carries the attacker's HP before and after
+        the exchange, the difference being what the defending agent unit's
+        counter actually took (``counter_damage`` is the nominal hit, overkill
+        included), and whether the counter killed the attacker
         (``attacker_killed``). Counter-attacks are the only damage the agent
         deals during the opponent's turn.
         """
@@ -1736,7 +1747,7 @@ class StrategyGameEnv(gym.Env):
         for record in self.game_state.action_history[history_start:]:
             if record.get("type") != "attack" or record.get("player") != opp:
                 continue
-            counter = record.get("counter_damage") or 0
+            counter = record["attacker_hp_before"] - record["attacker_hp_after"]
             if counter:
                 reward += counter * rc["damage_scale"]
                 self.episode_stats["damage_dealt"] += float(counter)

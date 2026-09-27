@@ -132,20 +132,23 @@ DEFAULT_REWARD_CONFIG: dict[str, float] = {
     # Action rewards
     "create_unit": 0.5,
     "move": 0.0,
-    # Reward per damage point the agent's units deal (nominal damage, as the
-    # engine reports it): their own attacks, on the attack step, and their
-    # counter-attacks when the opponent attacks them, on the end_turn step
-    # (the opponent's turn plays out inside it).
+    # Reward per HP the agent's units remove from enemy units: their own
+    # attacks, on the attack step, and their counter-attacks when the
+    # opponent attacks them, on the end_turn step (the opponent's turn plays
+    # out inside it). Measured as HP actually removed, not the engine's
+    # nominal damage: a killing blow on a unit with 1 HP left pays for 1,
+    # however hard it hits.
     "damage_scale": 0.05,
     # Charge per HP the agent's units *lose* in combat (a negative
     # magnitude): to the opponent's attacks, on the end_turn step, and to
     # the counter-attack on the agent's own attack, on the attack step.
     # Measured as HP actually lost in both places (a unit with 1 HP left
-    # loses 1, however hard the killing blow). Together with
-    # ``damage_scale`` this makes combat shaping net-zero-sum whichever side
-    # swings first: with ``damage_taken_scale = -damage_scale`` a mutual
-    # trade nets ~0 and only decisive combat (dealing more than you take)
-    # pays. Counters the kill/damage-farm draw attractor where two armies
+    # loses 1, however hard the killing blow), exactly as ``damage_scale``
+    # measures the other side's loss. Together with ``damage_scale`` this
+    # makes combat shaping net-zero-sum whichever side swings first, killing
+    # blows included: with ``damage_taken_scale = -damage_scale`` a mutual
+    # trade nets ~0, a mirrored exchange scores the exact negative, and
+    # only decisive combat (removing more HP than you lose) pays. Counters the kill/damage-farm draw attractor where two armies
     # trade blows to the max-turns clock while collecting only the
     # dealt-damage half of the exchange. Default 0.0 leaves legacy reward
     # shapes unchanged.
