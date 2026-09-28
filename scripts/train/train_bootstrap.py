@@ -256,8 +256,8 @@ def _print_stage_table(cfg) -> None:
     for s in stages:
         print(f"  {s.name:<30s} opp={s.opponent:<10s} WR>={s.promotion_win_rate:>4.0%} budget={s.max_timesteps:>12,}")
     budget = sum(s.max_timesteps for s in stages)
-    retries = max((s.resolve_max_retries(cfg.curriculum) for s in stages), default=0)
-    print(f"  total budget: {budget:,} env steps ({budget * (1 + retries):,} if every stage used {retries} retry/retries)")
+    worst = sum(s.max_timesteps * (1 + s.resolve_max_retries(cfg.curriculum)) for s in stages)
+    print(f"  total budget: {budget:,} env steps ({worst:,} if every stage used all its retries)")
 
 
 # Subdirectories a run directory may hold before training writes anything:
