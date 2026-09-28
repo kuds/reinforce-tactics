@@ -150,8 +150,10 @@ TILE_IMAGES = {
 
 # Animation configuration for sprite sheets
 #
-# Sprite sheets use a 6-column grid of 64x64 frames.  Each frame is
-# centre-cropped to 32x32 before being scaled to the display size.
+# Sprite sheets use a 6-column grid of 64x64 frames.  Each frame is cropped
+# to ``crop`` (48x48, ending just below the feet and drop shadow at y=51) and
+# drawn with its bottom edge on the tile's bottom edge, so the sprite
+# overflows its 32 px tile upward and sideways.
 #
 #   Idle (4 frames):         [0,0] [0,1] [0,2] [0,3]
 #   Move Left (8 frames):   [0,4] [0,5] [1,0] [1,1] [1,2] [1,3] [1,4] [1,5]
@@ -163,9 +165,11 @@ ANIMATION_CONFIG = {
     # Source frame size on the sprite sheet
     "frame_width": 64,
     "frame_height": 64,
-    # Centre-crop each frame to this size before scaling to display
-    "crop_width": 32,
-    "crop_height": 32,
+    # Crop of each frame, as (x, y, width, height) within the frame
+    "crop": (8, 4, 48, 48),
+    # Tile size the sheet art is drawn for; frames are scaled by
+    # TILE_SIZE / art_tile_size (nearest-neighbour)
+    "art_tile_size": 32,
     # Frame map: animation state -> list of (row, col) coordinates
     # This replaces the old row-based state_rows mapping.
     "frame_map": {

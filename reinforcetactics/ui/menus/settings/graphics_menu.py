@@ -31,16 +31,21 @@ class GraphicsMenu(Menu):
         lang = get_language()
 
         # Get current settings
+        pixel_art = self.settings.get("graphics.pixel_art", True)
         disable_animations = self.settings.get("graphics.disable_animations", False)
         disable_unit_sprites = self.settings.get("graphics.disable_unit_sprites", False)
-        use_tile_sprites = self.settings.get("graphics.use_tile_sprites", False)
+        use_tile_sprites = self.settings.get("graphics.use_tile_sprites", True)
         sprites_path = self.settings.get("graphics.sprites_path", "")
         animation_path = self.settings.get("graphics.animation_sprites_path", "")
         unit_path = self.settings.get("graphics.unit_sprites_path", "")
         tile_path = self.settings.get("graphics.tile_sprites_path", "")
 
+        # --- Master switch: OFF draws coloured tiles and unit letters ---
+        pixel_art_status = "ON" if pixel_art else "OFF (letters)"
+        self.add_option(f"Pixel Art: {pixel_art_status}", self._toggle_pixel_art)
+
         # --- Base sprites path (units/ and tiles/ auto-discovered) ---
-        base_display = sprites_path if sprites_path else lang.get("graphics.not_set", "(not set)")
+        base_display = sprites_path if sprites_path else lang.get("graphics.bundled", "(bundled)")
         self.add_option(f"Sprites Path: {base_display}", self._edit_sprites_path)
 
         # --- Unit Animations (sprite sheets) ---
@@ -80,6 +85,13 @@ class GraphicsMenu(Menu):
         self.clear_options()
         self._setup_options()
 
+    def _toggle_pixel_art(self) -> str:
+        """Toggle pixel art on/off (off draws coloured tiles and unit letters)."""
+        current = self.settings.get("graphics.pixel_art", True)
+        self.settings.set("graphics.pixel_art", not current)
+        self._refresh_options()
+        return "toggled"
+
     def _toggle_unit_sprites(self) -> str:
         """Toggle disabling static unit sprites."""
         current = self.settings.get("graphics.disable_unit_sprites", False)
@@ -89,7 +101,7 @@ class GraphicsMenu(Menu):
 
     def _toggle_tile_sprites(self) -> str:
         """Toggle tile sprites on/off."""
-        current = self.settings.get("graphics.use_tile_sprites", False)
+        current = self.settings.get("graphics.use_tile_sprites", True)
         self.settings.set("graphics.use_tile_sprites", not current)
         self._refresh_options()
         return "toggled"
@@ -197,6 +209,7 @@ class GraphicsMenu(Menu):
         instructions = [
             lang.get("graphics.path_hint", "Enter the path to your sprites folder"),
             lang.get("graphics.path_example", "Example: images/sprites/units"),
+            lang.get("graphics.path_empty_hint", "Leave empty to use the bundled sprites"),
             "",
             lang.get("graphics.press_enter", "Press ENTER to save, ESC to cancel"),
             lang.get("graphics.paste_hint", "Ctrl+V to paste from clipboard"),
