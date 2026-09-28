@@ -8,7 +8,12 @@ they survive the ephemeral job.
 |---|---|
 | `build_image.sh` | Build the training image and push it to Artifact Registry (via Cloud Build). |
 | `submit_vertex_job.sh` | Submit a Vertex AI custom job running a training command. |
-| `vertex_train.py` | Container entrypoint: runs the training command and syncs `models/`, `checkpoints/`, `tensorboard/`, `logs/` and the `benchmarks/bootstrap/` runs (plus any `GCS_SYNC_DIRS`) to GCS (periodic + on exit). |
+| `vertex_train.py` | Container entrypoint: restores any `GCS_RESTORE_DIRS` from GCS, runs the training command and syncs `models/`, `checkpoints/`, `tensorboard/`, `logs/` and the `benchmarks/bootstrap/` runs (plus any `GCS_SYNC_DIRS`) to GCS (periodic + on exit). |
+
+Several seeds of the bootstrap curriculum (one job per seed, resubmittable,
+all under `gs://<bucket>/jobs/<group>/`) are launched with
+`scripts/train/run_seeds.py --backend vertex`; see
+[docs/validation_run.md](../../docs/validation_run.md).
 
 ## Quickstart
 
