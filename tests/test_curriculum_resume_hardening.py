@@ -513,9 +513,10 @@ class TestResumeRecords:
 
         result, _ = _resume(cfg, tmp_path, programs, stage_offset=1)
         timeline = [r["timesteps"] for r in result["history"][1]["results"]]
-        # Block 2 is evaluated after the resume (at 50), not skipped; every
-        # block once.
-        assert timeline == [20, 50, 60, 80, 100]
+        # Block 2 is replayed before the resumed stage's first step, at the
+        # step it was due (40), not skipped and not a step late: the timeline
+        # an uninterrupted run writes, every block once.
+        assert timeline == [20, 40, 60, 80, 100]
 
     def test_interrupt_while_saving_a_new_best_keeps_the_record_true_to_the_file(self, tmp_path, monkeypatch):
         cfg = _cfg(_stage("a", patience=1), _stage("b", patience=1), eval={"eval_freq": 20})

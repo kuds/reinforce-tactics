@@ -406,6 +406,9 @@ class PeriodicEvalCallback(BaseCallback):
         self.peak_win_rate: float | None = best_state.get("peak_win_rate")
         self.peak_timestep: int = int(best_state.get("peak_timestep", -1))
         self._last_eval_block: int = int(last_eval_block) if last_eval_block is not None else -1
+        # A resumed stage (``last_eval_block`` restored from its checkpoint);
+        # see ``_on_training_start``.
+        self._resumed = last_eval_block is not None
         # Cumulative counter at this stage's ``learn()`` entry, so
         # ``best_eligible_after`` is measured stage-relative. Mirrors
         # ``PromotionCallback._stage_start_step`` / ``EntropyScheduleCallback``.
@@ -433,6 +436,13 @@ class PeriodicEvalCallback(BaseCallback):
         from reinforcetactics.rl.gym_env import check_flat_action_version
 
         check_flat_action_version(self.model, self.eval_env, what="the eval env")
+        # A checkpoint taken with an eval still pending (an interrupt mid-eval,
+        # or between the step that crossed the block and its eval) holds the
+        # weights and the step that eval was due at. Replay it now, before the
+        # first step, so the resumed stage evaluates at the same step as an
+        # uninterrupted run instead of a step later.
+        if self._resumed and int(self.num_timesteps) // self.eval_freq > self._last_eval_block:
+            self._do_eval()
 
     def _on_training_end(self) -> None:
         # The last eval of a learn() that ran out of budget would otherwise
