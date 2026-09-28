@@ -56,6 +56,8 @@ DEFINITIONS: dict[str, str] = {
     "requested mode, else its other_mode counts when those are, else missing. A row without 'deterministic' "
     "(legacy) is greedy. Rates carry a two-sided Wilson interval at --confidence.",
     "window": "Pooled counts of the last `patience` rows of the last attempt (secondary).",
+    "seat1_win_rate / seat2_win_rate": "The final row's by_seat win rates in its gate mode: the agent moving first "
+    "/ second. None for a seat the eval did not play.",
     "steps_to_promotion": "Cleared stages: stage_end_timesteps - stage_start_timesteps (every attempt; exact). "
     "Legacy fallback: last row timesteps - first row timesteps (approximate). Stalled or interrupted "
     "stages report trained_steps instead, marked censored.",
@@ -70,6 +72,13 @@ DEFINITIONS: dict[str, str] = {
     "shaping_share_abs": "(|A|+|S|+|I|) / (|A|+|S|+|I|+|T|) from the final row's eval-level sums of the action (A), "
     "shaping_delta (S), invalid_penalty (I) and terminal (T) components. Headline; archive-comparable.",
     "shaping_share_signed": "(A+S+I) / (A+S+I+T); None when |A+S+I+T| < 1 per episode.",
+    "reward_per_ep_turn_penalty": "The turn penalty per episode, part of the action component: the final row's "
+    "action_counts.end_turn x the stage's reward_config.turn_penalty / episodes (0 when unset on today's code; "
+    "None for an archive run that does not record it).",
+    "dense_share_abs": "|A-P| / (|A-P|+|T|) from the final row's eval-level sums: the action component without "
+    "the turn penalty P, against the terminal. Leaves out the clock cost, the potential term (its undiscounted "
+    "eval sum drifts with episode length) and the invalid penalty (docs/validation_run_config.md §1). None "
+    "without action_counts.",
     "episode_abs_share": "The abs share from per-episode magnitudes (reward_components_abs; new logging only).",
     "by_outcome": "Non-terminal, terminal and total return per episode for wins / draws / losses "
     "(reward_components_by_outcome; new logging only).",
@@ -100,6 +109,8 @@ AGG_METRICS: tuple[str, ...] = (
     "greedy_loss_rate",
     "window_stoch_win_rate",
     "window_greedy_win_rate",
+    "seat1_win_rate",
+    "seat2_win_rate",
     "peak_gate_wr",
     "captures_per_ep_tower",
     "captures_per_ep_building",
@@ -111,8 +122,10 @@ AGG_METRICS: tuple[str, ...] = (
     "reward_per_ep_shaping_delta",
     "reward_per_ep_invalid_penalty",
     "reward_per_ep_terminal",
+    "reward_per_ep_turn_penalty",
     "shaping_share_abs",
     "shaping_share_signed",
+    "dense_share_abs",
     "episode_abs_share",
     "draw_return_per_ep",
     "end_reason_rate_hq_capture",
@@ -583,6 +596,28 @@ def _share_signed(components: Mapping[str, Any] | None, episodes: int) -> float 
     return nt / total
 
 
+def _dense_share(components: Mapping[str, Any] | None, turn_penalty_total: float | None) -> float | None:
+    if not components or turn_penalty_total is None:
+        return None
+    dense = abs(float(components.get("action") or 0.0) - turn_penalty_total)
+    total = dense + abs(float(components.get("terminal") or 0.0))
+    return dense / total if total > 0 else None
+
+
+def _turn_penalty(run: RunRecord, stage: StageRecord) -> float | None:
+    """The stage's reward per ``end_turn``: its record's reward_config, else the run config's (stage over env)."""
+    config = run.config or {}
+    base = dict(((config.get("env") or {}).get("reward_config")) or {})
+    for s in (config.get("curriculum") or {}).get("stages") or []:
+        if isinstance(s, Mapping) and str(s.get("name")) == stage.name:
+            base.update(s.get("reward_config") or {})
+    for rc in (stage.settings.get("reward_config"), base):
+        if isinstance(rc, Mapping) and isinstance(rc.get("turn_penalty"), (int, float)):
+            return float(rc["turn_penalty"])
+    # Unset: the env default on today's code (0.0); unknown for an archive run.
+    return 0.0 if run.layout == "new" else None
+
+
 def draw_return(row: Mapping[str, Any]) -> tuple[float | None, bool]:
     """``(mean return of the row's draws, exact)``; for legacy rows the lowest value it can have.
 
@@ -699,6 +734,10 @@ def stage_metrics(
         pooled = _pooled(window, stochastic=stochastic) if window else None
         m[f"window_{mode}_win_rate"] = pooled["win_rate"] if pooled else None
         m[f"window_{mode}_episodes"] = pooled["episodes"] if pooled else None
+    by_seat = final.get("by_seat") if final else None
+    for seat in ("1", "2"):
+        seat_counts = by_seat.get(seat) if isinstance(by_seat, Mapping) else None
+        m[f"seat{seat}_win_rate"] = seat_counts.get("win_rate") if isinstance(seat_counts, Mapping) else None
 
     # Steps.
     extra = stage.extra
@@ -755,6 +794,16 @@ def stage_metrics(
     m["reward_sum_mismatch_at"] = mismatched[:5]
     m["shaping_share_abs"] = _share_abs(comps) if isinstance(comps, Mapping) else None
     m["shaping_share_signed"] = _share_signed(comps, episodes) if isinstance(comps, Mapping) else None
+    actions = final.get("action_counts") if final else None
+    end_turns = actions.get("end_turn") if isinstance(actions, Mapping) else None
+    turn_penalty = _turn_penalty(run, stage)
+    tp_total = (
+        float(end_turns) * turn_penalty
+        if isinstance(end_turns, (int, float)) and turn_penalty is not None and episodes
+        else None
+    )
+    m["reward_per_ep_turn_penalty"] = tp_total / episodes if tp_total is not None else None
+    m["dense_share_abs"] = _dense_share(comps, tp_total) if isinstance(comps, Mapping) else None
     m["episode_abs_share"] = _share_abs(final.get("reward_components_abs")) if final else None
     by_outcome = final.get("reward_components_by_outcome") if final else None
     m["by_outcome"] = None
@@ -1503,6 +1552,7 @@ def render_report(summary: Mapping[str, Any]) -> str:
         "stoch draw",
         "captures/ep",
         "shaping abs",
+        "dense share",
         "stoch WR per seed",
     ]
     table_rows = []
@@ -1526,6 +1576,7 @@ def render_report(summary: Mapping[str, Any]) -> str:
                 _range(met["stoch_draw_rate"], _pct),
                 caps,
                 _range(met["shaping_share_abs"], lambda x: f"{x:.2f}"),
+                _range(met["dense_share_abs"], lambda x: f"{x:.2f}"),
                 per_seed or "—",
             ]
         )
@@ -1551,9 +1602,11 @@ def render_report(summary: Mapping[str, Any]) -> str:
                     steps_txt,
                     _wdl(s, "stoch"),
                     _wdl(s, "greedy"),
+                    "/".join(_pct(s.get(f"seat{seat}_win_rate")) for seat in (1, 2)),
                     s.get("retries", 0),
                     _caps(s),
                     "—" if s.get("shaping_share_abs") is None else f"{s['shaping_share_abs']:.2f}",
+                    "—" if s.get("dense_share_abs") is None else f"{s['dense_share_abs']:.2f}",
                     "—"
                     if s.get("draw_return_per_ep") is None
                     else f"{s['draw_return_per_ep']:+.1f}" + ("" if s.get("draw_return_exact", True) else " (≥)"),
@@ -1568,9 +1621,11 @@ def render_report(summary: Mapping[str, Any]) -> str:
                 "steps",
                 "stoch W/D/L",
                 "greedy W/D/L",
+                "gate WR seat 1/2",
                 "retries",
                 "captures/ep T/B/H",
                 "shaping abs",
+                "dense share",
                 "draw return/ep",
                 "cum steps",
             ],
@@ -1848,6 +1903,8 @@ _STAGE_COLUMNS = (
     "greedy_draw_rate",
     "window_stoch_win_rate",
     "window_greedy_win_rate",
+    "seat1_win_rate",
+    "seat2_win_rate",
     "peak_gate_wr",
     "captures_per_ep_tower",
     "captures_per_ep_building",
@@ -1858,9 +1915,11 @@ _STAGE_COLUMNS = (
     "reward_per_ep_shaping_delta",
     "reward_per_ep_invalid_penalty",
     "reward_per_ep_terminal",
+    "reward_per_ep_turn_penalty",
     "reward_sum_mismatch",
     "shaping_share_abs",
     "shaping_share_signed",
+    "dense_share_abs",
     "episode_abs_share",
     "draw_return_per_ep",
     "draw_return_exact",

@@ -5,7 +5,8 @@ This is the configuration for the 3-seed validation run in
 with the reward back-port, on the fixed code (opponent-freeze fix, legal-only
 rule bots, the MDP fixes, the stochastic gate). It explains every change to
 three configs and gives the evidence for each. §10 lists the judgment calls
-you may want to revisit.
+you may want to revisit. How to launch, monitor, resume and aggregate the run
+is the runbook, [`validation_run.md`](validation_run.md).
 
 | File | What changed |
 |---|---|
@@ -25,28 +26,37 @@ checks that no stage is a step down on the ladder, using a cached ladder run.
 
 ## 1. How to run it
 
-One run per seed, with the same config:
+One run per seed, with the same config, launched as one seed group by
+`scripts/train/run_seeds.py` (the runbook, [`validation_run.md`](validation_run.md)
+§4, has the local, Colab and Vertex variants):
 
 ```
-for seed in 42 43 44; do
-  python scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --strict \
-      --set seed=$seed --output-dir benchmarks/bootstrap/validation_seed$seed
-done
+python scripts/train/run_seeds.py --config configs/ppo/bootstrap.yaml --n-seeds 3 --tag val -- \
+    --strict --skip-videos
 ```
 
-On Colab, a killed run continues with `--resume <its output dir>`. Rolling
-checkpoints are written every 50k stage steps. Run
-`configs/ppo/bootstrap_validation.yaml` first, about 2 h; its purpose is in §6.
+The seeds are 42, 1042 and 2042. Consecutive seeds (42, 43, 44) would share
+7 of the 8 training env streams and 59 of the 60 eval episodes per seat, and
+the launcher refuses them. Each seed runs `train_bootstrap.py --seed N
+--resume-if-exists`, so re-running the same command continues a killed seed
+from its rolling checkpoint (written every 50k stage steps). Run
+`configs/ppo/bootstrap_validation.yaml` first, about 2 h; its purpose is in §6
+and the command in the runbook (§3.1).
 
-Report per seed and per stage, from `<stage>/eval_results.jsonl`:
+Report per seed and per stage. `scripts/eval/summarize_seeds.py` (runbook §8)
+reads these from each stage's `eval_results.jsonl` and tabulates them; the
+field names below are the raw ones.
 
 - **Win / draw / loss with the stochastic policy.** Use `win_rate`,
   `draw_rate` and `loss_rate`, plus `by_seat` for each seat. The gate uses the
-  stochastic policy, so these are the gate's own numbers.
+  stochastic policy, so these are the gate's own numbers. (Report: stochastic
+  W/D/L and the gate win rate per seat.)
 - **Captures by type:** `captures_by_type` (tower / building / hq), per
   episode.
-- **Shaping share of return.** Decompose each eval's mean return using
-  `reward_components` and `action_counts`:
+- **Shaping share of return** (report: `dense_share_abs`, with
+  `reward_per_ep_turn_penalty` and `reward_per_ep_shaping_delta` as separate
+  columns). Decompose each eval's mean return using `reward_components` and
+  `action_counts`:
   - terminal: `reward_components.terminal`;
   - turn penalty: `action_counts.end_turn × turn_penalty`;
   - seize: `combat_stats.seize_attempts × seize_progress`;
@@ -61,10 +71,14 @@ Report per seed and per stage, from `<stage>/eval_results.jsonl`:
   return: the potential term telescopes in the discounted sum, but the
   undiscounted eval sum still carries −(1−γ)·ΣΦ(s_t). That drain reached
   −1508 in one 8872-step corner_points game played by a random policy.
+  The report's archive-comparable `shaping_share_abs` is computed on the raw
+  components (turn penalty and potential term included), so read it only
+  against the archive.
 
 For the v52a comparison, v52a's evals were greedy and seat-1 only. Evaluate
 each stage's `best_model.zip` in both modes and seat 1 after the run. The
-built-in sanity eval only covers the last stage.
+built-in sanity eval only covers the last stage, and there is no script for
+the per-stage eval yet (runbook §8).
 
 ---
 
@@ -535,7 +549,10 @@ to look at:
 - whether `beginner_random_15` trends up.
 
 `tests/test_shipped_configs.py` fails if the slice drifts from the
-canonical file in anything but these three settings.
+canonical file in anything but these three settings. The command that runs
+it is in the runbook ([`validation_run.md`](validation_run.md) §3.1). The
+slice restates the canonical file in full; §10.12 notes the `extends:` form
+it could take instead.
 
 ---
 
@@ -651,6 +668,24 @@ these config changes):
 - **Lint, types and tests.** `ruff check .`, `ruff format --check .` and
   `python -m mypy .` are clean. The default `pytest` run: 3068 passed, 9 skipped.
   `pytest -m slow --no-cov`: 62 passed.
+- **After merging the seed tooling** (`06f597a`, the runbook's launcher and
+  aggregator):
+  - `train_bootstrap.py --strict --check-only` loads both configs through
+    the new loader: 24 stages, 55.25M (106.5M with retries); the slice
+    8 stages, 4.75M.
+  - A 2-seed group (42, 1042) of the slice ran end to end through
+    `run_seeds.py --parallel 2` on 4 CPUs with tiny `--set` budgets (2 train
+    and 2 eval envs, 2,048 steps per stage, gate zeroed on the first seven
+    stages): both seeds cleared 7 stages and stalled at
+    `beginner_random_15` (exit 3, as the probe contract wants), and
+    `summarize_seeds.py` reported both with per-seat gate win rates and
+    both shaping shares.
+  - The runbook's smoke test (§3 there) on `bootstrap.yaml`, one seed, with
+    2 train and 2 eval envs on 4 CPUs: every stage's envs and evals built,
+    24/24 stages cleared at their first eval, every one flagged
+    `skip_ahead`, exit 0, in 9 minutes.
+  - Lint and types clean; the default `pytest` run: 3250 passed, 9 skipped;
+    `pytest -m slow --no-cov`: 64 passed.
 
 ---
 
@@ -737,3 +772,17 @@ these config changes):
       tiers: self-play or a frozen checkpoint.
 11. **Budgets are a prior.** Run the slice first and calibrate them, and
     the eval speed-up, from its stage wall-times.
+12. **`extends:` and `curriculum.stage_defaults` are not used.** The seed
+    tooling added both to the config loader
+    ([`configs/README.md`](../configs/README.md)). The configs were left as
+    literal files for this run, but two places would read more clearly:
+    - The slice as `extends: bootstrap.yaml` plus `eval.eval_freq: 50_000`,
+      `curriculum.max_retries: 0`, a `drop_stages` list of the 16 later
+      stages and the 8 budget / anneal pairs, about 35 lines. Checked: that
+      file resolves to exactly `bootstrap_validation.yaml` (no differences
+      in the loaded config). `tests/test_shipped_configs.py` would then
+      compare two resolved configs instead of two copies.
+    - In `bootstrap.yaml`, `stage_defaults: {patience: 2,
+      min_timesteps_before_promotion: 25_000}` would drop 48 repeated lines.
+      The per-map `max_turns` / `max_steps` pairs cannot move there: a
+      default applies to every stage.

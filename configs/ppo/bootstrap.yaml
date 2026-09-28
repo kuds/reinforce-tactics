@@ -3,19 +3,22 @@
 # L4 GPU (high-RAM tier, 12 vCPUs verified via ``!nproc``).
 #
 # Every change from the 33-stage curriculum, with its evidence and the
-# judgment calls worth revisiting, is in docs/validation_run_config.md.
+# judgment calls worth revisiting, is in docs/validation_run_config.md; how to
+# launch, resume and report the run is in docs/validation_run.md.
 #
 # Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
 # Stages live under curriculum.stages; a stage that exhausts `max_timesteps`
 # without promoting is retried (curriculum.max_retries) and then raises
-# CurriculumStalled. Run with --strict; on Colab resume a killed run with
-# train_bootstrap.py --resume RUN_DIR.
+# CurriculumStalled. Run with --strict; resume a killed run with
+# train_bootstrap.py --resume RUN_DIR (or re-run the same --resume-if-exists
+# command, as scripts/train/run_seeds.py does).
 #
 # Hardware tuning (env.n_envs / env.use_subprocess / ppo.batch_size /
 # eval.n_eval_envs / eval.eval_use_subprocess) targets the L4 + 12-vCPU
 # tier. On free Colab (2 vCPUs) drop env.n_envs and eval.n_eval_envs to 2.
 algorithm: maskable_ppo
-# One seed per run; the validation run launches three (--set seed=N).
+# One seed per run; the validation run launches three (42, 1042, 2042) with
+# scripts/train/run_seeds.py, which passes train_bootstrap.py --seed N.
 seed: 42
 # Budget: 55.25M env steps if every stage runs out its max_timesteps, 106.5M
 # if each also spends its retry (the capstone has none). Prior for a normal

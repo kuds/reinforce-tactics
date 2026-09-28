@@ -76,11 +76,13 @@ def eval_row(
     truncated: int = 0,
     flat_truncated_rate: float = 0.0,
     per_episode: dict[str, dict[str, float]] | None = None,
+    end_turns: int = 20,
 ) -> dict[str, Any]:
     """One eval row. ``mode`` "stochastic" / "greedy" is the gate mode of a new row; "legacy" is an archive row.
 
     ``captures`` are per episode (tower, building, hq); ``truncated`` draws
-    ended at max_steps, the other draws at max_turns.
+    ended at max_steps, the other draws at max_turns. A new row counts
+    ``end_turns`` agent end_turn actions per episode (``action_counts``).
     """
     per = per_episode or PER_EPISODE
     outcomes = ["wins"] * wins + ["draws"] * draws + ["losses"] * losses
@@ -121,6 +123,7 @@ def eval_row(
             for o in ("wins", "draws", "losses")
         },
         reward_components_abs={c: sum(abs(per[o][c]) for o in outcomes) for c in COMPONENTS},
+        action_counts={"end_turn": end_turns * n},
         flat_truncated_rate=flat_truncated_rate,
         deterministic=mode == "greedy",
         attempt=attempt,

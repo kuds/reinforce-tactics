@@ -188,6 +188,35 @@ class TestNewLayout:
         assert (a["captures_per_ep_tower"], a["captures_per_ep_building"], a["captures_per_ep_hq"]) == (1.0, 0.5, 0.0)
         assert a["opponent_captures_per_ep_neutral"] == 1.0 and a["opponent_captures_per_ep_owned"] == 0.0
 
+    def test_dense_share_takes_the_turn_penalty_out_of_the_action_stream(self, tmp_path):
+        a = rs.run_metrics(rs.read_run(_write_group(tmp_path)[0]))["stages"][0]
+        # 20 end_turns per episode at the config's turn_penalty -0.5: -10 per episode inside `action`.
+        assert a["reward_per_ep_turn_penalty"] == pytest.approx(-10.0)
+        dense, t_sum = abs(9 * 10 + 6 - 10 * -10.0), 9 * 50 - 10
+        assert a["dense_share_abs"] == pytest.approx(dense / (dense + abs(t_sum)))
+        # A stage's own reward_config wins over env.reward_config.
+        rows = [eval_row(100, 9, 1, 0, end_turns=4)]
+        path = write_run(
+            tmp_path, "run_tp", [stage("A", rows, promoted=True, start=0, end=100, reward_config={"turn_penalty": -2.0})]
+        )
+        a = rs.run_metrics(rs.read_run(path))["stages"][0]
+        assert a["reward_per_ep_turn_penalty"] == pytest.approx(-8.0)
+        # An archive row without action_counts has no dense share.
+        legacy = rs.run_metrics(rs.read_run(_write_legacy(tmp_path)))["stages"][0]
+        assert legacy["dense_share_abs"] is None and legacy["reward_per_ep_turn_penalty"] is None
+        assert rs._dense_share({"action": -30.0, "terminal": 50.0}, -40.0) == pytest.approx(10 / 60)
+        assert rs._dense_share({"action": 1.0, "terminal": 1.0}, None) is None
+
+    def test_per_seat_gate_win_rates(self, tmp_path):
+        a = rs.run_metrics(rs.read_run(_write_group(tmp_path)[0]))["stages"][0]
+        assert (a["seat1_win_rate"], a["seat2_win_rate"]) == (pytest.approx(0.9), None)
+        row = eval_row(100, 6, 2, 2)
+        row["by_seat"] = {"1": {"win_rate": 0.9, "episodes": 5}, "2": {"win_rate": 0.3, "episodes": 5}}
+        path = write_run(tmp_path, "run_seats", [stage("A", [row], promoted=True, start=0, end=100)])
+        a = rs.run_metrics(rs.read_run(path))["stages"][0]
+        assert (a["seat1_win_rate"], a["seat2_win_rate"]) == (0.9, 0.3)
+        assert rs.run_metrics(rs.read_run(_write_legacy(tmp_path)))["stages"][0]["seat1_win_rate"] is None
+
     def test_a_row_whose_components_do_not_add_up_is_flagged(self, tmp_path):
         rows = [eval_row(100, 9, 1, 0), eval_row(200, 9, 1, 0)]
         rows[0]["avg_reward"] += 5.0

@@ -2,9 +2,11 @@
 
 `configs/ppo/bootstrap.yaml` with the back-port, **three seeds**, on the fixed
 code ([`REVIEW_full_2026-09-26.md`](REVIEW_full_2026-09-26.md) §2.1). This page
-is how to run it and how to report it. Which config values the run uses is
-decided separately, in `docs/validation_run_config.md`; this page refers to
-the config only by its path.
+is how to run it and how to report it. Which config values the run uses, and
+why, is in [`validation_run_config.md`](validation_run_config.md): the reward
+back-port, the 24 ladder-ordered stages, the Wilson gate on the stochastic
+policy in both seats, the budgets and the compute estimate. This page refers
+to the config only by its path.
 
 The tooling:
 
@@ -27,7 +29,8 @@ resumable run record.** A stall is a result, not a failure of the run.
 
 ## 2. Preconditions
 
-1. The back-port is merged into `configs/ppo/bootstrap.yaml`. Record the
+1. The back-port is merged into `configs/ppo/bootstrap.yaml`
+   ([`validation_run_config.md`](validation_run_config.md) §2–5). Record the
    commit the run uses: every run dir records it again (`meta.git` in each
    stage's `config.json`, `git` in `seed_group.json`).
 2. The fast suite passes: `pytest -m "not slow"`.
@@ -39,10 +42,12 @@ resumable run record.** A stall is a result, not a failure of the run.
 
    It prints the stage table and the worst-case budget, and writes nothing.
 4. For Vertex: an image built from the merge commit (`TAG=<short sha>`, §4.3).
+5. The slice has run (§3.1): it calibrates the budgets and the eval speed-up
+   the compute estimate assumes.
 
 ## 3. Smoke test (about 30–60 min)
 
-Every stage promotes at its first eval, so the whole 33-stage pipeline runs:
+Every stage promotes at its first eval, so the whole 24-stage pipeline runs:
 each stage's envs and evals are built (late-stage env or config errors show up
 now, not after three days), both seeds run in parallel, and the report is
 written.
@@ -52,16 +57,38 @@ python3 scripts/train/run_seeds.py --config configs/ppo/bootstrap.yaml --seeds 4
     --strict --skip-videos --sanity-episodes 0 \
     --set 'curriculum.stages[*].promotion_win_rate=0' \
     --set 'curriculum.stages[*].patience=1' \
-    --set 'curriculum.stages[*].n_eval_episodes=4'
+    --set 'curriculum.stages[*].min_timesteps_before_promotion=0' \
+    --set eval.n_eval_episodes=4
 python3 scripts/eval/summarize_seeds.py \
     --group-manifest benchmarks/bootstrap/_groups/<smoke group>/seed_group.json
 ```
 
-`bootstrap.yaml` sets `n_eval_episodes: 80` on every stage, which wins over
-`eval.n_eval_episodes`, hence the per-stage `--set`. Expect exit 0 from both
-commands and, in the report, both seeds `completed` with 33/33 stages cleared
-(every stage flagged `skip_ahead`, as it should be here). The launcher prints
-the group id; delete the smoke group's run dirs afterwards.
+`bootstrap.yaml` sets `min_timesteps_before_promotion: 25_000` on every stage,
+so the stage-entry eval cannot promote; the smoke test zeroes it, or every
+stage would train to its first in-stage eval (up to 100k steps). `n_eval_episodes`
+is set once, under `eval` (per seat: 4 × 2 seats here). Expect exit 0 from
+both commands and, in the report, both seeds `completed` with 24/24 stages
+cleared (every stage flagged `skip_ahead`, as it should be here). The launcher
+prints the group id; delete the smoke group's run dirs afterwards.
+
+### 3.1 The slice (about 2 h)
+
+`configs/ppo/bootstrap_validation.yaml` is the first 8 stages of
+`bootstrap.yaml` with about half the budgets, `eval_freq` 50k and no retries
+([`validation_run_config.md`](validation_run_config.md) §6). Run it once, at
+the first seed, with the real gate:
+
+```bash
+python3 scripts/train/run_seeds.py --config configs/ppo/bootstrap_validation.yaml --seeds 42 --tag slice -- \
+    --strict --skip-videos
+```
+
+Read its stage wall-times and TensorBoard `time/fps` against the compute model
+([`validation_run_config.md`](validation_run_config.md) §5, which assumes
+8 subprocess eval envs run ~2.5× faster than serial), the per-seat win rates
+on `starter_medium`, `avg_turns` against `max_turns`, and
+`flat_truncated_rate`. A stall ends the slice (exit 3); that is a finding to
+diagnose before the three-seed launch, not a reason to extend its budget.
 
 ## 4. Launch
 
@@ -73,15 +100,18 @@ run from the root, where the config's map paths resolve).
 
 Seeds default to `--n-seeds 3` with a stride of 1000 from the config's seed:
 **42, 1042, 2042** (42 for continuity with the archive). Consecutive seeds
-(42, 43, 44) would share 7 of 8 training env streams and 79 of 80 gate-eval
-episodes (policy-sampling streams included); the launcher refuses seeds whose
-streams overlap unless `--allow-seed-overlap`.
+(42, 43, 44) would share 7 of 8 training env streams and 59 of 60 gate-eval
+episode seeds per seat (policy-sampling streams included); the launcher
+refuses seeds whose streams overlap unless `--allow-seed-overlap`.
 
 ### 4.1 Local workstation
 
-At least ~30 vCPUs for three seeds in parallel (each run keeps `n_envs + 1`
-cores busy, plus `n_eval_envs` with subprocess evals); otherwise run them one
-after another (`--parallel 1`).
+The launcher counts 17 CPUs per run for this config (the main process, 8 env
+workers and 8 subprocess eval workers) and warns when a slot is smaller. The
+env workers idle while an eval runs and the eval workers idle while PPO
+trains, so a slot of about 10 CPUs shares cores only during evals: about 30
+vCPUs for three seeds in parallel; otherwise run them one after another
+(`--parallel 1`).
 
 ```bash
 # three seeds at once, each pinned to its own third of the CPUs, one GPU each
@@ -140,7 +170,7 @@ python3 scripts/train/run_seeds.py status --group <group> --jobs     # Vertex: p
 tensorboard --logdir benchmarks/bootstrap                             # then filter the runs by "<group>_s"
 ```
 
-`status` shows, per seed: its state, the current stage (index of 33), the
+`status` shows, per seed: its state, the current stage (index of 24), the
 env steps so far, the last gate win rate, stages cleared, resumes, sessions and
 the last exit code, and steps per hour.
 
@@ -149,11 +179,15 @@ In the first two hours check:
 - **steps/h** (`status`): for scale, the archive's v52a ran at about 420k
   env steps/h on the beginner and intermediate stages and 200k/h on
   intermediate and skirmish (Colab L4, 12 vCPUs, greedy-only serial evals).
-  Both-mode evals cost more unless the eval is batched.
+  This config evaluates the stochastic policy only, every 100k steps, in 8
+  batched subprocess envs; the compute model in
+  [`validation_run_config.md`](validation_run_config.md) §5 and the slice
+  (§3.1) say what to expect.
 - **the eval share of wall clock**: every eval row carries `eval_seconds`
   and `wall_time`; `summarize_seeds.py` reports `eval_share` per stage.
 - **`flat_truncated_rate`** in the eval rows: should stay 0.
-- **the first stages clearing**, with plausible win rates in both modes.
+- **the first stages clearing**, with plausible win rates in both seats
+  (`win_rate_by_seat` in the eval rows).
 
 ## 6. Interruptions
 
@@ -175,20 +209,28 @@ In the first two hours check:
 
 ## 7. Budget
 
-- **Env steps:** expect roughly 10–20M per seed (the archive's deepest runs
-  cleared 20 of 33 stages in about 5.9M). That is about 1.5–3.5 days per
-  seed on Colab-class hardware with the default serial eval.
-- **Worst case:** the stage budgets sum to 87.5M env steps; with
-  `curriculum.max_retries: 1` every stage can use its budget twice (175M).
-  A single stall on a 3M-step skirmish stage with its retry is 6M steps
-  (about 30–50 h at the rates above).
+The numbers and the model behind them are in
+[`validation_run_config.md`](validation_run_config.md) §5; the slice (§3.1)
+calibrates them.
+
+- **Env steps:** a prior of about 21M per seed (each stage stopping at 40%
+  of its budget, 20% on map-entry stages). The archive's deepest runs
+  cleared 20 of 33 of the old stages in about 5.9M, against bots that were
+  weaker then.
+- **Wall clock:** about 24 h per seed at the expected length (14–38 h) on
+  an L4 with 12 vCPUs; about 58 h if every stage runs out its budget.
+- **Worst case:** the stage budgets sum to 55.25M env steps; with
+  `curriculum.max_retries: 1` every stage but the capstone can use its budget
+  twice (106.5M). A single stall on a 4M-step map top with its retry is 8M
+  steps. `train_bootstrap.py --check-only` prints both totals.
 - **Vertex:** a custom job times out after 7 days (the GCP default);
   resubmitting continues it. Cost is roughly $1/h per job for
   `n1-highmem-8` + T4 (verify against current GCP pricing; a 16-vCPU machine
-  costs more per hour and runs faster), i.e. on the order of $40–90 per seed
-  at the expected length.
+  costs more per hour and runs faster), times the wall clock above.
 - The eval-throughput knobs (`eval.n_eval_envs`, `eval.eval_use_subprocess`,
-  `eval.eval_both_modes`) belong to the config decision, not to this runbook.
+  `eval.eval_both_modes`) belong to the config decision
+  ([`validation_run_config.md`](validation_run_config.md) §4–5), not to this
+  runbook.
 
 ## 8. Aggregate and report
 
@@ -213,16 +255,39 @@ What to report, in this order:
    the spread is the honest summary; the intervals are in `per_stage.csv`.
 2. **Seed-sensitive stages** (§5 flags): cleared by some seeds, stalled by
    others. These say more about the curriculum than any mean.
-3. Per stage and seed (§3): stochastic and greedy W/D/L (with Wilson
-   intervals), captures per episode (tower/building/HQ), `shaping_share_abs`,
-   the draw return, steps to promotion, retries.
+3. Per stage and seed (§3): stochastic W/D/L (with Wilson intervals, both
+   seats pooled as the gate pools them) and the gate win rate per seat,
+   captures per episode (tower/building/HQ), the shaping share, the draw
+   return, steps to promotion, retries. Two shaping shares:
+   - `dense_share_abs` ("dense share") is the one
+     [`validation_run_config.md`](validation_run_config.md) §1 asks for: the
+     action stream without the turn penalty, against the terminal. The turn
+     penalty (`reward_per_ep_turn_penalty`) and the potential term
+     (`reward_per_ep_shaping_delta`) are separate columns in
+     `per_seed_stage.csv`.
+   - `shaping_share_abs` ("shaping abs") is the archive-comparable headline.
+     It counts the turn penalty and the potential term's drain as shaping,
+     so on this config it rises with game length even when nothing is
+     farmed.
 4. The flags: `skip_ahead`, `draw_breakeven` (a draw that pays at least
    break-even, the draw-farming signature), `flat_truncated`,
    `max_steps_truncate` above 5%, metadata write failures, resumed seeds.
 5. **v52a, qualitatively** (§4): only the stages marked comparable (same map,
    opponent and kwargs, max_turns, threshold and patience), and only greedy
    win rates (v52a gated and recorded the greedy policy only). The config
-   deltas and caveats are listed with it.
+   deltas and caveats are listed with it. On this config the comparison is
+   thinner than that:
+   - The run records the stochastic policy only (`eval_both_modes: false`),
+     so the group's greedy columns are empty. The greedy seat-1 numbers come
+     from a post-run eval of each stage's `best_model.zip`
+     ([`validation_run_config.md`](validation_run_config.md) §1, §4); there
+     is no script for that eval yet.
+   - 14 of the 24 stages share a name with a v52a stage, and none is marked
+     comparable: every Wilson threshold T differs from v52a's point
+     threshold (often by construction, since a stage's intended rate t is
+     its old point threshold), and `beginner_random_10` / `_15` also differ
+     in opponent (v52a used MixedBot random pairs there). Read the listed
+     differences rather than the ✗.
 
 Afterwards: archive the run dirs and the `_groups/<group>/` folder to Drive
 (`MyDrive/reinforce-tactics/benchmarks/bootstrap/`), re-run

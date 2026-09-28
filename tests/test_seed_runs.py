@@ -119,14 +119,14 @@ class TestSeedCollisions:
         cfg = load_config(BOOTSTRAP)
         found = sr.seed_collisions([42, 43, 44], cfg)
         assert any("42 and 43: the training envs share 7 of 8" in f for f in found)
-        assert any("42 and 43: the gate evals share 79 of 80" in f for f in found)
+        assert any("42 and 43: the gate evals share 59 of 60" in f for f in found)
         assert any("42 and 44: the training envs share 6 of 8" in f for f in found)
 
     def test_between_n_envs_and_n_eval(self):
         found = sr.seed_collisions([42, 92], load_config(BOOTSTRAP))
         assert found == [
-            "seeds 42 and 92: the gate evals share 30 of 80 episode seeds per seat, "
-            "policy-sampling streams included (difference 50 < n_eval_episodes 80)"
+            "seeds 42 and 92: the gate evals share 10 of 60 episode seeds per seat, "
+            "policy-sampling streams included (difference 50 < n_eval_episodes 60)"
         ]
 
     def test_default_seeds_do_not_collide_with_bootstrap_yaml(self):
@@ -139,8 +139,9 @@ class TestSeedCollisions:
         cfg["eval"]["resample_eval_seeds"] = True
         found = sr.seed_collisions([42, 1042], cfg)
         assert len(found) == 1 and "d mod 1000 = 0" in found[0]
-        assert sr.seed_collisions([42, 542], cfg) == []  # 542 - 42 = 500: in [80, 920]
-        assert sr.seed_collisions([42, 1112], cfg)  # residue 70 < 80
+        assert sr.seed_collisions([42, 542], cfg) == []  # 542 - 42 = 500: in [60, 940]
+        assert sr.seed_collisions([42, 1112], cfg) == []  # residue 70: in [60, 940]
+        assert sr.seed_collisions([42, 1092], cfg)  # residue 50 < 60
 
     def test_training_envs_meeting_another_seeds_eval_set(self):
         cfg = {"env": {"n_envs": 4}, "eval": {"n_eval_episodes": 10, "seed_offset": 1_000_000}}
@@ -200,11 +201,13 @@ class TestCpus:
 
     def test_needed_and_warnings(self):
         cfg = load_config(BOOTSTRAP)
-        assert sr.cpus_needed(cfg) == cfg.env.n_envs + 1
+        # bootstrap.yaml runs its 8 eval envs in worker processes
+        assert (cfg.eval.n_eval_envs, cfg.eval.eval_use_subprocess) == (8, True)
+        assert sr.cpus_needed(cfg) == cfg.env.n_envs + 9
         data = cfg.to_dict()
-        data["eval"].update(n_eval_envs=8, eval_use_subprocess=True)
-        assert sr.cpus_needed(data) == cfg.env.n_envs + 9
-        warnings = sr.cpu_warnings([list(range(9)), list(range(9, 17))], cfg)
+        data["eval"].update(eval_use_subprocess=False)
+        assert sr.cpus_needed(data) == cfg.env.n_envs + 1
+        warnings = sr.cpu_warnings([list(range(17)), list(range(17, 25))], cfg)
         assert len(warnings) == 1 and warnings[0].startswith("CPU set 1 (8 CPU(s))")
 
 
