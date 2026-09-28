@@ -42,6 +42,9 @@ class InputHandler:
         target_selection_mode: Whether we're in target selection mode
         target_selection_action: The action waiting for target selection
         target_selection_unit: The unit performing the action
+        walking_unit: The unit the player just moved while its sprite walks
+            there; the board ignores input until it arrives, and then its
+            action menu opens (see update)
     """
 
     def __init__(self, game, renderer, bots, num_players):
@@ -66,6 +69,7 @@ class InputHandler:
         self.target_selection_mode = False
         self.target_selection_action = None
         self.target_selection_unit = None
+        self.walking_unit = None
 
         # Right-click preview state
         self.right_click_preview_active = False
@@ -83,6 +87,24 @@ class InputHandler:
         self.notice_text = text
         self.notice_expires_at = pygame.time.get_ticks() + duration_ms
 
+    def update(self, current_time):
+        """Per-frame upkeep: open the action menu of a moved unit once its sprite has arrived.
+
+        Args:
+            current_time: The frame's ``pygame.time.get_ticks()``
+        """
+        unit = self.walking_unit
+        if unit is None or self.renderer.is_unit_moving(unit):
+            return
+        self.walking_unit = None
+        # Under fog of war the unit may have been ambushed and stopped short
+        # of the clicked tile (see GameState.move_unit).
+        if unit.ambushed:
+            self.show_notice(f"Ambushed! Your {unit.type} stopped at ({unit.x}, {unit.y})")
+        self.active_menu = UnitActionMenu(self.renderer.screen, self.game, unit)
+        self.target_selection_unit = unit
+        self.menu_opened_time = current_time
+
     def handle_keyboard_event(self, event):
         """
         Handle keyboard events.
@@ -93,6 +115,10 @@ class InputHandler:
         Returns:
             'pause' if pause menu should open, 'save' if save requested, None otherwise
         """
+        if self.walking_unit is not None and event.key not in (pygame.K_ESCAPE, pygame.K_s):
+            # A unit is walking its move: only pausing and saving answer until it arrives.
+            return None
+
         if event.key == pygame.K_ESCAPE:
             if self.target_selection_mode:
                 # Cancel target selection and return to menu
@@ -165,6 +191,10 @@ class InputHandler:
         """
         current_time = pygame.time.get_ticks()
 
+        # A unit is walking its move: the board answers once it arrives.
+        if self.walking_unit is not None:
+            return "continue"
+
         # Priority 0: Handle target selection mode
         if self.target_selection_mode and self.target_selection_action:
             return self._handle_target_selection_click(mouse_pos, current_time)
@@ -233,6 +263,10 @@ class InputHandler:
         Args:
             mouse_pos: Tuple of (x, y) mouse position
         """
+        # A unit is walking its move: the board answers once it arrives.
+        if self.walking_unit is not None:
+            return
+
         # Priority 1: Cancel target selection mode
         if self.target_selection_mode:
             self.target_selection_mode = False
@@ -405,16 +439,12 @@ class InputHandler:
         if self.selected_unit and self.selected_unit.can_move:
             if self.game.move_unit(self.selected_unit, grid_x, grid_y):
                 unit = self.selected_unit
-                # Under fog of war the unit may have been ambushed and stopped
-                # short of the clicked tile (see GameState.move_unit).
                 print(f"Moved {unit.type} to ({unit.x}, {unit.y})")
-                if unit.ambushed:
-                    self.show_notice(f"Ambushed! Your {unit.type} stopped at ({unit.x}, {unit.y})")
-                # After movement, open unit action menu
-                self.active_menu = UnitActionMenu(self.renderer.screen, self.game, self.selected_unit)
-                self.target_selection_unit = self.selected_unit
-                self.menu_opened_time = current_time
                 self.selected_unit = None
+                # Its sprite walks the path first (GameSession animates every
+                # move); the action menu opens when it arrives.
+                self.walking_unit = unit
+                self.update(current_time)
             return "continue"
 
         # Priority 4: Deselect

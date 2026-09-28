@@ -28,7 +28,9 @@ def _display():
 
 def _session(game, bots, monkeypatch):
     """A GameSession that stops itself after MAX_FRAMES rendered frames."""
-    session = GameSession(game, Mock(), bots, num_players=2)
+    renderer = Mock()
+    renderer.queue_movement_path_animation.return_value = False  # no walks to wait for
+    session = GameSession(game, renderer, bots, num_players=2)
     frames = [0]
 
     def render_frame():

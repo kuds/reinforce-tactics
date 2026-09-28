@@ -55,7 +55,11 @@ Significant features shipped since the roadmap was created that were not origina
 tracked here:
 
 ### Sprite & Animation System ✅
-- Coordinate-based sprite animation with movement path transitions
+- Coordinate-based sprite animation (idle and four walking directions)
+- Units walk their moves in the pygame client: the sprite follows the path the
+  engine took (to where an ambush stopped it), about 0.1 s per tile, facing each
+  step; the action menu opens on arrival, and bot turns play out one move at a
+  time, seen through the human player's fog of war
 - Per-team palette swap for unit sprites and team-coloured structure tiles
 - Tile variant auto-discovery for visual terrain variety
 - Sprite sheet splitting utility and unified `sprites_path` with auto-discovery

@@ -140,6 +140,7 @@ OVERLAY_ATTACK_RANGE_ALPHA = 100
 OVERLAY_FADE_MS = 150
 SELECTION_PULSE_MS = 360
 STATUS_PULSE_MS = 300
+UNIT_WALK_MS_PER_TILE = 100  # a moving unit's sprite crosses one tile in this time
 
 # ── Dimensions ───────────────────────────────────────────────────────
 BORDER_RADIUS = 8

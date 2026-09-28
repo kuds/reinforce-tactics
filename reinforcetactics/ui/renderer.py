@@ -6,6 +6,7 @@ import math
 import os
 import random
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import pygame
@@ -24,7 +25,7 @@ from reinforcetactics.ui.assets import (
     UNIT_ASSETS,
     tile_color,
 )
-from reinforcetactics.ui.sprite_animator import SpriteAnimator, scale_unit_sprite
+from reinforcetactics.ui.sprite_animator import SpriteAnimator, animation_key, scale_unit_sprite
 from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
@@ -40,6 +41,30 @@ def _pulse(period_ms):
 def _lerp_color(a, b, t):
     """Linearly interpolate between two RGB colors."""
     return tuple(int(ca + (cb - ca) * t) for ca, cb in zip(a, b))
+
+
+@dataclass
+class _Walk:
+    """A unit's sprite walking the path of its last move, one tile per ``theme.UNIT_WALK_MS_PER_TILE``.
+
+    Only the drawing walks: the engine has already put the unit on the
+    last tile of ``path``.
+    """
+
+    unit: object
+    path: list[tuple[int, int]]
+    start_ms: int
+
+    @property
+    def end_ms(self):
+        return self.start_ms + (len(self.path) - 1) * theme.UNIT_WALK_MS_PER_TILE
+
+    def step_at(self, now_ms):
+        """``(from_tile, to_tile, fraction)`` of the step the sprite is on at ``now_ms``; None once it has arrived."""
+        if now_ms >= self.end_ms:
+            return None
+        index, into = divmod(max(now_ms - self.start_ms, 0), theme.UNIT_WALK_MS_PER_TILE)
+        return self.path[index], self.path[index + 1], into / theme.UNIT_WALK_MS_PER_TILE
 
 
 def _resolve_bundled_sprites_path():
@@ -153,6 +178,14 @@ class Renderer:
         # Animation timing
         self.last_frame_time = time.time()
         self.delta_time = 0.0
+
+        # Units whose sprite is walking its last move (animation_key -> _Walk),
+        # and each walker's step this frame (see _update_walks).
+        self._walks = {}
+        self._walk_steps = {}
+        # The game's units at the last frame (animation_key -> unit), so the
+        # animation state of one that has since left the game is dropped.
+        self._known_units = {}
 
         # Pre-allocate tile-sized overlay surfaces used every frame.
         # Fog is two-tier: unexplored tiles are darker than shrouded ones
@@ -448,6 +481,9 @@ class Renderer:
 
         self.screen.fill((0, 0, 0))
 
+        self._forget_removed_units()
+        self._update_walks()
+
         # Draw grid
         self._draw_grid()
 
@@ -623,31 +659,53 @@ class Renderer:
     def _draw_units(self):
         """Draw all units.
 
-        Sprites are taller than a tile and overflow it upward, so units are
-        drawn top to bottom (by ``y``, then ``x``): a unit lower on the
-        screen stands in front of the one above it. Health bars and status
-        badges go on in a second pass so no neighbour's sprite covers them.
+        Sprites are taller than a tile and overflow it upward, so standing
+        units are drawn top to bottom (by ``y``, then ``x``): a unit lower on
+        the screen stands in front of the one above it. Walking units go on
+        after them, so they pass over the units they walk through. Health
+        bars and status badges go on in a last pass so no neighbour's sprite
+        covers them.
         """
         fow_player = self._get_fow_player()
 
-        shown = []
+        standing = []
+        walking = []
         for unit in self.game_state.units:
             # With fog of war, only draw visible units (own units + units in visible tiles)
-            if fow_player is not None:
-                # Always show own units
-                if unit.player != fow_player:
-                    # Check if enemy unit is in a visible tile
-                    vis_state = self._get_visibility_state(unit.x, unit.y, fow_player)
-                    if vis_state != VISIBLE:
-                        continue
+            if fow_player is not None and unit.player != fow_player and not self._unit_in_sight(unit, fow_player):
+                continue
+            if animation_key(unit) in self._walk_steps:
+                walking.append(unit)
+            else:
+                standing.append(unit)
 
-            shown.append(unit)
-
-        shown.sort(key=lambda u: (u.y, u.x))
+        standing.sort(key=lambda u: (u.y, u.x))
+        walking.sort(key=lambda u: self._unit_origin(u)[::-1])
+        shown = standing + walking
         for unit in shown:
             self._draw_unit(unit)
         for unit in shown:
             self._draw_unit_status(unit)
+
+    def _unit_in_sight(self, unit, player):
+        """Whether ``player`` sees ``unit``: its tile is VISIBLE to them.
+
+        While the unit walks, both ends of the step it is on must be, so an
+        enemy leaving the fog appears only once it has stepped out, and one
+        walking into it vanishes as it steps off the last tile in sight:
+        its path through the fog is never drawn.
+        """
+        step = self._walk_steps.get(animation_key(unit))
+        tiles = step[:2] if step else [(unit.x, unit.y)]
+        return all(self._get_visibility_state(x, y, player) == VISIBLE for x, y in tiles)
+
+    def _unit_origin(self, unit):
+        """Top-left pixel ``unit`` is drawn at: its tile, or part way along the step it is walking."""
+        step = self._walk_steps.get(animation_key(unit))
+        if step is None:
+            return unit.x * TILE_SIZE, unit.y * TILE_SIZE
+        (x0, y0), (x1, y1), t = step
+        return round((x0 + (x1 - x0) * t) * TILE_SIZE), round((y0 + (y1 - y0) * t) * TILE_SIZE)
 
     def _draw_unit(self, unit):
         """
@@ -681,7 +739,7 @@ class Renderer:
         self._draw_unit_letter(unit)
 
     def _draw_unit_status(self, unit):
-        """Draw a unit's status badges and health bar, anchored to its tile."""
+        """Draw a unit's status badges and health bar, anchored to its tile (or its step while walking)."""
         self._draw_paralysis_indicator(unit)
         self._draw_haste_indicator(unit)
         self._draw_unit_health_bar(unit)
@@ -707,7 +765,7 @@ class Renderer:
         if not unit.is_paralyzed():
             return
 
-        tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        tile_rect = pygame.Rect(*self._unit_origin(unit), TILE_SIZE, TILE_SIZE)
         border_color = _lerp_color(theme.STATUS_PARALYSIS, theme.STATUS_PARALYSIS_TINT, _pulse(theme.STATUS_PULSE_MS))
         pygame.draw.rect(self.screen, border_color, tile_rect, 3)
 
@@ -724,12 +782,13 @@ class Renderer:
             return
 
         # Anchored just above the health bar so neither covers the other.
-        bar_top = unit.y * TILE_SIZE + TILE_SIZE - theme.HEALTH_BAR_UNIT_HEIGHT - theme.HEALTH_BAR_MARGIN
+        left, top = self._unit_origin(unit)
+        bar_top = top + TILE_SIZE - theme.HEALTH_BAR_UNIT_HEIGHT - theme.HEALTH_BAR_MARGIN
         self._draw_status_badge(
             "haste",
             "H",
             theme.STATUS_HASTE,
-            bottomleft=(unit.x * TILE_SIZE + 3, bar_top - 2),
+            bottomleft=(left + 3, bar_top - 2),
         )
 
     def _draw_unit_sprite(self, unit, sprite):
@@ -757,14 +816,15 @@ class Renderer:
             display_sprite = sprite
 
         # Draw player-colored border around sprite
+        left, top = self._unit_origin(unit)
         player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
-        border_rect = pygame.Rect(unit.x * TILE_SIZE + 1, unit.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2)
+        border_rect = pygame.Rect(left + 1, top + 1, TILE_SIZE - 2, TILE_SIZE - 2)
         pygame.draw.rect(self.screen, player_color, border_rect, 2)
 
         # Stand the sprite on the tile: its bottom edge (the feet line) on the
         # tile's bottom edge, centred horizontally. A sprite larger than the
         # tile overflows it upward and sideways.
-        sprite_rect = display_sprite.get_rect(midbottom=(unit.x * TILE_SIZE + TILE_SIZE // 2, (unit.y + 1) * TILE_SIZE))
+        sprite_rect = display_sprite.get_rect(midbottom=(left + TILE_SIZE // 2, top + TILE_SIZE))
         self.screen.blit(display_sprite, sprite_rect)
 
     def _get_overlay(self, size, color):
@@ -799,7 +859,8 @@ class Renderer:
             self._letter_cache[key] = cached
         text, outline_text = cached
 
-        text_rect = text.get_rect(center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2))
+        left, top = self._unit_origin(unit)
+        text_rect = text.get_rect(center=(left + TILE_SIZE // 2, top + TILE_SIZE // 2))
 
         # Black outline
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)]:
@@ -815,8 +876,9 @@ class Renderer:
         margin = theme.HEALTH_BAR_MARGIN
         bar_width = TILE_SIZE - 2 * margin
         bar_height = theme.HEALTH_BAR_UNIT_HEIGHT
-        bar_x = unit.x * TILE_SIZE + margin
-        bar_y = unit.y * TILE_SIZE + TILE_SIZE - bar_height - margin
+        left, top = self._unit_origin(unit)
+        bar_x = left + margin
+        bar_y = top + TILE_SIZE - bar_height - margin
 
         # Background
         pygame.draw.rect(self.screen, theme.HEALTH_BAR_BG, (bar_x, bar_y, bar_width, bar_height))
@@ -1149,23 +1211,78 @@ class Renderer:
 
     def queue_movement_path_animation(self, unit, path):
         """
-        Queue a multi-step movement path for animation transitions.
+        Walk ``unit``'s sprite along the path of the move it just made.
 
-        Each path segment triggers the correct walking direction animation
-        (left, right, up, down). After the full path plays through, the
-        unit returns to idle.
+        The engine has already moved the unit; only its drawing follows the
+        path, one tile per ``theme.UNIT_WALK_MS_PER_TILE``, facing the way
+        each step goes (left, right, up, down), and it stands idle on
+        arrival. A new walk replaces one the unit is still on.
 
         Args:
             unit: Unit object
-            path: List of (x, y) positions including start position
+            path: List of (x, y) positions from its start tile to the tile
+                it stopped on (``GameState.move_listeners`` give this)
+
+        Returns:
+            True if the walk is one the viewer sees at least part of (their
+            own unit, or an enemy stepping between tiles in their sight);
+            False if there is nothing to watch, or no step at all.
         """
-        if self.animator:
-            self.animator.queue_movement_path(unit, path)
+        path = [tuple(tile) for tile in path]
+        if len(path) < 2:
+            return False
+        key = animation_key(unit)
+        walk = self._walks[key] = _Walk(unit, path, pygame.time.get_ticks())
+        self._walk_steps[key] = walk.step_at(walk.start_ms)
+        self.update_unit_animation_from_movement(unit, path[0], path[1])
+
+        fow_player = self._get_fow_player()
+        if fow_player is None or unit.player == fow_player:
+            return True
+        return any(
+            self._get_visibility_state(*a, fow_player) == VISIBLE and self._get_visibility_state(*b, fow_player) == VISIBLE
+            for a, b in zip(path, path[1:])
+        )
+
+    def is_unit_moving(self, unit):
+        """Whether ``unit``'s sprite is still walking its last move."""
+        walk = self._walks.get(animation_key(unit))
+        return walk is not None and pygame.time.get_ticks() < walk.end_ms
+
+    def _update_walks(self):
+        """Move each walking sprite on to this frame's step, facing its way; stand arrived ones idle."""
+        now = pygame.time.get_ticks()
+        self._walk_steps.clear()
+        for key, walk in list(self._walks.items()):
+            step = walk.step_at(now)
+            if step is None:
+                del self._walks[key]
+                self.set_unit_idle(walk.unit)
+            else:
+                self._walk_steps[key] = step
+                self.update_unit_animation_from_movement(walk.unit, step[0], step[1])
 
     def cleanup_unit_animation(self, unit):
         """Clean up animation data for a removed unit."""
+        key = animation_key(unit)
+        self._walks.pop(key, None)
+        self._walk_steps.pop(key, None)
         if self.animator:
             self.animator.cleanup_unit(unit)
+
+    def _forget_removed_units(self):
+        """Clean up the animation data of every unit gone from the game since the last frame.
+
+        Units die in combat or leave with an eliminated player inside the
+        engine, which the renderer only notices by their absence.
+        """
+        live = {animation_key(unit): unit for unit in self.game_state.units}
+        gone = {key: unit for key, unit in self._known_units.items() if key not in live}
+        # A unit can also move and die between two frames (a bot's turn)
+        gone.update((key, walk.unit) for key, walk in self._walks.items() if key not in live)
+        for unit in gone.values():
+            self.cleanup_unit_animation(unit)
+        self._known_units = live
 
     def set_viewing_player(self, player):
         """
