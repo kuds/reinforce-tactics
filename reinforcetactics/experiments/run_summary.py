@@ -1221,6 +1221,13 @@ def compare(baseline: Side, group: Side) -> dict[str, Any]:
         caveats.append("the baseline gated on the greedy policy: compare greedy win rates only")
     if any(st.get("eval_resampled") for r in baseline.runs for st in r.get("stages") or [] if isinstance(st, Mapping)):
         caveats.append("the baseline resampled its eval set every eval block")
+    if any(
+        st.get("reached") and not st.get("steps_exact")
+        for r in baseline.runs
+        for st in r.get("stages") or []
+        if isinstance(st, Mapping)
+    ):
+        caveats.append("the baseline's stage steps are approximate (last minus first eval row: no stage step bounds recorded)")
     caveats.append("numbers are the promoting (gate-selected) evals, 'at gate'; treat the comparison as qualitative")
     return {
         "label": baseline.label,
@@ -1353,8 +1360,10 @@ def _steps(x: Any) -> str:
     x = float(x)
     if abs(x) >= 1e6:
         return f"{x / 1e6:.2f}M"
-    if abs(x) >= 1e3:
+    if abs(x) >= 1e4:
         return f"{x / 1e3:.0f}k"
+    if abs(x) >= 1e3:
+        return f"{x / 1e3:.1f}k"
     return f"{x:.0f}"
 
 
@@ -1738,6 +1747,10 @@ def build_summary(
         verdict = "ok: the runs' resolved configs differ only in seed, device, logging and labels"
     else:
         verdict = "not checked (fewer than two resolved configs)"
+    if group_id is None:
+        # Run dirs named <group>_s<seed> of one group name it.
+        groups = {r.group for r in ordered}
+        group_id = groups.pop() if len(groups) == 1 else None
     side = side_from_runs(group_id or "group", ordered, summaries, source="inputs")
     agg = side.agg
     first = ordered[0] if ordered else None

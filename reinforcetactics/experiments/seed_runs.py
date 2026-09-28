@@ -199,32 +199,51 @@ def seed_streams(cfg: Any) -> SeedStreams:
       where block = cumulative steps // ``eval.eval_freq`` (bounded by the
       whole curriculum's budget with every retry used);
     * the stochastic eval's policy stream is derived from each episode seed.
+
+    A key the mapping leaves out takes the ``TrainingConfig`` default (a raw
+    YAML works as well as ``to_dict()``).
     """
     data = _as_dict(cfg)
     env = data.get("env") or {}
     ev = data.get("eval") or {}
     cur = data.get("curriculum") or {}
     stages = cur.get("stages") or []
-    default_eval = int(ev.get("n_eval_episodes") or 10)
-    n_eval = max([int(s.get("n_eval_episodes") or default_eval) for s in stages] or [default_eval])
-    default_retries = int(cur.get("max_retries") or 0)
+
+    def pick(section: Mapping[str, Any], key: str, default: Any) -> Any:
+        value = section.get(key)
+        return default if value is None else value
+
+    default_eval = int(pick(ev, "n_eval_episodes", _DEFAULTS["n_eval_episodes"]))
+    n_eval = max([int(pick(s, "n_eval_episodes", default_eval)) for s in stages] or [default_eval])
+    default_retries = int(pick(cur, "max_retries", _DEFAULTS["max_retries"]))
     budget = sum(
-        int(s.get("max_timesteps") or 0)
-        * (1 + int(s.get("max_retries") if s.get("max_retries") is not None else default_retries))
+        int(pick(s, "max_timesteps", _DEFAULTS["max_timesteps"])) * (1 + int(pick(s, "max_retries", default_retries)))
         for s in stages
     )
-    eval_freq = max(1, int(ev.get("eval_freq") or 1))
+    eval_freq = max(1, int(pick(ev, "eval_freq", _DEFAULTS["eval_freq"])))
     seats = ev.get("eval_seats")
     if seats is None:
         seats = [1, 2] if env.get("agent_seat") == "random" else [1]
     return SeedStreams(
-        n_envs=max(1, int(env.get("n_envs") or 1)),
+        n_envs=max(1, int(pick(env, "n_envs", _DEFAULTS["n_envs"]))),
         n_eval=max(1, n_eval),
         n_seats=len(seats),
-        seed_offset=int(ev.get("seed_offset") or 0),
+        seed_offset=int(pick(ev, "seed_offset", _DEFAULTS["seed_offset"])),
         resample=bool(ev.get("resample_eval_seeds")),
         max_blocks=math.ceil(budget / eval_freq),
     )
+
+
+# TrainingConfig defaults of the fields seed_streams reads (rl/config.py;
+# repeated here so this module needs no torch). test_seed_runs checks them.
+_DEFAULTS: dict[str, int] = {
+    "n_envs": 4,
+    "n_eval_episodes": 10,
+    "eval_freq": 10000,
+    "seed_offset": 1_000_000,
+    "max_retries": 1,
+    "max_timesteps": 1_000_000,
+}
 
 
 def _hits(delta: int, lo: int, hi: int, step: int, kmin: int, kmax: int) -> list[int]:
@@ -375,7 +394,7 @@ def cpus_needed(cfg: Any) -> int:
     ev = data.get("eval") or {}
     n = 1
     if env.get("use_subprocess", True):
-        n += int(env.get("n_envs") or 1)
+        n += int(env.get("n_envs") or _DEFAULTS["n_envs"])
     if ev.get("eval_use_subprocess") and int(ev.get("n_eval_envs") or 1) > 1:
         n += int(ev.get("n_eval_envs") or 1)
     return n

@@ -1,6 +1,7 @@
 """Tests for reinforcetactics.rl.evaluation."""
 
 import numpy as np
+import pytest
 
 from reinforcetactics.rl.evaluation import evaluate_model
 
@@ -286,3 +287,80 @@ class TestEvaluateModel:
         assert trace_dir.exists()
         files = sorted(p.name for p in trace_dir.iterdir())
         assert files == ["episode_0001_max_steps_truncate.jsonl"]
+
+
+# ---------------------------------------------------------------------------
+# Reward components per outcome, their magnitudes, opponent captures (§2.1)
+# ---------------------------------------------------------------------------
+
+
+def _record(outcome, components, *, lost=(0, 0), index=0):
+    from reinforcetactics.rl.evaluation import ACTION_TYPE_NAMES
+
+    return {
+        "index": index,
+        "seat": 1,
+        "reward": sum(components.values()),
+        "length": 3,
+        "turn": 2,
+        "outcome": outcome,
+        "end_reason": "elimination" if outcome != "draws" else "max_turns_draw",
+        "episode_stats": {"structures_lost_neutral": lost[0], "structures_lost_owned": lost[1]},
+        "action_counts": {name: 0 for name in ACTION_TYPE_NAMES},
+        "reward_components": dict(components),
+        "trace_path": None,
+    }
+
+
+class TestRewardComponentsByOutcome:
+    RECORDS = [
+        _record("wins", {"action": 10.0, "shaping_delta": -2.0, "invalid_penalty": 0.0, "terminal": 50.0}, lost=(1, 0)),
+        _record("draws", {"action": 6.0, "shaping_delta": -8.0, "invalid_penalty": -0.5, "terminal": -10.0}, lost=(2, 1)),
+        _record("draws", {"action": -4.0, "shaping_delta": 3.0, "invalid_penalty": 0.0, "terminal": -10.0}),
+        _record("losses", {"action": 1.0, "shaping_delta": -1.0, "invalid_penalty": 0.0, "terminal": -50.0}, lost=(0, 2)),
+    ]
+
+    def test_by_outcome_and_abs_sums(self):
+        from reinforcetactics.rl.evaluation import REWARD_COMPONENTS, _aggregate
+
+        result = _aggregate(self.RECORDS, track_breakdown=True, traced=False)
+        by = result["reward_components_by_outcome"]
+        assert by["wins"] == {"episodes": 1, "action": 10.0, "shaping_delta": -2.0, "invalid_penalty": 0.0, "terminal": 50.0}
+        assert by["draws"] == {"episodes": 2, "action": 2.0, "shaping_delta": -5.0, "invalid_penalty": -0.5, "terminal": -20.0}
+        assert by["losses"]["episodes"] == 1 and by["losses"]["terminal"] == -50.0
+        # The per-outcome sums add up to the eval-level components.
+        for c in REWARD_COMPONENTS:
+            assert sum(by[o][c] for o in ("wins", "draws", "losses")) == pytest.approx(result["reward_components"][c])
+        assert result["reward_components_abs"] == {
+            "action": 21.0,
+            "shaping_delta": 14.0,
+            "invalid_penalty": 0.5,
+            "terminal": 120.0,
+        }
+        assert result["opponent_captures"] == {"neutral": 3, "owned": 3}
+
+    def test_without_breakdown_only_opponent_captures(self):
+        from reinforcetactics.rl.evaluation import _aggregate
+
+        result = _aggregate(self.RECORDS, track_breakdown=False, traced=False)
+        assert "reward_components_by_outcome" not in result and "reward_components_abs" not in result
+        assert result["opponent_captures"] == {"neutral": 3, "owned": 3}
+
+    def test_evaluate_model_fills_them_from_the_env(self):
+        """Through evaluate_model: the env's reward_breakdown and episode_stats reach the new fields."""
+
+        class _Env(_StubEnv):
+            def step(self, action):
+                obs, r, term, trunc, info = super().step(action)
+                info["reward_breakdown"] = {"action": r, "shaping_delta": -1.0, "invalid_penalty": 0.0, "terminal": 0.0}
+                if term:
+                    info["episode_stats"]["structures_lost_neutral"] = 1
+                return obs, r, term, trunc, info
+
+        env = _Env([[(2.0, False, None), (3.0, True, 1)], [(1.0, True, None)]])
+        result = evaluate_model(_StubModel(), env, n_episodes=2, track_breakdown=True)
+        by = result["reward_components_by_outcome"]
+        assert by["wins"]["episodes"] == 1 and by["wins"]["action"] == 5.0 and by["wins"]["shaping_delta"] == -2.0
+        assert by["draws"]["episodes"] == 1 and by["draws"]["action"] == 1.0
+        assert result["reward_components_abs"]["shaping_delta"] == 3.0
+        assert result["opponent_captures"] == {"neutral": 2, "owned": 0}

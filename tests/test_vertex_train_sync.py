@@ -206,3 +206,71 @@ def test_periodic_sync_writes_the_objects_the_final_upload_writes(vertex_train, 
     monkeypatch.delenv(WRAPPER_SYNC_ENV, raising=False)  # run outside the wrapper
     train_bootstrap._maybe_upload(run_dir, SimpleNamespace(gcs_output=None, no_gcs=False))
     assert set(final.uploaded) == run_objects
+
+
+# ---------------------------------------------------------------------------
+# GCS_RESTORE_DIRS: a resubmitted seed job continues the run its earlier job synced
+# ---------------------------------------------------------------------------
+
+
+def test_restore_dirs_parsing(vertex_train):
+    assert vertex_train.resolve_restore_dirs({}) == {}
+    dirs = vertex_train.resolve_restore_dirs(
+        {"GCS_RESTORE_DIRS": " benchmarks/bootstrap/g_s42=g_s42 , flat=, up=../elsewhere, plain"}
+    )
+    assert dirs == {"benchmarks/bootstrap/g_s42": "g_s42", "flat": "", "plain": "plain"}
+
+
+def test_restore_exclude_keeps_what_a_resume_needs(vertex_train):
+    exclude = vertex_train.RESTORE_EXCLUDE
+    for skipped in ("charts/a.png", "videos/s.mp4", "checkpoints/s1.zip", "s1/traces/eval_1/e.jsonl", "s1/tensorboard/ev"):
+        assert exclude.search(skipped), skipped
+    for kept in ("s1/latest.zip", "s1/stage_final.zip", "s1/best_model.zip", "run_manifest.json", "s1/eval_results.jsonl"):
+        assert not exclude.search(kept), kept
+
+
+def _restore_env(monkeypatch, tmp_path, vertex_train):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GCS_OUTPUT_URI", "gs://bucket/jobs/g")
+    monkeypatch.setenv("GCS_SYNC_INTERVAL", "5")
+    monkeypatch.setenv("GCS_RESTORE_DIRS", "benchmarks/bootstrap/g_s42=g_s42")
+    monkeypatch.delenv("GCS_SYNC_DIRS", raising=False)
+    events: list[tuple] = []
+    monkeypatch.setattr(vertex_train, "_periodic_sync_loop", lambda *args, **kwargs: events.append(("sync thread",)))
+    monkeypatch.setattr(vertex_train, "sync_directories", lambda base_uri, **kwargs: events.append(("final sync",)) or {})
+    child = "import pathlib; pathlib.Path('child_saw').write_text(str(pathlib.Path('benchmarks/bootstrap/g_s42/resolved_config.yaml').exists()))"
+    monkeypatch.setattr(sys, "argv", ["vertex_train.py", sys.executable, "-c", child])
+    return events
+
+
+def test_restore_happens_before_the_command_and_the_sync_thread(vertex_train, monkeypatch, tmp_path, restore_signal_handlers):
+    events = _restore_env(monkeypatch, tmp_path, vertex_train)
+
+    def download_tree(src, local, *, exclude=None, credentials_file=None, client=None):
+        events.append(("restore", src, local, exclude.pattern if exclude else None))
+        Path(local).mkdir(parents=True, exist_ok=True)
+        (Path(local) / "resolved_config.yaml").write_text("seed: 42\n")
+        return 1
+
+    monkeypatch.setattr(vertex_train, "download_tree", download_tree)
+    assert vertex_train.main() == 0
+    assert events[0] == (
+        "restore",
+        "gs://bucket/jobs/g/g_s42",
+        "benchmarks/bootstrap/g_s42",
+        vertex_train.RESTORE_EXCLUDE.pattern,
+    )
+    assert events.index(("sync thread",)) > 0 and events[-1] == ("final sync",)
+    assert (tmp_path / "child_saw").read_text() == "True"
+
+
+def test_a_failed_restore_does_not_start_the_command(vertex_train, monkeypatch, tmp_path, restore_signal_handlers):
+    events = _restore_env(monkeypatch, tmp_path, vertex_train)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("503 from GCS")
+
+    monkeypatch.setattr(vertex_train, "download_tree", broken)
+    assert vertex_train.main() == 1
+    assert not (tmp_path / "child_saw").exists()
+    assert events == []  # nothing uploaded over the stored run either

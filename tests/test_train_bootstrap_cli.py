@@ -244,3 +244,226 @@ def test_real_sigterm_uploads_the_run_and_exits_143(tmp_path):
     uploaded = (tmp_path / "uploaded").read_text().splitlines()
     assert uploaded[0] == "gs://bucket/jobs/job1/run"
     assert "stage_1/eval_results.jsonl" in uploaded[1:]
+
+
+# ---------------------------------------------------------------------------
+# --seed, --resume-if-exists, --check-only (the per-seed command of run_seeds.py)
+# ---------------------------------------------------------------------------
+
+_COMMON = ["--device", "cpu", "--no-gcs", "--skip-plots", "--skip-videos", "--sanity-episodes", "0"]
+
+
+@pytest.fixture
+def fake_curriculum(train_bootstrap, monkeypatch, tmp_path, sigterm_guard):
+    """run_curriculum replaced by a recorder; a small valid config to run."""
+    import yaml
+
+    import reinforcetactics.rl.bootstrap as bootstrap
+
+    calls: list[dict] = []
+
+    def fake_run(cfg, output_dir, **kwargs):
+        calls.append({"cfg": cfg, "output_dir": Path(output_dir), **kwargs})
+        return {"history": [], "final_model_path": None}
+
+    monkeypatch.setattr(bootstrap, "run_curriculum", fake_run)
+    monkeypatch.setattr(train_bootstrap, "_maybe_upload", lambda output_dir, args: None)
+    data = {
+        "env": {"n_envs": 1, "use_subprocess": False},
+        "curriculum": {
+            "stages": [{"name": "s", "map_file": "maps/1v1/beginner.csv", "opponent": "noop", "max_timesteps": 100}]
+        },
+    }
+    config = tmp_path / "c.yaml"
+    config.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return calls, config
+
+
+def _status(run: Path, status: str, final_model: bool = False) -> None:
+    import json
+
+    payload: dict[str, object] = {"status": status}
+    if status == "curriculum_stalled":
+        payload.update(stalled_stage="s", peak_win_rate=0.4, threshold=0.9, retries_used=1)
+    (run / "run_status.json").write_text(json.dumps(payload))
+    if final_model:
+        (run / "final_model.zip").write_bytes(b"zip")
+
+
+class TestResumeIfExists:
+    def test_decision_table(self, train_bootstrap, fake_curriculum, tmp_path, capsys):
+        calls, config = fake_curriculum
+        out = tmp_path / "run"
+        argv = ["--config", str(config), "--output-dir", str(out), "--resume-if-exists", "--seed", "42", *_COMMON]
+
+        # 5. Nothing there: a fresh start (and a record to resume from).
+        assert train_bootstrap.main(argv) == 0
+        assert "resume" not in calls[-1] and calls[-1]["cfg"].seed == 42
+        assert (out / "resolved_config.yaml").is_file()
+        # 3. A record but no run_status.json: interrupted, so the same command resumes it.
+        assert train_bootstrap.main(argv) == 0
+        assert calls[-1]["resume"] is True and calls[-1]["output_dir"] == out
+        # 1. Finished: nothing is trained or post-processed.
+        _status(out, "completed_curriculum", final_model=True)
+        n = len(calls)
+        assert train_bootstrap.main(argv) == 0 and len(calls) == n
+        assert "already complete" in capsys.readouterr().out
+        # ...but a finished record without final_model.zip resumes (which rebuilds it).
+        (out / "final_model.zip").unlink()
+        assert train_bootstrap.main(argv) == 0 and calls[-1]["resume"] is True
+        # 2. Stalled: a result, reported with exit 3 and never resumed.
+        _status(out, "curriculum_stalled")
+        n = len(calls)
+        assert train_bootstrap.main(argv) == 3 and len(calls) == n
+        assert "stalled at stage 's'" in capsys.readouterr().out
+
+    def test_foreign_output_is_refused_and_logs_are_not_output(self, train_bootstrap, fake_curriculum, tmp_path):
+        calls, config = fake_curriculum
+        foreign = tmp_path / "foreign"
+        (foreign / "stage_a").mkdir(parents=True)
+        (foreign / "stage_a" / "eval_results.jsonl").write_text("{}\n")
+        argv = ["--config", str(config), "--resume-if-exists", *_COMMON]
+        with pytest.raises(SystemExit, match="not a train_bootstrap.py run dir"):
+            train_bootstrap.main([*argv, "--output-dir", str(foreign)])
+        other = tmp_path / "csv_only"
+        other.mkdir()
+        (other / "bootstrap_results.csv").write_text("stage\n")
+        with pytest.raises(SystemExit, match="bootstrap_results.csv"):
+            train_bootstrap.main([*argv, "--output-dir", str(other)])
+        assert calls == []
+        launched = tmp_path / "launched"
+        (launched / "logs").mkdir(parents=True)
+        (launched / "logs" / "train.20260928T120000Z.log").write_text("# launcher session\n")
+        assert train_bootstrap.main([*argv, "--output-dir", str(launched)]) == 0
+        assert "resume" not in calls[-1]
+
+    def test_usage(self, train_bootstrap, fake_curriculum, tmp_path):
+        _, config = fake_curriculum
+        with pytest.raises(SystemExit, match="needs --output-dir"):
+            train_bootstrap.main(["--config", str(config), "--resume-if-exists", *_COMMON])
+        with pytest.raises(SystemExit, match="drop --resume"):
+            train_bootstrap.main(["--resume", str(tmp_path), "--output-dir", str(tmp_path), "--resume-if-exists", *_COMMON])
+
+    def test_a_different_config_is_refused_unless_forced(self, train_bootstrap, fake_curriculum, tmp_path):
+        calls, config = fake_curriculum
+        out = tmp_path / "run"
+        base = ["--config", str(config), "--output-dir", str(out), "--resume-if-exists", *_COMMON]
+        assert train_bootstrap.main([*base, "--seed", "42"]) == 0
+        with pytest.raises(SystemExit, match="seed"):
+            train_bootstrap.main([*base, "--seed", "43"])
+        assert train_bootstrap.main([*base, "--seed", "43", "--force"]) == 0
+        assert calls[-1]["resume"] is True and calls[-1]["force"] is True and calls[-1]["cfg"].seed == 43
+        # --force on a fresh start is a no-op, not an error.
+        fresh = ["--config", str(config), "--output-dir", str(tmp_path / "new"), "--resume-if-exists", "--force", *_COMMON]
+        assert train_bootstrap.main(fresh) == 0
+
+    def test_build_bc_is_ignored_when_resuming(self, train_bootstrap, fake_curriculum, tmp_path, capsys):
+        calls, config = fake_curriculum
+        out = tmp_path / "run"
+        argv = ["--config", str(config), "--output-dir", str(out), "--resume-if-exists", *_COMMON]
+        assert train_bootstrap.main(argv) == 0
+        assert train_bootstrap.main([*argv, "--build-bc"]) == 0
+        assert calls[-1]["resume"] is True and "--build-bc ignored" in capsys.readouterr().out
+
+
+class TestSeedAndCheckOnly:
+    def test_seed_is_set_seed(self, train_bootstrap, fake_curriculum, tmp_path):
+        calls, config = fake_curriculum
+        assert (
+            train_bootstrap.main(["--config", str(config), "--output-dir", str(tmp_path / "a"), "--seed", "1042", *_COMMON])
+            == 0
+        )
+        assert (
+            train_bootstrap.main(
+                ["--config", str(config), "--output-dir", str(tmp_path / "b"), "--set", "seed=1042", *_COMMON]
+            )
+            == 0
+        )
+        assert calls[0]["cfg"].seed == calls[1]["cfg"].seed == 1042
+        a = (tmp_path / "a" / "resolved_config.yaml").read_text()
+        assert a == (tmp_path / "b" / "resolved_config.yaml").read_text() and "seed: 1042" in a
+        with pytest.raises(SystemExit, match="--seed and --set seed"):
+            train_bootstrap.main(["--config", str(config), "--seed", "1", "--set", "seed=2", *_COMMON])
+
+    def test_check_only_writes_nothing(self, train_bootstrap, fake_curriculum, tmp_path, capsys):
+        calls, config = fake_curriculum
+        out = tmp_path / "run"
+        assert (
+            train_bootstrap.main(["--config", str(config), "--output-dir", str(out), "--check-only", "--strict", *_COMMON])
+            == 0
+        )
+        assert not out.exists() and calls == []
+        assert "Config OK" in capsys.readouterr().out
+        with pytest.raises(KeyError, match="Unknown config key"):
+            train_bootstrap.main(["--config", str(config), "--check-only", "--set", "curriculum.stages[s].bogus=1", *_COMMON])
+
+    def test_torch_threads(self, train_bootstrap, fake_curriculum, tmp_path):
+        import torch
+
+        config = str(fake_curriculum[1])
+        before = torch.get_num_threads()
+        try:
+            assert (
+                train_bootstrap.main(
+                    ["--config", config, "--output-dir", str(tmp_path / "r"), "--torch-threads", "1", *_COMMON]
+                )
+                == 0
+            )
+            assert torch.get_num_threads() == 1
+        finally:
+            torch.set_num_threads(before)
+        with pytest.raises(SystemExit, match="--torch-threads"):
+            train_bootstrap.main(["--config", config, "--torch-threads", "0", *_COMMON])
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+def test_sigterm_mid_stage_then_the_identical_command_completes(tmp_path):
+    """The per-seed command of run_seeds.py, killed mid-stage and re-run unchanged, finishes the run."""
+    import json
+
+    from tests.test_curriculum_recovery import _tiny_config
+
+    config = _tiny_config(tmp_path, 3_200)
+    out = tmp_path / "run"
+    env = {k: v for k, v in os.environ.items() if k not in ("GCS_OUTPUT_URI", "AIP_MODEL_DIR", "GCS_WRAPPER_SYNC")}
+    env.update(PYTHONPATH=str(REPO_ROOT), SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", MPLBACKEND="Agg")
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "--config",
+        str(config),
+        "--seed",
+        "7",
+        "--output-dir",
+        str(out),
+        "--resume-if-exists",
+        "--strict",
+        *_COMMON,
+    ]
+    proc = subprocess.Popen(command, cwd=REPO_ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    jsonl = out / "s2" / "eval_results.jsonl"
+    try:
+        deadline = time.monotonic() + 300
+        while not (jsonl.exists() and len(jsonl.read_text().splitlines()) >= 3):
+            if proc.poll() is not None or time.monotonic() > deadline:
+                proc.kill()
+                pytest.fail(f"never reached stage 2:\n{proc.communicate()[0][-4000:]}")
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        first = proc.communicate(timeout=120)[0]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 143, first[-4000:]
+    assert not (out / "run_status.json").exists()
+
+    resumed = subprocess.run(command, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=600, check=False)
+    assert resumed.returncode == 0, resumed.stdout[-4000:] + resumed.stderr[-4000:]
+    assert "interrupted run found; resuming it" in resumed.stdout
+    status = json.loads((out / "run_status.json").read_text())
+    assert status["status"] == "completed_curriculum" and status["resume_count"] == 1
+    # Once more: the run is finished, so nothing runs.
+    again = subprocess.run(command, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=300, check=False)
+    assert again.returncode == 0 and "already complete" in again.stdout

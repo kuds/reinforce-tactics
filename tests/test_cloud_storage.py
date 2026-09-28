@@ -228,3 +228,89 @@ class TestIsAvailable:
         # True or False depending on whether google-cloud-storage is installed;
         # the contract is simply that it never raises and returns a bool.
         assert isinstance(is_available(), bool)
+
+
+# ---------------------------------------------------------------------------
+# download_tree (a resubmitted seed job restoring its run; run_seeds.py fetch)
+# ---------------------------------------------------------------------------
+
+
+class _StoredBlob:
+    def __init__(self, name, data, downloads):
+        self.name = name
+        self._data = data
+        self._downloads = downloads
+
+    def download_to_filename(self, filename):
+        self._downloads.append(filename)
+        with open(filename, "wb") as fh:
+            fh.write(self._data)
+
+
+class _ListingClient:
+    """list_blobs over an in-memory bucket; records the local paths written."""
+
+    def __init__(self, objects):
+        self.objects = dict(objects)
+        self.downloads = []
+        self.listed = []
+
+    def list_blobs(self, bucket, prefix=""):
+        self.listed.append((bucket, prefix))
+        return [
+            _StoredBlob(name, data, self.downloads) for name, data in sorted(self.objects.items()) if name.startswith(prefix)
+        ]
+
+
+class TestDownloadTree:
+    OBJECTS = {
+        "jobs/g/run_s42/resolved_config.yaml": b"seed: 42\n",
+        "jobs/g/run_s42/stage_1/latest.zip": b"zip",
+        "jobs/g/run_s42/stage_1/eval_results.jsonl": b"{}\n",
+        "jobs/g/run_s42/stage_1/best_model.zip.partial": b"half",
+        "jobs/g/run_s42/charts/summary.png": b"png",
+        "jobs/g/run_s42/": b"",
+        "jobs/g/run_s420/other.json": b"{}",
+    }
+
+    def test_layout_partial_skipped_and_atomic_writes(self, tmp_path):
+        from reinforcetactics.cloud.storage import download_tree
+
+        client = _ListingClient(self.OBJECTS)
+        count = download_tree("gs://bkt/jobs/g/run_s42", tmp_path / "run", client=client)
+        assert client.listed == [("bkt", "jobs/g/run_s42/")]  # not run_s420
+        files = sorted(p.relative_to(tmp_path / "run").as_posix() for p in (tmp_path / "run").rglob("*") if p.is_file())
+        assert files == ["charts/summary.png", "resolved_config.yaml", "stage_1/eval_results.jsonl", "stage_1/latest.zip"]
+        assert count == 4 and (tmp_path / "run" / "stage_1" / "latest.zip").read_bytes() == b"zip"
+        # Each object went to a .partial sibling first, then was renamed into place.
+        assert all(d.endswith(".partial") for d in client.downloads)
+
+    def test_exclude(self, tmp_path):
+        import re
+
+        from reinforcetactics.cloud.storage import download_tree
+
+        client = _ListingClient(self.OBJECTS)
+        count = download_tree(
+            "gs://bkt/jobs/g/run_s42", tmp_path / "run", exclude=re.compile(r"\.zip$|(^|/)charts/"), client=client
+        )
+        assert count == 2
+        assert sorted(p.name for p in (tmp_path / "run").rglob("*") if p.is_file()) == [
+            "eval_results.jsonl",
+            "resolved_config.yaml",
+        ]
+
+    def test_empty_prefix_missing_uri_and_bad_uri(self, tmp_path):
+        from reinforcetactics.cloud.storage import download_tree
+
+        assert download_tree("gs://bkt/jobs/nothing", tmp_path / "run", client=_ListingClient(self.OBJECTS)) == 0
+        assert not (tmp_path / "run").exists()
+        assert download_tree(None, tmp_path, client=_ListingClient({})) == 0
+        assert download_tree("s3://x/y", tmp_path, client=_ListingClient({})) == 0
+
+    def test_an_object_name_cannot_escape_the_target(self, tmp_path):
+        from reinforcetactics.cloud.storage import download_tree
+
+        client = _ListingClient({"p/../../escape.txt": b"x", "p/ok.txt": b"y"})
+        assert download_tree("gs://bkt/p", tmp_path / "run", client=client) == 1
+        assert not (tmp_path / "escape.txt").exists() and (tmp_path / "run" / "ok.txt").exists()
