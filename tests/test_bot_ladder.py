@@ -271,11 +271,11 @@ def test_cli_checks_a_curriculum_and_fails_on_flag(ladder, tmp_path, capsys):
 def test_default_inputs_cover_the_shipped_curriculum(ladder):
     args = ladder.build_parser().parse_args(["--config", str(REPO_ROOT / "configs/ppo/bootstrap.yaml")])
     boards, opponents, stages = ladder.resolve_inputs(args)
-    assert [b.label for b in boards] == ["starter@20", "beginner@75", "intermediate@60", "skirmish@120", "corner_points@200"]
+    assert [b.label for b in boards] == ["starter@20", "beginner@75", "intermediate@75", "skirmish@120", "corner_points@200"]
     labels = {o.label for o in opponents}
     assert {s.opponent.label for s in stages} <= labels
     assert {"simple", "medium", "advanced", "master", "random_20", "balanced_random", "noop"} <= labels
-    assert {"random_10", "random_15", "mix(medium/advanced,0.5)", "mix(balanced_random/simple,0.25)"} <= labels
+    assert {"random_10", "random_15", "mix(medium/advanced,0.5)", "mix(balanced_random/simple,0.5)"} <= labels
     assert len(labels) == len(opponents)
 
     # --maps under another spelling of a stage's map takes the stage's spelling

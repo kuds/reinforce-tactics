@@ -38,7 +38,7 @@ import yaml
 from reinforcetactics.rl import bootstrap, callbacks
 from reinforcetactics.rl.bootstrap import CurriculumStalled, ResumeError, _plan_resume, run_curriculum
 from reinforcetactics.rl.callbacks import TrainingMetricsCallback
-from reinforcetactics.rl.config import TrainingConfig, save_config
+from reinforcetactics.rl.config import TrainingConfig, load_config, save_config
 from reinforcetactics.rl.evaluation import wilson_lower_bound, z_for_confidence
 from tests.test_curriculum_recovery import (
     MAP,
@@ -869,13 +869,41 @@ def test_curriculum_summary_draws_the_gate_value(tmp_path):
     assert (0.78, 0.78, 0.78) in lines[1]
 
 
-def test_bootstrap_yaml_wilson_advice_matches_the_bound():
-    text = (REPO_ROOT / "configs" / "ppo" / "bootstrap.yaml").read_text(encoding="utf-8")
-    pairs = [(float(a), float(b)) for a, b in re.findall(r"(\d\.\d\d) -> (\d\.\d\d)", text)]
-    assert len(pairs) == 10
-    z = z_for_confidence(0.95)
-    for (threshold, advised), n in zip(pairs, [80] * 5 + [160] * 5, strict=True):
-        assert advised == pytest.approx(round(wilson_lower_bound(math.ceil(n * threshold - 1e-9), n, z), 2))
+@pytest.mark.parametrize("name", ["bootstrap.yaml", "bootstrap_validation.yaml"])
+def test_bootstrap_yaml_thresholds_match_the_wilson_bound(name):
+    """Each stage's threshold is the Wilson bound of the intended win rate its comment states.
+
+    The canonical curriculum gates on the Wilson lower bound over n = episodes
+    per seat x seats, and writes the intended stochastic win rate t next to
+    each threshold (``promotion_win_rate: 0.63  # t 0.70``). Changing n or t
+    without recomputing the threshold silently makes a stage easier or harder.
+    (This test used to check the advice comment the point-gated config
+    carried; the config now applies that advice.)
+    """
+    path = REPO_ROOT / "configs" / "ppo" / name
+    text = path.read_text(encoding="utf-8")
+    cfg = load_config(path)
+    targets = [float(t) for t in re.findall(r"promotion_win_rate: \d\.\d\d +# t (\d\.\d\d)\n", text)]
+    stages = cfg.curriculum.stages
+    assert len(targets) == len(stages)
+    n_seats = len(cfg.eval.resolve_eval_seats(cfg.env))
+    for stage, t in zip(stages, targets, strict=True):
+        gate = stage.resolve_promotion(cfg.curriculum)
+        assert gate["criterion"] == "wilson" and gate["score"] == "win_rate", stage.name
+        n = stage.resolve_n_eval_episodes(cfg.eval) * n_seats
+        expected = round(wilson_lower_bound(math.ceil(n * t - 1e-9), n, z_for_confidence(gate["confidence"])), 2)
+        assert gate["threshold"] == pytest.approx(expected), stage.name
+
+    if name == "bootstrap.yaml":
+        # The t -> T table in the curriculum comment.
+        flat = re.sub(r"\n\s*#", "", text)
+        ts, big_ts = re.search(r"t ((?:\d\.\d\d / )+\d\.\d\d) gives T ((?:\d\.\d\d / )+\d\.\d\d)", flat).groups()
+        pairs = list(zip(ts.split(" / "), big_ts.split(" / "), strict=True))
+        assert len(pairs) == 6
+        z = z_for_confidence(cfg.curriculum.promotion_confidence)
+        n = cfg.eval.n_eval_episodes * n_seats
+        for t, threshold in pairs:
+            assert float(threshold) == pytest.approx(round(wilson_lower_bound(math.ceil(n * float(t) - 1e-9), n, z), 2))
 
 
 def test_a_stage_restarted_fresh_on_resume_drops_the_aborted_sessions_best(tmp_path, monkeypatch):
