@@ -66,6 +66,16 @@ class GameSession:  # pylint: disable=too-few-public-methods
         # nor raised; bots aren't re-run until the state moves on.
         self._stalled_bot_state = None
 
+        # Every move walks its unit's sprite along its path, and a bot's
+        # move plays out before the bot goes on (see _on_unit_moved).
+        game.move_listeners.append(self._on_unit_moved)
+        # Set when the player pauses, saves or closes the window during a
+        # bot's walk: the bot moves still to come this frame aren't waited for.
+        self._skip_bot_walks = False
+        # The human seat whose fog of war the board shows while a bot moves
+        # (see _update_view); None when every seat is a bot.
+        self._last_human_seat = min((p for p in range(1, num_players + 1) if p not in bots), default=None)
+
     def run(self):
         """
         Run the main game loop.
@@ -88,6 +98,8 @@ class GameSession:  # pylint: disable=too-few-public-methods
         print()
 
         while self.running and not self.game.game_over:
+            self._skip_bot_walks = False
+
             # Bots also move without a human ending a turn first: a bot in seat
             # 1, a save loaded on a bot's turn, or an all-bot game. Bot turns
             # used to run only from the End Turn handlers, so these games sat
@@ -148,6 +160,8 @@ class GameSession:  # pylint: disable=too-few-public-methods
                 elif event.type == pygame.MOUSEMOTION:
                     self.input_handler.handle_mouse_motion(mouse_pos)
 
+            self.input_handler.update(pygame.time.get_ticks())
+
             # Rendering
             self._render_frame()
 
@@ -190,6 +204,57 @@ class GameSession:  # pylint: disable=too-few-public-methods
             if not self.input_handler._end_crashed_bot_turn(before[1]):
                 self._stalled_bot_state = before
 
+    def _on_unit_moved(self, unit, path):
+        """Walk a moved unit's sprite along ``path`` (a ``GameState.move_listeners`` callback).
+
+        A human's move only starts the walk (the input handler waits for it
+        before opening the action menu). A bot's move is played out here,
+        before the bot's next action, so its turn can be watched one move at
+        a time; a move the viewer can't see any of (under fog of war) isn't
+        waited for.
+        """
+        self._update_view()
+        shown = self.renderer.queue_movement_path_animation(unit, path)
+        if shown and self.game.current_player in self.bots and not self._skip_bot_walks:
+            self._play_out_walk(unit)
+
+    def _play_out_walk(self, unit):
+        """Render frames until ``unit``'s sprite has walked its move.
+
+        Runs inside a bot's turn, so of the input that arrives meanwhile
+        only a pause, a save or a window close is kept, re-posted for the
+        main loop. Any of them also ends the waiting, so it isn't held up by
+        the rest of the bot's moves. Clicks and other keys are dropped: the
+        board isn't the human's while a bot moves.
+        """
+        held = []
+        while self.renderer.is_unit_moving(unit) and not held:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_s)):
+                    held.append(event)
+            self._render_frame()
+            self.clock.tick(60)
+        if held:
+            self._skip_bot_walks = True
+            for event in held:
+                pygame.event.post(event)
+
+    def _update_view(self):
+        """Show the board from the human side of the fog of war while a bot moves.
+
+        The renderer draws the fog of the player to move, which made a bot's
+        turn (now played out on screen) show everything the bot sees. While a
+        bot's seat is to move, the board keeps the view of the last human
+        seat to move instead; with no human seat left in the game, each
+        bot's own view.
+        """
+        if self.game.current_player in self.bots:
+            human = self._last_human_seat
+            self.renderer.viewing_player = None if human is None or self.game.is_eliminated(human) else human
+        else:
+            self._last_human_seat = self.game.current_player
+            self.renderer.viewing_player = None
+
     def _handle_pause(self):
         """
         Show pause menu and handle the result.
@@ -228,6 +293,7 @@ class GameSession:  # pylint: disable=too-few-public-methods
 
     def _render_frame(self):
         """Render a single frame."""
+        self._update_view()
         self.renderer.render()
 
         # Draw movement overlay and pulsing highlight if unit selected

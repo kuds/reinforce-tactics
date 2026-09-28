@@ -377,6 +377,13 @@ class GameState:
         self.action_history: list[dict[str, Any]] = []
         self.game_start_time: datetime = datetime.now()
 
+        # Called as ``listener(unit, path)`` after every accepted move, with
+        # the tiles the unit stepped through from its start to where it
+        # stopped (see move_unit). For presentation only (the GUI walks the
+        # sprite along the path): not game state, never saved, and not
+        # carried into search clones.
+        self.move_listeners: list[Callable[[Unit, list[tuple[int, int]]], None]] = []
+
         # Cached legal actions per player (see get_legal_actions)
         self._legal_actions_cache: dict[int, dict[str, list[Any]]] = {}
         self._legal_actions_cache_valid: bool = False
@@ -952,7 +959,8 @@ class GameState:
         is spent (``unit.ambushed`` is set and ``cancel_move`` refuses to
         undo it) and is recorded to where the unit really stopped (with
         ``ambushed: True``), and the ambusher comes into view. Read
-        ``unit.x``/``unit.y`` for where it ended up.
+        ``unit.x``/``unit.y`` for where it ended up; ``move_listeners`` are
+        given the path it walked to get there.
 
         Args:
             unit: Unit to move
@@ -985,18 +993,21 @@ class GameState:
         # revealed (review core-9).
         self.fog.before_move(unit)
 
+        # The path the search planned, start tile first.
+        path = [(to_x, to_y)]
+        while path[-1] != (from_x, from_y):
+            path.append(came_from[path[-1]])
+        path.reverse()
+
         # FOW ambush rule: without fog of war the path was planned around
         # every unit, so it is always clear.
         ambusher = None
         if self.fog_of_war:
-            path = [(to_x, to_y)]
-            while path[-1] != (from_x, from_y):
-                path.append(came_from[path[-1]])
-            path.reverse()
             (to_x, to_y), ambusher = self.fog.resolve_ambush(unit, path)
             if ambusher is not None:
                 # Tiles actually stepped (for the path-length Knight's Charge).
                 steps = path.index((to_x, to_y))
+                del path[steps + 1 :]
                 logger.debug(
                     f"{unit.type} ambushed by {ambusher.type} at ({ambusher.x}, {ambusher.y}); stopped at ({to_x}, {to_y})"
                 )
@@ -1032,6 +1043,9 @@ class GameState:
 
         # Update visibility for the moving player
         self.fog.update(unit.player)
+
+        for listener in list(self.move_listeners):
+            listener(unit, list(path))
 
         return True
 
@@ -1901,6 +1915,8 @@ class GameState:
         "action_history": list,
         "_legal_actions_cache": dict,
         "_legal_actions_cache_valid": lambda: False,
+        # A search must not animate its simulated moves on the real board.
+        "move_listeners": list,
     }
 
     def clone_for_search(self) -> GameState:
@@ -1910,10 +1926,11 @@ class GameState:
         outcomes, including the combat RNG's position), and nothing done to
         the clone touches the original. It drops what search never reads --
         the action history (which grows all game and dominated deepcopy's
-        cost) and the legal-action cache -- and shares, instead of copying,
-        the terrain tiles, configuration and replay metadata, none of which
-        change during a game. The clone's own ``action_history`` starts
-        empty, so it cannot be saved as a replay of the whole game.
+        cost), the legal-action cache and the move listeners -- and shares,
+        instead of copying, the terrain tiles, configuration and replay
+        metadata, none of which change during a game. The clone's own
+        ``action_history`` starts empty, so it cannot be saved as a replay
+        of the whole game.
         """
         clone = GameState.__new__(GameState)
         for name, value in vars(self).items():
