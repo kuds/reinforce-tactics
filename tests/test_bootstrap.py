@@ -730,40 +730,33 @@ class TestCurriculumLoading:
         # to the original 6-stage layout (now 7, with the
         # `beginner_balanced_random` bridge for the map shift) lets
         # opponent randomness drive exploration the way PPO needs.
+        # The stage order follows the scripted-bot ladder (docs/validation_run_config.md;
+        # tests/test_bootstrap_ladder_order.py checks it).
         assert names == [
-            "starter_random",
             "starter_simple",
+            "starter_mixed_random_simple",
+            "starter_random",
+            "starter_mixed_random_medium",
             "starter_medium",
             "beginner_balanced_random",
             "beginner_random_10",
             "beginner_random_15",
-            "beginner_random_20",
-            "beginner_simple",
             "beginner_mixed_50",
-            "beginner_medium",
             "beginner_mixed_med_adv_50",
-            "beginner_advanced",
+            "beginner_medium",
             "intermediate_balanced_random",
-            "intermediate_random_20",
-            "intermediate_mixed_random_simple",
+            "intermediate_mixed_br_simple",
             "intermediate_simple",
+            "intermediate_mixed_simple_medium",
             "intermediate_medium",
             "skirmish_balanced_random",
-            "skirmish_random_10",
-            "skirmish_random_15",
-            "skirmish_random_20",
-            "skirmish_mixed_25",
-            "skirmish_mixed_50",
+            "skirmish_mixed_br_simple",
             "skirmish_simple",
-            "skirmish_medium",
+            "skirmish_mixed_simple_advanced",
+            "skirmish_advanced",
             "corner_points_balanced_random",
-            "corner_points_random_10",
-            "corner_points_random_15",
-            "corner_points_random_20",
-            "corner_points_mixed_25",
             "corner_points_mixed_50",
             "corner_points_simple",
-            "corner_points_medium",
         ]
         assert "starter_noop" not in names, "noop stages broke PPO learning in earlier runs -- removing them was deliberate"
         assert "beginner_noop" not in names
@@ -792,19 +785,22 @@ class TestCurriculumLoading:
         sched = first_beginner.resolve_ent_coef_schedule()
         assert sched is not None, "first beginner stage should drive an entropy schedule"
         assert sched["start"] > sched["end"]
-        # Reward-shape invariant on beginner stages: HQ capture is much
-        # harder than elimination on the bigger map, so the two terminal
-        # rewards must be equalized (or capture <= elimination). The
-        # shipped config used to enforce this via a per-stage override
-        # on beginner_random_20; the global-config rewrite equalises
-        # win_by_hq_capture / win_by_elimination at the env level
-        # instead, which has the same effect for the resolved stage
-        # config. Test against the resolved dict so either design path
-        # satisfies the invariant.
-        beginner_random = by_name["beginner_random_20"]
-        resolved = beginner_random.resolve_reward_config(cfg.env)
-        assert resolved is not None
-        assert resolved["win_by_hq_capture"] <= resolved["win_by_elimination"]
+        # Reward back-port (review rltrain-14 / prior-4): the values of the
+        # deepest archived run, v52a. These checks replace an invariant that
+        # the HQ win pay no more than elimination: v49-v52a raised it (80 vs
+        # 50) and still ended 96-100% of wins by elimination. Every archived run
+        # that cleared beginner_random_20 had win_speed_bonus 0,
+        # enemy_owned_capture 0 and turn_penalty <= -0.5, and no run with
+        # win_speed_bonus 50 + enemy_owned_capture -15 did. Checked on the
+        # resolved dict, so a per-stage override cannot reintroduce them.
+        for stage in cfg.curriculum.stages:
+            resolved = stage.resolve_reward_config(cfg.env)
+            assert resolved is not None
+            assert resolved["win_speed_bonus"] == 0.0, stage.name
+            assert resolved["enemy_owned_capture"] == 0.0, stage.name
+            assert resolved["turn_penalty"] <= -0.5, stage.name
+            assert resolved["draw"] <= resolved["loss"] < 0, stage.name
+            assert resolved["damage_taken_scale"] == -resolved["damage_scale"], stage.name
         # Policy MLP capacity: SB3 defaults net_arch to [64, 64] which is
         # undersized for a Dict obs (~734 input dims) feeding a flat-
         # discrete head with up to 512 logits. The shipped config bumps
@@ -897,11 +893,10 @@ class TestBootstrapStagesAreConstructible:
         from reinforcetactics.rl.bootstrap import make_stage_env
 
         # Sweep multiple distinct seeds per stage so MixedBot's per-episode
-        # coin flip lands on both inner-bot branches. For p_hard=0.25
-        # stages (the worst case in bootstrap.yaml), 8 distinct seeds gives
-        # P(miss one branch) = 0.75^8 ~= 10%, vs the earlier 4-seed sweep
-        # which left ~32% miss probability -- enough to silently regress
-        # CI runs.
+        # coin flip lands on both inner-bot branches. Every mixed stage in
+        # bootstrap.yaml has p_hard=0.5, so 8 distinct seeds miss one branch
+        # with P = 2 * 0.5^8 ~= 0.8% (a p_hard=0.25 stage would be ~10%,
+        # and the earlier 4-seed sweep ~32%).
         seeds = list(range(8))
         failures: list[str] = []
         for stage in shipped_cfg.curriculum.stages:

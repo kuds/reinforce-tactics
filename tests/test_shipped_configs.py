@@ -18,6 +18,7 @@ walks every shipped YAML/JSON file:
   path) load, and fail the pre-run file check.
 """
 
+import dataclasses
 import functools
 import importlib.util
 import json
@@ -133,3 +134,101 @@ def test_non_curriculum_config_parses_strict_through_its_entry_point(rel):
 def test_canonical_bootstrap_config_is_strict_clean():
     cfg = load_config(CONFIGS / "ppo" / "bootstrap.yaml")
     assert ignored_config_fields(cfg, bootstrap.CONSUMED_CONFIG_FIELDS, algorithms=bootstrap.CONSUMED_ALGORITHMS) == []
+
+
+# ---------------------------------------------------------------------------
+# The validation-run configs (docs/validation_run_config.md)
+# ---------------------------------------------------------------------------
+
+BOOTSTRAP = CONFIGS / "ppo" / "bootstrap.yaml"
+BOOTSTRAP_SLICE = CONFIGS / "ppo" / "bootstrap_validation.yaml"
+SELF_PLAY = CONFIGS / "self_play" / "self_play.yaml"
+
+
+def _max_steps_floor(max_turns: int, max_actions_per_turn: int) -> int:
+    """The most steps a mask-following policy can spend before the max_turns clock ends the game.
+
+    Each game turn it takes at most ``max_actions_per_turn`` actions (the mask
+    then offers end_turn alone) plus the end_turn.
+    """
+    return max_turns * (max_actions_per_turn + 1) + max_actions_per_turn
+
+
+@pytest.mark.parametrize("path", [BOOTSTRAP, BOOTSTRAP_SLICE], ids=_rel)
+def test_curriculum_max_steps_never_truncates_before_the_clock(path):
+    """Truncation pays 0 plus the bootstrapped value: it must not be a cheaper exit than a max-turns draw."""
+    cfg = load_config(path)
+    cap = cfg.env.max_actions_per_turn
+    assert cap is not None, "the bound needs env.max_actions_per_turn"
+    for stage in cfg.curriculum.stages:
+        max_turns = stage.resolve_max_turns(cfg.env)
+        assert max_turns is not None, stage.name
+        floor = _max_steps_floor(max_turns, cap)
+        max_steps = stage.resolve_max_steps(cfg.env)
+        # At or above the bound, rounded up to the next 100 (no slack beyond it).
+        assert floor <= max_steps < floor + 100, f"{stage.name}: max_steps {max_steps}, bound {floor}"
+
+
+def test_self_play_max_steps_never_truncates_before_the_clock():
+    cfg = load_config(SELF_PLAY)
+    assert cfg.env.max_turns is not None and cfg.env.max_actions_per_turn is not None
+    floor = _max_steps_floor(cfg.env.max_turns, cfg.env.max_actions_per_turn)
+    assert floor <= cfg.env.max_steps < floor + 100
+
+
+def _without(obj, *names: str) -> dict:
+    out = dataclasses.asdict(obj)
+    for name in names:
+        out.pop(name)
+    return out
+
+
+def test_validation_slice_mirrors_the_canonical_curriculum():
+    """bootstrap_validation.yaml is bootstrap.yaml's first stages with shorter budgets, and nothing else.
+
+    Allowed differences: per-stage max_timesteps / anneal_horizon (no larger
+    than the canonical ones), eval.eval_freq, and curriculum.max_retries.
+    """
+    canonical, probe = load_config(BOOTSTRAP), load_config(BOOTSTRAP_SLICE)
+    assert (probe.algorithm, probe.seed) == (canonical.algorithm, canonical.seed)
+    assert dataclasses.asdict(probe.env) == dataclasses.asdict(canonical.env)
+    assert dataclasses.asdict(probe.ppo) == dataclasses.asdict(canonical.ppo)
+    assert _without(probe.eval, "eval_freq") == _without(canonical.eval, "eval_freq")
+    assert probe.eval.eval_freq <= canonical.eval.eval_freq
+    assert _without(probe.curriculum, "stages", "max_retries") == _without(canonical.curriculum, "stages", "max_retries")
+    n = len(probe.curriculum.stages)
+    assert 0 < n < len(canonical.curriculum.stages)
+    for mine, theirs in zip(probe.curriculum.stages, canonical.curriculum.stages[:n], strict=True):
+        budget = ("max_timesteps", "anneal_horizon")
+        assert _without(mine, *budget) == _without(theirs, *budget), mine.name
+        assert mine.max_timesteps <= theirs.max_timesteps, mine.name
+        assert mine.resolve_horizon() <= theirs.resolve_horizon(), mine.name
+
+
+def test_self_play_trains_the_bootstrap_mdp():
+    """self_play.yaml's env and policy match the curriculum's, so a bootstrap checkpoint continues there."""
+    sp, boot = load_config(SELF_PLAY), load_config(BOOTSTRAP)
+    for name in (
+        "reward_config",
+        "action_space_type",
+        "max_flat_actions",
+        "flat_action_version",
+        "max_actions_per_turn",
+        "enabled_units",
+        "fog_of_war",
+        "engine_overrides",
+        "gold_scale",
+        "turn_scale",
+        "unit_count_scale",
+    ):
+        assert getattr(sp.env, name) == getattr(boot.env, name), f"env.{name}"
+    assert sp.env.pad_to_size == bootstrap._resolve_curriculum_pad_size(boot)
+    assert sp.ppo.policy_kwargs == boot.ppo.policy_kwargs
+    # Potential shaping is policy-invariant only for the trainer's own gamma.
+    assert sp.ppo.gamma == boot.ppo.gamma
+    # The map and its game clock are the curriculum's.
+    clocks = {s.map_file: s.resolve_max_turns(boot.env) for s in boot.curriculum.stages}
+    assert sp.env.map_file in clocks and sp.env.max_turns == clocks[sp.env.map_file]
+    # The pool actually fills: a snapshot's gate counts wins against a near copy of itself.
+    assert sp.self_play.use_opponent_pool and 0.0 < sp.self_play.latest_opponent_prob < 1.0
+    assert sp.self_play.min_win_rate_for_pool < 0.5

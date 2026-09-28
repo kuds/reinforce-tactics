@@ -1,18 +1,27 @@
-# PPO bootstrap curriculum, hardware-tuned for Google Colab on an L4 GPU
-# (high-RAM tier, 12 vCPUs verified via ``!nproc``).
+# PPO bootstrap curriculum: the canonical config for the 3-seed validation run
+# (docs/REVIEW_full_2026-09-26.md §2.1), hardware-tuned for Google Colab on an
+# L4 GPU (high-RAM tier, 12 vCPUs verified via ``!nproc``).
+#
+# Every change from the 33-stage curriculum, with its evidence and the
+# judgment calls worth revisiting, is in docs/validation_run_config.md.
 #
 # Loaded by reinforcetactics.rl.config.load_config into a TrainingConfig.
-# Stages live under curriculum.stages; if a stage exhausts its
-# `max_timesteps` without promoting, the runner raises CurriculumStalled.
+# Stages live under curriculum.stages; a stage that exhausts `max_timesteps`
+# without promoting is retried (curriculum.max_retries) and then raises
+# CurriculumStalled. Run with --strict; on Colab resume a killed run with
+# train_bootstrap.py --resume RUN_DIR.
 #
 # Hardware tuning (env.n_envs / env.use_subprocess / ppo.batch_size /
-# eval.eval_freq / eval.n_eval_episodes) targets the L4 + 12-vCPU Colab
-# tier. Drop n_envs to 4 on free Colab (2 vCPUs); leave the rest as-is.
+# eval.n_eval_envs / eval.eval_use_subprocess) targets the L4 + 12-vCPU
+# tier. On free Colab (2 vCPUs) drop env.n_envs and eval.n_eval_envs to 2.
 algorithm: maskable_ppo
+# One seed per run; the validation run launches three (--set seed=N).
 seed: 42
-# Worst-case budget: ~22M env steps, the sum of the stages' max_timesteps.
-# The curriculum runner ignores a top-level total_timesteps (train_bootstrap.py
-# reports it, and --strict rejects it), so the number lives in this comment.
+# Budget: 55.25M env steps if every stage runs out its max_timesteps, 106.5M
+# if each also spends its retry (the capstone has none). Prior for a normal
+# run: ~21M steps, ~24 h per seed on the L4 (docs/validation_run_config.md).
+# The curriculum runner ignores a top-level total_timesteps (--strict rejects
+# it), so the number lives in this comment.
 
 env:
   # 8 envs leaves headroom on a 12-vCPU machine for the main process
@@ -20,35 +29,32 @@ env:
   # for real CPU parallelism with n_envs > 1.
   n_envs: 8
   use_subprocess: true
-  # max_steps is uniform across stages. Per-stage max_turns bounds the
-  # natural game-clock and varies 20 (starter) / 60 (intermediate) /
-  # 75 (beginner) / 120 (skirmish) / 200 (corner_points). At ~20
-  # env-steps/turn, 3000 covers skirmish (120 * ~20 ~ 2400) but NOT
-  # corner_points: a 200-turn game with sustained 20+ unit armies
-  # accumulates 3000 agent steps around turn ~90-135 and ends as a
-  # max_steps_truncate draw (paying reward_config.draw) regardless of
-  # board state. Raise max_steps (>= ~4500) or scale it with max_turns
-  # before training the corner_points block. (Flagged in the 2026-07
-  # training review, docs/REVIEW_ppo_training.md; no run has reached
-  # corner_points yet.)
-  max_steps: 3000
+  # Train in both seats (review critic-gaps-2): each training episode draws
+  # the agent's seat, so the opponent moves first in half of them, as it
+  # does in tournaments and the GUI. The gate evaluates both seats (eval).
+  agent_seat: random
+  # Game clock of the starter stages; the other maps set their own per stage
+  # (beginner and intermediate 75, skirmish 120, corner_points 200).
   max_turns: 20
-  # Per-game-turn hard cap on agent actions. When the policy has taken
-  # this many actions in a single game-turn without ending the turn,
-  # the action mask narrows to end_turn-only on subsequent steps,
-  # forcing the turn to close. Bounded blast-radius defense against
-  # the "never end the turn" attractor that re-emerges as max_steps
-  # is raised (eval signature: ``len`` near ``max_steps`` with
-  # ``turns`` very low).
-  #
-  # Disabled (``null``) for now so the per-stage stall traces
-  # (``<stage_dir>/traces/eval_*/episode_*_max_steps_truncate.jsonl``)
-  # capture the unmodified policy behaviour. Once the loop mechanism
-  # is identified from the traces, set this back to 60 to enforce the
-  # cap -- 60 actions/turn comfortably covers a healthy turn on the
-  # beginner map (~25 legal actions worst-case for the current
-  # enabled_units roster) without clipping legitimate play.
-  max_actions_per_turn: null
+  # Per-turn cap on agent actions: after 60 actions in one game turn the
+  # mask narrows to end_turn only. A safety net against the "never end the
+  # turn" attractor, sized so it rarely binds: a trained v50 policy on
+  # skirmish took median 26 / p90 37 / max 41 steps per turn, and random
+  # play maxes at 57 there. Random play on corner_points hits it on ~21% of
+  # turns; watch that if a seed gets there. The per-turn counter is not in
+  # the observation, so the cap is not meant to shape play.
+  max_actions_per_turn: 60
+  # max_steps must never end an episode before the max_turns clock does:
+  # truncation pays reward_config.truncation (0) plus SB3's bootstrap of the
+  # truncated state, which would make it a cheaper exit than a max-turns
+  # draw. A policy that follows the action mask (MaskablePPO always does)
+  # spends at most max_actions_per_turn + 1 steps per turn, so every stage
+  # uses
+  #   max_steps = ceil((max_turns * 61 + 60) / 100) * 100
+  # 1300 here (20 turns); per stage 4700 (75), 7400 (120), 12300 (200).
+  # Change max_actions_per_turn or a stage's max_turns and this must follow
+  # (tests/test_shipped_configs.py checks it).
+  max_steps: 1300
   action_space_type: flat_discrete
   # max_flat_actions stays at the 512 default (decision recorded for review
   # rlenv-11 / prior-13, which proposed 1024 here). The case for 1024 was
@@ -61,89 +67,69 @@ env:
   # flat_truncated_rate); raise the cap if the validation run shows it
   # biting. 1024 remains a sweep axis (v52b / v53 / v54): it doubles the
   # Discrete head and makes 512-head checkpoints unusable as warm starts.
+  #
   # engine_overrides: optional sparse overlay over the non-YAML engine
-  # constants (constants.py) so balance is a first-class, swept,
-  # auto-recorded config axis instead of an invisible module constant.
-  # Absent/unset = use constants.py (today's behaviour). GameState
-  # deep-merges this over the module defaults; config.json records the
-  # resolved effective_engine_economy + engine_constants_hash. Unknown
-  # unit code / stat field fails loud. Example (commented; uncomment to
-  # pin a balance era, e.g. the 6eb0566 deep-run economy):
+  # constants (constants.py). Unset here: the run plays the deployed engine,
+  # the one the scripted-bot ladder was measured on. v50-v52a's
+  # damage_model: hp_scaled and unit_data W cost 300 are deliberately not
+  # back-ported (docs/validation_run_config.md). Example of the syntax:
   #
   # engine_overrides:
   #   starting_gold: 250
-  #   headquarters_income: 150
-  #   building_income: 100
-  #   tower_income: 50
   #   unit_data:               # sparse: only the deltas you want
   #     K: {defence: 5}
-  #     W: {attack: 10}
   reward_config:
-    # All reward magnitudes that were calibrated *relative to* the old
-    # ~5000-scale terminal rewards are scaled to 1/100 of their original
-    # values: terminals, captures, seize_progress, plus the per-turn
-    # and per-invalid-action penalties. Prior runs showed value_loss
-    # climbing without bound and explained_variance pinned near zero,
-    # the canonical signature of value targets outpacing a [256,256]
-    # MLP's capacity. Ratios between scaled keys are preserved (a
-    # uniform divide), so the curriculum's inductive biases (building >
-    # HQ > tower; terminal >> shaping; ~1% turn-penalty pressure
-    # relative to a win) carry over unchanged.
+    # The deepest archived run's values (v52a_maxturn_scaled_draw, 20 of 33
+    # stages), back-ported per review rltrain-14 / prior-4. Every key the env
+    # reads is set, so none falls back to the 1000-scale
+    # DEFAULT_REWARD_CONFIG. Terminals are ~50: prior runs at the ~5000 scale
+    # showed value_loss climbing without bound.
     #
-    # The per-step potential-shaping signals (income_diff, unit_diff,
-    # structure_control) are pinned to the env defaults at gym_env.py:188-190.
-    # They feed a potential function (gym_env.py:890) that is
-    # policy-invariant under discounted return, but the *undiscounted*
-    # eval reward sum carries a bias term -(1-gamma) * sum_t Phi(s_t)
-    # that scales with episode length * average Phi. On long beginner
-    # episodes (~800 steps) the prior weights (income_diff: 0.5,
-    # unit_diff: 1.0, structure_control: 10.0) made avg Phi ~33,
-    # biasing eval reward by ~-260 even on 100% WR runs. The env
-    # defaults give avg Phi ~3, cutting the bias 10x while leaving
-    # the policy's optimum unchanged: shaping invariance holds under
-    # discounted return regardless of weight.
-    #
-    # win_by_hq_capture and win_by_elimination are equalised at 50
-    # rather than the old 5:1 ratio favouring HQ. On the bigger
-    # beginner map HQ capture is structurally harder than elimination
-    # (more terrain, more units to fight through to reach the HQ), so
-    # over-rewarding HQ pushes the policy toward an unattainable
-    # strategy. Equalising lets the policy take whichever finishing
-    # path the map affords.
-    win_by_hq_capture: 50.0
+    # Terminals. 96-100% of archived wins are eliminations. The HQ values
+    # (here and hq_capture) are v49's, kept for parity with v52a; HQ endings
+    # stayed at 0.3-4% of eval episodes after v49 raised them.
+    win_by_hq_capture: 80.0
     win_by_elimination: 50.0
-    win: 50.0
+    win: 50.0                # any other winning end_reason
     loss: -50.0
+    # draw equals loss. turn_penalty makes a full-clock draw cost
+    # draw + turn_penalty * max_turns: -70 (starter), -125 (beginner,
+    # intermediate), -170 (skirmish), -250 (corner_points).
     draw: -50.0
+    # max_steps truncation (unreachable here, see env.max_steps).
+    truncation: 0.0
+    # Potential-based shaping, paid as gamma * Phi(s') - Phi(s) with Phi =
+    # income_diff * (income difference) + unit_diff * (unit-count
+    # difference) + structure_control * (structure difference). Policy-
+    # invariant under the discounted return, but the undiscounted eval sum
+    # carries -(1 - gamma) * sum_t Phi(s_t), which grows with episode length.
+    # unit_diff is 0 (v49): it paid for cheap-unit spam.
     income_diff: 0.05
-    unit_diff: 0.3
+    unit_diff: 0.0
     structure_control: 1.0
     create_unit: 0.0
     move: 0.0
-    damage_scale: 0.0
-    kill: 0.0
+    # Combat shaping on HP actually removed, both sides (v34+ / v49):
+    # damage_taken_scale mirrors damage_scale, so an even trade nets ~0 and
+    # only decisive combat pays. Counter-attacks count on both sides. It is a
+    # small stream (+5..+24 per episode in the archive's evals).
+    damage_scale: 0.002
+    damage_taken_scale: -0.002
+    kill: 0.2
+    unit_lost: 0.0           # off, as in v52a (the key did not exist then)
+    # Paid per seize action. The largest dense stream (35-68 per episode on
+    # beginner / intermediate, 147-282 on skirmish in the archive) and a
+    # known farm: partial seizes pay without a capture. 3.0 for parity with
+    # v52a; 1.0 is the first one-knob follow-up arm.
     seize_progress: 3.0
-    capture: 10.0            # back-compat fallback (no longer reached
-                             # when the per-type keys below are set)
-    # Per-structure capture differentiation. Hoisted to the global env
-    # config (rather than scoped to a single late stage) so every stage
-    # in the curriculum sees the same gradient: building captures are
-    # the highest per-turn payoff, HQ captures are a viable finisher,
-    # and neutral towers are positive-but-not-dominant. Rationale:
-    # introducing a new strategy mid-curriculum (only at random_20)
-    # asks the policy to discover and integrate it after entropy has
-    # already cooled to 0.03 and the value function has locked in on
-    # the warrior-spam-elimination attractor from earlier stages. Far
-    # easier to bake in the correct inductive bias from stage 1, when
-    # entropy is high and the value function is plastic. Both starter
-    # and beginner maps have HQs, buildings, and towers in equivalent
-    # layouts, so the gradient is meaningful on every stage.
-    tower_capture: 15.0      # neutral towers; modest downweight on the
-                             # local optimum the prior run converged to
-    building_capture: 40.0   # enemy economy; ~20.5/turn vs tower 8/turn
-                             # makes this the per-turn-best capture target
-    hq_capture: 25.0         # stacks with win_by_hq_capture (+50) so
-                             # HQ seize pays ~18.75/turn including terminal
+    # Per-structure capture rewards (capture is the fallback, unused while
+    # all three per-type keys are set). The HQ pays most (v49: it used to
+    # pay less than a building).
+    capture: 10.0
+    tower_capture: 15.0
+    building_capture: 40.0
+    hq_capture: 60.0
+    # Support abilities: explicit zeros (the env defaults are nonzero).
     cure: 0.0
     heal_scale: 0.0
     paralyze: 0.0
@@ -151,39 +137,23 @@ env:
     defence_buff: 0.0
     attack_buff: 0.0
     invalid_action: -0.1
-    # ``turn_penalty`` is now 0.0: prior runs charged a per-end_turn
-    # cost which (combined with seize_progress and free move/attack
-    # actions) trained the policy into a "never end the turn"
-    # attractor — episodes truncated at ``max_steps`` with very few
-    # game-turns elapsed and 0% win rate (see PR description for the
-    # eval log). Per-turn pressure now lives in ``win_speed_bonus``
-    # below, which scales the terminal reward linearly with how
-    # quickly the agent finishes the game.
-    turn_penalty: 0.0
-    # ``win_speed_bonus`` adds up to this magnitude on a turn-1 win
-    # and tapers linearly to 0 at ``max_turns``. With ``win=50`` the
-    # terminal range becomes 50..100 depending on speed, so the
-    # agent gets a clear gradient toward faster wins without paying
-    # a per-action or per-end_turn cost mid-game. Stacks with the
-    # ``win`` / ``win_by_*`` terminals; only fires on the agent's
-    # win.
-    win_speed_bonus: 50.0
-    # Opponent-capture penalty. Fires once per capturable tile the
-    # opponent seizes during their turn (gym_env.py:_execute_action,
-    # action_type=5). Tiered to encode two different failures:
-    # ``enemy_neutral_capture`` punishes letting the opponent grab a
-    # contested neutral (the failure that collapsed skirmish_simple --
-    # the agent never learned the capture race because beginner has 0
-    # neutrals and random opponents don't compete for them).
-    # ``enemy_owned_capture`` punishes losing a tile we already held;
-    # the structure_control shaping already gives a small differential
-    # signal here, but the discrete event reward sharpens it. Magnitudes
-    # are calibrated against building_capture=+40 so re-capturing
-    # remains net-positive even after eating both penalties.
+    # Charged per end_turn: the clock-scaled draw deterrent (v52a). With
+    # draw == loss it also makes a fast loss cheaper than a full-clock draw;
+    # the per-turn cap above keeps "never end the turn" from dodging it.
+    turn_penalty: -1.0
+    # Both 0. Every archived run that cleared beginner_random_20 had
+    # win_speed_bonus 0, enemy_owned_capture 0 and turn_penalty <= -0.5; 0
+    # of 20 runs with win_speed_bonus 50 and enemy_owned_capture -15 did.
+    # The v27 bisection re-added each alone and each stalled
+    # beginner_random_10 (v27a, v27c).
+    win_speed_bonus: 0.0
+    # Charged per tile the opponent seizes: a neutral (the capture race) or
+    # one the agent held. -8 for neutrals was shown benign (v27b).
     enemy_neutral_capture: -8.0
-    enemy_owned_capture: -15.0
+    enemy_owned_capture: 0.0
 
 ppo:
+  # Unchanged, and identical to v52a (and every archived run).
   learning_rate: 3.0e-4
   n_steps: 2048             # 2048 * 8 = 16384 transitions per PPO update
   batch_size: 256           # bumped from 64 -- L4 absorbs much bigger minibatches
@@ -220,620 +190,396 @@ ppo:
       extra_conv: true
 
 eval:
-  # eval_freq is in env steps across all sub-envs. With n_envs=8 and
-  # n_steps=2048, one PPO update = 16384 env steps, so eval_freq=50000
-  # fires ~once per 3 PPO updates -- the efficient ratio for production
-  # runs. (20000 was used during the reward-rescale validation runs to
-  # catch value-head / reward-signal regressions early; once those were
-  # confirmed healthy the eval overhead at that cadence -- ~half of
-  # wall-clock -- stopped being worth it.) Per-stage
-  # CurriculumStage.n_eval_episodes overrides this default for stages
-  # that need tighter CIs.
-  eval_freq: 50_000
-  n_eval_episodes: 80
-  # Gate settings left at their defaults (see EvalConfig). Since the eval-gate
-  # change the gate measures the *stochastic* policy (eval_deterministic:
-  # false) and every eval also records the greedy win rate on the same seeds
-  # (eval_both_modes: true). The promotion_win_rate values below were tuned
-  # on greedy evals; if stages stop promoting, compare win_rate_greedy with
-  # win_rate_stochastic in eval_results.jsonl before lowering them.
-  #
-  # Eval cost: measured with an untrained policy on 4 CPUs, one default eval
-  # (both modes) takes 2.3-2.5x the old greedy-only eval (starter, 40
-  # episodes: 4.2s greedy + 6.1s stochastic against 4.6s before; beginner, 16
-  # episodes: 19.0s against 7.5s). That gives back much of what the move from
-  # eval_freq 20_000 to 50_000 saved. n_eval_envs: 4 (batched predict, one
-  # process) brings it to ~1.45x (starter: 2.7s + 4.0s). Since a stochastic
-  # eval samples from its own seeded stream, n_eval_envs changes neither the
-  # training run nor the greedy numbers, but the stochastic gate numbers are a
-  # different (equally valid, reproducible) sample than the serial path's, so
-  # switch it at a run boundary, not mid-comparison. eval_both_modes: false
-  # halves the cost again at the price of the greedy number.
-  #
-  # Also recommended once validated: eval_seats: [1, 2] with env.agent_seat:
-  # random, so checkpoints are trained and gated in the seat they are
-  # deployed in half the time. checkpoint_freq (default 50_000) is the
-  # rolling latest.zip that train_bootstrap.py --resume continues from.
-  #
-  # Promotion / recovery settings (curriculum section) are also left at their
-  # defaults (see CurriculumConfig): promotion_criterion point (the gate these
-  # thresholds were tuned for), max_retries 1 (a stalled stage gets one more
-  # budget from its best_model.zip), regression_guard_evals 0 (off).
-  # Recommended to try on the noisy *_random_N stages: promotion_criterion:
-  # rolling with promotion_rolling_k: 3 and patience: 1, or wilson with
-  # lowered thresholds. A Wilson gate (one-sided 95%) as hard as today's point
-  # gate at 80 episodes is 7-9 points lower: 0.65 -> 0.56, 0.70 -> 0.61,
-  # 0.75 -> 0.66, 0.85 -> 0.77, 0.90 -> 0.83; with eval_seats [1, 2] (160
-  # pooled episodes) 4.5-6.5 points lower: 0.65 -> 0.59, 0.70 -> 0.64,
-  # 0.75 -> 0.69, 0.85 -> 0.80, 0.90 -> 0.85. In general T' =
-  # wilson_lower_bound(ceil(n * T), n, z_for_confidence(0.95)) from
-  # reinforcetactics.rl.evaluation, n the episodes pooled per eval. Also:
-  # promotion_score: win_plus_half_draw where max_turns draws dominate;
-  # regression_guard_evals: 3 with regression_guard_drop: 0.25;
-  # anneal_horizon near the steps a stage typically needs to promote, so
-  # ent_coef schedules finish cooling.
+  # Env steps across all sub-envs (cumulative, so a stage's first in-stage
+  # eval lands up to 100k after its carry-in eval). Eval dominates
+  # wall-clock (72-94% in v52a); 100k with the stochastic policy only is
+  # ~24 h expected per seed, against ~42 h for 100k with both modes.
+  eval_freq: 100_000
+  # Per seat: 60 x 2 seats = 120 pooled episodes per eval. The thresholds
+  # below are matched to n = 120; change this and recompute them.
+  n_eval_episodes: 60
+  eval_seats: [1, 2]
+  # The gate pools both seats. `min` would make the *_medium stages nearly
+  # impassable: no scripted bot beats MediumBot moving first on beginner or
+  # intermediate (0-4%).
+  seat_aggregate: mean
+  # Gate, best_model.zip and stall verdicts use the stochastic policy (the
+  # one PPO trains). The greedy number is not recorded per eval: that would
+  # nearly double eval time. For the v52a comparison, evaluate each stage's
+  # best_model.zip in both modes after the run.
+  eval_deterministic: false
+  eval_both_modes: false
+  # 8 eval envs in worker processes, one batched predict per step. Assumed
+  # ~2.5x faster than serial on the L4 (measured only 1.0-1.5x on 4 local
+  # CPUs); if it underperforms, n_eval_envs 4 in-process measured ~1.6x.
+  n_eval_envs: 8
+  eval_use_subprocess: true
+  # Stage-relative steps between rolling latest.zip checkpoints, which
+  # train_bootstrap.py --resume continues from.
+  checkpoint_freq: 50_000
 
 curriculum:
-  # Stage order against the measured scripted-bot ladder: see
-  # docs/bot_ladder_2026-09.md (flags and a recommended order, not applied
-  # here). Re-check with:
-  #   python scripts/eval/bot_ladder.py --config configs/ppo/bootstrap.yaml --out-dir <dir>
+  # Gate: the Wilson lower bound (one-sided 95%) of the pooled two-seat win
+  # rate (a draw counts as a loss) must reach promotion_win_rate on
+  # `patience` consecutive evals. Each stage names its intended stochastic
+  # win rate t; its threshold is
+  #   T = round(wilson_lower_bound(ceil(120 * t), 120, z_for_confidence(0.95)), 2)
+  # (reinforcetactics.rl.evaluation): t 0.85 / 0.80 / 0.75 / 0.70 / 0.65 /
+  # 0.60 gives T 0.79 / 0.73 / 0.68 / 0.63 / 0.58 / 0.53. A policy at t
+  # passes one eval about half the time and at t + 0.05 86-95% of the time;
+  # one at t - 0.05 promotes within 10 evals 4-11% of the time.
+  promotion_criterion: wilson
+  promotion_confidence: 0.95
+  promotion_score: win_rate
+  # A stalled stage gets one more budget from its best_model.zip.
+  max_retries: 1
+  # Restore best_model.zip after 3 consecutive evals whose stochastic win
+  # rate is more than 0.25 below the stage's best, and keep training.
+  regression_guard_evals: 3
+  regression_guard_drop: 0.25
+  # Stage order: every stage's opponent rates at least as strong as the
+  # previous stage's on the same map and does not lose their head-to-head,
+  # measured with the scripted-bot ladder (both seats). Evidence per step in
+  # docs/validation_run_config.md; re-check after any bot or engine change:
+  #   python scripts/eval/bot_ladder.py --config configs/ppo/bootstrap.yaml \
+  #       --seeds 25 --fail-on-flag --out-dir <dir>
+  # Every stage has patience 2 and min_timesteps_before_promotion 25_000
+  # (the stage-entry eval of the carry-in policy cannot count toward
+  # promotion). anneal_horizon ends each entropy schedule near the steps a
+  # stage is expected to need.
   stages:
+    # ---- starter (20 turns): cold start ----
+    # An untrained policy plays like RandomBot, which beats SimpleBot on this
+    # map, so SimpleBot is the warm-up.
+    - name: starter_simple
+      map_file: maps/1v1/starter.csv
+      opponent: simple
+      promotion_win_rate: 0.73      # t 0.80
+      patience: 2
+      max_timesteps: 500_000
+      anneal_horizon: 300_000
+      min_timesteps_before_promotion: 25_000
+      ent_coef: {start: 0.10, end: 0.05, schedule: linear}
+
+    - name: starter_mixed_random_simple
+      map_file: maps/1v1/starter.csv
+      opponent: mixed
+      opponent_kwargs: {easy: random, hard: simple, p_hard: 0.5}
+      promotion_win_rate: 0.68      # t 0.75
+      patience: 2
+      max_timesteps: 500_000
+      anneal_horizon: 300_000
+      min_timesteps_before_promotion: 25_000
+      ent_coef: 0.05
+
     - name: starter_random
       map_file: maps/1v1/starter.csv
       opponent: random
-      promotion_win_rate: 0.90
+      promotion_win_rate: 0.68      # t 0.75
+      patience: 2
+      max_timesteps: 750_000
+      anneal_horizon: 400_000
+      min_timesteps_before_promotion: 25_000
+      ent_coef: 0.05
+
+    - name: starter_mixed_random_medium
+      map_file: maps/1v1/starter.csv
+      opponent: mixed
+      opponent_kwargs: {easy: random, hard: medium, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
       max_timesteps: 1_000_000
-      ent_coef: 0.10
-      n_eval_episodes: 80
-
-    # starter_simple/medium drop to 0.05 from starter_random's 0.10.
-    # By the time the policy reaches these stages it has already cleared
-    # starter_random at >=90% WR (the curriculum guarantees this via
-    # promotion gates), so the entropy bonus has done its job for the
-    # starter map. Run 20260511_203654 shows both stages clearing at
-    # 100% WR with deterministic reward (std=0) on the first eval,
-    # confirming the policy is already converged -- 0.10 is just noise
-    # on top of a solved problem. 0.05 matches the convention used by
-    # every other simple/medium stage in the curriculum.
-    - name: starter_simple
-      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. On this map
-      # RandomBot beats SimpleBot 41-7-2 (50 seeded games, both seats), so
-      # this stage is no step up from starter_random. Suggested: run it
-      # before starter_random, or drop it.
-      map_file: maps/1v1/starter.csv
-      opponent: simple
-      promotion_win_rate: 0.90
-      patience: 2
-      max_timesteps: 2_000_000
+      anneal_horizon: 500_000
+      min_timesteps_before_promotion: 25_000
       ent_coef: 0.05
-      n_eval_episodes: 80
 
+    # Map top. t 0.60 on every map top: MediumBot moving first is rarely
+    # beaten by any scripted bot (at most 16% here), so most of the wins
+    # have to come from the seat where the agent moves first.
     - name: starter_medium
       map_file: maps/1v1/starter.csv
       opponent: medium
-      promotion_win_rate: 0.90
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
-      max_timesteps: 3_000_000
+      max_timesteps: 1_500_000
+      anneal_horizon: 750_000
+      min_timesteps_before_promotion: 25_000
       ent_coef: 0.05
-      n_eval_episodes: 80
 
+    # ---- beginner (6x6, 75 turns) ----
     - name: beginner_balanced_random
       map_file: maps/1v1/beginner.csv
       opponent: balanced_random
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.79      # t 0.85
       patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
+      max_timesteps: 1_000_000
+      anneal_horizon: 300_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 75
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
+      max_steps: 4700
+      ent_coef: {start: 0.10, end: 0.03, schedule: linear}
 
+    # RandomBots draw each other (99-100% of games), so their head-to-head
+    # measures nothing. The step shows in how hard each is to beat: the
+    # scripted bots win 0.958 of games against balanced_random, 0.719
+    # against random_10 and 0.610 against random_15.
     - name: beginner_random_10
       map_file: maps/1v1/beginner.csv
       opponent: random
-      opponent_kwargs:
-        max_actions: 10
-      promotion_win_rate: 0.75
+      opponent_kwargs: {max_actions: 10}
+      promotion_win_rate: 0.68      # t 0.75
       patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
+      max_timesteps: 3_000_000
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 75
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
+      max_steps: 4700
+      ent_coef: {start: 0.10, end: 0.03, schedule: linear}
 
+    # The historical wall (the archive's stall stage). A lower entropy floor
+    # so the policy commits late in the budget.
     - name: beginner_random_15
       map_file: maps/1v1/beginner.csv
       opponent: random
-      opponent_kwargs:
-        # Bridge stage between random_10 (max_actions=10, ~98% WR) and
-        # random_20 (max_actions=20). Stepping straight from 10 to 20 in
-        # an earlier run let the opponent survive long enough that episodes
-        # ran out the max_turns clock as draws (W/L/D ~30/0/30, plateauing
-        # at 40-60% WR). Splitting into 10 -> 15 -> 20 gives the policy a
-        # smoother difficulty ramp.
-        max_actions: 15
-      promotion_win_rate: 0.70
+      opponent_kwargs: {max_actions: 15}
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 75
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: beginner_random_20
-      map_file: maps/1v1/beginner.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 20
-      # Hardest random stage; the bar matches random_15's 0.70. (An
-      # earlier revision set 0.65 because run 4 plateaued at ~62% WR
-      # against this opponent on the prior reward shape while still
-      # budget-limited; the threshold has since been raised to 0.70 —
-      # keep this comment in sync with the value below when tuning.)
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 75
-      # Lower end-of-schedule floor than other stages (0.01 vs 0.03):
-      # this is the longest stage at 3M steps and the policy needs to
-      # commit during the last ~1M to convert draws into wins. A 0.03
-      # floor was still injecting meaningful exploration noise at the
-      # end of run 4's budget when the policy was structurally tying.
-      ent_coef:
-        start: 0.10
-        end: 0.01
-        schedule: linear
-
-    - name: beginner_simple
-      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. RandomBot with
-      # max_actions 20 beats SimpleBot 26-17-7 on this map, so this stage
-      # is easier than beginner_random_20. SimpleBot ties random_15 and
-      # edges random_10. Suggested: run it right after beginner_random_10.
-      map_file: maps/1v1/beginner.csv
-      opponent: simple
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 75
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
+      max_steps: 4700
+      ent_coef: {start: 0.10, end: 0.01, schedule: linear}
 
     - name: beginner_mixed_50
-      # Bridge stage between simple and medium. MixedBot samples
-      # SimpleBot or MediumBot per episode with p_hard=0.5, so half the
-      # episodes mirror beginner_simple (which the policy just cleared at
-      # 0.70 WR) and half preview beginner_medium. Mirrors the
-      # random_10 -> 15 -> 20 ladder: budget sits halfway between the
-      # flanking stages (3.5M steps); threshold held at 0.70 to match.
       map_file: maps/1v1/beginner.csv
       opponent: mixed
-      opponent_kwargs:
-        easy: simple
-        hard: medium
-        p_hard: 0.5
-      promotion_win_rate: 0.70
+      opponent_kwargs: {easy: simple, hard: medium, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
-      max_timesteps: 3_500_000
-      n_eval_episodes: 80
+      max_timesteps: 3_000_000
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 75
+      max_steps: 4700
       ent_coef: 0.05
 
+    # Before beginner_medium: since the rule-bot legality fix MediumBot
+    # beats AdvancedBot, so this mix sits between mix(simple/medium) and
+    # pure MediumBot.
+    - name: beginner_mixed_med_adv_50
+      map_file: maps/1v1/beginner.csv
+      opponent: mixed
+      opponent_kwargs: {easy: medium, hard: advanced, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
+      ent_coef: 0.05
+
+    # Map top (see starter_medium): no scripted bot beats MediumBot moving
+    # first on this map (0-2%).
     - name: beginner_medium
       map_file: maps/1v1/beginner.csv
       opponent: medium
-      promotion_win_rate: 0.70
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 4_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 2_000_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 75
+      max_steps: 4700
       ent_coef: 0.05
 
-    - name: beginner_mixed_med_adv_50
-      # Bridge stage between medium and advanced. MixedBot samples
-      # MediumBot or AdvancedBot per episode with p_hard=0.5: half the
-      # episodes mirror beginner_medium (just cleared at 0.70 WR) and
-      # half preview beginner_advanced. Threshold (0.70) matches the
-      # flanking stages; budget (4.5M) sits halfway between them,
-      # mirroring the simple -> mixed_50 -> medium spacing.
-      #
-      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. Since the rule-bot
-      # legality fixes (review rulebots-1/6/8/14/19) this bot loses to
-      # MediumBot 15-0-35, so the stage is easier than beginner_medium: its
-      # "hard" half no longer previews a harder opponent. Suggested: run it
-      # between beginner_advanced and beginner_medium (see beginner_advanced).
-      map_file: maps/1v1/beginner.csv
-      opponent: mixed
-      opponent_kwargs:
-        easy: medium
-        hard: advanced
-        p_hard: 0.5
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 4_500_000
-      n_eval_episodes: 80
-      max_turns: 75
-      ent_coef: 0.05
-
-    - name: beginner_advanced
-      # AdvancedBot extends MediumBot with map analysis and enhanced
-      # tactics (bot.py). Caps the rising-budget ladder (threshold flat
-      # at 0.70 throughout): simple 0.70/3M -> mixed_50 0.70/3.5M ->
-      # medium 0.70/4M -> mixed_med_adv_50 0.70/4.5M -> advanced
-      # 0.70/5M. The extra ~1M budget accounts for AdvancedBot's
-      # tighter play forcing the policy to convert draws into wins on
-      # the same map geometry.
-      #
-      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. The premise above
-      # no longer holds after the rule-bot legality fixes (review
-      # rulebots-1/6/8/14/19). AdvancedBot now loses 46 of 50 games to
-      # MediumBot on this map (33 of 50 before the fixes) and goes 17-0-33
-      # against beginner_mixed_med_adv_50's bot, so this stage and that one
-      # are easier than beginner_medium. Suggested: beginner_mixed_50 ->
-      # beginner_advanced -> beginner_mixed_med_adv_50 -> beginner_medium,
-      # which rises at every step. Re-baseline the budgets and thresholds
-      # with the move (docs/REVIEW_full_2026-09-26.md §8, week 4).
-      map_file: maps/1v1/beginner.csv
-      opponent: advanced
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 5_000_000
-      n_eval_episodes: 80
-      max_turns: 75
-      ent_coef: 0.05
-
-    # Bridge between beginner (6x6, 0 neutral buildings) and skirmish (8x8,
-    # 4 neutral buildings). A run trained through beginner_advanced collapsed
-    # at skirmish_simple (0% WR, deterministic +186 reward plateau) because
-    # the agent never had to compete for neutral structures: every beginner
-    # stage starts with all buildings pre-owned, and the random opponents
-    # used in the earlier skirmish stages don't capture aggressively. By the
-    # time SimpleBot's land-grab tempo shows up, the policy has already
-    # converged on "spawn warriors near HQ, march outward" and can't relearn
-    # map control on the larger board.
-    #
-    # The 7x7 intermediate.csv has 3 neutrals on the anti-diagonal (1 b at
-    # center, 2 t flanking), two forests covering each player's push toward
-    # their *far* tower, and water in the off-corners (top-right and
-    # bottom-left). The water corners eliminate the flank-around option so
-    # both players must engage through the centre -- exactly the lesson the
-    # earlier random-opponent stages don't teach.
+    # ---- intermediate (7x7, 3 neutrals on the anti-diagonal, 75 turns) ----
+    # The first map with contested neutrals, and water in the off-corners so
+    # both sides must engage through the centre. 75 turns, not 60: 25-34% of
+    # v52a's decisive intermediate games ended after turn 60, and v34, the
+    # only run at 60, stalled with every game drawn at the clock.
     - name: intermediate_balanced_random
       map_file: maps/1v1/intermediate.csv
       opponent: balanced_random
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.79      # t 0.85
       patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
-      max_turns: 60
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
+      max_timesteps: 1_000_000
+      anneal_horizon: 300_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
+      ent_coef: {start: 0.10, end: 0.03, schedule: linear}
 
-    - name: intermediate_random_20
-      map_file: maps/1v1/intermediate.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 20
-      promotion_win_rate: 0.70
-      patience: 3
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
-      max_turns: 60
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    # Bridge between intermediate_random_20 (78% WR) and intermediate_simple
-    # (which collapsed in run 20260512). Random bot is degenerate on a map
-    # with neutral buildings -- it scatters units instead of competing for
-    # the centre -- so the policy promotes through random_20 without learning
-    # the capture race, then face-plants on simple. MixedBot(random, simple,
-    # p_hard=0.5) keeps half the episodes winnable while previewing simple's
-    # land-grab tempo. Mirrors the beginner_mixed_50 pattern that already
-    # bridges beginner_simple -> beginner_medium successfully.
-    - name: intermediate_mixed_random_simple
+    # Replaces random_20 and mix(random/simple), which were no step: they
+    # draw each other and SimpleBot (0.49-0.52 head to head).
+    - name: intermediate_mixed_br_simple
       map_file: maps/1v1/intermediate.csv
       opponent: mixed
-      opponent_kwargs:
-        easy: random
-        hard: simple
-        p_hard: 0.5
-      promotion_win_rate: 0.65
+      opponent_kwargs: {easy: balanced_random, hard: simple, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
-      max_timesteps: 2_500_000
-      n_eval_episodes: 80
-      max_turns: 60
-      ent_coef:
-        start: 0.07
-        end: 0.03
-        schedule: linear
+      max_timesteps: 2_000_000
+      anneal_horizon: 1_000_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
+      ent_coef: {start: 0.07, end: 0.03, schedule: linear}
 
-    # The real test: capture-greedy opponent on a board with contested
-    # neutrals. Promotion threshold sits at 0.65 (lower than beginner_simple's
-    # 0.70) because this is the first stage where the agent has to learn a
-    # genuinely new skill (map control), not just transfer an existing one.
+    # The capture race against a capture-greedy bot: a new skill, not a
+    # transfer, hence t 0.65.
     - name: intermediate_simple
       map_file: maps/1v1/intermediate.csv
       opponent: simple
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.58      # t 0.65
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 60
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
       ent_coef: 0.05
 
+    # Splits the simple -> medium step, the largest on this map.
+    - name: intermediate_mixed_simple_medium
+      map_file: maps/1v1/intermediate.csv
+      opponent: mixed
+      opponent_kwargs: {easy: simple, hard: medium, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
+      ent_coef: 0.05
+
+    # Map top (see starter_medium).
     - name: intermediate_medium
-      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but the largest
-      # step on this map (MediumBot beats SimpleBot 45-1-4). A
-      # mixed {easy: simple, hard: medium, p_hard: 0.5} bridge before it
-      # splits the step evenly (0.72 / 0.75 head-to-head scores).
       map_file: maps/1v1/intermediate.csv
       opponent: medium
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 60
+      max_timesteps: 4_000_000
+      anneal_horizon: 2_000_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 75
+      max_steps: 4700
       ent_coef: 0.05
 
+    # ---- skirmish (8x8, 4 neutral buildings, 120 turns) ----
+    # No RandomBot stages: random_10/15/20 draw each other and every strong
+    # bot beats them, so they add no step (v52a cleared them at 1.0).
     - name: skirmish_balanced_random
       map_file: maps/1v1/skirmish.csv
       opponent: balanced_random
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.79      # t 0.85
       patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
+      max_timesteps: 1_000_000
+      anneal_horizon: 300_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 120
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
+      max_steps: 7400
+      ent_coef: {start: 0.10, end: 0.03, schedule: linear}
 
-    - name: skirmish_random_10
-      map_file: maps/1v1/skirmish.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 10
-      promotion_win_rate: 0.75
-      patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
-      max_turns: 120
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: skirmish_random_15
-      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but no
-      # measurable step. RandomBot with max_actions 10, 15 and 20 rates the
-      # same here and draws itself; with skirmish_random_20, a candidate to
-      # drop.
-      map_file: maps/1v1/skirmish.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 15
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 120
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: skirmish_random_20
-      # Bot ladder: no measurable step over skirmish_random_15 (see there).
-      map_file: maps/1v1/skirmish.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 20
-      promotion_win_rate: 0.70
-      patience: 3
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 120
-      ent_coef:
-        start: 0.10
-        end: 0.01
-        schedule: linear
-
-    # Two-stage bridge between skirmish_random_20 and skirmish_simple.
-    # On the 8x8 skirmish map the random -> simple difficulty gap is much
-    # wider than on smaller maps: random units scatter into empty space and
-    # never compete for the 4 neutral buildings, while SimpleBot's
-    # closest-structure logic gets *more* effective with map area (more
-    # buildings to greedily seize). A single mixed_50 isn't enough surface
-    # area to teach the policy how to win on this map -- it needs gradual
-    # exposure starting with mostly-random episodes (p_hard=0.25), then a
-    # standard 50/50 mix.
-    - name: skirmish_mixed_25
+    - name: skirmish_mixed_br_simple
       map_file: maps/1v1/skirmish.csv
       opponent: mixed
-      opponent_kwargs:
-        easy: random
-        hard: simple
-        p_hard: 0.25
-      promotion_win_rate: 0.70
+      opponent_kwargs: {easy: balanced_random, hard: simple, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
       max_timesteps: 2_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 1_000_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 120
-      ent_coef:
-        start: 0.07
-        end: 0.03
-        schedule: linear
-
-    - name: skirmish_mixed_50
-      map_file: maps/1v1/skirmish.csv
-      opponent: mixed
-      opponent_kwargs:
-        easy: random
-        hard: simple
-        p_hard: 0.5
-      promotion_win_rate: 0.65
-      patience: 2
-      max_timesteps: 2_500_000
-      n_eval_episodes: 80
-      max_turns: 120
-      ent_coef: 0.05
+      max_steps: 7400
+      ent_coef: {start: 0.07, end: 0.03, schedule: linear}
 
     - name: skirmish_simple
       map_file: maps/1v1/skirmish.csv
       opponent: simple
-      promotion_win_rate: 0.70
+      promotion_win_rate: 0.63      # t 0.70
       patience: 2
       max_timesteps: 3_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 120
+      max_steps: 7400
       ent_coef: 0.05
 
-    - name: skirmish_medium
+    # Splits the simple -> advanced step.
+    - name: skirmish_mixed_simple_advanced
       map_file: maps/1v1/skirmish.csv
-      opponent: medium
-      promotion_win_rate: 0.65
+      opponent: mixed
+      opponent_kwargs: {easy: simple, hard: advanced, p_hard: 0.5}
+      promotion_win_rate: 0.63      # t 0.70
+      patience: 2
+      max_timesteps: 3_000_000
+      anneal_horizon: 1_500_000
+      min_timesteps_before_promotion: 25_000
+      max_turns: 120
+      max_steps: 7400
+      ent_coef: 0.05
+
+    # Map top (see starter_medium). No MediumBot stage: it beats AdvancedBot
+    # head to head but only ties SimpleBot here, so it rates below
+    # AdvancedBot and the ladder flags it after advanced.
+    - name: skirmish_advanced
+      map_file: maps/1v1/skirmish.csv
+      opponent: advanced
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 4_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 2_000_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 120
+      max_steps: 7400
       ent_coef: 0.05
 
+    # ---- corner_points (10x12, 200 turns) ----
+    # BalancedRandomBot, not RandomBot, is the easy side of the mixes here:
+    # its throughput scales with army size, so it keeps pressing on a big
+    # map where RandomBot's units scatter.
     - name: corner_points_balanced_random
       map_file: maps/1v1/corner_points.csv
       opponent: balanced_random
-      promotion_win_rate: 0.85
+      promotion_win_rate: 0.79      # t 0.85
       patience: 2
       max_timesteps: 1_500_000
-      n_eval_episodes: 80
+      anneal_horizon: 500_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 200
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: corner_points_random_10
-      map_file: maps/1v1/corner_points.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 10
-      promotion_win_rate: 0.75
-      patience: 2
-      max_timesteps: 1_500_000
-      n_eval_episodes: 80
-      max_turns: 200
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: corner_points_random_15
-      map_file: maps/1v1/corner_points.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 15
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 200
-      ent_coef:
-        start: 0.10
-        end: 0.03
-        schedule: linear
-
-    - name: corner_points_random_20
-      # Bot ladder (docs/bot_ladder_2026-09.md): not flagged, but no
-      # measurable step over corner_points_random_15 (same rating, all draws
-      # head to head). A candidate to drop.
-      map_file: maps/1v1/corner_points.csv
-      opponent: random
-      opponent_kwargs:
-        max_actions: 20
-      promotion_win_rate: 0.70
-      patience: 3
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 200
-      ent_coef:
-        start: 0.10
-        end: 0.01
-        schedule: linear
-
-    # Two-stage bridge between corner_points_random_20 and
-    # corner_points_simple. The random -> simple gap on a 12x10 map is so
-    # wide that RandomBot is essentially useless as the easy half of a
-    # MixedBot: its units scatter into 120 tiles of empty space and never
-    # press on the agent's structures. BalancedRandomBot scales its action
-    # throughput with army size (one build + one random action per owned
-    # unit per turn), so it stays competitive on big maps where plain
-    # RandomBot degrades. Substituting balanced_random for random on the
-    # easy side keeps the mixed-bot signal meaningful at this scale.
-    - name: corner_points_mixed_25
-      map_file: maps/1v1/corner_points.csv
-      opponent: mixed
-      opponent_kwargs:
-        easy: balanced_random
-        hard: simple
-        p_hard: 0.25
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 2_000_000
-      n_eval_episodes: 80
-      max_turns: 200
-      ent_coef:
-        start: 0.07
-        end: 0.03
-        schedule: linear
+      max_steps: 12300
+      ent_coef: {start: 0.10, end: 0.03, schedule: linear}
 
     - name: corner_points_mixed_50
       map_file: maps/1v1/corner_points.csv
       opponent: mixed
-      opponent_kwargs:
-        easy: balanced_random
-        hard: simple
-        p_hard: 0.5
-      promotion_win_rate: 0.65
+      opponent_kwargs: {easy: balanced_random, hard: simple, p_hard: 0.5}
+      promotion_win_rate: 0.58      # t 0.65
       patience: 2
       max_timesteps: 2_500_000
-      n_eval_episodes: 80
+      anneal_horizon: 1_250_000
+      min_timesteps_before_promotion: 25_000
       max_turns: 200
-      ent_coef: 0.05
+      max_steps: 12300
+      ent_coef: {start: 0.07, end: 0.03, schedule: linear}
 
+    # Capstone: the hardest bot to beat on this map (the best other scripted
+    # bot wins 17-31% of games against it), so no retry. A step of 0.73 over
+    # mix(balanced_random/simple). No MediumBot stage here: the top bots
+    # (medium, simple, advanced, master and their mixes) rate within a few
+    # dozen Elo of each other on this map, so two of them in a row are
+    # ordered by noise, and SimpleBot beats MediumBot head to head (0.74).
     - name: corner_points_simple
       map_file: maps/1v1/corner_points.csv
       opponent: simple
-      promotion_win_rate: 0.70
-      patience: 2
-      max_timesteps: 3_000_000
-      n_eval_episodes: 80
-      max_turns: 200
-      ent_coef: 0.05
-
-    - name: corner_points_medium
-      # Bot ladder (docs/bot_ladder_2026-09.md): FLAGGED. On this map at
-      # 200 turns SimpleBot beats MediumBot 31-16-3 (and AdvancedBot and
-      # MasterBot), so this stage is easier than corner_points_simple.
-      # Suggested: swap the two (mixed_50 -> medium -> simple).
-      map_file: maps/1v1/corner_points.csv
-      opponent: medium
-      promotion_win_rate: 0.65
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 4_000_000
-      n_eval_episodes: 80
+      anneal_horizon: 2_000_000
+      min_timesteps_before_promotion: 25_000
+      max_retries: 0
       max_turns: 200
+      max_steps: 12300
       ent_coef: 0.05
