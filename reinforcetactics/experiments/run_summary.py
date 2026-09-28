@@ -104,7 +104,8 @@ DEFINITIONS: dict[str, str] = {
     "train_steps_per_s": "Training throughput between consecutive rows of one session: sum of delta-timesteps / "
     "sum of (delta-wall_time - the later row's eval_seconds); PPO updates included, evals excluded. Compare with "
     "the compute model's 1000/s. TensorBoard's time/fps mixes both in.",
-    "active_h": "Hours the run's processes ran: the group manifest's sessions (started_at to ended_at) when given, "
+    "active_h": "Hours the run's processes ran: the group manifest's sessions (started_at to ended_at; a session "
+    "with no ended_at, whose launcher or VM died, to its last eval row before the next session's start) when given, "
     "else the eval rows' wall_time span with each gap longer than 3x the run's median gap counted as 3x the "
     "median (a pause between sessions is not training). wall_clock_h is the plain first-to-last span.",
     "seed_sensitive": "A stage at least one seed cleared and at least one seed stalled on.",
@@ -933,20 +934,27 @@ def stage_metrics(
 
 
 def _session_hours(sessions: Sequence[Mapping[str, Any]] | None, walls: Sequence[float]) -> float | None:
-    """Hours the launcher's sessions ran (``started_at`` to ``ended_at``; a session still open, or ended without
-    a stamp, to its last eval row). None without a session that has a start."""
-    total, counted = 0.0, False
+    """Hours the launcher's sessions ran (``started_at`` to ``ended_at``). A session with no ``ended_at`` (still
+    running, or its launcher or VM died: a Colab recycle, a reboot, a SIGKILL) runs to its last eval row before
+    the next session's start, or to the run's last eval row when it is the last session. None without a session
+    that has a start."""
+    timed = []
     for session in sessions or []:
         start = _parse_time(session.get("started_at"))
         if start is None:  # a Vertex submission: no process times
             continue
-        end = _parse_time(session.get("ended_at"))
-        if end is None:  # still running, or its launcher died: up to the last eval row after its start
-            later = [w for w in walls if w >= start]
-            end = max(later) if later else start
+        timed.append((start, _parse_time(session.get("ended_at"))))
+    if not timed:
+        return None
+    timed.sort(key=lambda se: se[0])
+    total = 0.0
+    for i, (start, end) in enumerate(timed):
+        if end is None:
+            next_start = timed[i + 1][0] if i + 1 < len(timed) else math.inf
+            own = [w for w in walls if start <= w < next_start]
+            end = max(own) if own else start
         total += max(0.0, end - start)
-        counted = True
-    return total / 3600.0 if counted else None
+    return total / 3600.0
 
 
 def _active_hours(walls: Sequence[float], cap_factor: float = 3.0) -> float | None:
@@ -987,14 +995,15 @@ def run_metrics(
         active_h = _active_hours(walls)
         active_source = "eval rows (gaps capped)"
         wall_source = "eval rows"
-    from_sessions = _session_hours(sessions, walls)
-    if from_sessions is not None:
-        active_h, active_source = from_sessions, "launcher sessions"
     else:
         created = sorted(t for t in (_parse_time(s.meta.get("created_at")) for s in run.stages) if t is not None)
         if len(created) > 1:
             wall_h = (created[-1] - created[0]) / 3600.0
             wall_source = "stage records (approx.; excludes the first stage)"
+    # The launcher's sessions, when given, replace the active-hours estimate (not the wall clock).
+    from_sessions = _session_hours(sessions, walls)
+    if from_sessions is not None:
+        active_h, active_source = from_sessions, "launcher sessions"
     # Steps/h per map: a stage's own rate, else from consecutive stage records.
     rates: dict[str, list[float]] = {}
     prev_t = prev_cum = None

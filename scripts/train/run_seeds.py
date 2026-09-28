@@ -45,9 +45,11 @@ Launch rules:
   ``<run dir>/logs/train.<UTC stamp>.log`` (and the console with ``--tee``,
   the default for K = 1). SIGINT / SIGTERM / SIGHUP reach every child as
   that signal (SIGHUP as SIGTERM), and each checkpoints and exits; after
-  600 s the rest are killed. Run a multi-day launch under tmux, screen or
-  nohup all the same: a launcher killed outright (SIGKILL) leaves its
-  children training with no one recording them.
+  600 s the rest are killed. A SIGHUP already ignored at launch (nohup)
+  stays ignored, so a disconnect does not stop the group. Run a multi-day
+  launch under tmux, screen or nohup all the same: a launcher killed
+  outright (SIGKILL) leaves its children training with no one recording
+  them.
 * Vertex (``--backend vertex``): one custom job per seed through
   scripts/cloud/submit_vertex_job.sh (needs BUCKET and IMAGE_URI or TAG;
   PROJECT_ID / REGION / MACHINE_TYPE / ... pass through). All seeds write

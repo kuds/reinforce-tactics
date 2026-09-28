@@ -258,6 +258,22 @@ class TestClassifyRun:
         _write(run / "final_model.zip")
         assert sr.seed_state(run, {"last_state": "submitted"}) == sr.COMPLETED
 
+    def test_a_vertex_seed_finished_in_gcs_keeps_that_state_until_fetched(self, tmp_path):
+        """A continuation found the run finished or stalled in GCS; the run dir here is missing or an old copy."""
+        job = "projects/p/locations/us-central1/customJobs/101"
+        missing = tmp_path / "missing"
+        partial = tmp_path / "partial"
+        _write(partial / "resolved_config.yaml", "seed: 1\n")  # fetched while it still ran
+        for run in (missing, partial):
+            for state in (sr.COMPLETED, sr.STALLED):
+                assert sr.seed_state(run, {"last_state": state, "job_resource": job}) == state
+        # A local record says nothing about a run dir that is gone: the run dir decides.
+        assert sr.seed_state(missing, {"last_state": sr.COMPLETED}) == sr.PENDING
+        assert sr.seed_state(partial, {"last_state": sr.STALLED}) == sr.INTERRUPTED
+        # The fetched run dir, once finished, is the verdict.
+        _write(partial / "run_status.json", json.dumps({"status": "curriculum_stalled"}))
+        assert sr.seed_state(partial, {"last_state": sr.COMPLETED, "job_resource": job}) == sr.STALLED
+
     def test_failed_job_exit_status(self):
         message = (
             "The replica workerpool0-0 exited with a non-zero status of 143. To find out more about why your job "
@@ -622,6 +638,62 @@ class TestLocalScheduler:
             assert (root / f"{GROUP}_s0" / "got_signal").read_text() == str(int(signal.SIGTERM))
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+    def test_a_launcher_under_nohup_trains_on_through_a_hangup(self, stub, tmp_path):
+        """nohup leaves SIGHUP ignored; the launcher keeps it so, and only a real stop (SIGTERM) stops the group."""
+        script, set_plan = stub
+        set_plan({0: ["wait"]})
+        root = tmp_path / "root"
+        cmd = [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "train" / "run_seeds.py"),
+            "--config",
+            str(_tiny_config(tmp_path / "t.yaml")),
+            "--seeds",
+            "0",
+            "--group",
+            GROUP,
+            "--root",
+            str(root),
+            "--train-script",
+            str(script),
+            "--kill-timeout",
+            "2",
+        ]
+        env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN),  # what nohup does
+        )
+        run_dir = root / f"{GROUP}_s0"
+        try:
+            deadline = time.monotonic() + 120
+            while not (run_dir / "waiting").exists():
+                if proc.poll() is not None or time.monotonic() > deadline:
+                    proc.kill()
+                    pytest.fail(f"the child never started:\n{proc.communicate()[0]}")
+                time.sleep(0.05)
+            proc.send_signal(signal.SIGHUP)
+            time.sleep(1.5)  # several of the launcher's 0.2 s polls
+            assert proc.poll() is None and not (run_dir / "got_signal").exists()
+            manifest = sr.read_group(sr.group_manifest_path(root, GROUP))
+            assert manifest["runs"]["0"]["sessions"][-1]["exit_code"] is None
+            proc.send_signal(signal.SIGTERM)
+            output = proc.communicate(timeout=60)[0]
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        assert proc.returncode == 143, output
+        assert (run_dir / "got_signal").read_text() == str(int(signal.SIGTERM))
+        manifest = sr.read_group(sr.group_manifest_path(root, GROUP))
+        (session,) = manifest["runs"]["0"]["sessions"]
+        assert session["exit_code"] == 143 and manifest["runs"]["0"]["last_state"] == "interrupted"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
     def test_children_of_a_killed_launcher_are_running_not_relaunched(self, run_seeds, stub, tmp_path, capsys):
         """SIGKILL the launcher of a --parallel group: its children train on; status and a relaunch see them."""
         script, set_plan = stub
@@ -924,6 +996,27 @@ class TestVertex:
         assert not re.search(run_seeds.FETCH_EXCLUDE, "final_model.zip")
         assert re.search(run_seeds.FETCH_EXCLUDE, "starter_simple/best_model.zip")
         assert re.search(run_seeds.FETCH_EXCLUDE, "starter_simple/latest.zip")
+
+    def test_seeds_found_finished_in_gcs_are_finished_before_fetch(self, run_seeds, vertex, monkeypatch, capsys):
+        """A continuation reads run_status.json in GCS: status, and a fresh launch, see those seeds as finished."""
+        fake, _, root, argv = vertex
+        assert run_seeds.main(argv) == 0
+        fake.state, fake.message = "JOB_STATE_SUCCEEDED", ""
+        monkeypatch.setattr(run_seeds, "GCS_STATE", lambda uri, run: "completed" if run.endswith("_s42") else "stalled")
+        fake.calls.clear()
+        assert run_seeds.main(argv) == 0 and fake.submissions() == []
+        manifest = sr.read_group(sr.group_manifest_path(root, GROUP))
+        assert [manifest["runs"][s]["last_state"] for s in ("42", "1042")] == ["completed", "stalled"]
+        assert not (root / f"{GROUP}_s42").exists()  # nothing fetched
+        capsys.readouterr()
+        assert run_seeds.main(["status", "--group", GROUP, "--root", str(root)]) == 0
+        out = capsys.readouterr().out
+        assert "completed" in out and "stalled" in out and "pending" not in out and "submitted" not in out
+        # The group is finished: a new launch with the same tag and config is not sent back to it.
+        fresh = [a for a in argv if a not in ("--group", GROUP)]
+        fresh[fresh.index("--root") : fresh.index("--root")] = ["--tag", "t"]
+        assert run_seeds.main([*fresh[:-3], "--dry-run", *fresh[-3:]]) == 0
+        assert "unfinished group" not in capsys.readouterr().err
 
     def test_needs_bucket_and_an_image(self, run_seeds, vertex, monkeypatch):
         _, _, _, argv = vertex

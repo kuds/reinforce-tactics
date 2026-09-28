@@ -436,6 +436,59 @@ class TestAggregation:
         assert summary["runs"][0]["active_h"] == pytest.approx(run["active_h"])
         assert "| active h |" in rs.render_report(summary)
 
+    def test_an_open_session_ends_before_the_next_session(self, tmp_path):
+        """A session whose launcher or VM died (no ended_at) does not count the later sessions' rows."""
+        hour = 3600.0
+        # Session 1: T0 to T0+5h, rows every half hour, never closed (a Colab recycle).
+        # Session 2: T0+10h to T0+15h, rows every half hour, closed.
+        walls = [T0 + 0.5 * hour * i for i in range(1, 11)] + [T0 + 10 * hour + 0.5 * hour * i for i in range(1, 11)]
+        rows = [eval_row(100 * (i + 1), 9, 1, 0, wall_time=w, eval_seconds=5.0) for i, w in enumerate(walls)]
+        path = write_run(tmp_path, "20260928_120000_val_s42", [stage("A", rows, promoted=True, start=0, end=2000)])
+        record = rs.read_run(path)
+        stamp = lambda t: datetime.fromtimestamp(t, UTC).isoformat()  # noqa: E731
+        second = {"started_at": stamp(T0 + 10 * hour), "ended_at": stamp(T0 + 15 * hour)}
+        sessions = [{"started_at": stamp(T0), "ended_at": None}, second]
+        run = rs.run_metrics(record, sessions=sessions)
+        assert run["active_h"] == pytest.approx(10.0) and run["active_source"] == "launcher sessions"
+        # The order in the manifest does not matter; several open sessions each stop at the next start.
+        third = {"started_at": stamp(T0 + 20 * hour), "ended_at": None}
+        walls3 = [*walls, T0 + 20 * hour + 0.5 * hour, T0 + 21 * hour]
+        rows3 = [eval_row(100 * (i + 1), 9, 1, 0, wall_time=w, eval_seconds=5.0) for i, w in enumerate(walls3)]
+        path3 = write_run(tmp_path, "20260928_120000_val_s1042", [stage("A", rows3, promoted=True, start=0, end=2200)])
+        run3 = rs.run_metrics(rs.read_run(path3), sessions=[third, second, {**sessions[0]}])
+        assert run3["active_h"] == pytest.approx(5.0 + 5.0 + 1.0)
+        # An open session with no row of its own (it died before its first eval) adds nothing.
+        run4 = rs.run_metrics(record, sessions=[{"started_at": stamp(T0 + 5.5 * hour), "ended_at": None}, second])
+        assert run4["active_h"] == pytest.approx(5.0)
+
+    def test_wall_clock_comes_from_the_eval_rows_when_every_stage_has_a_created_at(self, tmp_path):
+        """Stage records' created_at are only the fallback: they leave out the last stage's time."""
+        hour = 3600.0
+        rows_a = [eval_row(100 * (i + 1), 9, 1, 0, wall_time=T0 + hour * i, eval_seconds=5.0) for i in range(3)]
+        rows_b = [eval_row(300 + 100 * (i + 1), 9, 1, 0, wall_time=T0 + 3 * hour + hour * i) for i in range(6)]
+        stages = [
+            stage("A", rows_a, promoted=True, start=0, end=300, created_at=datetime.fromtimestamp(T0, UTC).isoformat()),
+            stage(
+                "B",
+                rows_b,
+                promoted=True,
+                start=300,
+                end=900,
+                created_at=datetime.fromtimestamp(T0 + 2.5 * hour, UTC).isoformat(),
+            ),
+        ]
+        record = rs.read_run(write_run(tmp_path, "20260928_120000_val_s42", stages))
+        vertex = [{"submitted_at": "2026-09-28T12:00:00+00:00", "job": "projects/p/locations/r/customJobs/1"}]
+        for sessions in (None, [], vertex):
+            run = rs.run_metrics(record, sessions=sessions)
+            assert run["wall_clock_source"] == "eval rows", sessions
+            assert run["wall_clock_h"] == pytest.approx(8.0), sessions
+            assert run["active_source"] == "eval rows (gaps capped)", sessions
+        # With no eval rows at all, the stage records are the fallback.
+        bare = [stage(s["name"], [], promoted=True, start=0, end=300, created_at=s["created_at"]) for s in stages]
+        run = rs.run_metrics(rs.read_run(write_run(tmp_path, "bare_s42", bare)))
+        assert run["wall_clock_source"].startswith("stage records") and run["wall_clock_h"] == pytest.approx(2.5)
+
     def test_single_run(self, tmp_path):
         run = rs.run_metrics(rs.read_run(_write_group(tmp_path)[0]))
         agg = rs.aggregate([run])

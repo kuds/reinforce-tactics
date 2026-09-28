@@ -857,13 +857,18 @@ def seed_state(run_dir: str | Path, record: Mapping[str, Any] | None) -> str:
     last session failed; ``submitted`` for a Vertex seed whose job was
     submitted and whose run dir here (a fetched copy, or none yet) is not
     finished -- only the job knows whether it still runs (``status
-    --jobs``); else the run dir's state.
+    --jobs``); for a Vertex seed that a continuation found completed or
+    stalled in GCS, that verdict until ``fetch`` brings the run dir; else
+    the run dir's state.
     """
     state = classify_run(run_dir)
     if state in DONE_STATES:
         return state
     record = record or {}
-    if record.get("last_state") == SUBMITTED:
+    last = record.get("last_state")
+    if record.get("job_resource") and last in DONE_STATES:
+        return str(last)
+    if last == SUBMITTED:
         return SUBMITTED
     if run_is_live(run_dir, record):
         return RUNNING
@@ -1113,7 +1118,9 @@ def run_local(
     ``signalled`` is the signal. SIGHUP (the terminal or SSH session went
     away) is handled the same way, and the children get SIGTERM, which
     train_bootstrap.py turns into a checkpoint and exit 143: they run in
-    their own sessions and would otherwise train on unrecorded.
+    their own sessions and would otherwise train on unrecorded. A SIGHUP
+    that is already ignored when this starts (``nohup``) stays ignored: the
+    group trains on through a disconnect.
     """
     console = console or sys.stdout
     queue = [int(s) for s in seeds]
@@ -1128,7 +1135,8 @@ def run_local(
     previous: dict[int, Any] = {}
     if handle_signals and threading.current_thread() is threading.main_thread():
         handled = [signal.SIGINT, signal.SIGTERM]
-        if hasattr(signal, "SIGHUP"):
+        # Under nohup SIGHUP is already ignored: keep it so, or every SSH disconnect would stop the group.
+        if hasattr(signal, "SIGHUP") and signal.getsignal(signal.SIGHUP) is not signal.SIG_IGN:
             handled.append(signal.SIGHUP)
         for signum in handled:
             previous[signum] = signal.signal(signum, on_signal)

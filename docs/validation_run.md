@@ -158,12 +158,15 @@ launch session (and on the console with `--parallel 1`). The group records
 `--parallel`, `--cpu-sets`, `--no-pin`, `--gpus` and `--device`, and a
 continuation reuses them.
 
-Run the launcher inside `tmux` or `screen` (or under `nohup`). A hangup
-(an SSH disconnect) now stops the group cleanly: every child gets SIGTERM,
-checkpoints and exits, and the group continues with `--group <id>`. But a
-launcher killed outright (SIGKILL, the OOM killer) leaves its children
-training with nobody recording them; `status` then shows them as
-`running`, and a relaunch leaves them alone until they exit.
+Run the launcher inside `tmux` or `screen` (or under `nohup`). Inside
+tmux or screen an SSH disconnect does not reach the launcher; under `nohup`
+it does, but the launcher keeps an ignored SIGHUP ignored. Either way the
+group trains on. A launcher started with none of them stops the group
+cleanly on a hangup: every child gets SIGTERM, checkpoints and exits, and
+the group continues with `--group <id>`. But a launcher killed outright
+(SIGKILL, the OOM killer) leaves its children training with nobody
+recording them; `status` then shows them as `running`, and a relaunch
+leaves them alone until they exit.
 
 ### 4.2 Colab
 
@@ -225,7 +228,8 @@ the last exit code, and steps per hour. The states: `pending`, `running` (a
 live trainer holds the run dir's lock), `interrupted` (resumable), `failed`,
 `stalled`, `completed`, and on Vertex `submitted` (the job's own state is the
 `--jobs` column; `fetch` brings the run dir, and a finished one then reads
-`completed`).
+`completed`). A continuation (`--group`) that finds a seed's run finished or
+stalled in GCS records that, and `status` shows it before `fetch`.
 
 In the first two hours check:
 
