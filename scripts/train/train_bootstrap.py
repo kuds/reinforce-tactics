@@ -38,6 +38,25 @@ eval, seed) is refused unless ``--force``. So is a run that was started with
 ``--build-bc`` and stopped before the warm start was built (``--force``
 resumes it without one).
 
+``--resume-if-exists`` (with ``--output-dir``) makes one command serve the
+first start and every restart, which is what the seed launcher
+(scripts/train/run_seeds.py) and a Vertex resubmission run: a finished run
+exits 0 and a stalled one 3 without training, an interrupted one resumes
+(exactly as ``--resume <output-dir>``, with the same config checks), and an
+empty or missing directory starts fresh. ``--seed N`` is ``--set seed=N``.
+
+``--check-only`` loads, overrides and validates the config, prints the stage
+table and exits 0 without writing anything.
+
+One trainer per run directory: the script holds an exclusive lock on
+``<output-dir>/.train_bootstrap.lock`` for as long as it runs (taken before
+``--resume-if-exists`` looks at an existing directory, or when it creates a
+new one), and exits 1 without writing anything else there when another live
+process holds it -- a relaunch while the first trainer still runs (an orphan
+of a launcher that was killed, say). The lock ends with the process, however
+it ends. On a filesystem without flock support the run goes on unlocked,
+with a note.
+
 Exit codes (so a scheduler can tell the outcomes apart):
 
     0    every curriculum stage promoted
@@ -56,6 +75,8 @@ Examples:
     python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml \\
         --build-bc --gcs-output gs://my-bucket/bootstrap
     python3 scripts/train/train_bootstrap.py --resume benchmarks/bootstrap/20260927_101500
+    python3 scripts/train/train_bootstrap.py --config configs/ppo/bootstrap.yaml --seed 1042 \\
+        --output-dir benchmarks/bootstrap/20260928_120000_val_s1042 --resume-if-exists
 """
 
 import argparse
@@ -128,6 +149,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         help="Fail when the config sets fields the curriculum runner does not read (default: warn)",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="The run's seed (cfg.seed), applied after --set; the same as --set seed=N, which it cannot be combined with",
+    )
+    p.add_argument(
+        "--resume-if-exists",
+        action="store_true",
+        help="With --output-dir: exit 0 if the run there finished, 3 if it stalled, resume it if it was interrupted, "
+        "start it if the directory is new (the idempotent per-seed command of scripts/train/run_seeds.py)",
+    )
+    p.add_argument(
+        "--torch-threads",
+        type=int,
+        default=None,
+        metavar="N",
+        help="torch.set_num_threads(N) in the training process (default: leave torch's choice)",
+    )
+    p.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Load, override and validate the config, print the stage table, and exit without writing anything",
     )
 
     # Behaviour-cloning warm-start (notebook section 3c-3e). Off by default;
@@ -216,10 +261,80 @@ def _write_resolved_config(cfg, output_dir: Path) -> bool:
 
 def _print_stage_table(cfg) -> None:
     stages = cfg.curriculum.stages
-    print(f"Config stages: {len(stages)} | enabled_units={cfg.env.enabled_units} | n_envs={cfg.env.n_envs}")
+    print(f"Config stages: {len(stages)} | enabled_units={cfg.env.enabled_units} | n_envs={cfg.env.n_envs} | seed={cfg.seed}")
     for s in stages:
         print(f"  {s.name:<30s} opp={s.opponent:<10s} WR>={s.promotion_win_rate:>4.0%} budget={s.max_timesteps:>12,}")
-    print(f"  total budget (worst case): {sum(s.max_timesteps for s in stages):,} env steps")
+    budget = sum(s.max_timesteps for s in stages)
+    worst = sum(s.max_timesteps * (1 + s.resolve_max_retries(cfg.curriculum)) for s in stages)
+    print(f"  total budget: {budget:,} env steps ({worst:,} if every stage used all its retries)")
+
+
+# Subdirectories a run directory may hold before training writes anything:
+# the seed launcher's per-session logs, and folders other tools create.
+_NON_TRAINING_DIRS = frozenset({"logs", "charts", "videos", "checkpoints", "tensorboard"})
+_TRAINING_FILES = ("run_manifest.json", "bootstrap_results.csv", "train_metrics.csv")
+
+
+def _training_output(output_dir: Path) -> list[str]:
+    """What in ``output_dir`` is output of a training run (empty: nothing is)."""
+    found = [name for name in _TRAINING_FILES if (output_dir / name).exists()]
+    if output_dir.is_dir():
+        for child in sorted(output_dir.iterdir()):
+            if child.is_dir() and child.name not in _NON_TRAINING_DIRS and any(p.is_file() for p in child.rglob("*")):
+                found.append(f"{child.name}/")
+    return found
+
+
+def _resume_if_exists(args) -> int | None:
+    """Decide what ``--resume-if-exists`` does with ``--output-dir``, before any output is written.
+
+    Returns an exit code when there is nothing to train (the run finished:
+    0; it stalled: 3), or None to go on -- with ``args.resume`` set when the
+    directory holds an interrupted run, which then resumes exactly as
+    ``--resume <output-dir>`` would (the config checks against its record
+    included). A directory with training output but no
+    ``resolved_config.yaml`` is refused (SystemExit): it is not a run this
+    script can continue, and starting over would mix two runs.
+    """
+    import json
+
+    if args.resume:
+        raise SystemExit("--resume-if-exists decides by itself whether to resume; drop --resume")
+    if not args.output_dir:
+        raise SystemExit("--resume-if-exists needs --output-dir (the run directory to start or continue)")
+    output_dir = Path(args.output_dir)
+    try:
+        status = json.loads((output_dir / "run_status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        status = None
+    if not isinstance(status, dict):
+        status = {}
+    if status.get("status") == "completed_curriculum" and (output_dir / "final_model.zip").is_file():
+        print(f"{output_dir}: already complete (run_status.json: completed_curriculum); nothing to do")
+        return EXIT_OK
+    if status.get("status") == "curriculum_stalled":
+        peak = status.get("peak_win_rate")
+        shown = "n/a" if peak is None else f"{float(peak):.1%}"
+        print(
+            f"{output_dir}: stalled at stage '{status.get('stalled_stage')}' (peak gate WR {shown}, threshold "
+            f"{status.get('threshold')}, {status.get('retries_used', 0)} retry/retries); a stall is a result, "
+            f"not resumed (exit {EXIT_STALLED})"
+        )
+        return EXIT_STALLED
+    if (output_dir / "resolved_config.yaml").is_file():
+        print(f"{output_dir}: interrupted run found; resuming it")
+        args.resume = str(output_dir)
+        if args.build_bc:
+            print("  note: --build-bc ignored; the run's record already names its warm start")
+            args.build_bc = False
+        return None
+    found = _training_output(output_dir)
+    if found:
+        raise SystemExit(
+            f"--resume-if-exists: {output_dir} has training output ({', '.join(found[:8])}) but no resolved_config.yaml, "
+            "so it is not a train_bootstrap.py run dir this command can continue; pick another --output-dir"
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -515,11 +630,62 @@ def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> NoReturn:
     raise SystemExit(EXIT_TERMINATED)
 
 
+# Run dirs this invocation of main() locked; released when it returns.
+_LOCKED_DIRS: list[Path] = []
+
+
+def _lock_run_dir(run_dir: Path) -> int | None:
+    """Hold ``run_dir``'s lock until main() returns (SystemExit if another process holds it)."""
+    from reinforcetactics.experiments.seed_runs import RunLockedError, acquire_run_lock
+
+    try:
+        fd = acquire_run_lock(run_dir)
+    except RunLockedError as exc:
+        raise SystemExit(f"{exc}") from None
+    if fd is None:
+        print(f"  note: cannot lock {run_dir} (no file locks here); nothing stops a second trainer in it")
+    else:
+        _LOCKED_DIRS.append(run_dir)
+    return fd
+
+
 def main(argv: list[str] | None = None) -> int:
+    """The CLI (see the module docstring); the run dir's lock is held until it returns."""
+    try:
+        return _main(argv)
+    finally:
+        from reinforcetactics.experiments.seed_runs import release_run_lock
+
+        while _LOCKED_DIRS:
+            release_run_lock(_LOCKED_DIRS.pop())
+
+
+def _main(argv: list[str] | None = None) -> int:
     # Installed first so a SIGTERM at any point after startup reaches the
     # finally block below instead of killing the process outright.
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
     args = build_parser().parse_args(argv)
+    set_keys = [item.partition("=")[0].strip() for item in (args.set or [])]
+    if args.seed is not None and "seed" in set_keys:
+        raise SystemExit("--seed and --set seed=... both set the seed; use one of them")
+    if args.torch_threads is not None and args.torch_threads < 1:
+        raise SystemExit(f"--torch-threads must be >= 1, got {args.torch_threads}")
+    # The run dir's lock, before anything reads the directory. A directory
+    # that does not exist yet is locked when it is created, below (so a run
+    # refused before then writes nothing), still before anything is written
+    # into it. The lock is held until main() returns.
+    lock_taken = False
+    early = args.resume or args.output_dir
+    if not args.check_only and early and Path(early).is_dir():
+        _lock_run_dir(Path(early))
+        lock_taken = True
+    if args.resume_if_exists and not args.check_only:
+        decided = _resume_if_exists(args)
+        if decided is not None:
+            return decided
+        if args.force and not args.resume:
+            print("  note: --force has no effect on a fresh start")
+            args.force = False
 
     # Heavy imports are deferred until after arg parsing so --help works without
     # torch / sb3 / the rest of the package installed.
@@ -527,7 +693,12 @@ def main(argv: list[str] | None = None) -> int:
 
     import reinforcetactics.rl.bootstrap as bootstrap
     from reinforcetactics.rl.bootstrap import CurriculumStalled
-    from reinforcetactics.rl.config import IgnoredConfigFieldWarning, check_ignored_config_fields, load_config
+    from reinforcetactics.rl.config import (
+        IgnoredConfigFieldWarning,
+        apply_overrides,
+        check_ignored_config_fields,
+        load_config,
+    )
 
     resume_dir = Path(args.resume) if args.resume else None
     if resume_dir is not None:
@@ -559,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
         config_path = Path(DEFAULT_CONFIG)
         cfg = load_config(config_path)
     cfg = _apply_set_overrides(cfg, args.set)
+    if args.seed is not None:
+        # After --set, as --set seed=N would be; on a resume the check below
+        # refuses a seed that differs from the run's record (unless --force).
+        cfg = apply_overrides(cfg, {"seed": args.seed})
     cfg.ppo.device = _resolve_device(args.device or cfg.ppo.device)
     # Fail before any output or training on a warm-start checkpoint that is
     # not there (--build-bc writes its own), and report the fields the
@@ -597,7 +772,18 @@ def main(argv: list[str] | None = None) -> int:
         differences = []
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(args.output_dir) if args.output_dir else Path("benchmarks") / "bootstrap" / run_id
+    if args.check_only:
+        print(f"Config OK: {config_path}" + (f" (resuming {resume_dir})" if resume_dir is not None else ""))
+        _print_stage_table(cfg)
+        return EXIT_OK
+    if args.torch_threads is not None:
+        import torch
+
+        torch.set_num_threads(args.torch_threads)
+        print(f"torch threads: {torch.get_num_threads()}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not lock_taken:
+        _lock_run_dir(output_dir)
     charts_dir = output_dir / "charts"
     charts_dir.mkdir(parents=True, exist_ok=True)
 

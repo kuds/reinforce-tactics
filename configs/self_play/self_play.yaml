@@ -1,17 +1,76 @@
-# Self-play training with optional opponent pool.
+# Self-play training with an opponent pool (scripts/train/train_self_play.py).
+#
+# The env, reward and policy settings match configs/ppo/bootstrap.yaml, so
+# the run trains the same MDP the curriculum does and a bootstrap
+# checkpoint can continue here (--resume-from; the observation padding and
+# the flat_discrete head match). Rationale for the pool settings:
+# docs/validation_run_config.md.
 algorithm: self_play
 total_timesteps: 5000000
 seed: 0
 
 env:
-  max_steps: 200
+  # Skirmish (8x8, 4 neutral buildings) at the curriculum's 120 turns: the
+  # map where the deepest archived runs stopped, and one where the eval
+  # opponent below (SimpleBot) is a real bar: MediumBot only ties it there
+  # (on beginner, even RandomBot out-rates it). A map is required: without
+  # one every env generates its own random 20x20 map.
+  map_file: maps/1v1/skirmish.csv
+  max_turns: 120
+  # As bootstrap.yaml: a per-turn cap of 60 actions, and max_steps =
+  # ceil((max_turns * 61 + 60) / 100) * 100 so no episode is truncated
+  # before the max_turns clock. The old max_steps 200, with no max_turns,
+  # truncated nearly every game, so wins (and pool admissions) stayed near 0.
+  max_actions_per_turn: 60
+  max_steps: 7400
+  action_space_type: flat_discrete
+  # The padding the bootstrap curriculum trains at (its largest map,
+  # corner_points), so bootstrap checkpoints load.
+  pad_to_size: [10, 12]
+  # The eval env's seat (self-play workers draw theirs, swap_players below).
+  agent_seat: random
+  # Identical to bootstrap.yaml's reward_config (comments there).
+  reward_config:
+    win_by_hq_capture: 80.0
+    win_by_elimination: 50.0
+    win: 50.0
+    loss: -50.0
+    draw: -50.0
+    truncation: 0.0
+    income_diff: 0.05
+    unit_diff: 0.0
+    structure_control: 1.0
+    create_unit: 0.0
+    move: 0.0
+    damage_scale: 0.002
+    damage_taken_scale: -0.002
+    kill: 0.2
+    unit_lost: 0.0
+    seize_progress: 3.0
+    capture: 10.0
+    tower_capture: 15.0
+    building_capture: 40.0
+    hq_capture: 60.0
+    cure: 0.0
+    heal_scale: 0.0
+    paralyze: 0.0
+    haste: 0.0
+    defence_buff: 0.0
+    attack_buff: 0.0
+    invalid_action: -0.1
+    turn_penalty: -1.0
+    win_speed_bonus: 0.0
+    enemy_neutral_capture: -8.0
+    enemy_owned_capture: 0.0
   n_envs: 8
   use_subprocess: true
 
 ppo:
+  # As bootstrap.yaml (a cold start builds this policy; --resume-from keeps
+  # the checkpoint's own).
   learning_rate: 3.0e-4
   n_steps: 2048
-  batch_size: 64
+  batch_size: 256
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
@@ -21,15 +80,43 @@ ppo:
   max_grad_norm: 0.5
   use_action_masking: true
   device: auto
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256]
+    features_extractor_class: reinforcetactics.rl.extractors.SpatialFeatureExtractor
+    features_extractor_kwargs:
+      features_dim: 256
+      pool: masked_avg
+      coord_conv: true
+      extra_conv: true
 
 self_play:
   swap_players: true
+  # Env steps between pushes of the current policy as the "latest" opponent.
   opponent_update_freq: 10000
   use_opponent_pool: true
-  pool_size: 10
+  # Each episode (once the pool holds a snapshot) plays the latest snapshot
+  # with probability 0.5, else a uniform sample from the pool. 0.0 (the old
+  # behaviour) played only pool snapshots, up to a whole window old; 1.0
+  # makes the pool dead weight and risks strategy cycling. Published mixes
+  # sit in between (OpenAI Five ~80% latest; AlphaStar's main agents ~35%
+  # self-play, the rest past players).
+  latest_opponent_prob: 0.5
+  # A history window of 20 snapshots x 100k steps = the last ~2M steps (40%
+  # of the run). Each worker process holds its own copy of the pool.
+  pool_size: 20
   pool_strategy: uniform
-  add_to_pool_freq: 50000
-  min_win_rate_for_pool: 0.55
+  add_to_pool_freq: 100000
+  # 0.0: admit every snapshot (a plain history window). The gate counts the
+  # agent's wins over all games since the last check, and until the pool
+  # holds a snapshot every game is against the latest snapshot, a near copy
+  # of the agent: its expected win rate is (1 - draw rate) / 2, never above
+  # 0.5. With the old 0.55 (or 0.50) the first snapshot is admitted only by
+  # luck, the pool stays empty and latest_opponent_prob does nothing. Raise
+  # it only once the gate scores pool games alone, counting draws as half.
+  # Watch self_play/pool_size in TensorBoard.
+  min_win_rate_for_pool: 0.0
   mixed_training: false
   bot_ratio: 0.3
   # The fixed scripted opponent the model is evaluated against ("bot" is
@@ -39,8 +126,11 @@ self_play:
   eval_opponent: bot
 
 eval:
-  eval_freq: 10000
-  n_eval_episodes: 10
+  # Skirmish games run ~1000-2500 agent steps (the old 10_000-step cadence
+  # was sized for 200-step episodes). 20 deterministic episodes, each in a
+  # randomly drawn seat (env.agent_seat).
+  eval_freq: 100000
+  n_eval_episodes: 20
   checkpoint_freq: 50000
 
 logging:

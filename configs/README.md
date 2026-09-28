@@ -70,3 +70,39 @@ informational `total_timesteps`) runs under `--strict`.
 Command-line flags that override a config value are validated like the
 config itself, so `--gamma 1.5` is a usage error. In
 `train_bootstrap.py`, `--set KEY=null` (or `~`) unsets a field.
+
+### Inheritance and stage addressing
+
+A config can be a diff against another one (`load_config` resolves it; the
+run's `resolved_config.yaml` records the fully expanded result):
+
+```yaml
+extends: ../bootstrap.yaml          # relative to this file (or absolute); chains up to 8 deep
+env:
+  reward_config: {turn_penalty: -0.5}   # mappings merge key by key
+  engine_overrides: {__replace__: true, damage_model: hp_scaled}   # replace instead of merging
+curriculum:
+  stage_defaults: {max_retries: 2}      # every stage that leaves the field unset or null
+  stages:                               # merged by name: a known name deep-merges, a new one is appended
+    - {name: skirmish_random_15, promotion_win_rate: 0.6}
+  drop_stages: [starter_simple]         # applied (and removed) at this file's level
+  stage_order: [...]                    # optional: a permutation of the remaining stages
+```
+
+Anything that is not a mapping (lists included) replaces, and `null` sets
+null. A stage without a `name`, a repeated name, an unknown name in
+`drop_stages`, or a `stage_order` that is not a permutation is an error.
+`stage_defaults` fills field by field: a stage's own `reward_config` is kept
+whole, not merged with the default's.
+
+`train_bootstrap.py --set` addresses stages and keys inside mapping fields:
+
+```bash
+--set 'curriculum.stages[beginner_simple].promotion_win_rate=0.6'
+--set 'curriculum.stages[*].patience=1'
+--set env.reward_config.turn_penalty=-0.5         # null deletes the key
+--set ppo.policy_kwargs.features_extractor_kwargs.pool=flatten
+```
+
+An unknown stage name is an error that lists the stages; every value is then
+validated like the file's (reward keys included). `--seed N` is `--set seed=N`.

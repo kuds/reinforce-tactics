@@ -79,6 +79,14 @@ class TestSerialVectorizedParity:
             pool.close()
         assert _comparable(vec) == _comparable(serial)
         assert len(vec["rewards"]) == 5 * (len(seats) if seats else 1)
+        # The per-outcome components, their magnitudes and the opponent's
+        # captures (§2.1 logging) are part of the parity, and add up.
+        by = vec["reward_components_by_outcome"]
+        assert sum(b["episodes"] for b in by.values()) == len(vec["rewards"])
+        for c, total in vec["reward_components"].items():
+            assert sum(b[c] for b in by.values()) == pytest.approx(total)
+            assert vec["reward_components_abs"][c] >= abs(total) - 1e-9
+        assert set(vec["opponent_captures"]) == {"neutral", "owned"}
         # The episodes differ from one another (the test would be vacuous otherwise).
         assert len(set(vec["lengths"])) > 1 or len(set(vec["rewards"])) > 1
 

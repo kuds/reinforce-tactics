@@ -1334,16 +1334,43 @@ _SECTION_TYPES = {
 }
 
 
+def _stage_defaults(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """``curriculum.stage_defaults``, checked: a mapping of stage fields (not ``name``)."""
+    defaults = raw.get("stage_defaults")
+    if defaults is None:
+        return {}
+    if not isinstance(defaults, Mapping):
+        raise TypeError(f"'curriculum.stage_defaults' must be a mapping, got {type(defaults).__name__}")
+    stage_fields = {f.name for f in fields(CurriculumStage)}
+    if "name" in defaults:
+        raise ValueError("'curriculum.stage_defaults' cannot set 'name': every stage names itself")
+    unknown = set(defaults) - stage_fields
+    if unknown:
+        raise ValueError(
+            f"Unknown keys in 'curriculum.stage_defaults': {sorted(unknown)}. Valid keys: {sorted(stage_fields - {'name'})}"
+        )
+    return dict(defaults)
+
+
 def _build_curriculum(raw: Any) -> CurriculumConfig:
-    """Build CurriculumConfig from a raw mapping, deserializing nested stages."""
+    """Build CurriculumConfig from a raw mapping, deserializing nested stages.
+
+    ``stage_defaults`` (rltrain-15) is consumed here, so a dict caller gets it
+    too: every field a stage leaves absent or null takes the default's value
+    (field by field; a mapping-valued default such as ``reward_config``
+    replaces an absent one whole and is not merged into the stage's own).
+    The built config has no trace of it -- ``resolved_config.yaml`` records
+    the expanded stages.
+    """
     if raw is None:
         return CurriculumConfig()
     if not isinstance(raw, Mapping):
         raise TypeError(f"Section 'curriculum' must be a mapping, got {type(raw).__name__}")
-    valid_fields = {f.name for f in fields(CurriculumConfig)}
+    valid_fields = {f.name for f in fields(CurriculumConfig)} | {"stage_defaults"}
     unknown = set(raw.keys()) - valid_fields
     if unknown:
         raise ValueError(f"Unknown keys in section 'curriculum': {sorted(unknown)}. Valid keys: {sorted(valid_fields)}")
+    defaults = _stage_defaults(raw)
     raw_stages = raw.get("stages") or []
     if not isinstance(raw_stages, list):
         raise TypeError(f"'curriculum.stages' must be a list, got {type(raw_stages).__name__}")
@@ -1357,11 +1384,15 @@ def _build_curriculum(raw: Any) -> CurriculumConfig:
             raise ValueError(
                 f"Unknown keys for CurriculumStage at index {i}: {sorted(unknown_stage)}. Valid keys: {sorted(stage_fields)}"
             )
-        stages.append(CurriculumStage(**{k: v for k, v in s.items() if k in stage_fields}))
+        merged = dict(s)
+        for key, value in defaults.items():
+            if merged.get(key) is None:
+                merged[key] = copy.deepcopy(value)
+        stages.append(CurriculumStage(**{k: v for k, v in merged.items() if k in stage_fields}))
     kwargs: dict[str, Any] = {"stages": stages}
     # Every other curriculum-level field as given; coerced in validate()
     # (``bool("false")`` used to be True here).
-    kwargs.update({k: v for k, v in raw.items() if k != "stages"})
+    kwargs.update({k: v for k, v in raw.items() if k not in ("stages", "stage_defaults")})
     return CurriculumConfig(**kwargs)
 
 
@@ -1382,9 +1413,23 @@ def _build_section(section_name: str, raw: Any):
 
 
 def config_from_dict(data: Mapping[str, Any]) -> TrainingConfig:
-    """Construct a :class:`TrainingConfig` from a plain dict."""
+    """Construct a :class:`TrainingConfig` from a plain dict.
+
+    ``curriculum.stage_defaults`` and the stage directives
+    (``curriculum.drop_stages`` / ``curriculum.stage_order``) are applied;
+    ``extends`` is not (it names a file relative to another file, which a
+    dict does not have): use :func:`load_config`, or
+    :func:`merge_config_dicts` to combine dicts.
+    """
     if not isinstance(data, Mapping):
         raise TypeError(f"Config data must be a mapping, got {type(data).__name__}")
+    if "extends" in data:
+        raise ValueError("'extends' is resolved by load_config(path); config_from_dict() takes an already merged dict")
+    curriculum = data.get("curriculum")
+    if isinstance(curriculum, Mapping) and any(k in curriculum for k in STAGE_DIRECTIVES):
+        curriculum = dict(curriculum)
+        _apply_stage_directives(curriculum, where="curriculum")
+        data = {**data, "curriculum": curriculum}
 
     top_level_scalars = {"algorithm", "total_timesteps", "seed", "warm_start_path"}
     valid_keys = top_level_scalars | set(_SECTION_TYPES)
@@ -1423,16 +1468,188 @@ def _read_config_file(path: Path) -> dict[str, Any]:
     return dict(data)
 
 
-def load_config(path: ConfigPath) -> TrainingConfig:
-    """Load and validate a training config from a YAML or JSON file.
+# ---------------------------------------------------------------------------
+# Config inheritance (review rltrain-15 / consolidate-14)
+#
+# ``extends: <path>`` makes a file a diff against another: the base file is
+# read (recursively), then this file is deep-merged over it. Mappings merge
+# key by key; anything else (scalars, lists) replaces; ``null`` sets null; a
+# mapping carrying ``__replace__: true`` replaces instead of merging.
+# ``curriculum.stages`` merges by stage ``name``: a known name deep-merges
+# into that stage, a new one is appended. ``curriculum.drop_stages`` and
+# ``curriculum.stage_order`` then edit the merged stage list and are removed,
+# at the level (file) that holds them.
+# ---------------------------------------------------------------------------
 
-    Validation is :meth:`TrainingConfig.validate` without ``check_files``:
-    a config can be loaded before the checkpoint it names exists.
+EXTENDS_MAX_DEPTH = 8
+REPLACE_MARKER = "__replace__"
+STAGE_DIRECTIVES: tuple[str, ...] = ("drop_stages", "stage_order")
+
+
+def _strip_markers(value: Any) -> Any:
+    """A deep copy of ``value`` without ``__replace__`` markers (they only mean something in a merge)."""
+    if isinstance(value, Mapping):
+        return {k: _strip_markers(v) for k, v in value.items() if k != REPLACE_MARKER}
+    if isinstance(value, list):
+        return [_strip_markers(v) for v in value]
+    return copy.deepcopy(value)
+
+
+def _replace_flag(mapping: Mapping[str, Any], where: str) -> bool:
+    flag = mapping.get(REPLACE_MARKER, False)
+    if not isinstance(flag, bool):
+        raise TypeError(f"{where}: {REPLACE_MARKER} must be true or false, got {flag!r}")
+    return flag
+
+
+def _stage_names(stages: Any, where: str) -> list[str]:
+    """The ``name`` of every stage mapping in ``stages``; a stage without one, or a repeated name, is an error."""
+    if not isinstance(stages, list):
+        raise TypeError(f"{where} must be a list, got {type(stages).__name__}")
+    names: list[str] = []
+    for i, stage in enumerate(stages):
+        if not isinstance(stage, Mapping):
+            raise TypeError(f"{where}[{i}] must be a mapping, got {type(stage).__name__}")
+        name = stage.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{where}[{i}] has no name; stages are merged by name")
+        if name in names:
+            raise ValueError(f"{where}: duplicate stage name '{name}'")
+        names.append(name)
+    return names
+
+
+def _merge_stage_lists(base: list[Any], overlay: list[Any]) -> list[Any]:
+    base_names = _stage_names(base, "base curriculum.stages")
+    overlay_names = _stage_names(overlay, "curriculum.stages")
+    merged = [_strip_markers(s) for s in base]
+    for name, stage in zip(overlay_names, overlay, strict=True):
+        if name in base_names:
+            i = base_names.index(name)
+            merged[i] = merge_config_dicts(merged[i], stage, _path=("curriculum", "stages", name))
+        else:
+            merged.append(_strip_markers(stage))
+    return merged
+
+
+def merge_config_dicts(base: Any, overlay: Any, *, _path: tuple[str, ...] = ()) -> Any:
+    """Deep-merge a raw config ``overlay`` over ``base`` (neither is modified).
+
+    A mapping merged into a mapping merges key by key; anything else
+    replaces (lists included); ``None`` sets None; a mapping carrying
+    ``__replace__: true`` replaces instead of merging (the marker is removed).
+    ``curriculum.stages`` merges by stage ``name``: an overlay stage with a
+    known name deep-merges into that stage, a new name is appended; a stage
+    without a name, or a name given twice, is a ``ValueError``.
+    """
+    if not isinstance(overlay, Mapping):
+        return _strip_markers(overlay)
+    where = ".".join(_path) or "config"
+    if _replace_flag(overlay, where) or not isinstance(base, Mapping):
+        return _strip_markers(overlay)
+    out = _strip_markers(base)
+    for key, value in overlay.items():
+        if key == REPLACE_MARKER:
+            continue
+        path = (*_path, str(key))
+        if path == ("curriculum", "stages") and isinstance(value, list) and isinstance(out.get(key), list):
+            out[key] = _merge_stage_lists(out[key], value)
+        elif key in out:
+            out[key] = merge_config_dicts(out[key], value, _path=path)
+        else:
+            out[key] = _strip_markers(value)
+    return out
+
+
+def _apply_stage_directives(curriculum: dict[str, Any], *, where: str) -> None:
+    """Apply and remove ``drop_stages`` / ``stage_order`` in the raw ``curriculum`` mapping (in place)."""
+    drop = curriculum.pop("drop_stages", None)
+    order = curriculum.pop("stage_order", None)
+    if drop is None and order is None:
+        return
+    stages = list(curriculum.get("stages") or [])
+    names = _stage_names(stages, f"{where}.stages")
+    if drop is not None:
+        if not isinstance(drop, list) or not all(isinstance(n, str) for n in drop):
+            raise TypeError(f"{where}.drop_stages must be a list of stage names, got {drop!r}")
+        unknown = [n for n in drop if n not in names]
+        if unknown:
+            raise ValueError(f"{where}.drop_stages names unknown stage(s) {unknown}; stages: {names}")
+        dropped = set(drop)
+        stages = [s for s in stages if s["name"] not in dropped]
+        names = [n for n in names if n not in dropped]
+    if order is not None:
+        if not isinstance(order, list) or not all(isinstance(n, str) for n in order):
+            raise TypeError(f"{where}.stage_order must be a list of stage names, got {order!r}")
+        missing = [n for n in names if n not in order]
+        extra = [n for n in order if n not in names]
+        repeated = sorted({n for n in order if order.count(n) > 1})
+        if missing or extra or repeated:
+            raise ValueError(
+                f"{where}.stage_order must list every remaining stage exactly once"
+                + (f"; missing {missing}" if missing else "")
+                + (f"; unknown {extra}" if extra else "")
+                + (f"; repeated {repeated}" if repeated else "")
+            )
+        by_name = {s["name"]: s for s in stages}
+        stages = [by_name[n] for n in order]
+    curriculum["stages"] = stages
+
+
+def _read_config_tree(path: ConfigPath, _chain: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """Read a config file with its ``extends`` chain resolved into one raw dict.
+
+    ``extends`` is resolved relative to the extending file (an absolute path
+    is taken as is); chains may be :data:`EXTENDS_MAX_DEPTH` files deep.
+
+    Raises:
+        FileNotFoundError: The file, or a base it extends, does not exist.
+        ValueError: A cycle (the message names the chain), a chain that is
+            too deep, or a bad stage merge / directive.
     """
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(f"Config file not found: {p}")
-    return config_from_dict(_read_config_file(p))
+    resolved = p.resolve()
+    if resolved in _chain:
+        chain = " -> ".join(str(c) for c in (*_chain, resolved))
+        raise ValueError(f"'extends' cycle: {chain}")
+    if len(_chain) > EXTENDS_MAX_DEPTH:
+        raise ValueError(
+            f"'extends' chain deeper than {EXTENDS_MAX_DEPTH}: {' -> '.join(str(c) for c in (*_chain, resolved))}"
+        )
+    data = _read_config_file(p)
+    base_ref = data.pop("extends", None)
+    if base_ref is not None:
+        if not isinstance(base_ref, str) or not base_ref.strip():
+            raise TypeError(f"{p}: 'extends' must be a path, got {base_ref!r}")
+        base_path = Path(base_ref)
+        if not base_path.is_absolute():
+            base_path = p.parent / base_path
+        if not base_path.is_file():
+            raise FileNotFoundError(f"{p}: extends {base_ref!r}, but {base_path} does not exist")
+        data = merge_config_dicts(_read_config_tree(base_path, (*_chain, resolved)), data)
+    else:
+        data = _strip_markers(data)
+    curriculum = data.get("curriculum")
+    if isinstance(curriculum, Mapping) and any(k in curriculum for k in STAGE_DIRECTIVES):
+        curriculum = dict(curriculum)
+        _apply_stage_directives(curriculum, where=f"{p}: curriculum")
+        data["curriculum"] = curriculum
+    return data
+
+
+def load_config(path: ConfigPath) -> TrainingConfig:
+    """Load and validate a training config from a YAML or JSON file.
+
+    ``extends`` chains, ``curriculum.stage_defaults`` and the stage
+    directives are resolved (:func:`_read_config_tree`), so the returned
+    config -- and a ``resolved_config.yaml`` saved from it -- holds the fully
+    expanded stages. Validation is :meth:`TrainingConfig.validate` without
+    ``check_files``: a config can be loaded before the checkpoint it names
+    exists.
+    """
+    return config_from_dict(_read_config_tree(path))
 
 
 def _plain(value: Any) -> Any:
@@ -1467,21 +1684,129 @@ def _get_nested(cfg: TrainingConfig, dotted_key: str) -> Any:
     return value
 
 
-def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
-    parts = dotted_key.split(".")
-    target: Any = cfg
-    for part in parts[:-1]:
-        if not hasattr(target, part):
-            raise KeyError(f"Unknown config key segment: '{part}' in '{dotted_key}'")
-        target = getattr(target, part)
+def _split_dotted_key(dotted_key: str) -> list[tuple[str, str | None]]:
+    """``"curriculum.stages[a.b].reward_config.k"`` -> ``[("curriculum", None), ("stages", "a.b"), ...]``.
+
+    Dots inside ``[...]`` belong to the selector.
+    """
+    tokens: list[tuple[str, str | None]] = []
+    i, n = 0, len(dotted_key)
+    while True:
+        start = i
+        while i < n and dotted_key[i] not in ".[":
+            i += 1
+        name = dotted_key[start:i]
+        selector: str | None = None
+        if i < n and dotted_key[i] == "[":
+            close = dotted_key.find("]", i)
+            if close < 0:
+                raise KeyError(f"Unclosed '[' in config key '{dotted_key}'")
+            selector = dotted_key[i + 1 : close].strip()
+            i = close + 1
+        if not name:
+            raise KeyError(f"Empty segment in config key '{dotted_key}'")
+        tokens.append((name, selector))
+        if i >= n:
+            return tokens
+        if dotted_key[i] != ".":
+            raise KeyError(f"Expected '.' after ']' in config key '{dotted_key}'")
+        i += 1
+
+
+def _select_stages(curriculum: CurriculumConfig, selector: str, dotted_key: str) -> list[CurriculumStage]:
+    if selector == "*":
+        return list(curriculum.stages)
+    matches = [s for s in curriculum.stages if s.name == selector]
+    if not matches:
+        names = ", ".join(s.name for s in curriculum.stages) or "(none)"
+        raise KeyError(f"No curriculum stage named '{selector}' in '{dotted_key}'. Stages: {names}")
+    return matches
+
+
+def _set_in_mapping(mapping: dict[str, Any], keys: Sequence[str], value: Any, dotted_key: str) -> None:
+    """Set ``mapping[k0][k1]...`` to ``value`` (creating mappings on the way); ``None`` deletes the key."""
+    target = mapping
+    for key in keys[:-1]:
+        child = target.get(key)
+        if child is None:
+            if value is None:
+                return  # nothing to delete
+            child = target[key] = {}
+        elif not isinstance(child, dict):
+            raise KeyError(f"'{key}' in '{dotted_key}' is not a mapping ({type(child).__name__})")
+        target = child
+    if value is None:
+        target.pop(keys[-1], None)
+    else:
+        target[keys[-1]] = value
+
+
+def _set_path(target: Any, tokens: Sequence[tuple[str, str | None]], value: Any, dotted_key: str) -> None:
+    """Set the field ``tokens`` names under dataclass ``target`` (see :func:`_set_nested`)."""
+    for i, (name, selector) in enumerate(tokens):
         if not is_dataclass(target):
-            raise KeyError(f"'{part}' in '{dotted_key}' does not point to a config section")
-    leaf = parts[-1]
-    if leaf not in {f.name for f in fields(target)}:
-        raise KeyError(f"Unknown config key: '{dotted_key}'")
-    # Coerced to the field's annotated type, as a file value would be:
-    # ``--set env.pad_to_size=[10,12]`` becomes a tuple, ``"1e-5"`` a float.
-    setattr(target, leaf, _coerce_to(value, _field_types(type(target))[leaf], dotted_key))
+            raise KeyError(f"'{name}' in '{dotted_key}' is below a value that is not a config section")
+        if isinstance(target, CurriculumConfig) and name == "stage_defaults":
+            raise KeyError(
+                f"'{dotted_key}': curriculum.stage_defaults is applied when a config file is loaded; "
+                "set curriculum.stages[*].<field> instead"
+            )
+        rest = tokens[i + 1 :]
+        if name not in {f.name for f in fields(target)}:
+            if rest:
+                raise KeyError(f"Unknown config key segment: '{name}' in '{dotted_key}'")
+            raise KeyError(f"Unknown config key: '{dotted_key}' ('{name}' is not a field of {type(target).__name__})")
+        if selector is not None:
+            if not (isinstance(target, CurriculumConfig) and name == "stages"):
+                raise KeyError(f"'{dotted_key}': only curriculum.stages takes a [<name>] or [*] selector")
+            if not rest:
+                raise KeyError(f"'{dotted_key}': name a stage field, e.g. curriculum.stages[{selector}].patience")
+            for stage in _select_stages(target, selector, dotted_key):
+                _set_path(stage, rest, value, dotted_key)
+            return
+        tp = _field_types(type(target))[name]
+        if not rest:
+            # Coerced to the field's annotated type, as a file value would be:
+            # ``--set env.pad_to_size=[10,12]`` becomes a tuple, ``"1e-5"`` a float.
+            setattr(target, name, _coerce_to(value, tp, dotted_key))
+            return
+        child = getattr(target, name)
+        if is_dataclass(child):
+            target = child
+            continue
+        # A dotted tail below a mapping-valued field (env.reward_config.k,
+        # ppo.policy_kwargs.features_extractor_kwargs.pool): copy the mapping
+        # and set (or, with None, delete) the key.
+        if child is not None and not isinstance(child, Mapping):
+            raise KeyError(
+                f"'{name}' in '{dotted_key}' does not point to a config section or a mapping ({type(child).__name__})"
+            )
+        if any(sel is not None for _, sel in rest):
+            raise KeyError(f"'{dotted_key}': a [...] selector only applies to curriculum.stages")
+        updated = copy.deepcopy(dict(child)) if child is not None else {}
+        _set_in_mapping(updated, [key for key, _ in rest], value, dotted_key)
+        new_value = None if (child is None and not updated) else updated
+        setattr(target, name, _coerce_to(new_value, tp, dotted_key))
+        return
+
+
+def _set_nested(cfg: TrainingConfig, dotted_key: str, value: Any) -> None:
+    """Set the field ``dotted_key`` names to ``value`` (coerced to the field's type).
+
+    Beyond ``section.field`` (review rltrain-15):
+
+    * ``curriculum.stages[<name>].<field>`` sets one stage's field and
+      ``curriculum.stages[*].<field>`` every stage's; an unknown stage name
+      is a ``KeyError`` that lists the stages.
+    * A dotted tail below a mapping-valued field sets one key of a copy of
+      the mapping (``env.reward_config.turn_penalty``,
+      ``ppo.policy_kwargs.features_extractor_kwargs.pool``,
+      ``curriculum.stages[x].reward_config.k``); ``None`` deletes the key.
+
+    Values are only coerced here; :meth:`TrainingConfig.validate` (run by
+    :func:`apply_overrides`) checks them, reward keys included.
+    """
+    _set_path(cfg, _split_dotted_key(dotted_key), value, dotted_key)
 
 
 def config_to_argparse_defaults(

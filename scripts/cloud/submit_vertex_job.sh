@@ -24,7 +24,24 @@
 #   SYNC_DIRS          Extra dirs to sync, comma-separated (optional; see
 #                      GCS_SYNC_DIRS in vertex_train.py). models/, checkpoints/,
 #                      tensorboard/, logs/ and benchmarks/bootstrap/ always are.
+#   OUTPUT_URI         gs:// output base (optional; default
+#                      gs://<BUCKET>/jobs/<JOB_NAME>). run_seeds.py sets
+#                      gs://<BUCKET>/jobs/<group> so every seed of a group
+#                      lands under one prefix.
+#   RESTORE_DIRS       Dirs to download from the output base before the command
+#                      starts (optional; passed as GCS_RESTORE_DIRS, same
+#                      dir=prefix syntax as SYNC_DIRS). A resubmitted seed job
+#                      continues its run this way.
+#   RESTART_ON_WORKER_RESTART  1 = restart the job when its worker restarts
+#                      (scheduling.restartJobOnWorkerRestart; optional)
+#   RT_GIT_COMMIT      The commit the image was built from (optional; passed
+#                      to the container, where the image has no .git, so run
+#                      records name it; run_seeds.py sets it when TAG names a
+#                      commit of its checkout)
 #   SERVICE_ACCOUNT    Run-as service account    (optional)
+#
+# On success the script prints JOB_RESOURCE=projects/.../customJobs/<id>
+# (scripts/train/run_seeds.py reads it to check the job before resubmitting).
 #
 # Example:
 #   BUCKET=my-bucket ./scripts/cloud/submit_vertex_job.sh \
@@ -78,11 +95,19 @@ else
   TRAIN_CMD=(python3 main.py --mode train --algorithm ppo --timesteps 1000000)
 fi
 
-# Normalise the bucket into a gs:// base output directory for this job.
-case "${BUCKET}" in
-  gs://*) BASE_OUTPUT="${BUCKET%/}/jobs/${JOB_NAME}" ;;
-  *)      BASE_OUTPUT="gs://${BUCKET%/}/jobs/${JOB_NAME}" ;;
-esac
+# Normalise the bucket into a gs:// base output directory for this job, unless
+# OUTPUT_URI names one (a seed group shares one base).
+if [[ -n "${OUTPUT_URI:-}" ]]; then
+  case "${OUTPUT_URI}" in
+    gs://*) BASE_OUTPUT="${OUTPUT_URI%/}" ;;
+    *) echo "ERROR: OUTPUT_URI must be a gs:// URI, got '${OUTPUT_URI}'." >&2; exit 1 ;;
+  esac
+else
+  case "${BUCKET}" in
+    gs://*) BASE_OUTPUT="${BUCKET%/}/jobs/${JOB_NAME}" ;;
+    *)      BASE_OUTPUT="gs://${BUCKET%/}/jobs/${JOB_NAME}" ;;
+  esac
+fi
 
 echo "=================================================="
 echo "Vertex AI custom job"
@@ -126,6 +151,14 @@ trap 'rm -f "${CONFIG_FILE}"' EXIT
     echo "        - name: GCS_SYNC_DIRS"
     echo "          value: $(yaml_squote "${SYNC_DIRS}")"
   fi
+  if [[ -n "${RESTORE_DIRS:-}" ]]; then
+    echo "        - name: GCS_RESTORE_DIRS"
+    echo "          value: $(yaml_squote "${RESTORE_DIRS}")"
+  fi
+  if [[ -n "${RT_GIT_COMMIT:-}" ]]; then
+    echo "        - name: RT_GIT_COMMIT"
+    echo "          value: $(yaml_squote "${RT_GIT_COMMIT}")"
+  fi
   # Pass W&B credentials through when present so --wandb works on the worker.
   if [[ -n "${WANDB_API_KEY:-}" ]]; then
     echo "        - name: WANDB_API_KEY"
@@ -133,6 +166,11 @@ trap 'rm -f "${CONFIG_FILE}"' EXIT
   fi
   echo "baseOutputDirectory:"
   echo "  outputUriPrefix: $(yaml_squote "${BASE_OUTPUT}")"
+  if [[ "${RESTART_ON_WORKER_RESTART:-0}" == "1" ]]; then
+    # CustomJobSpec.scheduling.restartJobOnWorkerRestart (Vertex AI v1 API).
+    echo "scheduling:"
+    echo "  restartJobOnWorkerRestart: true"
+  fi
 } > "${CONFIG_FILE}"
 
 echo "Job config:"
@@ -144,14 +182,24 @@ if [[ -n "${SERVICE_ACCOUNT:-}" ]]; then
   SA_FLAG=(--service-account="${SERVICE_ACCOUNT}")
 fi
 
-gcloud ai custom-jobs create \
+# gcloud reports the new job's resource name (on stderr, as "CustomJob
+# [projects/.../customJobs/<id>] is submitted successfully."); keep its output
+# to print that name on a line of its own.
+if ! SUBMIT_OUTPUT="$(gcloud ai custom-jobs create \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
   --display-name="${JOB_NAME}" \
   --config="${CONFIG_FILE}" \
-  "${SA_FLAG[@]}"
+  "${SA_FLAG[@]}" 2>&1)"; then
+  printf '%s\n' "${SUBMIT_OUTPUT}" >&2
+  echo "ERROR: gcloud ai custom-jobs create failed." >&2
+  exit 1
+fi
+printf '%s\n' "${SUBMIT_OUTPUT}"
+JOB_RESOURCE="$(printf '%s\n' "${SUBMIT_OUTPUT}" | grep -oE 'projects/[^] /]+/locations/[^] /]+/customJobs/[0-9]+' | head -n 1 || true)"
 
 echo ""
+echo "JOB_RESOURCE=${JOB_RESOURCE}"
 echo "✅ Submitted '${JOB_NAME}'. Trained artifacts will appear under:"
 echo "     ${BASE_OUTPUT}/{models,checkpoints,tensorboard,logs}/"
 echo "   (train_bootstrap.py runs: ${BASE_OUTPUT}/<run timestamp>/)"

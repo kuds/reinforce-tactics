@@ -211,8 +211,15 @@ that failed in every session of the run.
 | `REPLICA_COUNT` | `1` | Worker replicas |
 | `SYNC_INTERVAL` | `300` | Seconds between GCS syncs (`0` = only on exit) |
 | `SYNC_DIRS` | *(unset)* | Extra local dirs to sync, comma-separated: `dir` goes to `gs://.../jobs/<name>/dir/`, `dir=prefix` to `.../prefix/`, and `dir=` straight into `gs://.../jobs/<name>/`. A file under two entries (e.g. `benchmarks` and the default `benchmarks/bootstrap`) is uploaded to both places, and a warning is logged. Sets `GCS_SYNC_DIRS` in the container |
+| `OUTPUT_URI` | `gs://<BUCKET>/jobs/<JOB_NAME>` | The job's `gs://` output base. `scripts/train/run_seeds.py` sets `gs://<BUCKET>/jobs/<group>` so every seed of a group lands under one prefix (`<base>/<group>_s<seed>/`) |
+| `RESTORE_DIRS` | *(unset)* | Dirs to download from the output base before the command starts, as `dir=prefix` entries (the `SYNC_DIRS` syntax). Sets `GCS_RESTORE_DIRS`; a resubmitted seed job restores its run dir this way and `train_bootstrap.py --resume-if-exists` continues it. `charts/`, `videos/`, `checkpoints/`, `traces/` and `tensorboard/` are not restored; a failed restore fails the job before the command runs |
+| `RESTART_ON_WORKER_RESTART` | *(unset)* | `1` adds `scheduling.restartJobOnWorkerRestart: true` to the job spec |
 | `SERVICE_ACCOUNT` | *(unset)* | Run the job as this service account |
 | `WANDB_API_KEY` | *(unset)* | Passed through to the container when set |
+
+On success the submit script prints `JOB_RESOURCE=projects/.../customJobs/<id>`,
+which `run_seeds.py` records so that a relaunch checks the job's state before
+it would resubmit. Multi-seed runs: see [validation_run.md](validation_run.md).
 
 ## 3. Monitor the job
 
@@ -250,7 +257,9 @@ The wrapper:
 
 1. Resolves the GCS destination from `GCS_OUTPUT_URI` (set by the submit script),
    falling back to Vertex's `AIP_MODEL_DIR`. With neither set it just runs
-   locally — the same image works on your laptop.
+   locally — the same image works on your laptop. With `GCS_RESTORE_DIRS`
+   set, it first downloads those prefixes of the destination into the named
+   local directories (before the command and before any sync).
 2. Runs the training command as a child process, with `GCS_WRAPPER_SYNC` in its
    environment describing what the final sync will upload.
 3. Every `GCS_SYNC_INTERVAL` seconds, uploads `models/`, `checkpoints/`,
