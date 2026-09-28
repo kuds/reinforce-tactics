@@ -17,13 +17,17 @@ class Settings:
         "video": {"fullscreen": False, "resolution": [900, 700], "fps": 60},
         "audio": {"music_volume": 0.7, "sfx_volume": 0.8, "enabled": True},
         "graphics": {
+            # Master switch: False draws coloured tiles and unit letters
+            # instead of sprites.
+            "pixel_art": True,
             # Single base path – units/ and tiles/ subdirectories are
             # discovered automatically.  The per-category paths below
-            # override the auto-discovered subdirectory when set.
+            # override the auto-discovered subdirectory when set.  Left
+            # empty, the renderer uses the bundled assets/sprites/.
             "sprites_path": "",
             "unit_sprites_path": "",
             "tile_sprites_path": "",
-            "use_tile_sprites": False,
+            "use_tile_sprites": True,
             "animation_sprites_path": "",
             # Disable flags (False = enabled, True = disabled)
             "disable_animations": False,
@@ -62,6 +66,19 @@ class Settings:
     def _merge_with_defaults(self, loaded):
         """Merge loaded settings with defaults to ensure all keys exist."""
         result = copy.deepcopy(self.DEFAULT_SETTINGS)
+
+        # Files saved before the bundled art became the default carry the old
+        # ``use_tile_sprites: false`` default. With no sprites path set it had
+        # no visible effect (there were no tiles to load), so drop it and let
+        # the new default apply. Newer files carry the ``pixel_art`` key.
+        graphics = loaded.get("graphics")
+        if (
+            isinstance(graphics, dict)
+            and "pixel_art" not in graphics
+            and not graphics.get("sprites_path")
+            and not graphics.get("tile_sprites_path")
+        ):
+            loaded = {**loaded, "graphics": {k: v for k, v in graphics.items() if k != "use_tile_sprites"}}
 
         for key, value in loaded.items():
             if key in result and isinstance(result[key], dict):
@@ -140,7 +157,8 @@ class Settings:
         Resolution order:
         1. The per-category override (e.g. ``graphics.unit_sprites_path``).
         2. ``{graphics.sprites_path}/{category}/`` if the base path is set.
-        3. Empty string (not configured).
+        3. Empty string (not configured; the renderer then falls back to
+           the bundled ``assets/sprites/``).
         """
         key_map = {
             "units": "graphics.unit_sprites_path",

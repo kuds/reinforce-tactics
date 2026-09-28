@@ -30,23 +30,26 @@ def animation_key(unit):
     return ("object", id(unit)) if unit_id is None else unit_id
 
 
-def scale_unit_sprite(image, size):
-    """Scale a unit sprite to ``size`` x ``size`` preserving pixel-art quality.
+def scale_unit_sprite(image, size, nearest=False):
+    """Scale a unit sprite to ``size`` preserving pixel-art quality.
 
-    Uses nearest-neighbour scaling when the source is the target size or an
-    integer multiple of it (keeps pixels crisp), and smooth scaling for
-    non-integer ratios (avoids ragged pixels).
+    ``size`` is a side length or a ``(width, height)`` pair. Uses
+    nearest-neighbour scaling when ``nearest`` is set (sprite-sheet frames,
+    which must stay crisp at any ratio) or when the source is an integer
+    multiple of the target, and smooth scaling for other non-integer ratios
+    (avoids ragged pixels in arbitrary static images).
     """
+    target = (size, size) if isinstance(size, int) else tuple(size)
     width, height = image.get_size()
-    if (width, height) == (size, size):
+    if (width, height) == target:
         return image
-    if width % size == 0 and height % size == 0:
-        return pygame.transform.scale(image, (size, size))
+    if nearest or (width % target[0] == 0 and height % target[1] == 0):
+        return pygame.transform.scale(image, target)
     try:
-        return pygame.transform.smoothscale(image, (size, size))
+        return pygame.transform.smoothscale(image, target)
     except (pygame.error, ValueError):
         # smoothscale requires a 24/32-bit surface; fall back if unsupported
-        return pygame.transform.scale(image, (size, size))
+        return pygame.transform.scale(image, target)
 
 
 class SpriteAnimator:
@@ -151,8 +154,10 @@ class SpriteAnimator:
         the coordinate-based frame_map from ANIMATION_CONFIG.
 
         Each source frame (``frame_width`` x ``frame_height``, e.g. 64x64)
-        is centre-cropped to ``crop_width`` x ``crop_height`` (e.g. 32x32)
-        before being scaled to the display size.
+        is cropped to ``crop`` (e.g. the 48x48 at (8, 4) that ends at the
+        feet line) and scaled by ``TILE_SIZE / art_tile_size`` with
+        nearest-neighbour, so frames keep the tiles' pixel size (1x at the
+        default 32 px tiles).
 
         Args:
             sheet_surface: Pygame surface of the loaded sprite sheet
@@ -167,14 +172,13 @@ class SpriteAnimator:
         fw = unit_cfg.get("frame_width", self.frame_width)
         fh = unit_cfg.get("frame_height", self.frame_height)
 
-        # Crop dimensions (defaults to full frame if not configured)
-        cw = unit_cfg.get("crop_width", ANIMATION_CONFIG.get("crop_width", fw))
-        ch = unit_cfg.get("crop_height", ANIMATION_CONFIG.get("crop_height", fh))
+        # Crop rect within the frame (defaults to the full frame)
+        crop = pygame.Rect(unit_cfg.get("crop", ANIMATION_CONFIG.get("crop", (0, 0, fw, fh))))
 
-        # Render frames at full tile size: cropped frames are typically
-        # exactly TILE_SIZE already, so this avoids a non-integer downscale
-        # that made the pixel art look ragged.
-        sprite_size = TILE_SIZE
+        # Display size: the crop at the tiles' pixel scale. Never smoothscaled,
+        # which would blur the pixel art at a non-integer ratio.
+        art_tile_size = unit_cfg.get("art_tile_size", ANIMATION_CONFIG.get("art_tile_size", TILE_SIZE))
+        sprite_size = (crop.width * TILE_SIZE // art_tile_size, crop.height * TILE_SIZE // art_tile_size)
 
         frame_map = ANIMATION_CONFIG.get("frame_map", {})
 
@@ -183,15 +187,8 @@ class SpriteAnimator:
             for row, col in coords:
                 rect = pygame.Rect(col * fw, row * fh, fw, fh)
                 if rect.right <= sheet_surface.get_width() and rect.bottom <= sheet_surface.get_height():
-                    frame = sheet_surface.subsurface(rect).copy()
-                    # Centre-crop to the target crop size
-                    if cw < fw or ch < fh:
-                        cx = (fw - cw) // 2
-                        cy = (fh - ch) // 2
-                        frame = frame.subsurface(pygame.Rect(cx, cy, cw, ch)).copy()
-                    # Same smart scaler as static sprites: nearest-neighbour
-                    # for integer ratios, smoothscale otherwise.
-                    frame = scale_unit_sprite(frame, sprite_size)
+                    frame = sheet_surface.subsurface(crop.move(rect.topleft).clip(rect)).copy()
+                    frame = scale_unit_sprite(frame, sprite_size, nearest=True)
                     state_frames.append(frame)
 
             if state_frames:

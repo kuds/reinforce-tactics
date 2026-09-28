@@ -102,8 +102,10 @@ class Renderer:
             headless: If True, render to an offscreen surface without opening a window.
                      Useful for recording videos in notebooks or CI environments.
             pixel_art: Authoritative override for pixel-art rendering.
-                     ``None`` (default) uses ``settings.json``. ``True``
-                     resolves the bundled ``assets/sprites/`` directory and
+                     ``None`` (default) uses ``settings.json``: sprites from
+                     the configured paths, or the bundled ``assets/sprites/``
+                     when none is set, unless ``graphics.pixel_art`` is off.
+                     ``True`` always uses the bundled directory and
                      force-enables tile/unit sprites. ``False`` force-disables
                      sprite loading and uses the fallback (coloured rects +
                      unit letters), regardless of settings.
@@ -218,12 +220,33 @@ class Renderer:
         # Per-overlay fade-in state: kind -> (signature, start_ticks)
         self._overlay_anim = {}
 
+    def _use_sprites(self):
+        """Whether to load sprites at all (False draws coloured tiles and letters)."""
+        if self._pixel_art is not None:
+            return self._pixel_art
+        return bool(self.settings.get("graphics.pixel_art", True))
+
     def _resolve_sprites_path(self, category):
-        """Resolve sprite directory for a category, honouring the override."""
-        if self._sprites_override:
-            subdir = {"units": "units", "tiles": "tiles", "animation": "units"}.get(category, category)
-            return os.path.join(self._sprites_override, subdir)
-        return self.settings.get_sprites_path(category)
+        """Resolve the sprite directory for a category.
+
+        ``pixel_art=True`` always uses the bundled ``assets/sprites/``.
+        Otherwise a path from the Graphics settings wins, and the bundled
+        directory is the default when none is set.
+        """
+        base = self._sprites_override
+        if not base:
+            configured = self.settings.get_sprites_path(category)
+            if configured:
+                return configured
+            # Custom static unit sprites with no sheets configured: the
+            # bundled sheets would take priority and hide them.
+            if category == "animation" and self.settings.get_sprites_path("units"):
+                return ""
+            base = _resolve_bundled_sprites_path()
+            if not base:
+                return ""
+        subdir = {"units": "units", "tiles": "tiles", "animation": "units"}.get(category, category)
+        return os.path.join(base, subdir)
 
     def _load_tile_images(self):
         """Load tile images, discover variants, and generate team-coloured
@@ -237,13 +260,13 @@ class Renderer:
         tile_images = {}  # type_name -> base surface (single)
         tile_variants = {}  # type_name -> [surface, ...]
 
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             self.tile_variants = {}
             self.team_tile_variants = {}
             return tile_images
 
-        use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", False)
+        use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", True)
         tile_sprites_path = self._resolve_sprites_path("tiles")
 
         for tile_type, filename in TILE_IMAGES.items():
@@ -348,8 +371,8 @@ class Renderer:
         """Load unit images from configured sprites path."""
         unit_images = {}
 
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             return unit_images
 
         # Get the configured unit sprites path
@@ -374,8 +397,8 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             return None
 
         animation_path = self._resolve_sprites_path("animation")
@@ -634,9 +657,18 @@ class Renderer:
         pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_width, bar_height), 1)
 
     def _draw_units(self):
-        """Draw all units; walking ones last, so they pass over the units they walk through."""
+        """Draw all units.
+
+        Sprites are taller than a tile and overflow it upward, so standing
+        units are drawn top to bottom (by ``y``, then ``x``): a unit lower on
+        the screen stands in front of the one above it. Walking units go on
+        after them, so they pass over the units they walk through. Health
+        bars and status badges go on in a last pass so no neighbour's sprite
+        covers them.
+        """
         fow_player = self._get_fow_player()
 
+        standing = []
         walking = []
         for unit in self.game_state.units:
             # With fog of war, only draw visible units (own units + units in visible tiles)
@@ -645,10 +677,15 @@ class Renderer:
             if animation_key(unit) in self._walk_steps:
                 walking.append(unit)
             else:
-                self._draw_unit(unit)
+                standing.append(unit)
 
-        for unit in walking:
+        standing.sort(key=lambda u: (u.y, u.x))
+        walking.sort(key=lambda u: self._unit_origin(u)[::-1])
+        shown = standing + walking
+        for unit in shown:
             self._draw_unit(unit)
+        for unit in shown:
+            self._draw_unit_status(unit)
 
     def _unit_in_sight(self, unit, player):
         """Whether ``player`` sees ``unit``: its tile is VISIBLE to them.
@@ -672,7 +709,7 @@ class Renderer:
 
     def _draw_unit(self, unit):
         """
-        Draw a single unit.
+        Draw a single unit's body (status overlays are :meth:`_draw_unit_status`).
 
         Rendering priority (cascading fallback):
         1. Animated sprite sheet (if available and not disabled)
@@ -689,9 +726,6 @@ class Renderer:
                 animated_frame = self.animator.get_frame(unit, self.delta_time)
                 if animated_frame:
                     self._draw_unit_sprite(unit, animated_frame)
-                    self._draw_paralysis_indicator(unit)
-                    self._draw_haste_indicator(unit)
-                    self._draw_unit_health_bar(unit)
                     return
 
         # Fall back to static sprite (if not disabled)
@@ -699,13 +733,13 @@ class Renderer:
             static_sprite = self.unit_images.get(unit.type)
             if static_sprite:
                 self._draw_unit_sprite(unit, static_sprite)
-                self._draw_paralysis_indicator(unit)
-                self._draw_haste_indicator(unit)
-                self._draw_unit_health_bar(unit)
                 return
 
         # Fall back to letter representation
         self._draw_unit_letter(unit)
+
+    def _draw_unit_status(self, unit):
+        """Draw a unit's status badges and health bar, anchored to its tile (or its step while walking)."""
         self._draw_paralysis_indicator(unit)
         self._draw_haste_indicator(unit)
         self._draw_unit_health_bar(unit)
@@ -787,8 +821,10 @@ class Renderer:
         border_rect = pygame.Rect(left + 1, top + 1, TILE_SIZE - 2, TILE_SIZE - 2)
         pygame.draw.rect(self.screen, player_color, border_rect, 2)
 
-        # Center the sprite in the tile
-        sprite_rect = display_sprite.get_rect(center=(left + TILE_SIZE // 2, top + TILE_SIZE // 2))
+        # Stand the sprite on the tile: its bottom edge (the feet line) on the
+        # tile's bottom edge, centred horizontally. A sprite larger than the
+        # tile overflows it upward and sideways.
+        sprite_rect = display_sprite.get_rect(midbottom=(left + TILE_SIZE // 2, top + TILE_SIZE))
         self.screen.blit(display_sprite, sprite_rect)
 
     def _get_overlay(self, size, color):
