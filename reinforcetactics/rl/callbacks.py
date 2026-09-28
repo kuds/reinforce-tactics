@@ -34,6 +34,7 @@ import json
 import logging
 import math
 import os
+import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -485,6 +486,7 @@ class PeriodicEvalCallback(BaseCallback):
         # fires, so traces from different evals don't collide and a stalled
         # episode is easy to map back to the eval row in the printed log.
         trace_dir = self.trace_dir / f"eval_{int(self.num_timesteps):09d}" if self.trace_dir is not None else None
+        started = time.perf_counter()
         m = self._evaluate(
             deterministic=self.deterministic, seed=eval_seed, trace_dir=trace_dir, track_breakdown=self.track_breakdown
         )
@@ -508,6 +510,11 @@ class PeriodicEvalCallback(BaseCallback):
                 },
                 "win_rate_by_seat": {s: v["win_rate"] for s, v in (other.get("by_seat") or {}).items()},
             }
+        # When the row was produced (epoch seconds) and how long its evals took
+        # (both modes): throughput and the eval share of wall-clock, per row,
+        # for scripts/eval/summarize_seeds.py and run_seeds.py status.
+        m["eval_seconds"] = time.perf_counter() - started
+        m["wall_time"] = time.time()
         m["win_rate_stochastic"] = mode_wr.get(False)
         m["win_rate_greedy"] = mode_wr.get(True)
         m["win_rate_by_seat"] = {s: v["win_rate"] for s, v in (m.get("by_seat") or {}).items()}

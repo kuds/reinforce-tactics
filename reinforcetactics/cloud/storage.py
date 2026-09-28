@@ -4,7 +4,9 @@ Training runs (whether ``main.py`` or the scripts under ``scripts/train/``)
 write models, checkpoints, and logs to the local filesystem. On an ephemeral
 runner such as a Vertex AI custom job those files vanish when the job ends, so
 this module provides small, dependency-light helpers to sync the local output
-directories up to a ``gs://`` location.
+directories up to a ``gs://`` location, and (:func:`download_tree`) to bring a
+run back down: a resubmitted job restoring its run directory, or a copy for
+analysis.
 
 Nothing here imports ``google-cloud-storage`` at module load time; the client is
 created lazily so the rest of the package (and the test suite) can import this
@@ -14,6 +16,7 @@ module without the optional dependency installed.
 import json
 import logging
 import os
+import re
 from collections.abc import Iterable, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
@@ -273,6 +276,68 @@ def upload_tree(
     if uploader is None:
         return 0
     return uploader.upload_directory(local_dir)
+
+
+def download_tree(
+    src_uri: str | None,
+    local_dir: str | os.PathLike[str],
+    *,
+    exclude: re.Pattern[str] | None = None,
+    credentials_file: str | None = None,
+    client: Any = None,
+) -> int:
+    """Download every object under ``src_uri`` into ``local_dir``, keeping the relative layout.
+
+    The inverse of :func:`upload_tree`: ``gs://b/p/run/a/x.json`` lands at
+    ``<local_dir>/a/x.json``. Objects still being written (``PARTIAL_SUFFIX``)
+    are skipped, and so is every relative path ``exclude`` matches (``search``).
+    Each file is written to a ``.partial`` sibling and renamed into place, so
+    a kill never leaves a truncated file behind. Returns the number of files
+    downloaded: 0 for an empty prefix, a bad URI, or a missing
+    ``google-cloud-storage`` (with no ``client`` injected).
+    """
+    if not src_uri:
+        return 0
+    try:
+        bucket_name, prefix = parse_gcs_uri(src_uri)
+    except ValueError as e:
+        logger.warning("Skipping GCS download: %s", e)
+        return 0
+    if client is None:
+        if not is_available():
+            logger.warning("google-cloud-storage not installed; skipping download from %s", src_uri)
+            return 0
+        from google.cloud import storage
+
+        if credentials_file and os.path.exists(credentials_file):
+            client = storage.Client.from_service_account_json(credentials_file)
+        else:
+            client = storage.Client()
+    base = f"{prefix}/" if prefix else ""
+    target = Path(local_dir)
+    count = 0
+    for blob in client.list_blobs(bucket_name, prefix=base):
+        name = str(blob.name)
+        relative = name[len(base) :]
+        if not relative or relative.endswith("/") or relative.endswith(PARTIAL_SUFFIX):
+            continue
+        if exclude is not None and exclude.search(relative):
+            continue
+        destination = target / relative
+        # An object name like "../x" must not escape the target directory.
+        if not destination.resolve().is_relative_to(target.resolve()):
+            logger.warning("Skipping %s: it would land outside %s", name, target)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        partial = destination.with_name(destination.name + PARTIAL_SUFFIX)
+        try:
+            blob.download_to_filename(str(partial))
+            os.replace(partial, destination)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+        count += 1
+    return count
 
 
 def wrapper_sync_env(base_uri: str, sync_dirs: Mapping[str, str], root: str = ".") -> str:
