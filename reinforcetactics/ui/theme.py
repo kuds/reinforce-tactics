@@ -100,6 +100,17 @@ HEALTH_STRUCTURE_BUILDING = (0, 200, 200)
 HEALTH_STRUCTURE_TOWER = (200, 200, 200)
 
 # ── In-game HUD ──────────────────────────────────────────────────────
+# In play the HUD is a panel to the right of the board, so it never covers
+# a tile or takes a click meant for one. Text sits on dark fills; the
+# current player's colour is only an accent (yellow gold text on a green or
+# yellow player fill measured 1.03:1 and 1.3:1).
+HUD_PANEL_WIDTH = 200
+HUD_PANEL_PADDING = 12
+HUD_PANEL_BG = PANEL_BG
+HUD_PANEL_BORDER = PANEL_BORDER
+HUD_CARD_BG = (50, 50, 65)
+HUD_ACCENT_WIDTH = 6
+HUD_LABEL_TEXT = TEXT_MUTED
 HUD_GOLD_TEXT = (255, 215, 0)
 HUD_TURN_BG = (50, 50, 65)
 HUD_TURN_BORDER = (100, 150, 200)
@@ -129,6 +140,7 @@ OVERLAY_ATTACK_RANGE_ALPHA = 100
 OVERLAY_FADE_MS = 150
 SELECTION_PULSE_MS = 360
 STATUS_PULSE_MS = 300
+UNIT_WALK_MS_PER_TILE = 100  # a moving unit's sprite crosses one tile in this time
 
 # ── Dimensions ───────────────────────────────────────────────────────
 BORDER_RADIUS = 8

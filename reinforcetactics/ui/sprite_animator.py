@@ -2,12 +2,10 @@
 Sprite animation system for unit animations.
 
 Handles loading sprite sheets and managing frame-by-frame animations
-including directional walking, smooth transitions between animation
-states during multi-step movement paths, and per-team palette swaps.
+including directional walking and per-team palette swaps.
 """
 
 import os
-from collections import deque
 
 import pygame
 
@@ -20,23 +18,38 @@ from reinforcetactics.ui.assets import (
 )
 
 
-def scale_unit_sprite(image, size):
-    """Scale a unit sprite to ``size`` x ``size`` preserving pixel-art quality.
+def animation_key(unit):
+    """The key a unit's animation state is kept under: the engine's ``unit_id``.
 
-    Uses nearest-neighbour scaling when the source is the target size or an
-    integer multiple of it (keeps pixels crisp), and smooth scaling for
-    non-integer ratios (avoids ragged pixels).
+    ``id(unit)`` used to be the key, and CPython reuses the address of a
+    freed object, so a unit created after another died could inherit the
+    dead unit's timer and state. Units from saves that predate ``unit_id``
+    have none and fall back to their object identity.
     """
+    unit_id = getattr(unit, "unit_id", None)
+    return ("object", id(unit)) if unit_id is None else unit_id
+
+
+def scale_unit_sprite(image, size, nearest=False):
+    """Scale a unit sprite to ``size`` preserving pixel-art quality.
+
+    ``size`` is a side length or a ``(width, height)`` pair. Uses
+    nearest-neighbour scaling when ``nearest`` is set (sprite-sheet frames,
+    which must stay crisp at any ratio) or when the source is an integer
+    multiple of the target, and smooth scaling for other non-integer ratios
+    (avoids ragged pixels in arbitrary static images).
+    """
+    target = (size, size) if isinstance(size, int) else tuple(size)
     width, height = image.get_size()
-    if (width, height) == (size, size):
+    if (width, height) == target:
         return image
-    if width % size == 0 and height % size == 0:
-        return pygame.transform.scale(image, (size, size))
+    if nearest or (width % target[0] == 0 and height % target[1] == 0):
+        return pygame.transform.scale(image, target)
     try:
-        return pygame.transform.smoothscale(image, (size, size))
+        return pygame.transform.smoothscale(image, target)
     except (pygame.error, ValueError):
         # smoothscale requires a 24/32-bit surface; fall back if unsupported
-        return pygame.transform.scale(image, (size, size))
+        return pygame.transform.scale(image, target)
 
 
 class SpriteAnimator:
@@ -54,9 +67,9 @@ class SpriteAnimator:
     base blue pixels with each team's palette, so ``get_frame`` has
     zero per-frame overhead for colouring.
 
-    Movement path animation is supported: when a unit follows a
-    multi-tile path, segments are queued so the walking direction
-    updates correctly at each waypoint.
+    Which way a unit walks, and when it stops, is set from outside: the
+    renderer tweens a moving unit along its path and sets the walking
+    state for each tile it crosses.
     """
 
     def __init__(self, sprites_path, headless=False):
@@ -76,11 +89,9 @@ class SpriteAnimator:
         # Team-coloured frames: (unit_type, player) -> {state -> [frames]}
         self.team_sheets = {}
 
-        self.animation_timers = {}  # unit_id -> {current_time, current_frame}
-        self.unit_states = {}  # unit_id -> current animation state
-
-        # Movement path queues for multi-step animation transitions
-        self.movement_queues = {}  # unit_id -> deque of state strings
+        # Keyed by animation_key(unit)
+        self.animation_timers = {}  # key -> {current_time, current_frame}
+        self.unit_states = {}  # key -> current animation state
 
         # Frame dimensions (can be overridden per unit type)
         self.frame_width = ANIMATION_CONFIG.get("frame_width", 32)
@@ -143,8 +154,10 @@ class SpriteAnimator:
         the coordinate-based frame_map from ANIMATION_CONFIG.
 
         Each source frame (``frame_width`` x ``frame_height``, e.g. 64x64)
-        is centre-cropped to ``crop_width`` x ``crop_height`` (e.g. 32x32)
-        before being scaled to the display size.
+        is cropped to ``crop`` (e.g. the 48x48 at (8, 4) that ends at the
+        feet line) and scaled by ``TILE_SIZE / art_tile_size`` with
+        nearest-neighbour, so frames keep the tiles' pixel size (1x at the
+        default 32 px tiles).
 
         Args:
             sheet_surface: Pygame surface of the loaded sprite sheet
@@ -159,14 +172,13 @@ class SpriteAnimator:
         fw = unit_cfg.get("frame_width", self.frame_width)
         fh = unit_cfg.get("frame_height", self.frame_height)
 
-        # Crop dimensions (defaults to full frame if not configured)
-        cw = unit_cfg.get("crop_width", ANIMATION_CONFIG.get("crop_width", fw))
-        ch = unit_cfg.get("crop_height", ANIMATION_CONFIG.get("crop_height", fh))
+        # Crop rect within the frame (defaults to the full frame)
+        crop = pygame.Rect(unit_cfg.get("crop", ANIMATION_CONFIG.get("crop", (0, 0, fw, fh))))
 
-        # Render frames at full tile size: cropped frames are typically
-        # exactly TILE_SIZE already, so this avoids a non-integer downscale
-        # that made the pixel art look ragged.
-        sprite_size = TILE_SIZE
+        # Display size: the crop at the tiles' pixel scale. Never smoothscaled,
+        # which would blur the pixel art at a non-integer ratio.
+        art_tile_size = unit_cfg.get("art_tile_size", ANIMATION_CONFIG.get("art_tile_size", TILE_SIZE))
+        sprite_size = (crop.width * TILE_SIZE // art_tile_size, crop.height * TILE_SIZE // art_tile_size)
 
         frame_map = ANIMATION_CONFIG.get("frame_map", {})
 
@@ -175,15 +187,8 @@ class SpriteAnimator:
             for row, col in coords:
                 rect = pygame.Rect(col * fw, row * fh, fw, fh)
                 if rect.right <= sheet_surface.get_width() and rect.bottom <= sheet_surface.get_height():
-                    frame = sheet_surface.subsurface(rect).copy()
-                    # Centre-crop to the target crop size
-                    if cw < fw or ch < fh:
-                        cx = (fw - cw) // 2
-                        cy = (fh - ch) // 2
-                        frame = frame.subsurface(pygame.Rect(cx, cy, cw, ch)).copy()
-                    # Same smart scaler as static sprites: nearest-neighbour
-                    # for integer ratios, smoothscale otherwise.
-                    frame = scale_unit_sprite(frame, sprite_size)
+                    frame = sheet_surface.subsurface(crop.move(rect.topleft).clip(rect)).copy()
+                    frame = scale_unit_sprite(frame, sprite_size, nearest=True)
                     state_frames.append(frame)
 
             if state_frames:
@@ -260,10 +265,6 @@ class SpriteAnimator:
         ``unit.player`` if available, otherwise falls back to the
         base (uncoloured) sprite sheet.
 
-        Handles movement queue advancement: when the current movement
-        segment finishes its allotted frames, the next queued segment's
-        direction is activated automatically.
-
         Args:
             unit: Unit object with ``type`` and ``player`` attributes
             delta_time: Time since last frame in seconds
@@ -284,7 +285,7 @@ class SpriteAnimator:
         if not unit_frames:
             return None
 
-        unit_id = id(unit)
+        unit_id = animation_key(unit)
         state = self.unit_states.get(unit_id, "idle")
 
         # Fallback chain
@@ -317,14 +318,10 @@ class SpriteAnimator:
                 # pacing doesn't accumulate the per-frame remainder as drift
                 # (which slowed and jittered animations at low frame rates).
                 timer["current_time"] %= frame_duration
-                next_frame = (timer["current_frame"] + 1) % len(anim_frames)
-                timer["current_frame"] = next_frame
+                timer["current_frame"] = (timer["current_frame"] + 1) % len(anim_frames)
 
-                # If we looped back to 0, check movement queue
-                if next_frame == 0:
-                    self._advance_movement_queue(unit)
-
-        return anim_frames[timer["current_frame"]]
+        # A state switch can keep the frame index of a longer cycle
+        return anim_frames[timer["current_frame"] % len(anim_frames)]
 
     # ------------------------------------------------------------------
     # State management
@@ -334,19 +331,22 @@ class SpriteAnimator:
         """
         Set the animation state for a unit.
 
-        Resets the frame timer when the state actually changes.
+        Resets the frame timer when the state actually changes, except
+        between two walking directions: a unit turning a corner keeps its
+        stride instead of restarting the walk cycle on every turn.
 
         Args:
             unit: Unit object
             state: Animation state name ('idle', 'move_down', 'move_up',
                    'move_left', 'move_right')
         """
-        unit_id = id(unit)
+        unit_id = animation_key(unit)
         old_state = self.unit_states.get(unit_id)
 
         if old_state != state:
             self.unit_states[unit_id] = state
-            if unit_id in self.animation_timers:
+            turning = _is_walking(old_state) and _is_walking(state)
+            if unit_id in self.animation_timers and not turning:
                 self.animation_timers[unit_id] = {
                     "current_time": 0.0,
                     "current_frame": 0,
@@ -365,64 +365,8 @@ class SpriteAnimator:
         self.set_unit_state(unit, state)
 
     def set_idle(self, unit):
-        """Set a unit to idle animation state and clear any movement queue."""
-        unit_id = id(unit)
-        self.movement_queues.pop(unit_id, None)
+        """Set a unit to idle animation state."""
         self.set_unit_state(unit, "idle")
-
-    # ------------------------------------------------------------------
-    # Movement path animation
-    # ------------------------------------------------------------------
-
-    def queue_movement_path(self, unit, path):
-        """
-        Queue a multi-step movement path for smooth animation transitions.
-
-        Each segment of the path produces a walking direction that plays
-        for one full animation cycle before advancing to the next segment.
-        After all segments complete, the unit returns to idle.
-
-        This is intended for UI-mode animated movement where the unit
-        visually walks along its path.
-
-        Args:
-            unit: Unit object
-            path: List of (x, y) positions the unit travels through,
-                  including the starting position.  Minimum 2 positions.
-        """
-        if len(path) < 2:
-            return
-
-        unit_id = id(unit)
-        queue = deque()
-
-        for i in range(len(path) - 1):
-            state = self._direction_state(path[i], path[i + 1])
-            queue.append(state)
-
-        self.movement_queues[unit_id] = queue
-
-        # Start the first segment immediately
-        first_state = queue.popleft()
-        self.set_unit_state(unit, first_state)
-
-    def _advance_movement_queue(self, unit):
-        """
-        Advance to the next segment in the movement queue.
-
-        Called internally when the current animation cycle loops.
-        If no more segments remain, sets the unit back to idle.
-        """
-        unit_id = id(unit)
-        queue = self.movement_queues.get(unit_id)
-        if not queue:
-            if unit_id in self.movement_queues:
-                del self.movement_queues[unit_id]
-                self.set_unit_state(unit, "idle")
-            return
-
-        next_state = queue.popleft()
-        self.set_unit_state(unit, next_state)
 
     # ------------------------------------------------------------------
     # Queries & cleanup
@@ -434,10 +378,9 @@ class SpriteAnimator:
 
     def cleanup_unit(self, unit):
         """Clean up all animation data for a removed unit."""
-        unit_id = id(unit)
+        unit_id = animation_key(unit)
         self.animation_timers.pop(unit_id, None)
         self.unit_states.pop(unit_id, None)
-        self.movement_queues.pop(unit_id, None)
 
     def reload(self, sprites_path=None):
         """
@@ -453,7 +396,6 @@ class SpriteAnimator:
         self.team_sheets.clear()
         self.animation_timers.clear()
         self.unit_states.clear()
-        self.movement_queues.clear()
 
         self._load_all_sprite_sheets()
 
@@ -481,3 +423,8 @@ class SpriteAnimator:
         elif dy != 0:
             return "move_down" if dy > 0 else "move_up"
         return "idle"
+
+
+def _is_walking(state):
+    """Whether ``state`` is one of the walking directions."""
+    return state is not None and state.startswith("move_")

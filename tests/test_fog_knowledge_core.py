@@ -524,6 +524,7 @@ class TestGuiFollowsTheAmbushRule:
         screen = pygame.display.set_mode((TILE_SIZE * 12, TILE_SIZE * 12))
         renderer = Mock()
         renderer.screen = screen
+        renderer.is_unit_moving.return_value = False  # the menu opens on the move's frame
         handler = InputHandler(fow_game, renderer, bots={}, num_players=2)
         barbarian = fow_game.place_unit("B", 4, 7, player=1)
         ambusher = fow_game.place_unit("W", 7, 7, player=2)

@@ -6,8 +6,10 @@ same on every platform:
 - **Noto Sans** (``get_font``) — body/UI text. Full Latin coverage,
   including the accented characters used by the French and Spanish
   translations.
-- **Pixelify Sans** (``get_display_font``) — pixel-styled display font for
-  titles and headings, matching the game's pixel-art style.
+- **Jersey 15** (``get_display_font``) — pixel-styled display font for
+  titles and headings, matching the game's pixel-art style. It must have no
+  standard ligatures: SDL_ttf applies them and pygame can't turn them off,
+  and a pixel "fi" ligature reads as "A" ("Configure" became "ConAgure").
 
 Neither bundled font covers CJK, so when the active language is Korean or
 Chinese both helpers fall back to a system font with CJK coverage. The
@@ -21,7 +23,7 @@ import pygame
 
 # Bundled fonts, relative to the assets/fonts directory.
 BODY_FONT_FILE = "NotoSans-Regular.ttf"
-DISPLAY_FONT_FILE = "PixelifySans-Regular.ttf"
+DISPLAY_FONT_FILE = "Jersey15-Regular.ttf"
 
 # Languages whose glyphs the bundled fonts cannot render.
 CJK_LANGUAGES = ("korean", "chinese")
@@ -234,8 +236,8 @@ def get_display_font(size: int) -> pygame.font.Font:
     """
     Get the game's display font (titles/headings) at the given size.
 
-    Returns the bundled Pixelify Sans font, a pixel-styled face matching
-    the game's pixel-art look. Falls back to :func:`get_font` when the
+    Returns the bundled Jersey 15 font, a pixel-styled face matching the
+    game's pixel-art look. Falls back to :func:`get_font` when the
     active language is CJK or the bundled font file is missing.
 
     Args:

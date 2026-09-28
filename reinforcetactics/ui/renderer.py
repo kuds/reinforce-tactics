@@ -6,6 +6,7 @@ import math
 import os
 import random
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import pygame
@@ -24,7 +25,8 @@ from reinforcetactics.ui.assets import (
     UNIT_ASSETS,
     tile_color,
 )
-from reinforcetactics.ui.sprite_animator import SpriteAnimator, scale_unit_sprite
+from reinforcetactics.ui.sprite_animator import SpriteAnimator, animation_key, scale_unit_sprite
+from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
@@ -39,6 +41,30 @@ def _pulse(period_ms):
 def _lerp_color(a, b, t):
     """Linearly interpolate between two RGB colors."""
     return tuple(int(ca + (cb - ca) * t) for ca, cb in zip(a, b))
+
+
+@dataclass
+class _Walk:
+    """A unit's sprite walking the path of its last move, one tile per ``theme.UNIT_WALK_MS_PER_TILE``.
+
+    Only the drawing walks: the engine has already put the unit on the
+    last tile of ``path``.
+    """
+
+    unit: object
+    path: list[tuple[int, int]]
+    start_ms: int
+
+    @property
+    def end_ms(self):
+        return self.start_ms + (len(self.path) - 1) * theme.UNIT_WALK_MS_PER_TILE
+
+    def step_at(self, now_ms):
+        """``(from_tile, to_tile, fraction)`` of the step the sprite is on at ``now_ms``; None once it has arrived."""
+        if now_ms >= self.end_ms:
+            return None
+        index, into = divmod(max(now_ms - self.start_ms, 0), theme.UNIT_WALK_MS_PER_TILE)
+        return self.path[index], self.path[index + 1], into / theme.UNIT_WALK_MS_PER_TILE
 
 
 def _resolve_bundled_sprites_path():
@@ -76,8 +102,10 @@ class Renderer:
             headless: If True, render to an offscreen surface without opening a window.
                      Useful for recording videos in notebooks or CI environments.
             pixel_art: Authoritative override for pixel-art rendering.
-                     ``None`` (default) uses ``settings.json``. ``True``
-                     resolves the bundled ``assets/sprites/`` directory and
+                     ``None`` (default) uses ``settings.json``: sprites from
+                     the configured paths, or the bundled ``assets/sprites/``
+                     when none is set, unless ``graphics.pixel_art`` is off.
+                     ``True`` always uses the bundled directory and
                      force-enables tile/unit sprites. ``False`` force-disables
                      sprite loading and uses the fallback (coloured rects +
                      unit letters), regardless of settings.
@@ -93,9 +121,20 @@ class Renderer:
         if not pygame.get_init():
             pygame.init()
 
+        # The board is drawn at the window's top-left corner, one TILE_SIZE
+        # square per tile. In play the HUD (gold, turn, End Turn, Resign) is
+        # a panel to the right of it: drawn over the board, as it used to be,
+        # it hid units in the top rows of a 20x20 map and took their clicks.
+        # Replays and headless capture keep a board-sized surface (the replay
+        # player lays out its own controls, and videos are the board alone).
+        self.board_rect = pygame.Rect(0, 0, game_state.grid.width * TILE_SIZE, game_state.grid.height * TILE_SIZE)
+        self.has_hud_panel = not (headless or replay_mode)
+
+        # UI elements (lays out the HUD panel, which sets the window size)
+        self._setup_ui_elements()
+
         # Setup display
-        screen_width = game_state.grid.width * TILE_SIZE
-        screen_height = game_state.grid.height * TILE_SIZE
+        screen_width, screen_height = self.window_size
         if headless:
             # Headless: prefer a dummy SDL display so the surface lives on
             # a properly initialised SDL backbuffer. On some environments
@@ -140,6 +179,14 @@ class Renderer:
         self.last_frame_time = time.time()
         self.delta_time = 0.0
 
+        # Units whose sprite is walking its last move (animation_key -> _Walk),
+        # and each walker's step this frame (see _update_walks).
+        self._walks = {}
+        self._walk_steps = {}
+        # The game's units at the last frame (animation_key -> unit), so the
+        # animation state of one that has since left the game is dropped.
+        self._known_units = {}
+
         # Pre-allocate tile-sized overlay surfaces used every frame.
         # Fog is two-tier: unexplored tiles are darker than shrouded ones
         # (seen before, currently out of sight).
@@ -173,15 +220,33 @@ class Renderer:
         # Per-overlay fade-in state: kind -> (signature, start_ticks)
         self._overlay_anim = {}
 
-        # UI elements
-        self._setup_ui_elements()
+    def _use_sprites(self):
+        """Whether to load sprites at all (False draws coloured tiles and letters)."""
+        if self._pixel_art is not None:
+            return self._pixel_art
+        return bool(self.settings.get("graphics.pixel_art", True))
 
     def _resolve_sprites_path(self, category):
-        """Resolve sprite directory for a category, honouring the override."""
-        if self._sprites_override:
-            subdir = {"units": "units", "tiles": "tiles", "animation": "units"}.get(category, category)
-            return os.path.join(self._sprites_override, subdir)
-        return self.settings.get_sprites_path(category)
+        """Resolve the sprite directory for a category.
+
+        ``pixel_art=True`` always uses the bundled ``assets/sprites/``.
+        Otherwise a path from the Graphics settings wins, and the bundled
+        directory is the default when none is set.
+        """
+        base = self._sprites_override
+        if not base:
+            configured = self.settings.get_sprites_path(category)
+            if configured:
+                return configured
+            # Custom static unit sprites with no sheets configured: the
+            # bundled sheets would take priority and hide them.
+            if category == "animation" and self.settings.get_sprites_path("units"):
+                return ""
+            base = _resolve_bundled_sprites_path()
+            if not base:
+                return ""
+        subdir = {"units": "units", "tiles": "tiles", "animation": "units"}.get(category, category)
+        return os.path.join(base, subdir)
 
     def _load_tile_images(self):
         """Load tile images, discover variants, and generate team-coloured
@@ -195,13 +260,13 @@ class Renderer:
         tile_images = {}  # type_name -> base surface (single)
         tile_variants = {}  # type_name -> [surface, ...]
 
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             self.tile_variants = {}
             self.team_tile_variants = {}
             return tile_images
 
-        use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", False)
+        use_tile_sprites = bool(self._sprites_override) or self.settings.get("graphics.use_tile_sprites", True)
         tile_sprites_path = self._resolve_sprites_path("tiles")
 
         for tile_type, filename in TILE_IMAGES.items():
@@ -306,8 +371,8 @@ class Renderer:
         """Load unit images from configured sprites path."""
         unit_images = {}
 
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             return unit_images
 
         # Get the configured unit sprites path
@@ -332,8 +397,8 @@ class Renderer:
 
     def _init_animator(self):
         """Initialize the sprite animator for unit animations."""
-        # pixel_art=False forces fallback rendering regardless of settings
-        if self._pixel_art is False:
+        # Letter mode (pixel_art=False or graphics.pixel_art off)
+        if not self._use_sprites():
             return None
 
         animation_path = self._resolve_sprites_path("animation")
@@ -349,30 +414,63 @@ class Renderer:
         self.animator = self._init_animator()
 
     def _setup_ui_elements(self):
-        """Setup UI elements like buttons (localized, sized to their labels)."""
-        screen_width = self.game_state.grid.width * TILE_SIZE
+        """Lay out the HUD and pre-render its static labels (localized).
+
+        In play the HUD is a panel to the right of the board: the player
+        card, gold and turn at the top, End Turn and Resign at the bottom.
+        Without the panel (replays, headless capture) there are no buttons.
+        """
         lang = get_language()
 
-        self._hud_font = get_font(28)
-        self._hud_button_font = get_display_font(24)
-        self._hud_badge_font = get_font(20)
+        self._hud_font = get_font(theme.FONT_SIZE_SUBHEADING)
+        self._hud_caption_font = get_font(theme.FONT_SIZE_HINT)
+        self._hud_title_font = get_display_font(theme.FONT_SIZE_BODY)
+        self._hud_button_font = get_display_font(theme.FONT_SIZE_BODY)
+        self._hud_badge_font = get_font(theme.FONT_SIZE_LABEL)
 
         self._hud_player_label = lang.get("player", "Player")
         self._hud_gold_label = lang.get("gold", "Gold")
         self._hud_turn_label = lang.get("turn", "Turn")
 
-        # Pre-render the static button labels and size buttons to fit them.
-        self._end_turn_label = self._hud_button_font.render(lang.get("end_turn", "End Turn"), True, theme.TEXT)
-        self._resign_label = self._hud_button_font.render(lang.get("resign", "Resign"), True, theme.TEXT)
-        button_height = 40
-        button_width = max(140, self._end_turn_label.get_width() + 28, self._resign_label.get_width() + 28)
-        self.end_turn_button = pygame.Rect(screen_width - button_width - 10, 10, button_width, button_height)
-        self.resign_button = pygame.Rect(screen_width - button_width - 10, 60, button_width, button_height)
+        pad = theme.HUD_PANEL_PADDING
+        content_width = theme.HUD_PANEL_WIDTH - 2 * pad
+        text_width = content_width - 16
 
-        # Pre-render the fog-of-war badge
-        self._fow_label = self._hud_badge_font.render(
-            lang.get("player_config.fog_of_war", "Fog of War"), True, theme.HUD_FOW_TEXT
-        )
+        def label(font, text, color):
+            return font.render(ellipsize(text, font, text_width), True, color)
+
+        self._end_turn_label = label(self._hud_button_font, lang.get("end_turn", "End Turn"), theme.TEXT)
+        self._resign_label = label(self._hud_button_font, lang.get("resign", "Resign"), theme.TEXT)
+        self._fow_label = label(self._hud_badge_font, lang.get("player_config.fog_of_war", "Fog of War"), theme.HUD_FOW_TEXT)
+        self._hud_gold_caption = label(self._hud_caption_font, self._hud_gold_label, theme.HUD_LABEL_TEXT)
+        self._hud_turn_caption = label(self._hud_caption_font, self._hud_turn_label, theme.HUD_LABEL_TEXT)
+
+        if not self.has_hud_panel:
+            self.hud_rect = pygame.Rect(self.board_rect.right, 0, 0, self.board_rect.height)
+            self.end_turn_button = pygame.Rect(0, 0, 0, 0)
+            self.resign_button = pygame.Rect(0, 0, 0, 0)
+            return
+
+        x = self.board_rect.right + pad
+        stat_height = self._hud_caption_font.get_height() + self._hud_font.get_height()
+        self._hud_player_card = pygame.Rect(x, pad, content_width, 40)
+        self._hud_gold_pos = (x, self._hud_player_card.bottom + 16)
+        self._hud_turn_pos = (x, self._hud_gold_pos[1] + stat_height + 12)
+        self._hud_fow_pos = (x, self._hud_turn_pos[1] + stat_height + 16)
+        info_bottom = self._hud_fow_pos[1] + self._fow_label.get_height() + 4
+
+        # End Turn and Resign sit at the bottom of the panel. A board too
+        # short to fit the panel beside it gets a taller window instead.
+        button_height, gap = 40, 10
+        height = max(self.board_rect.height, info_bottom + 16 + 2 * button_height + gap + pad)
+        self.hud_rect = pygame.Rect(self.board_rect.right, 0, theme.HUD_PANEL_WIDTH, height)
+        self.resign_button = pygame.Rect(x, height - pad - button_height, content_width, button_height)
+        self.end_turn_button = pygame.Rect(x, self.resign_button.y - gap - button_height, content_width, button_height)
+
+    @property
+    def window_size(self):
+        """(width, height) of the window: the board, plus the HUD panel in play."""
+        return self.hud_rect.right, max(self.board_rect.height, self.hud_rect.height)
 
     def render(self):
         """Render the entire game state."""
@@ -382,6 +480,9 @@ class Renderer:
         self.last_frame_time = current_time
 
         self.screen.fill((0, 0, 0))
+
+        self._forget_removed_units()
+        self._update_walks()
 
         # Draw grid
         self._draw_grid()
@@ -556,24 +657,59 @@ class Renderer:
         pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_width, bar_height), 1)
 
     def _draw_units(self):
-        """Draw all units."""
+        """Draw all units.
+
+        Sprites are taller than a tile and overflow it upward, so standing
+        units are drawn top to bottom (by ``y``, then ``x``): a unit lower on
+        the screen stands in front of the one above it. Walking units go on
+        after them, so they pass over the units they walk through. Health
+        bars and status badges go on in a last pass so no neighbour's sprite
+        covers them.
+        """
         fow_player = self._get_fow_player()
 
+        standing = []
+        walking = []
         for unit in self.game_state.units:
             # With fog of war, only draw visible units (own units + units in visible tiles)
-            if fow_player is not None:
-                # Always show own units
-                if unit.player != fow_player:
-                    # Check if enemy unit is in a visible tile
-                    vis_state = self._get_visibility_state(unit.x, unit.y, fow_player)
-                    if vis_state != VISIBLE:
-                        continue
+            if fow_player is not None and unit.player != fow_player and not self._unit_in_sight(unit, fow_player):
+                continue
+            if animation_key(unit) in self._walk_steps:
+                walking.append(unit)
+            else:
+                standing.append(unit)
 
+        standing.sort(key=lambda u: (u.y, u.x))
+        walking.sort(key=lambda u: self._unit_origin(u)[::-1])
+        shown = standing + walking
+        for unit in shown:
             self._draw_unit(unit)
+        for unit in shown:
+            self._draw_unit_status(unit)
+
+    def _unit_in_sight(self, unit, player):
+        """Whether ``player`` sees ``unit``: its tile is VISIBLE to them.
+
+        While the unit walks, both ends of the step it is on must be, so an
+        enemy leaving the fog appears only once it has stepped out, and one
+        walking into it vanishes as it steps off the last tile in sight:
+        its path through the fog is never drawn.
+        """
+        step = self._walk_steps.get(animation_key(unit))
+        tiles = step[:2] if step else [(unit.x, unit.y)]
+        return all(self._get_visibility_state(x, y, player) == VISIBLE for x, y in tiles)
+
+    def _unit_origin(self, unit):
+        """Top-left pixel ``unit`` is drawn at: its tile, or part way along the step it is walking."""
+        step = self._walk_steps.get(animation_key(unit))
+        if step is None:
+            return unit.x * TILE_SIZE, unit.y * TILE_SIZE
+        (x0, y0), (x1, y1), t = step
+        return round((x0 + (x1 - x0) * t) * TILE_SIZE), round((y0 + (y1 - y0) * t) * TILE_SIZE)
 
     def _draw_unit(self, unit):
         """
-        Draw a single unit.
+        Draw a single unit's body (status overlays are :meth:`_draw_unit_status`).
 
         Rendering priority (cascading fallback):
         1. Animated sprite sheet (if available and not disabled)
@@ -590,9 +726,6 @@ class Renderer:
                 animated_frame = self.animator.get_frame(unit, self.delta_time)
                 if animated_frame:
                     self._draw_unit_sprite(unit, animated_frame)
-                    self._draw_paralysis_indicator(unit)
-                    self._draw_haste_indicator(unit)
-                    self._draw_unit_health_bar(unit)
                     return
 
         # Fall back to static sprite (if not disabled)
@@ -600,13 +733,13 @@ class Renderer:
             static_sprite = self.unit_images.get(unit.type)
             if static_sprite:
                 self._draw_unit_sprite(unit, static_sprite)
-                self._draw_paralysis_indicator(unit)
-                self._draw_haste_indicator(unit)
-                self._draw_unit_health_bar(unit)
                 return
 
         # Fall back to letter representation
         self._draw_unit_letter(unit)
+
+    def _draw_unit_status(self, unit):
+        """Draw a unit's status badges and health bar, anchored to its tile (or its step while walking)."""
         self._draw_paralysis_indicator(unit)
         self._draw_haste_indicator(unit)
         self._draw_unit_health_bar(unit)
@@ -632,7 +765,7 @@ class Renderer:
         if not unit.is_paralyzed():
             return
 
-        tile_rect = pygame.Rect(unit.x * TILE_SIZE, unit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        tile_rect = pygame.Rect(*self._unit_origin(unit), TILE_SIZE, TILE_SIZE)
         border_color = _lerp_color(theme.STATUS_PARALYSIS, theme.STATUS_PARALYSIS_TINT, _pulse(theme.STATUS_PULSE_MS))
         pygame.draw.rect(self.screen, border_color, tile_rect, 3)
 
@@ -649,12 +782,13 @@ class Renderer:
             return
 
         # Anchored just above the health bar so neither covers the other.
-        bar_top = unit.y * TILE_SIZE + TILE_SIZE - theme.HEALTH_BAR_UNIT_HEIGHT - theme.HEALTH_BAR_MARGIN
+        left, top = self._unit_origin(unit)
+        bar_top = top + TILE_SIZE - theme.HEALTH_BAR_UNIT_HEIGHT - theme.HEALTH_BAR_MARGIN
         self._draw_status_badge(
             "haste",
             "H",
             theme.STATUS_HASTE,
-            bottomleft=(unit.x * TILE_SIZE + 3, bar_top - 2),
+            bottomleft=(left + 3, bar_top - 2),
         )
 
     def _draw_unit_sprite(self, unit, sprite):
@@ -682,14 +816,15 @@ class Renderer:
             display_sprite = sprite
 
         # Draw player-colored border around sprite
+        left, top = self._unit_origin(unit)
         player_color = PLAYER_COLORS.get(unit.player, (255, 255, 255))
-        border_rect = pygame.Rect(unit.x * TILE_SIZE + 1, unit.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2)
+        border_rect = pygame.Rect(left + 1, top + 1, TILE_SIZE - 2, TILE_SIZE - 2)
         pygame.draw.rect(self.screen, player_color, border_rect, 2)
 
-        # Center the sprite in the tile
-        sprite_rect = display_sprite.get_rect(
-            center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2)
-        )
+        # Stand the sprite on the tile: its bottom edge (the feet line) on the
+        # tile's bottom edge, centred horizontally. A sprite larger than the
+        # tile overflows it upward and sideways.
+        sprite_rect = display_sprite.get_rect(midbottom=(left + TILE_SIZE // 2, top + TILE_SIZE))
         self.screen.blit(display_sprite, sprite_rect)
 
     def _get_overlay(self, size, color):
@@ -724,7 +859,8 @@ class Renderer:
             self._letter_cache[key] = cached
         text, outline_text = cached
 
-        text_rect = text.get_rect(center=(unit.x * TILE_SIZE + TILE_SIZE // 2, unit.y * TILE_SIZE + TILE_SIZE // 2))
+        left, top = self._unit_origin(unit)
+        text_rect = text.get_rect(center=(left + TILE_SIZE // 2, top + TILE_SIZE // 2))
 
         # Black outline
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)]:
@@ -740,8 +876,9 @@ class Renderer:
         margin = theme.HEALTH_BAR_MARGIN
         bar_width = TILE_SIZE - 2 * margin
         bar_height = theme.HEALTH_BAR_UNIT_HEIGHT
-        bar_x = unit.x * TILE_SIZE + margin
-        bar_y = unit.y * TILE_SIZE + TILE_SIZE - bar_height - margin
+        left, top = self._unit_origin(unit)
+        bar_x = left + margin
+        bar_y = top + TILE_SIZE - bar_height - margin
 
         # Background
         pygame.draw.rect(self.screen, theme.HEALTH_BAR_BG, (bar_x, bar_y, bar_width, bar_height))
@@ -769,66 +906,90 @@ class Renderer:
         self._text_cache[key] = ((text, color), surface)
         return surface
 
+    def _gold_text(self):
+        """The current player's gold, written as the unit shop writes prices."""
+        return f"{self.game_state.player_gold[self.game_state.current_player]}g"
+
+    def _turn_text(self):
+        """The turn number, out of the turn limit when there is one."""
+        text = str(self.game_state.turn_number + 1)
+        if self.game_state.max_turns:
+            text += f" / {self.game_state.max_turns}"
+        return text
+
     def _draw_ui(self):
-        """Draw UI elements."""
-        # In headless mode the screen is exactly the grid size, so any HUD
-        # drawn here would overlap the playfield. Skip it for video capture.
+        """Draw the HUD: the side panel in play, two labels in a replay."""
+        # Headless capture (videos, notebooks) is the board alone.
         if self.headless:
             return
+        if self.has_hud_panel:
+            self._draw_hud_panel()
+        else:
+            self._draw_replay_hud()
 
-        player_color = PLAYER_COLORS.get(self.game_state.current_player, theme.TEXT)
+    def _draw_player_card(self, rect, text_surface, player_color):
+        """Draw ``text_surface`` on a dark card with a player-colour accent strip and border."""
+        radius = theme.BORDER_RADIUS_SMALL
+        pygame.draw.rect(self.screen, theme.HUD_CARD_BG, rect, border_radius=radius)
+        accent = pygame.Rect(rect.x, rect.y, theme.HUD_ACCENT_WIDTH, rect.height)
+        pygame.draw.rect(self.screen, player_color, accent, border_top_left_radius=radius, border_bottom_left_radius=radius)
+        pygame.draw.rect(self.screen, player_color, rect, 2, border_radius=radius)
+        self.screen.blit(text_surface, text_surface.get_rect(midleft=(accent.right + 8, rect.centery)))
 
-        # Draw player info and gold
-        gold = self.game_state.player_gold[self.game_state.current_player]
-        gold_text = f"{self._hud_player_label} {self.game_state.current_player} {self._hud_gold_label}: ${gold}"
-        text_surface = self._cached_text("gold", gold_text, self._hud_font, theme.HUD_GOLD_TEXT)
-        text_rect = text_surface.get_rect(topleft=(10, 10))
-        bg_rect = text_rect.inflate(10, 5)
+    def _draw_hud_panel(self):
+        """Draw the HUD panel to the right of the board."""
+        panel = self.hud_rect
+        pygame.draw.rect(self.screen, theme.HUD_PANEL_BG, panel)
+        pygame.draw.line(self.screen, theme.HUD_PANEL_BORDER, panel.topleft, (panel.left, panel.bottom - 1), 2)
 
-        pygame.draw.rect(self.screen, player_color, bg_rect)
-        pygame.draw.rect(self.screen, theme.HUD_GOLD_TEXT, bg_rect, 2)
-        self.screen.blit(text_surface, text_rect)
+        player = self.game_state.current_player
+        name = self._cached_text("hud_player", f"{self._hud_player_label} {player}", self._hud_title_font, theme.TEXT)
+        self._draw_player_card(self._hud_player_card, name, PLAYER_COLORS.get(player, theme.TEXT))
 
-        # Draw turn counter
-        turn_text = f"{self._hud_turn_label}: {self.game_state.turn_number + 1}"
-        if self.game_state.max_turns:
-            turn_text += f" / {self.game_state.max_turns}"
+        for key, caption, text, color, (x, y) in (
+            ("hud_gold", self._hud_gold_caption, self._gold_text(), theme.HUD_GOLD_TEXT, self._hud_gold_pos),
+            ("hud_turn", self._hud_turn_caption, self._turn_text(), theme.TEXT, self._hud_turn_pos),
+        ):
+            self.screen.blit(caption, (x, y))
+            self.screen.blit(self._cached_text(key, text, self._hud_font, color), (x, y + caption.get_height()))
+
+        if self.game_state.fog_of_war:
+            fow_rect = self._fow_label.get_rect(topleft=(self._hud_fow_pos[0] + 4, self._hud_fow_pos[1] + 2))
+            fow_bg = fow_rect.inflate(8, 4)
+            pygame.draw.rect(self.screen, theme.HUD_FOW_BG, fow_bg, border_radius=theme.BORDER_RADIUS_SMALL)
+            pygame.draw.rect(self.screen, theme.HUD_FOW_BORDER, fow_bg, width=1, border_radius=theme.BORDER_RADIUS_SMALL)
+            self.screen.blit(self._fow_label, fow_rect)
+
+        mouse_pos = pygame.mouse.get_pos()
+        for button, label, color, hover_color, border_color in (
+            (self.end_turn_button, self._end_turn_label, theme.BTN_END_TURN, theme.BTN_END_TURN_HOVER, theme.TEXT),
+            (self.resign_button, self._resign_label, theme.BTN_RESIGN, theme.BTN_RESIGN_HOVER, theme.BTN_RESIGN_BORDER),
+        ):
+            fill = hover_color if button.collidepoint(mouse_pos) else color
+            pygame.draw.rect(self.screen, fill, button, border_radius=theme.BORDER_RADIUS)
+            pygame.draw.rect(self.screen, border_color, button, 2, border_radius=theme.BORDER_RADIUS)
+            self.screen.blit(label, label.get_rect(center=button.center))
+
+    def _draw_replay_hud(self):
+        """Draw the gold and turn labels over the board's top-left corner.
+
+        A replay keeps a board-sized window (the replay player lays out its
+        own controls) and takes no clicks on the board, so these stay on it.
+        """
+        player = self.game_state.current_player
+        gold_text = f"{self._hud_player_label} {player} {self._hud_gold_label}: {self._gold_text()}"
+        gold_surface = self._cached_text("gold", gold_text, self._hud_font, theme.HUD_GOLD_TEXT)
+        card = pygame.Rect(5, 5, theme.HUD_ACCENT_WIDTH + gold_surface.get_width() + 16, gold_surface.get_height() + 6)
+        self._draw_player_card(card, gold_surface, PLAYER_COLORS.get(player, theme.TEXT))
+
+        turn_text = f"{self._hud_turn_label}: {self._turn_text()}"
         turn_surface = self._cached_text("turn", turn_text, self._hud_font, theme.TEXT)
-        turn_rect = turn_surface.get_rect(topleft=(10, bg_rect.bottom + 5))
+        turn_rect = turn_surface.get_rect(topleft=(10, card.bottom + 5))
         turn_bg_rect = turn_rect.inflate(10, 5)
 
         pygame.draw.rect(self.screen, theme.HUD_TURN_BG, turn_bg_rect)
         pygame.draw.rect(self.screen, theme.HUD_TURN_BORDER, turn_bg_rect, 2)
         self.screen.blit(turn_surface, turn_rect)
-
-        # Skip End Turn and Resign buttons in replay mode or headless mode
-        if self.replay_mode or self.headless:
-            return
-
-        # Draw End Turn button
-        mouse_pos = pygame.mouse.get_pos()
-        et_hover = self.end_turn_button.collidepoint(mouse_pos)
-        button_color = theme.BTN_END_TURN_HOVER if et_hover else theme.BTN_END_TURN
-
-        pygame.draw.rect(self.screen, button_color, self.end_turn_button, border_radius=theme.BORDER_RADIUS)
-        pygame.draw.rect(self.screen, theme.TEXT, self.end_turn_button, 2, border_radius=theme.BORDER_RADIUS)
-        self.screen.blit(self._end_turn_label, self._end_turn_label.get_rect(center=self.end_turn_button.center))
-
-        # Draw Resign button
-        rs_hover = self.resign_button.collidepoint(mouse_pos)
-        resign_color = theme.BTN_RESIGN_HOVER if rs_hover else theme.BTN_RESIGN
-
-        pygame.draw.rect(self.screen, resign_color, self.resign_button, border_radius=theme.BORDER_RADIUS)
-        pygame.draw.rect(self.screen, theme.BTN_RESIGN_BORDER, self.resign_button, 2, border_radius=theme.BORDER_RADIUS)
-        self.screen.blit(self._resign_label, self._resign_label.get_rect(center=self.resign_button.center))
-
-        # Draw fog of war indicator if enabled
-        if self.game_state.fog_of_war:
-            fow_rect = self._fow_label.get_rect(topright=(self.screen.get_width() - 10, self.resign_button.bottom + 10))
-            fow_bg = fow_rect.inflate(8, 4)
-            pygame.draw.rect(self.screen, theme.HUD_FOW_BG, fow_bg, border_radius=theme.BORDER_RADIUS_SMALL)
-            pygame.draw.rect(self.screen, theme.HUD_FOW_BORDER, fow_bg, width=1, border_radius=theme.BORDER_RADIUS_SMALL)
-            self.screen.blit(self._fow_label, fow_rect)
 
     def _overlay_alpha(self, kind, signature, base_alpha):
         """Fade an overlay in over OVERLAY_FADE_MS when its target changes.
@@ -1050,23 +1211,78 @@ class Renderer:
 
     def queue_movement_path_animation(self, unit, path):
         """
-        Queue a multi-step movement path for animation transitions.
+        Walk ``unit``'s sprite along the path of the move it just made.
 
-        Each path segment triggers the correct walking direction animation
-        (left, right, up, down). After the full path plays through, the
-        unit returns to idle.
+        The engine has already moved the unit; only its drawing follows the
+        path, one tile per ``theme.UNIT_WALK_MS_PER_TILE``, facing the way
+        each step goes (left, right, up, down), and it stands idle on
+        arrival. A new walk replaces one the unit is still on.
 
         Args:
             unit: Unit object
-            path: List of (x, y) positions including start position
+            path: List of (x, y) positions from its start tile to the tile
+                it stopped on (``GameState.move_listeners`` give this)
+
+        Returns:
+            True if the walk is one the viewer sees at least part of (their
+            own unit, or an enemy stepping between tiles in their sight);
+            False if there is nothing to watch, or no step at all.
         """
-        if self.animator:
-            self.animator.queue_movement_path(unit, path)
+        path = [tuple(tile) for tile in path]
+        if len(path) < 2:
+            return False
+        key = animation_key(unit)
+        walk = self._walks[key] = _Walk(unit, path, pygame.time.get_ticks())
+        self._walk_steps[key] = walk.step_at(walk.start_ms)
+        self.update_unit_animation_from_movement(unit, path[0], path[1])
+
+        fow_player = self._get_fow_player()
+        if fow_player is None or unit.player == fow_player:
+            return True
+        return any(
+            self._get_visibility_state(*a, fow_player) == VISIBLE and self._get_visibility_state(*b, fow_player) == VISIBLE
+            for a, b in zip(path, path[1:])
+        )
+
+    def is_unit_moving(self, unit):
+        """Whether ``unit``'s sprite is still walking its last move."""
+        walk = self._walks.get(animation_key(unit))
+        return walk is not None and pygame.time.get_ticks() < walk.end_ms
+
+    def _update_walks(self):
+        """Move each walking sprite on to this frame's step, facing its way; stand arrived ones idle."""
+        now = pygame.time.get_ticks()
+        self._walk_steps.clear()
+        for key, walk in list(self._walks.items()):
+            step = walk.step_at(now)
+            if step is None:
+                del self._walks[key]
+                self.set_unit_idle(walk.unit)
+            else:
+                self._walk_steps[key] = step
+                self.update_unit_animation_from_movement(walk.unit, step[0], step[1])
 
     def cleanup_unit_animation(self, unit):
         """Clean up animation data for a removed unit."""
+        key = animation_key(unit)
+        self._walks.pop(key, None)
+        self._walk_steps.pop(key, None)
         if self.animator:
             self.animator.cleanup_unit(unit)
+
+    def _forget_removed_units(self):
+        """Clean up the animation data of every unit gone from the game since the last frame.
+
+        Units die in combat or leave with an eliminated player inside the
+        engine, which the renderer only notices by their absence.
+        """
+        live = {animation_key(unit): unit for unit in self.game_state.units}
+        gone = {key: unit for key, unit in self._known_units.items() if key not in live}
+        # A unit can also move and die between two frames (a bot's turn)
+        gone.update((key, walk.unit) for key, walk in self._walks.items() if key not in live)
+        for unit in gone.values():
+            self.cleanup_unit_animation(unit)
+        self._known_units = live
 
     def set_viewing_player(self, player):
         """
