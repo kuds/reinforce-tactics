@@ -1,11 +1,11 @@
 /**
  * Reinforce Tactics - Tactical Game Theme
- * Inspired by Advance Wars and Fire Emblem
+ * Inspired by classic handheld tactics games
  */
 
 /* ===== Color Variables ===== */
 :root {
-  /* Primary: Fire Emblem Blue */
+  /* Primary: Tactics Blue */
   --ifm-color-primary: #1e3a5f;
   --ifm-color-primary-dark: #1a3353;
   --ifm-color-primary-darker: #18304e;

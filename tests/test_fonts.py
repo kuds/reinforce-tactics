@@ -3,7 +3,8 @@
 import pygame
 import pytest
 
-from reinforcetactics.utils.fonts import _font_cache, _get_available_fonts, get_font
+from reinforcetactics.utils import fonts
+from reinforcetactics.utils.fonts import _font_cache, _get_available_fonts, get_display_font, get_font
 
 
 @pytest.fixture
@@ -99,3 +100,43 @@ def test_get_font_edge_cases(pygame_init):
 
     # Ensure they're different
     assert small_font is not large_font
+
+
+def _render_glyph_by_glyph(font, text):
+    """Render ``text`` one character at a time, each at its own advance."""
+    whole = font.render(text, False, (255, 255, 255), (0, 0, 0))
+    parts = pygame.Surface(whole.get_size())
+    parts.fill((0, 0, 0))
+    x = 0
+    for char in text:
+        parts.blit(font.render(char, False, (255, 255, 255), (0, 0, 0)), (x, 0))
+        x += font.size(char)[0]
+    return whole, parts, x
+
+
+def test_display_font_is_the_bundled_file(pygame_init, monkeypatch):
+    """get_display_font serves the bundled display face, not a fallback."""
+    monkeypatch.setattr(fonts, "_needs_cjk_font", lambda: False)
+    font = get_display_font(32)
+    assert font.name == "Jersey 15"
+
+
+@pytest.mark.parametrize("size", [24, 32, 48])
+@pytest.mark.parametrize("text", ["fi", "fl", "ff", "ffi", "ffl", "Configure Players", "Configurer les joueurs"])
+def test_display_font_applies_no_ligatures(pygame_init, text, size):
+    """The display font draws "fi", "fl" and "ff" as separate letters.
+
+    SDL_ttf applies a font's standard ligatures and pygame can't turn them
+    off. The previous display font's pixel "fi" read as "A", so the player
+    setup title rendered as "ConAgure Players". A ligature shows up here as
+    a string that renders narrower than, or different from, its letters
+    drawn one by one.
+    """
+    fonts_dir = fonts._resolve_bundled_fonts_dir()
+    assert fonts_dir is not None
+    font = pygame.font.Font(str(fonts_dir / fonts.DISPLAY_FONT_FILE), size)
+
+    whole, parts, advance = _render_glyph_by_glyph(font, text)
+
+    assert whole.get_width() == advance
+    assert pygame.image.tobytes(whole, "RGB") == pygame.image.tobytes(parts, "RGB")
