@@ -11,7 +11,8 @@
 # without promoting is retried (curriculum.max_retries) and then raises
 # CurriculumStalled. Run with --strict; resume a killed run with
 # train_bootstrap.py --resume RUN_DIR (or re-run the same --resume-if-exists
-# command, as scripts/train/run_seeds.py does).
+# command, as scripts/train/run_seeds.py does; a seed group continues with
+# run_seeds.py --group <id>).
 #
 # Hardware tuning (env.n_envs / env.use_subprocess / ppo.batch_size /
 # eval.n_eval_envs / eval.eval_use_subprocess) targets the L4 + 12-vCPU
@@ -59,10 +60,19 @@ env:
   # (tests/test_shipped_configs.py checks it).
   max_steps: 1300
   action_space_type: flat_discrete
+  # Every stage's observations are padded to the largest curriculum map
+  # (corner_points, 10x12). The runner would resolve the same value from the
+  # maps; it is written out so a file with only the small maps (the slice,
+  # bootstrap_validation.yaml) trains on the same inputs: coord_conv's
+  # position planes span the padded grid, so an unpadded 6x6 map would see
+  # different coordinates (and ~3.7x less compute per update).
+  pad_to_size: [10, 12]
   # max_flat_actions stays at the 512 default (decision recorded for review
   # rlenv-11 / prior-13, which proposed 1024 here). The case for 1024 was
   # that on skirmish / corner_points (728-744 legal actions) truncation
   # dropped casts, heals and attacks first, so a big army could not fight.
+  # An untrained policy reaches 770-805 legal actions on corner_points (the
+  # runbook's smoke test), and 15-17% of its decision points there are cut.
   # flat_action_version 2 (the env default for new runs) drops only moves
   # there, shared round-robin across units, and keeps every attack, heal,
   # cast, seize and end_turn. What it still drops is visible now
@@ -203,8 +213,8 @@ eval:
   n_eval_episodes: 60
   eval_seats: [1, 2]
   # The gate pools both seats. `min` would make the *_medium stages nearly
-  # impassable: no scripted bot beats MediumBot moving first on beginner or
-  # intermediate (0-4%).
+  # impassable: scripted bots beat MediumBot moving first in at most 24% of
+  # games on starter and beginner (RandomBot) and 8% on intermediate.
   seat_aggregate: mean
   # Gate, best_model.zip and stall verdicts use the stochastic policy (the
   # one PPO trains). The greedy number is not recorded per eval: that would
@@ -213,8 +223,9 @@ eval:
   eval_deterministic: false
   eval_both_modes: false
   # 8 eval envs in worker processes, one batched predict per step. Assumed
-  # ~2.5x faster than serial on the L4 (measured only 1.0-1.5x on 4 local
-  # CPUs); if it underperforms, n_eval_envs 4 in-process measured ~1.6x.
+  # ~2.5x faster than serial on the L4; on an idle 4-vCPU CPU box they ran
+  # 1.9-2.5x faster (untrained policy). If it underperforms, n_eval_envs 4
+  # in-process measured 1.5-1.7x.
   n_eval_envs: 8
   eval_use_subprocess: true
   # Stage-relative steps between rolling latest.zip checkpoints, which
@@ -228,9 +239,16 @@ curriculum:
   # win rate t; its threshold is
   #   T = round(wilson_lower_bound(ceil(120 * t), 120, z_for_confidence(0.95)), 2)
   # (reinforcetactics.rl.evaluation): t 0.85 / 0.80 / 0.75 / 0.70 / 0.65 /
-  # 0.60 gives T 0.79 / 0.73 / 0.68 / 0.63 / 0.58 / 0.53. A policy at t
-  # passes one eval about half the time and at t + 0.05 86-95% of the time;
-  # one at t - 0.05 promotes within 10 evals 4-11% of the time.
+  # 0.60 / 0.50 gives T 0.79 / 0.73 / 0.68 / 0.63 / 0.58 / 0.53 / 0.43. A
+  # policy at t passes one eval 46-55% of the time and at t + 0.05 84-95% of
+  # the time; one at t - 0.05 promotes within 10 evals 3.5-11.5% of the time.
+  # T needs k_min wins of the 120 pooled episodes (61 at t 0.50, 73 at 0.60,
+  # 85 at 0.70), so no seat can pass alone: 60/60 in seat 1 still needs 13
+  # seat-2 wins at t 0.60. t is capped by what the scripted bots achieve
+  # against the stage's opponent in both seats (the ladder cache; checked by
+  # tests/test_bootstrap_ladder_order.py): at most the best bot's pooled
+  # win rate on a bridge stage, and on a map top at most an even 0.50 unless
+  # a bot does better (docs/validation_run_config.md section 4).
   promotion_criterion: wilson
   promotion_confidence: 0.95
   promotion_score: win_rate
@@ -289,20 +307,25 @@ curriculum:
       map_file: maps/1v1/starter.csv
       opponent: mixed
       opponent_kwargs: {easy: random, hard: medium, p_hard: 0.5}
-      promotion_win_rate: 0.63      # t 0.70
+      # t 0.60: the best scripted bot wins 0.62-0.66 of its games against
+      # this mix (MediumBot: 0.92 moving first, 0.40 moving second).
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 1_000_000
       anneal_horizon: 500_000
       min_timesteps_before_promotion: 25_000
       ent_coef: 0.05
 
-    # Map top. t 0.60 on every map top: MediumBot moving first is rarely
-    # beaten by any scripted bot (at most 16% here), so most of the wins
-    # have to come from the seat where the agent moves first.
+    # Map top. t 0.50 on the MediumBot map tops and on corner_points_simple:
+    # no scripted bot wins more than 0.40 of its games against these
+    # opponents (0.34-0.36 here), and MediumBot moving first is beaten in at
+    # most 24% of games (RandomBot). t 0.50 needs 61 of the 120 pooled wins,
+    # which a policy that wins nearly every seat-1 game reaches; t 0.60 (73)
+    # would need 13+ seat-2 wins even with a perfect seat 1.
     - name: starter_medium
       map_file: maps/1v1/starter.csv
       opponent: medium
-      promotion_win_rate: 0.53      # t 0.60
+      promotion_win_rate: 0.43      # t 0.50
       patience: 2
       max_timesteps: 1_500_000
       anneal_horizon: 750_000
@@ -354,11 +377,13 @@ curriculum:
       max_steps: 4700
       ent_coef: {start: 0.10, end: 0.01, schedule: linear}
 
+    # t 0.60: the best scripted bot wins 0.68-0.70 of its games against this
+    # mix (MediumBot: 1.00 moving first, 0.40 moving second).
     - name: beginner_mixed_50
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs: {easy: simple, hard: medium, p_hard: 0.5}
-      promotion_win_rate: 0.63      # t 0.70
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 3_000_000
       anneal_horizon: 1_500_000
@@ -369,12 +394,13 @@ curriculum:
 
     # Before beginner_medium: since the rule-bot legality fix MediumBot
     # beats AdvancedBot, so this mix sits between mix(simple/medium) and
-    # pure MediumBot.
+    # pure MediumBot. t 0.60: the best scripted bot wins 0.60-0.70 of its
+    # games against it (MediumBot: 0.96-1.00 moving first, 0.24-0.40 second).
     - name: beginner_mixed_med_adv_50
       map_file: maps/1v1/beginner.csv
       opponent: mixed
       opponent_kwargs: {easy: medium, hard: advanced, p_hard: 0.5}
-      promotion_win_rate: 0.63      # t 0.70
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 3_000_000
       anneal_horizon: 1_500_000
@@ -383,12 +409,12 @@ curriculum:
       max_steps: 4700
       ent_coef: 0.05
 
-    # Map top (see starter_medium): no scripted bot beats MediumBot moving
-    # first on this map (0-2%).
+    # Map top (see starter_medium): the best scripted bot wins 0.36-0.40 of
+    # its games against MediumBot here; moving second, at most 16-24%.
     - name: beginner_medium
       map_file: maps/1v1/beginner.csv
       opponent: medium
-      promotion_win_rate: 0.53      # t 0.60
+      promotion_win_rate: 0.43      # t 0.50
       patience: 2
       max_timesteps: 4_000_000
       anneal_horizon: 2_000_000
@@ -443,12 +469,13 @@ curriculum:
       max_steps: 4700
       ent_coef: 0.05
 
-    # Splits the simple -> medium step, the largest on this map.
+    # Splits the simple -> medium step, the largest on this map. t 0.60: the
+    # best scripted bot wins 0.66-0.70 of its games against this mix.
     - name: intermediate_mixed_simple_medium
       map_file: maps/1v1/intermediate.csv
       opponent: mixed
       opponent_kwargs: {easy: simple, hard: medium, p_hard: 0.5}
-      promotion_win_rate: 0.63      # t 0.70
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 3_000_000
       anneal_horizon: 1_500_000
@@ -457,11 +484,12 @@ curriculum:
       max_steps: 4700
       ent_coef: 0.05
 
-    # Map top (see starter_medium).
+    # Map top (see starter_medium): the best scripted bot wins 0.36-0.38 of
+    # its games against MediumBot here; moving second, at most 4-8%.
     - name: intermediate_medium
       map_file: maps/1v1/intermediate.csv
       opponent: medium
-      promotion_win_rate: 0.53      # t 0.60
+      promotion_win_rate: 0.43      # t 0.50
       patience: 2
       max_timesteps: 4_000_000
       anneal_horizon: 2_000_000
@@ -524,9 +552,10 @@ curriculum:
       max_steps: 7400
       ent_coef: 0.05
 
-    # Map top (see starter_medium). No MediumBot stage: it beats AdvancedBot
-    # head to head but only ties SimpleBot here, so it rates below
-    # AdvancedBot and the ladder flags it after advanced.
+    # Map top. t 0.60, not 0.50: here MediumBot wins 0.66 of its games
+    # against AdvancedBot (0.56 moving second). No MediumBot stage: it beats
+    # AdvancedBot head to head but only ties SimpleBot here, so it rates
+    # below AdvancedBot and the ladder flags it after advanced.
     - name: skirmish_advanced
       map_file: maps/1v1/skirmish.csv
       opponent: advanced
@@ -569,7 +598,8 @@ curriculum:
       ent_coef: {start: 0.07, end: 0.03, schedule: linear}
 
     # Capstone: the hardest bot to beat on this map (the best other scripted
-    # bot wins 17-31% of games against it), so no retry. A step of 0.73 over
+    # bot wins 0.32-0.34 of its games against it, and at most 0.40 in either
+    # seat), so t 0.50 as on the MediumBot map tops, and no retry. A step of 0.73 over
     # mix(balanced_random/simple). No MediumBot stage here: the top bots
     # (medium, simple, advanced, master and their mixes) rate within a few
     # dozen Elo of each other on this map, so two of them in a row are
@@ -577,7 +607,7 @@ curriculum:
     - name: corner_points_simple
       map_file: maps/1v1/corner_points.csv
       opponent: simple
-      promotion_win_rate: 0.53      # t 0.60
+      promotion_win_rate: 0.43      # t 0.50
       patience: 2
       max_timesteps: 4_000_000
       anneal_horizon: 2_000_000

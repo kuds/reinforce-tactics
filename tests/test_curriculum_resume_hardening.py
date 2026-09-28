@@ -899,7 +899,7 @@ def test_bootstrap_yaml_thresholds_match_the_wilson_bound(name):
         flat = re.sub(r"\n\s*#", "", text)
         ts, big_ts = re.search(r"t ((?:\d\.\d\d / )+\d\.\d\d) gives T ((?:\d\.\d\d / )+\d\.\d\d)", flat).groups()
         pairs = list(zip(ts.split(" / "), big_ts.split(" / "), strict=True))
-        assert len(pairs) == 6
+        assert len(pairs) == 7
         z = z_for_confidence(cfg.curriculum.promotion_confidence)
         n = cfg.eval.n_eval_episodes * n_seats
         for t, threshold in pairs:

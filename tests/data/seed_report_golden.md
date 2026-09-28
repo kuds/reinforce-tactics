@@ -15,11 +15,11 @@ Generated 2026-09-21T14:13:20+00:00 by scripts/eval/summarize_seeds.py (schema 1
 
 ## 1. Per-seed outcome
 
-| seed | status | cleared | deepest stage | stalled at | env steps | wall h | resumes | retries | meta fails | gate |
-|---|---|---|---|---|---|---|---|---|---|---|
-| s42 | completed | 4/4 | D | — | 1.3k | 0.2 | 0 | 0 | 0 | stochastic |
-| s1042 | interrupted | 3/4 | D | — | 1.4k | 0.2 | 1 | 0 | 0 | stochastic |
-| s2042 | stalled | 2/4 | C | C | 2.5k | 0.4 | 0 | 1 | 0 | stochastic |
+| seed | status | cleared | deepest stage | stalled at | env steps | wall h | active h | resumes | retries | meta fails | gate |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| s42 | completed | 4/4 | D | — | 1.3k | 0.2 | 0.2 | 0 | 0 | 0 | stochastic |
+| s1042 | interrupted | 3/4 | D | — | 1.4k | 0.2 | 0.2 | 1 | 0 | 0 | stochastic |
+| s2042 | stalled | 2/4 | C | C | 2.5k | 0.4 | 0.4 | 0 | 1 | 0 | stochastic |
 
 ## 2. Per stage across seeds
 
@@ -34,37 +34,45 @@ Mean [min–max] over the seeds that reached the stage; steps: median [min–max
 
 ## 3. Per-seed detail
 
+draw return/ep: the mean return of the final eval's draws without the potential term (its undiscounted eval sum drifts with game length); (+Φ) marks a row that records whole-episode returns only, (≥) a legacy lower bound.
+
 ### s42 — 20260928_120000_val_s42 (completed, new layout)
 
 | # | stage | outcome | steps | stoch W/D/L | greedy W/D/L | gate WR seat 1/2 | retries | captures/ep T/B/H | shaping abs | dense share | draw return/ep | cum steps |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 300 |
-| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 500 |
-| 3 | C | cleared | 600 | 9/1/0 90% [60%–98%] | 6/3/1 60% [31%–83%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 1.1k |
-| 4 | D | cleared | 200 | 8/2/0 80% [49%–94%] | 9/1/0 90% [60%–98%] | 80%/— | 0 | 1.0/0.5/0.0 | 0.23 | 0.34 | -5.5 | 1.3k |
+| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 300 |
+| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 500 |
+| 3 | C | cleared | 600 | 9/1/0 90% [60%–98%] | 6/3/1 60% [31%–83%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 1.1k |
+| 4 | D | cleared | 200 | 8/2/0 80% [49%–94%] | 9/1/0 90% [60%–98%] | 80%/— | 0 | 1.0/0.5/0.0 | 0.23 | 0.34 | -4.5 | 1.3k |
 
 Steps/h by map: beginner 6.0k
+
+Throughput by map (train env steps/s, evals excluded / eval agent steps/s): beginner 2 / —
 
 ### s1042 — 20260928_120000_val_s1042 (interrupted, new layout)
 
 | # | stage | outcome | steps | stoch W/D/L | greedy W/D/L | gate WR seat 1/2 | retries | captures/ep T/B/H | shaping abs | dense share | draw return/ep | cum steps |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 300 |
-| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 500 |
-| 3 | C | cleared | 800 | 9/1/0 90% [60%–98%] | 6/3/1 60% [31%–83%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 1.3k |
-| 4 | D | interrupted | 0 (censored) ~ | 3/7/0 30% [11%–60%] | 2/8/0 20% [6%–51%] | 30%/— | 0 | 1.0/0.5/0.0 | 0.53 | 0.68 | -5.5 | 1.4k |
+| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 300 |
+| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 500 |
+| 3 | C | cleared | 800 | 9/1/0 90% [60%–98%] | 6/3/1 60% [31%–83%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 1.3k |
+| 4 | D | interrupted | 0 (censored) ~ | 3/7/0 30% [11%–60%] | 2/8/0 20% [6%–51%] | 30%/— | 0 | 1.0/0.5/0.0 | 0.53 | 0.68 | -4.5 | 1.4k |
 
 Steps/h by map: beginner 6.0k
+
+Throughput by map (train env steps/s, evals excluded / eval agent steps/s): beginner 2 / —
 
 ### s2042 — 20260928_120000_val_s2042 (stalled, new layout)
 
 | # | stage | outcome | steps | stoch W/D/L | greedy W/D/L | gate WR seat 1/2 | retries | captures/ep T/B/H | shaping abs | dense share | draw return/ep | cum steps |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 300 |
-| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -5.5 | 500 |
-| 3 | C | stalled | 2.0k (censored) | 3/6/1 30% [11%–60%] | 1/8/1 10% [2%–40%] | 30%/— | 1 | 1.0/0.5/0.0 | 0.68 | 0.81 | -5.5 | 2.5k |
+| 1 | A | cleared | 300 | 9/1/0 90% [60%–98%] | 10/0/0 100% [72%–100%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 300 |
+| 2 | B | cleared | 200 | 9/1/0 90% [60%–98%] | 8/2/0 80% [49%–94%] | 90%/— | 0 | 1.0/0.5/0.0 | 0.21 | 0.31 | -4.5 | 500 |
+| 3 | C | stalled | 2.0k (censored) | 3/6/1 30% [11%–60%] | 1/8/1 10% [2%–40%] | 30%/— | 1 | 1.0/0.5/0.0 | 0.68 | 0.81 | -4.5 | 2.5k |
 
 Steps/h by map: beginner 6.0k
+
+Throughput by map (train env steps/s, evals excluded / eval agent steps/s): beginner 2 / —
 
 ## 4. Comparison
 

@@ -188,10 +188,15 @@ def test_validation_slice_mirrors_the_canonical_curriculum():
 
     Allowed differences: per-stage max_timesteps / anneal_horizon (no larger
     than the canonical ones), eval.eval_freq, and curriculum.max_retries.
+    Compared as the runner resolves them (``bootstrap.resolve_config``): the
+    padding is derived from the stage maps, and the slice's maps are all 6x6,
+    so two identical env blocks could still train on different observations.
     """
-    canonical, probe = load_config(BOOTSTRAP), load_config(BOOTSTRAP_SLICE)
+    canonical = bootstrap.resolve_config(load_config(BOOTSTRAP))
+    probe = bootstrap.resolve_config(load_config(BOOTSTRAP_SLICE))
     assert (probe.algorithm, probe.seed) == (canonical.algorithm, canonical.seed)
     assert dataclasses.asdict(probe.env) == dataclasses.asdict(canonical.env)
+    assert probe.env.pad_to_size == canonical.env.pad_to_size == (10, 12)
     assert dataclasses.asdict(probe.ppo) == dataclasses.asdict(canonical.ppo)
     assert _without(probe.eval, "eval_freq") == _without(canonical.eval, "eval_freq")
     assert probe.eval.eval_freq <= canonical.eval.eval_freq

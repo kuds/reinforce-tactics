@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -183,7 +184,9 @@ class TestNewLayout:
             "terminal_per_ep": -10.0,
             "return_per_ep": -5.5,
         }
-        assert a["draw_return_per_ep"] == pytest.approx(-5.5) and a["draw_breakeven"] is False
+        # Without the potential term (6 - 0.5 - 10), and with it (-1 more).
+        assert a["draw_return_per_ep"] == pytest.approx(-4.5) and a["draw_breakeven"] is False
+        assert a["draw_return_raw_per_ep"] == pytest.approx(-5.5) and a["draw_return_has_potential"] is False
         assert a["reward_per_ep_terminal"] == pytest.approx(t_sum / 10) and a["reward_sum_mismatch"] is False
         assert (a["captures_per_ep_tower"], a["captures_per_ep_building"], a["captures_per_ep_hq"]) == (1.0, 0.5, 0.0)
         assert a["opponent_captures_per_ep_neutral"] == 1.0 and a["opponent_captures_per_ep_owned"] == 0.0
@@ -246,6 +249,52 @@ class TestNewLayout:
         a = rs.run_metrics(rs.read_run(path))["stages"][0]
         assert a["draw_breakeven_evals"] == 1 and a["draw_breakeven_at"] == [100]
         assert a["draw_breakeven"] is False  # the final row's draws lose
+
+    def test_draw_breakeven_leaves_the_potential_term_out(self, tmp_path):
+        """The smoke test's corner_points draws: -258 action, -50 terminal, +393 potential term per draw.
+
+        With the potential term a draw 'returns' +85 and was flagged break-even; its undiscounted eval sum
+        is drift, not reward the policy can farm, so the flag reads the -308 without it.
+        """
+        drift = {"draws": {"action": -258.0, "shaping_delta": 393.0, "invalid_penalty": 0.0, "terminal": -50.0}}
+        rows = [eval_row(100, 0, 7, 0, per_episode={**PER_EPISODE, **drift})]
+        path = write_run(tmp_path, "run_phi", [stage("A", rows, promoted=True, start=0, end=100)], seed=8)
+        summary = rs.build_summary([rs.read_run(path)])
+        a = summary["runs"][0]["stages"][0]
+        assert a["draw_return_per_ep"] == pytest.approx(-308.0) and a["draw_return_raw_per_ep"] == pytest.approx(85.0)
+        assert a["draw_breakeven"] is False and a["draw_breakeven_evals"] == 0
+        assert not any(f["kind"] == "draw_breakeven" for f in summary["flags"])
+        # The other way round: a potential drain must not hide a draw that pays.
+        drain = {"draws": {"action": 60.0, "shaping_delta": -1580.0, "invalid_penalty": 0.0, "terminal": -50.0}}
+        rows = [eval_row(100, 0, 5, 0, per_episode={**PER_EPISODE, **drain})]
+        path = write_run(tmp_path, "run_drain", [stage("A", rows, promoted=True, start=0, end=100)], seed=9)
+        a = rs.run_metrics(rs.read_run(path))["stages"][0]
+        assert a["draw_return_per_ep"] == pytest.approx(10.0) and a["draw_breakeven"] is True
+        # A row with whole-episode returns only cannot take it out, and says so.
+        row = {"draws": 2, "wins": 0, "losses": 0, "rewards": [3.0, 5.0], "outcomes": ["draws", "draws"]}
+        assert rs.draw_return(row) == (4.0, True) and rs.draw_return_has_potential(row) is True
+
+    def test_eval_and_training_throughput(self, tmp_path):
+        """Eval: agent steps / eval seconds; training: steps between rows / (wall time - the later row's eval)."""
+        rows = [
+            eval_row(1000, 9, 1, 0, wall_time=T0, eval_seconds=10.0),
+            eval_row(2000, 9, 1, 0, wall_time=T0 + 30.0, eval_seconds=10.0),  # 1000 steps in 20 s of training
+            eval_row(3000, 9, 1, 0, wall_time=T0 + 55.0, eval_seconds=5.0),  # 1000 steps in 20 s
+            eval_row(4000, 9, 1, 0, wall_time=T0 + 9000.0, eval_seconds=5.0),  # across a pause: skipped
+        ]
+        path = write_run(tmp_path, "run_tp", [stage("A", rows, promoted=True, start=0, end=4000)], seed=4)
+        run = rs.run_metrics(rs.read_run(path))
+        a = run["stages"][0]
+        # 10 episodes of 100 agent steps per row: 4000 steps over 30 s of eval.
+        assert a["eval_agent_steps_per_s"] == pytest.approx(4000 / 30.0)
+        assert a["train_steps_per_s"] == pytest.approx(2000 / 40.0)
+        assert run["throughput_by_map"][MAP] == {
+            "eval_agent_steps_per_s": pytest.approx(4000 / 30.0),
+            "train_steps_per_s": pytest.approx(50.0),
+        }
+        # A both-modes row's lengths cover one mode only: left out of the eval rate.
+        both = eval_row(100, 9, 1, 0, other=(9, 1, 0), wall_time=T0, eval_seconds=10.0)
+        assert rs._eval_throughput([both]) is None
 
 
 class TestLegacyLayout:
@@ -343,6 +392,49 @@ class TestAggregation:
         wr = by["A"]["metrics"]["stoch_win_rate"]
         assert wr["n"] == 3 and wr["sd"] == 0.0 and wr["ci95_lo"] == wr["ci95_hi"] == pytest.approx(0.9)
         assert by["D"]["n_reached"] == 2 and by["D"]["outcomes"]["s2042"] == "not_reached"
+
+    def test_runs_of_the_same_seed_are_kept_apart(self, tmp_path):
+        """Two different runs of seed 42 (the whole archive is seed 42): neither overwrites the other."""
+        done_rows = _rows(0, [(9, 1, 0), (9, 1, 0)])
+        stalled_rows = _rows(0, [(1, 9, 0)] * 3)
+        done = write_run(tmp_path, "repa_s42", [stage("s2", done_rows, promoted=True, start=0, end=200)], seed=42)
+        stalled = write_run(
+            tmp_path, "stl_s42", [stage("s2", stalled_rows, promoted=False, start=0, end=300)], seed=42, status="stalled"
+        )
+        other = write_run(tmp_path, "repa_s1042", [stage("s2", done_rows, promoted=True, start=0, end=200)], seed=1042)
+        summary = rs.build_summary([rs.read_run(p) for p in (done, stalled, other)], allow_mixed=True)
+        labels = [r["label"] for r in summary["runs"]]
+        assert labels == ["s42@repa_s42", "s42@stl_s42", "s1042"]
+        (s2,) = summary["stages"]
+        assert (s2["n_reached"], s2["n_cleared"], s2["n_stalled"]) == (3, 2, 1)
+        assert s2["outcomes"] == {"s42@repa_s42": "cleared", "s42@stl_s42": "stalled", "s1042": "cleared"}
+        wr = s2["metrics"]["stoch_win_rate"]
+        assert wr["n"] == 3 and wr["values"] == {"s42@repa_s42": 0.9, "s42@stl_s42": 0.1, "s1042": 0.9}
+        assert rs.render_report(summary).count("s42@stl_s42") >= 2
+        assert rs.unique_labels(["s1", "s1", "s2"], ["a", "a", "b"]) == ["s1@a", "s1@a#2", "s2"]
+
+    def test_active_hours_leave_out_the_time_between_sessions(self, tmp_path):
+        # Rows every 60 s, then a 50-minute outage, then rows every 60 s again.
+        walls = [T0 + 60.0 * i for i in range(5)] + [T0 + 240.0 + 3000.0 + 60.0 * i for i in range(5)]
+        rows = [eval_row(100 * (i + 1), 9, 1, 0, wall_time=w, eval_seconds=5.0) for i, w in enumerate(walls)]
+        path = write_run(tmp_path, "20260928_120000_val_s42", [stage("A", rows, promoted=True, start=0, end=1000)])
+        record = rs.read_run(path)
+        run = rs.run_metrics(record)
+        assert run["wall_clock_h"] == pytest.approx((240.0 + 3000.0 + 240.0) / 3600.0)
+        # The outage counts as 3x the median gap (180 s), not 3000 s.
+        assert run["active_h"] == pytest.approx((8 * 60.0 + 180.0) / 3600.0) and run["active_source"].startswith("eval")
+        # The launcher's sessions, when given, are the process time itself.
+        stamp = lambda t: datetime.fromtimestamp(t, UTC).isoformat()  # noqa: E731
+        sessions = [
+            {"started_at": stamp(T0 - 20.0), "ended_at": stamp(T0 + 250.0)},
+            {"started_at": stamp(T0 + 3400.0), "ended_at": None},  # its launcher died: to its last row
+        ]
+        run = rs.run_metrics(record, sessions=sessions)
+        assert run["active_h"] == pytest.approx((270.0 + (walls[-1] - (T0 + 3400.0))) / 3600.0)
+        assert run["active_source"] == "launcher sessions"
+        summary = rs.build_summary([record], sessions={record.run_id: sessions})
+        assert summary["runs"][0]["active_h"] == pytest.approx(run["active_h"])
+        assert "| active h |" in rs.render_report(summary)
 
     def test_single_run(self, tmp_path):
         run = rs.run_metrics(rs.read_run(_write_group(tmp_path)[0]))

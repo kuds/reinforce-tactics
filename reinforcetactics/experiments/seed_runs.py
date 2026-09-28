@@ -62,14 +62,31 @@ EXIT_STALLED = 3
 EXIT_SIGINT = 128 + signal.SIGINT
 EXIT_SIGTERM = 128 + signal.SIGTERM
 INTERRUPT_CODES = frozenset({EXIT_SIGINT, EXIT_SIGTERM})
+# A child killed from outside without a chance to checkpoint: a hangup
+# (SIGHUP, 129) or SIGKILL (137: ``kill -9``, the kernel's OOM killer). The
+# run dir still resumes from its last rolling checkpoint, so these count as
+# interrupted, not failed (numeric: SIGHUP and SIGKILL do not exist on Windows).
+EXIT_SIGHUP = 129
+EXIT_SIGKILL = 137
+KILLED_CODES = frozenset({EXIT_SIGHUP, EXIT_SIGKILL})
 
-# Run states (classify_run), plus FAILED from a session's exit code.
+# Run states (classify_run), plus FAILED from a session's exit code, RUNNING
+# when a live process holds the run dir's lock (run_is_live), and SUBMITTED
+# for a Vertex seed whose job was submitted and whose run dir is not here.
 PENDING = "pending"
 INTERRUPTED = "interrupted"
 COMPLETED = "completed"
 STALLED = "stalled"
 FAILED = "failed"
+RUNNING = "running"
+SUBMITTED = "submitted"
 DONE_STATES = frozenset({COMPLETED, STALLED})
+
+# train_bootstrap.py holds an exclusive flock on this file in its output
+# directory for as long as it runs (acquire_run_lock), so a second trainer
+# never resumes a run dir that is still being written, and the launcher can
+# tell a live run from an interrupted one.
+RUN_LOCK = ".train_bootstrap.lock"
 
 TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
 GROUP_RE = re.compile(r"^(\d{8}_\d{6})_([a-z0-9][a-z0-9-]{0,30})$")
@@ -263,9 +280,10 @@ def seed_collisions(seeds: Sequence[int], cfg: Any) -> list[str]:
     streams) when d < n_eval -- or, with ``resample_eval_seeds``, whenever
     d mod 1000 falls outside [n_eval, 1000 - n_eval] within the block range.
     A run's training envs meeting another run's eval seeds (d near
-    ``seed_offset``) is reported too. Consecutive seeds (42, 43, 44) share 7
-    of 8 training streams and 79 of 80 eval episodes under bootstrap.yaml;
-    the default stride of 1000 shares none.
+    ``seed_offset``) is reported too. Consecutive seeds (42, 43) share
+    n_envs - 1 training streams and n_eval - 1 eval episode seeds per seat
+    (under bootstrap.yaml, 7 of 8 and 59 of 60); the default stride of 1000
+    shares none.
     """
     st = seed_streams(cfg)
     eval_blocks = st.max_blocks if st.resample else 0
@@ -336,6 +354,198 @@ def classify_run(run_dir: str | Path) -> str:
     if (run_dir / "resolved_config.yaml").is_file():
         return INTERRUPTED
     return PENDING
+
+
+# ---------------------------------------------------------------------------
+# The run-dir lock: one trainer per run directory
+# ---------------------------------------------------------------------------
+
+
+class RunLockedError(RuntimeError):
+    """Another live process holds the run directory's lock."""
+
+
+def _fcntl() -> Any:
+    try:
+        import fcntl
+    except ImportError:  # Windows: no flock; the lock is skipped
+        return None
+    return fcntl
+
+
+def lock_holder(run_dir: str | Path) -> dict[str, Any]:
+    """What the lock file says about its holder (``pid``, ``host``, ``started_at``); {} if unreadable."""
+    data = _read_json(Path(run_dir) / RUN_LOCK)
+    return data if isinstance(data, dict) else {}
+
+
+# Locks this process holds: {lock path: (pid, fd)}. flock treats every open()
+# of the file separately, so a second acquire in the same process (a test
+# calling train_bootstrap.main twice) must reuse the first descriptor.
+_HELD_LOCKS: dict[str, tuple[int, int]] = {}
+
+
+def _held_fd(path: Path) -> int | None:
+    held = _HELD_LOCKS.get(str(path))
+    if held is None:
+        return None
+    pid, fd = held
+    try:
+        same = pid == os.getpid() and os.fstat(fd).st_ino == os.stat(path).st_ino
+    except OSError:
+        same = False
+    if same:
+        return fd
+    _HELD_LOCKS.pop(str(path), None)
+    if pid == os.getpid():
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    return None
+
+
+def acquire_run_lock(run_dir: str | Path, *, attempts: int = 5, wait: float = 0.2) -> int | None:
+    """Take an exclusive lock on ``<run_dir>/RUN_LOCK`` and keep it for the life of this process.
+
+    Returns the lock's file descriptor (it stays open; the lock ends when
+    the process does, however it ends, or with :func:`release_run_lock`), or
+    None where file locks do not work (no ``fcntl``, or a filesystem without
+    flock support): the run goes on unlocked. Raises :class:`RunLockedError`
+    when another process holds the lock -- a trainer still running in this
+    directory. ``attempts`` covers a status probe holding it for an instant.
+    """
+    fcntl = _fcntl()
+    if fcntl is None:
+        return None
+    run_dir = Path(run_dir).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / RUN_LOCK
+    held = _held_fd(path)
+    if held is not None:
+        return held
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:  # a read-only or odd filesystem: no lock
+        return None
+    for attempt in range(max(1, attempts)):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if attempt + 1 >= max(1, attempts):
+                os.close(fd)
+                holder = lock_holder(run_dir)
+                who = ", ".join(f"{k} {holder[k]}" for k in ("pid", "host", "started_at") if holder.get(k))
+                raise RunLockedError(
+                    f"{run_dir} is in use by another process ({who or 'holder unknown'}); a second trainer "
+                    "would write the same run dir. Wait for it to finish, or stop it first."
+                ) from None
+            time.sleep(wait)
+        except OSError:
+            # A filesystem without flock (some network / FUSE mounts): no lock.
+            os.close(fd)
+            return None
+    info = {"pid": os.getpid(), "host": _hostname(), "started_at": utc_now()}
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, (json.dumps(info) + "\n").encode("utf-8"))
+    except OSError:
+        pass
+    _HELD_LOCKS[str(path)] = (os.getpid(), fd)
+    return fd
+
+
+def release_run_lock(run_dir: str | Path) -> None:
+    """Release a lock this process took with :func:`acquire_run_lock` (no-op otherwise)."""
+    path = Path(run_dir).resolve() / RUN_LOCK
+    held = _HELD_LOCKS.pop(str(path), None)
+    if held is not None and held[0] == os.getpid():
+        try:
+            os.close(held[1])
+        except OSError:
+            pass
+
+
+def run_lock_held(run_dir: str | Path) -> bool | None:
+    """Whether a live process holds the run dir's lock: None when there is no lock file or locks do not work.
+
+    Read-only: the probe takes a shared lock for an instant and never
+    creates the file.
+    """
+    fcntl = _fcntl()
+    path = Path(run_dir) / RUN_LOCK
+    if fcntl is None or not path.is_file():
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return None
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def _hostname() -> str:
+    import socket
+
+    try:
+        return socket.gethostname()
+    except OSError:
+        return ""
+
+
+def _pid_runs(pid: Any, run_dir: Path) -> bool:
+    """Whether process ``pid`` is alive here and (where /proc shows it) its command names ``run_dir``."""
+    try:
+        pid = int(pid)
+        os.kill(pid, 0)
+    except (TypeError, ValueError, ProcessLookupError, OverflowError):
+        return False
+    except PermissionError:
+        pass  # alive, another user's
+    except OSError:
+        return False
+    cmdline = Path(f"/proc/{pid}/cmdline")
+    if cmdline.parent.parent.is_dir():  # Linux: a reused pid runs some other command
+        try:
+            args = cmdline.read_bytes().split(b"\0")
+        except OSError:
+            return False
+        return any(os.fsencode(run_dir.name) in a for a in args)
+    return True
+
+
+def run_is_live(run_dir: str | Path, record: Mapping[str, Any] | None = None) -> bool:
+    """Whether a process is still training in ``run_dir``.
+
+    The run dir's lock answers when there is one (train_bootstrap.py holds it
+    while it runs). Otherwise -- a trainer that takes no lock, a filesystem
+    without flock -- the last session the launcher recorded as running on
+    this host counts while its pid is alive and still runs this seed.
+    """
+    run_dir = Path(run_dir)
+    held = run_lock_held(run_dir)
+    if held is not None:
+        return held
+    record = record or {}
+    sessions = record.get("sessions") or []
+    if record.get("last_state") != RUNNING or not sessions:
+        return False
+    last = sessions[-1]
+    if last.get("ended_at") or not last.get("pid"):
+        return False
+    if last.get("host") and last["host"] != _hostname():
+        return False
+    return _pid_runs(last["pid"], run_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +743,22 @@ def git_info(repo_root: str | Path = REPO_ROOT) -> dict[str, Any]:
     return {"commit": commit, "short": commit[:7], "dirty": dirty}
 
 
+def resolve_commit(ref: str, repo_root: str | Path = REPO_ROOT) -> str | None:
+    """The full sha of commit ``ref`` (a short sha, a tag) in the checkout, or None when it names no commit here."""
+    ref = str(ref or "").strip()
+    if not ref or ref.startswith("-"):
+        return None
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out or None
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -548,7 +774,15 @@ def new_group_manifest(
     train_args: Sequence[str],
     git: Mapping[str, Any] | None = None,
     vertex: Mapping[str, Any] | None = None,
+    launch: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """A new ``seed_group.json``.
+
+    ``launch`` holds the local scheduling options (``parallel``,
+    ``cpu_sets``, ``no_pin``, ``gpus``, ``device``, ``tee``) that a
+    continuation without them reuses, as it reuses the config, seeds and
+    train args.
+    """
     _, tag = parse_group_id(group)
     return {
         "version": MANIFEST_VERSION,
@@ -563,6 +797,7 @@ def new_group_manifest(
         "seeds": [int(s) for s in seeds],
         "train_args": list(train_args),
         "vertex": dict(vertex) if vertex else None,
+        "launch": dict(launch or {}),
         "runs": {
             str(int(s)): {
                 "run_dir": run_dir_name(group, int(s)),
@@ -615,11 +850,24 @@ def manifest_mismatches(
 
 
 def seed_state(run_dir: str | Path, record: Mapping[str, Any] | None) -> str:
-    """A seed's state: its run dir's (:func:`classify_run`), or ``failed`` when its last session failed."""
+    """A seed's state.
+
+    Its run dir's (:func:`classify_run`) when finished; ``running`` while a
+    process still trains in it (:func:`run_is_live`); ``failed`` when its
+    last session failed; ``submitted`` for a Vertex seed whose job was
+    submitted and whose run dir here (a fetched copy, or none yet) is not
+    finished -- only the job knows whether it still runs (``status
+    --jobs``); else the run dir's state.
+    """
     state = classify_run(run_dir)
     if state in DONE_STATES:
         return state
-    if (record or {}).get("last_state") == FAILED:
+    record = record or {}
+    if record.get("last_state") == SUBMITTED:
+        return SUBMITTED
+    if run_is_live(run_dir, record):
+        return RUNNING
+    if record.get("last_state") == FAILED:
         return FAILED
     return state
 
@@ -627,22 +875,27 @@ def seed_state(run_dir: str | Path, record: Mapping[str, Any] | None) -> str:
 def state_after_exit(run_dir: str | Path, exit_code: int) -> str:
     """A seed's state after a session ended with ``exit_code``.
 
-    The run dir decides completed / stalled; otherwise 130 / 143 mean
-    interrupted and anything else failed (an exit 0 or 3 whose run dir does
-    not say so included: the record and the exit code disagree).
+    The run dir decides completed / stalled; otherwise 130 / 143 (a signal
+    the child handled) and 129 / 137 (a hangup, ``kill -9`` or the OOM
+    killer) mean interrupted -- the run resumes from its last rolling
+    checkpoint -- and anything else failed (an exit 0 or 3 whose run dir
+    does not say so included: the record and the exit code disagree).
     """
     state = classify_run(run_dir)
     if state in DONE_STATES:
         return state
-    return INTERRUPTED if exit_code in INTERRUPT_CODES else FAILED
+    return INTERRUPTED if exit_code in INTERRUPT_CODES | KILLED_CODES else FAILED
 
 
 def launcher_exit_code(states: Mapping[Any, str], signalled: int | None = None, codes: Mapping[Any, int] | None = None) -> int:
-    """0 all completed; 3 some stalled (none failed or interrupted); 1 any failed; 130/143 interrupted."""
+    """0 all completed; 3 some stalled (none failed or interrupted); 1 any failed or not finished; 130/143 interrupted.
+
+    Not finished: pending, or still running under another launcher.
+    """
     if signalled is not None:
         return 128 + int(signalled)
     values = list(states.values())
-    if FAILED in values or PENDING in values:
+    if FAILED in values or PENDING in values or RUNNING in values or SUBMITTED in values:
         return EXIT_FAILED
     interrupted = [k for k, v in states.items() if v == INTERRUPTED]
     if interrupted:
@@ -857,7 +1110,10 @@ def run_local(
     SIGINT / SIGTERM to this process (with ``handle_signals``) is forwarded
     to every child, no new child starts, and after ``kill_timeout`` seconds
     (or a second signal) the children left are killed; the result's
-    ``signalled`` is the signal.
+    ``signalled`` is the signal. SIGHUP (the terminal or SSH session went
+    away) is handled the same way, and the children get SIGTERM, which
+    train_bootstrap.py turns into a checkpoint and exit 143: they run in
+    their own sessions and would otherwise train on unrecorded.
     """
     console = console or sys.stdout
     queue = [int(s) for s in seeds]
@@ -871,7 +1127,10 @@ def run_local(
 
     previous: dict[int, Any] = {}
     if handle_signals and threading.current_thread() is threading.main_thread():
-        for signum in (signal.SIGINT, signal.SIGTERM):
+        handled = [signal.SIGINT, signal.SIGTERM]
+        if hasattr(signal, "SIGHUP"):
+            handled.append(signal.SIGHUP)
+        for signum in handled:
             previous[signum] = signal.signal(signum, on_signal)
 
     def finish(slot: int, rc: int) -> None:
@@ -921,6 +1180,7 @@ def run_local(
             "cpu_set": format_cpu_set(spec.cpu_set),
             "gpu": spec.gpu,
             "pid": proc.pid,
+            "host": _hostname(),
             "log": str(log_path),
         }
         running[slot] = _Running(spec=spec, proc=proc, session=session, log=log, pump=pump)
@@ -941,9 +1201,11 @@ def run_local(
         if received:
             first = received[0]
             result.signalled = first
+            # A hangup is forwarded as SIGTERM, the signal the trainer checkpoints on.
+            forward = signal.SIGTERM if first == getattr(signal, "SIGHUP", None) else first
             for item in running.values():
                 try:
-                    item.proc.send_signal(first)
+                    item.proc.send_signal(forward)
                 except OSError:
                     pass
             deadline = time.monotonic() + kill_timeout
@@ -1007,13 +1269,16 @@ def vertex_submission(
     bucket: str,
     image_env: Mapping[str, str] | None = None,
     root: str = DEFAULT_ROOT,
+    git_commit: str | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """``(env, argv)`` of the ``submit_vertex_job.sh`` call for one seed.
 
     The same spec serves the first submission and every resubmission: the
     job restores ``<OUTPUT_URI>/<run>/`` into ``benchmarks/bootstrap/<run>``
     before it starts (``RESTORE_DIRS``), and ``--resume-if-exists`` then
-    starts, resumes, or finds the run done.
+    starts, resumes, or finds the run done. ``git_commit`` (the commit the
+    image was built from) reaches the job as ``RT_GIT_COMMIT``: the image
+    has no ``.git``, so the run's records take the commit from there.
     """
     run = run_dir_name(group, seed)
     local = f"{root.rstrip('/')}/{run}"
@@ -1024,6 +1289,8 @@ def vertex_submission(
         "OUTPUT_URI": group_output_uri(bucket, group),
         "RESTORE_DIRS": f"{local}={run}",
     }
+    if git_commit:
+        env["RT_GIT_COMMIT"] = str(git_commit)
     train = ["python3", TRAIN_SCRIPT, "--config", str(config), "--seed", str(int(seed)), "--output-dir", local]
     train += ["--resume-if-exists", "--device", device, *passthrough]
     if "--build-bc" in passthrough:
@@ -1050,20 +1317,38 @@ def job_region(resource: str) -> str | None:
 Runner = Callable[..., Any]
 
 
-def describe_job_state(resource: str, runner: Runner = subprocess.run) -> str | None:
-    """The job's state (``JOB_STATE_RUNNING``, ...) from ``gcloud ai custom-jobs describe``; None if unknown."""
-    cmd = ["gcloud", "ai", "custom-jobs", "describe", resource, "--format=value(state)"]
+def describe_job(resource: str, runner: Runner = subprocess.run) -> tuple[str | None, str]:
+    """``(state, error message)`` of a job from ``gcloud ai custom-jobs describe``; ``(None, "")`` if unknown."""
+    cmd = ["gcloud", "ai", "custom-jobs", "describe", resource, "--format=value(state,error.message)"]
     region = job_region(resource)
     if region:
         cmd.append(f"--region={region}")
     try:
         proc = runner(cmd, capture_output=True, text=True, check=False)
     except OSError:
-        return None
+        return None, ""
     if getattr(proc, "returncode", 1) != 0:
-        return None
-    state = (getattr(proc, "stdout", "") or "").strip().splitlines()
-    return state[-1].strip() if state else None
+        return None, ""
+    lines = [line for line in (getattr(proc, "stdout", "") or "").strip().splitlines() if line.strip()]
+    if not lines:
+        return None, ""
+    state, _, message = lines[-1].partition("\t")
+    return state.strip() or None, message.strip()
+
+
+def describe_job_state(resource: str, runner: Runner = subprocess.run) -> str | None:
+    """The job's state (``JOB_STATE_RUNNING``, ...) from ``gcloud ai custom-jobs describe``; None if unknown."""
+    return describe_job(resource, runner=runner)[0]
+
+
+_EXIT_STATUS_RE = re.compile(r"non-zero status of (\d+)")
+
+
+def job_exit_status(message: str) -> int | None:
+    """The container's exit status in a failed job's error message (Vertex writes "... exited with a
+    non-zero status of N ..."), else None."""
+    m = _EXIT_STATUS_RE.search(message or "")
+    return int(m.group(1)) if m else None
 
 
 def gcs_run_state(output_uri: str, run: str, client: Any = None) -> str | None:

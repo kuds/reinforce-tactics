@@ -15,12 +15,15 @@ is the runbook, [`validation_run.md`](validation_run.md).
 | [`configs/self_play/self_play.yaml`](../configs/self_play/self_play.yaml) | Trains the bootstrap MDP; `latest_opponent_prob` 0.5 and a pool that actually fills (§7) |
 
 Tests pin the parts that must not drift. [`tests/test_shipped_configs.py`](../tests/test_shipped_configs.py)
-checks the `max_steps` bound, that the slice mirrors the canonical file and
-that self-play trains the same MDP.
+checks the `max_steps` bound, that the slice mirrors the canonical file (as
+the runner resolves both, padding included) and that self-play trains the
+same MDP.
 [`tests/test_curriculum_resume_hardening.py`](../tests/test_curriculum_resume_hardening.py)
 checks that every threshold matches the Wilson rule.
 [`tests/test_bootstrap_ladder_order.py`](../tests/test_bootstrap_ladder_order.py)
-checks that no stage is a step down on the ladder, using a cached ladder run.
+checks, on a cached ladder run, that no stage is a step down on the ladder
+and that no gate asks for more than the scripted bots achieve against the
+stage's opponent in both seats (§4).
 
 ---
 
@@ -38,8 +41,9 @@ python scripts/train/run_seeds.py --config configs/ppo/bootstrap.yaml --n-seeds 
 The seeds are 42, 1042 and 2042. Consecutive seeds (42, 43, 44) would share
 7 of the 8 training env streams and 59 of the 60 eval episodes per seat, and
 the launcher refuses them. Each seed runs `train_bootstrap.py --seed N
---resume-if-exists`, so re-running the same command continues a killed seed
-from its rolling checkpoint (written every 50k stage steps). Run
+--resume-if-exists`, so continuing the group (`run_seeds.py --group <id>`,
+runbook §6) resumes a killed seed from its rolling checkpoint (written every
+50k stage steps). Run
 `configs/ppo/bootstrap_validation.yaml` first, about 2 h; its purpose is in §6
 and the command in the runbook (§3.1).
 
@@ -180,8 +184,18 @@ and v53c.
   - The ladder was re-measured at 75 (§3.2).
 - **`max_flat_actions` stays 512** (the decision already recorded). The v2
   decode tables drop moves first and keep every attack, heal, cast, seize
-  and `end_turn`. Random play reaches 538 legal actions on corner_points, so
-  watch `flat_truncated_rate` there.
+  and `end_turn`. An untrained policy reaches 770–805 legal actions on
+  corner_points (the runbook's smoke test), and 15–17% of its decision
+  points there are cut, so watch `flat_truncated_rate` once a seed trains
+  on that map.
+- **`pad_to_size: [10, 12]`, now explicit** in both curriculum files. The
+  runner derives the padding from the stage maps, and it would resolve the
+  same value for `bootstrap.yaml`. The slice has only 6×6 maps, so without
+  the setting it trained unpadded: `SpatialFeatureExtractor`'s `coord_conv`
+  planes span the padded grid, so a 6×6 map sits at [0, 0.56] × [0, 0.45]
+  in the canonical run but spans [0, 1]² unpadded, and one forward and
+  backward pass at batch 256 took 153 ms padded against 41.5 ms unpadded
+  on CPU.
 
 ### 2.3 Not back-ported
 
@@ -218,19 +232,19 @@ env steps; the anneal is where the entropy schedule ends.
 | 1 | starter_simple | simple | 0.80 → 0.73 | 500k / 300k | 0.10→0.05 |
 | 2 | starter_mixed_random_simple | mix(random/simple, 0.5) | 0.75 → 0.68 | 500k / 300k | 0.05 |
 | 3 | starter_random | random (20) | 0.75 → 0.68 | 750k / 400k | 0.05 |
-| 4 | starter_mixed_random_medium | mix(random/medium, 0.5) | 0.70 → 0.63 | 1M / 500k | 0.05 |
-| 5 | starter_medium | medium | 0.60 → 0.53 | 1.5M / 750k | 0.05 |
+| 4 | starter_mixed_random_medium | mix(random/medium, 0.5) | 0.60 → 0.53 | 1M / 500k | 0.05 |
+| 5 | starter_medium | medium | 0.50 → 0.43 | 1.5M / 750k | 0.05 |
 | 6 | beginner_balanced_random | balanced_random | 0.85 → 0.79 | 1M / 300k | 0.10→0.03 |
 | 7 | beginner_random_10 | random (10) | 0.75 → 0.68 | 3M / 1.5M | 0.10→0.03 |
 | 8 | beginner_random_15 | random (15) | 0.70 → 0.63 | 3M / 1.5M | 0.10→0.01 |
-| 9 | beginner_mixed_50 | mix(simple/medium, 0.5) | 0.70 → 0.63 | 3M / 1.5M | 0.05 |
-| 10 | beginner_mixed_med_adv_50 | mix(medium/advanced, 0.5) | 0.70 → 0.63 | 3M / 1.5M | 0.05 |
-| 11 | beginner_medium | medium | 0.60 → 0.53 | 4M / 2M | 0.05 |
+| 9 | beginner_mixed_50 | mix(simple/medium, 0.5) | 0.60 → 0.53 | 3M / 1.5M | 0.05 |
+| 10 | beginner_mixed_med_adv_50 | mix(medium/advanced, 0.5) | 0.60 → 0.53 | 3M / 1.5M | 0.05 |
+| 11 | beginner_medium | medium | 0.50 → 0.43 | 4M / 2M | 0.05 |
 | 12 | intermediate_balanced_random | balanced_random | 0.85 → 0.79 | 1M / 300k | 0.10→0.03 |
 | 13 | intermediate_mixed_br_simple | mix(balanced_random/simple, 0.5) | 0.70 → 0.63 | 2M / 1M | 0.07→0.03 |
 | 14 | intermediate_simple | simple | 0.65 → 0.58 | 3M / 1.5M | 0.05 |
-| 15 | intermediate_mixed_simple_medium | mix(simple/medium, 0.5) | 0.70 → 0.63 | 3M / 1.5M | 0.05 |
-| 16 | intermediate_medium | medium | 0.60 → 0.53 | 4M / 2M | 0.05 |
+| 15 | intermediate_mixed_simple_medium | mix(simple/medium, 0.5) | 0.60 → 0.53 | 3M / 1.5M | 0.05 |
+| 16 | intermediate_medium | medium | 0.50 → 0.43 | 4M / 2M | 0.05 |
 | 17 | skirmish_balanced_random | balanced_random | 0.85 → 0.79 | 1M / 300k | 0.10→0.03 |
 | 18 | skirmish_mixed_br_simple | mix(balanced_random/simple, 0.5) | 0.70 → 0.63 | 2M / 1M | 0.07→0.03 |
 | 19 | skirmish_simple | simple | 0.70 → 0.63 | 3M / 1.5M | 0.05 |
@@ -238,7 +252,7 @@ env steps; the anneal is where the entropy schedule ends.
 | 21 | skirmish_advanced | advanced | 0.60 → 0.53 | 4M / 2M | 0.05 |
 | 22 | corner_points_balanced_random | balanced_random | 0.85 → 0.79 | 1.5M / 500k | 0.10→0.03 |
 | 23 | corner_points_mixed_50 | mix(balanced_random/simple, 0.5) | 0.65 → 0.58 | 2.5M / 1.25M | 0.07→0.03 |
-| 24 | corner_points_simple | simple | 0.60 → 0.53 | 4M / 2M (no retry) | 0.05 |
+| 24 | corner_points_simple | simple | 0.50 → 0.43 | 4M / 2M (no retry) | 0.05 |
 
 Every stage has patience 2 and `min_timesteps_before_promotion: 25_000`.
 The minimum only keeps the stage-entry eval of the carry-in policy from
@@ -408,28 +422,67 @@ At 60 turns its steps were 0.68, 0.74, 0.71 and 0.70.
 - **Thresholds.** With n = 60 episodes per seat × 2 seats = 120:
   T = round(`wilson_lower_bound(ceil(120·t), 120, z_for_confidence(0.95))`, 2).
 
-  | t | 0.85 | 0.80 | 0.75 | 0.70 | 0.65 | 0.60 |
-  |---|---|---|---|---|---|---|
-  | T (n = 120) | 0.79 | 0.73 | 0.68 | 0.63 | 0.58 | 0.53 |
-  | T (n = 80) | 0.77 | 0.72 | 0.66 | 0.61 | 0.56 | 0.51 |
-  | T (n = 160) | 0.80 | 0.74 | 0.69 | 0.64 | 0.59 | 0.54 |
+  | t | 0.85 | 0.80 | 0.75 | 0.70 | 0.65 | 0.60 | 0.50 |
+  |---|---|---|---|---|---|---|---|
+  | T (n = 120) | 0.79 | 0.73 | 0.68 | 0.63 | 0.58 | 0.53 | 0.43 |
+  | wins needed of 120 | 103 | 96 | 91 | 85 | 79 | 73 | 61 |
+  | T (n = 80) | 0.77 | 0.72 | 0.66 | 0.61 | 0.56 | 0.51 | 0.41 |
+  | T (n = 160) | 0.80 | 0.74 | 0.69 | 0.64 | 0.59 | 0.54 | 0.44 |
 
   If you change `n_eval_episodes` or `eval_seats`, recompute T. The test
   fails until you do.
-- **How t was set.** Stages that existed before keep their old point
-  threshold as t: 0.85 for balanced_random, 0.75 for random_10, and
-  0.70–0.65 for the rest. The exceptions are:
-  - every map top gets t = 0.60 (starter, beginner and intermediate medium;
-    `skirmish_advanced`; `corner_points_simple`);
-  - the starter block drops from 0.90 to 0.80 / 0.75 / 0.75 / 0.70 / 0.60.
+- **How t was set.** The gate pools the seats, so T asks for a number of
+  wins out of 120 (the table's second row), and neither seat can supply
+  them alone: even 60 of 60 seat-1 wins leave 13 to find in seat 2 at
+  t 0.60, and 25 at t 0.70. So t is capped by what the scripted bots
+  achieve against the stage's opponent in both seats, measured on the
+  ladder (win rates counting wins only, as the gate does):
+  - **Bridge stages** ask at most the best scripted bot's pooled win rate
+    against their opponent. Stages that existed before keep their old point
+    threshold as t where that fits (0.85 for balanced_random, 0.75 for
+    random_10, 0.70–0.65 for most others); the starter block drops from
+    0.90 to 0.80 / 0.75 / 0.75.
+  - **The four bridges into MediumBot get t 0.60**: `starter_mixed_random_medium`,
+    `beginner_mixed_50`, `beginner_mixed_med_adv_50` and
+    `intermediate_mixed_simple_medium`. The best scripted bot wins 0.62–0.66,
+    0.68–0.70, 0.60–0.70 and 0.66–0.70 of its games against these opponents
+    (the cached seeds 8000–8024 and fresh seeds 11000–11024, 50 games per
+    pairing each). On starter and beginner most of those wins come moving
+    first: MediumBot wins 0.92–1.00 of its seat-1 games against these mixes
+    and 0.24–0.40 of its seat-2 games; on intermediate AdvancedBot does best
+    (0.76 / 0.64). At t 0.70 (85 of 120) a policy would have to beat every
+    scripted bot's two-seat record against them.
+  - **Map tops get t 0.50** (`starter_medium`, `beginner_medium`,
+    `intermediate_medium`, `corner_points_simple`). No scripted bot wins
+    more than 0.40 of its games against these opponents (0.34–0.36,
+    0.36–0.40, 0.36–0.38 and 0.32–0.34), and MediumBot moving first is
+    beaten in at most 24% of games on starter and beginner (RandomBot) and
+    4–8% on intermediate. t 0.50 needs 61 of 120 wins, which a policy that
+    wins nearly every seat-1 game reaches with one or two seat-2 wins; at
+    t 0.60 it would need 13. It still asks for more than any scripted bot
+    achieves: that is what a map top is for.
+  - **`skirmish_advanced` keeps t 0.60**: there MediumBot wins 0.66 of its
+    games against AdvancedBot, 0.56 moving second.
+
+  `tests/test_bootstrap_ladder_order.py` checks these caps on the cached
+  ladder: a bridge's wins needed / 120 may exceed the best bot's pooled
+  rate by at most 0.01 (T's rounding), and a map top asks at most
+  max(best bot, 0.50) and no more than a perfect seat 1 plus the best
+  scripted seat-2 record. The best of 14 bots over 50 games per pairing is
+  biased upward, which is why the four MediumBot bridges sit at t 0.60,
+  below both seed sets, rather than at the 0.70 the cache alone would
+  allow for two of them.
 - **Gate power.** Modelled as 120 Bernoulli episodes per eval, with the
   repo's `wilson_lower_bound`:
-  - a policy at exactly t passes one eval 46–47% of the time;
-  - at t + 0.05, 86–95%;
-  - at t + 0.10, two consecutive passes 98–100%.
-  - A policy at t − 0.05 passes one eval with probability 0.06–0.12, and
-    promotes within a 10-eval (1M-step) plateau with probability 0.04–0.11.
-    At t − 0.10 it essentially never promotes.
+  - a policy at exactly t passes one eval 46–47% of the time, and 55% at
+    t 0.80 (`starter_simple`). Elsewhere rounding T to two decimals raises
+    it just above the Wilson bound of 120·t wins, so one more win is
+    needed; at t 0.80 it lowers it, and 96 = 120·t wins suffice;
+  - at t + 0.05, 84–95%;
+  - at t + 0.10, two consecutive passes 97–100%.
+  - A policy at t − 0.05 passes one eval with probability 0.07–0.12, and
+    promotes within a 10-eval (1M-step) plateau with probability
+    0.035–0.115. At t − 0.10 it essentially never promotes.
   - For comparison, the old point gate at 80 episodes passed a policy
     sitting at its threshold 55–58% of the time, about as often. But it
     promoted a policy 0.05 below the threshold within 10 evals 20–29% of the
@@ -439,11 +492,12 @@ At 60 turns its steps were 0.68, 0.74, 0.71 and 0.70.
   evaluates 60 episodes per seat on the same seeds.
   - The review (`critic-gaps-2`) found every archived checkpoint was trained
     and gated as the first mover only, but deployed in both seats.
-  - **`seat_aggregate: mean`, not `min`.** MediumBot moving first is almost
-    never beaten by any scripted bot: 0–4% on beginner and intermediate, at
-    most 16% on starter. The best bot's pooled win rate against MediumBot is
-    only 0.28–0.39, and against corner SimpleBot 0.17–0.31.
-  - That is why the map tops use t = 0.60 pooled. With `min`, a policy at
+  - **`seat_aggregate: mean`, not `min`.** MediumBot moving first is rarely
+    beaten by any scripted bot: in at most 24% of games on starter and
+    beginner (RandomBot, cached and fresh seeds) and 4–8% on intermediate.
+    The best bot's pooled win rate against MediumBot is only 0.34–0.40, and
+    against corner SimpleBot 0.32–0.34.
+  - That is why the map tops use t = 0.50 pooled. With `min`, a policy at
     0.90 / 0.70 in the two seats passes a t = 0.70 eval 34–45% of the time;
     with `mean` it passes 100% of the time.
 - **Stochastic only.** `eval_deterministic: false` and
@@ -507,11 +561,25 @@ At 60 turns its steps were 0.68, 0.74, 0.71 and 0.70.
 
 - **The 3-seed run** needs about 3 × 24 ≈ 72 L4-hours expected, and
   3 × 58 ≈ 175 if every stage runs out its budget.
-- **The ×2.5 eval speed-up is an assumption.** Locally, 8 subprocess eval
-  envs were only 1.0–1.5× faster than serial, on 4 CPUs with an untrained
-  policy. Calibrate it on the slice (§6) from TensorBoard `time/fps` and
-  the stage wall-times. If it underperforms, `n_eval_envs: 4` in-process
-  measured about ×1.6, which gives about 34–38 h expected.
+- **The ×2.5 eval speed-up is an assumption for the L4.** On an idle
+  4-vCPU CPU box with an untrained policy, 8 subprocess eval envs ran 2.3×
+  (starter_medium) and 2.5× (beginner_random_10) faster than serial, and
+  1.9–2.2× on the larger maps; in-process `n_eval_envs: 4` ran 1.5–1.7×.
+  (The 1.0–1.5× this section quoted before did not reproduce there.) If it
+  underperforms, the in-process setting gives about 34–38 h expected.
+- **Calibrate from the slice's report** (§6; runbook §3.1), not from
+  TensorBoard `time/fps` or stage wall-times, which mix training, PPO
+  updates and evals. `summarize_seeds.py` reports, per map, eval agent
+  steps/s (`sum(lengths) / eval_seconds` over the eval rows) against the
+  model's 675/s (270 × 2.5), and training env steps/s
+  (Δtimesteps / (Δwall_time − eval_seconds) between rows) against its
+  1000/s, and each seed's `active h` (session time, not the span between
+  its first and last eval). The slice runs no serial eval, so the ×2.5
+  itself is not measured there; the absolute eval rate is what the model
+  needs. Unmeasured so far: a trained agent's episode lengths on beginner
+  to corner_points, which dominate the estimate (an untrained policy
+  played about 6800-agent-step corner_points games, against the modelled
+  3000).
 
 ---
 
@@ -520,7 +588,10 @@ At 60 turns its steps were 0.68, 0.74, 0.71 and 0.70.
 The slice is the first 8 canonical stages: all of starter, then
 `beginner_balanced_random`, `beginner_random_10` and `beginner_random_15`.
 The env, reward, PPO, eval and gate settings are the same as in
-`bootstrap.yaml`, and so are the thresholds. Only three things differ:
+`bootstrap.yaml`, and so are the thresholds. The env includes the padding:
+the slice sets `pad_to_size: [10, 12]` itself, because its maps are all 6×6
+and the runner would otherwise not pad them (§2.2). Only three things
+differ:
 
 - **Budgets are about halved.** The total is 4.75M env steps.
 
@@ -542,14 +613,17 @@ The env, reward, PPO, eval and gate settings are the same as in
 Expect about 2 h, or about 4.5 h if every stage runs out its budget. What
 to look at:
 
-- the per-seat win rates on `starter_medium` (seat 2 against MediumBot
-  moving first is the expected hard half);
+- the per-seat win rates on `starter_mixed_random_medium` and
+  `starter_medium` (seat 2 against MediumBot moving first is the expected
+  hard half; at t 0.60 and 0.50 a strong seat 1 carries most of the gate);
 - `avg_turns` climbing toward `max_turns` (the draw attractor);
 - `flat_truncated_rate`;
 - whether `beginner_random_15` trends up.
 
 `tests/test_shipped_configs.py` fails if the slice drifts from the
-canonical file in anything but these three settings. The command that runs
+canonical file in anything but these three settings, comparing the configs
+as the runner resolves them (`bootstrap.resolve_config`), so a derived
+difference such as the padding fails it too. The command that runs
 it is in the runbook ([`validation_run.md`](validation_run.md) §3.1). The
 slice restates the canonical file in full; §10.12 notes the `extends:` form
 it could take instead.
@@ -686,6 +760,24 @@ these config changes):
     `skip_ahead`, exit 0, in 9 minutes.
   - Lint and types clean; the default `pytest` run: 3250 passed, 9 skipped;
     `pytest -m slow --no-cov`: 64 passed.
+- **After the review of this prep** (2026-09-28):
+  - The review's fresh ladder (seeds 11000–11024, `--fail-on-flag`, 3184 s
+    on 4 CPUs) flagged no stage; its best scripted win rates per stage sit
+    in the ranges of §4 next to the cached run's.
+  - The gates in §3–4; `tests/test_bootstrap_ladder_order.py` checks them
+    against the cached ladder, and the first draft's thresholds fail it.
+  - Both curriculum files resolve to `pad_to_size` (10, 12).
+  - The seed tooling with the real trainer (a tiny config, 4 CPUs): after
+    SIGKILL of a `--parallel 2` launcher, `status` showed both orphaned
+    seeds `running`, `--group <id> --dry-run` left them alone, the original
+    launch command was refused and named the group, and a second
+    `train_bootstrap.py` on a live run dir exited 1 without writing. After
+    the orphans got SIGTERM, both read `interrupted` and `--group <id>`
+    alone queued them with the stored `--parallel 2 --no-pin --device cpu`.
+    SIGHUP to a launcher: the child checkpointed and exited 143, the
+    launcher exited 129, and the seed was recorded `interrupted`.
+  - Lint and types clean; the default `pytest` run: 3266 passed, 9 skipped;
+    `pytest -m slow --no-cov`: 64 passed.
 
 ---
 
@@ -733,9 +825,12 @@ these config changes):
 4. **`win_by_hq_capture` 80 over 50.** Parity only. It replaces a test
    invariant that HQ ≤ elimination; the evidence says it doesn't matter
    either way.
-5. **Map tops at t = 0.60, gate on the seat mean.**
-   - If a `*_medium` stage plateaus with seat-1 win rate ≥ 0.9 and seat-2
-     near 0, lower that stage to t = 0.50 (T = 0.43).
+5. **Map tops at t = 0.50, the MediumBot bridges at t = 0.60, gate on the
+   seat mean** (§4). They were 0.60 and 0.70 in the first draft, carried
+   over from the old seat-1 thresholds; no scripted bot reached them in
+   both seats, so the slice would probably have stalled at stage 4 or 5.
+   - If a map top still plateaus with seat-1 win rate ≥ 0.9 and seat 2 near
+     0, the next step down is t = 0.45 (T = 0.38, 55 of 120 wins).
    - The alternative is `agent_seat: 1` everywhere: comparable with v52a,
      but it leaves seat 2 untrained.
 6. **Starter block kept.** v52a and v40 skipped starter. Starting at
@@ -752,7 +847,7 @@ these config changes):
    - `eval_both_modes: false` saves about 1.8× in compute.
    - For long maps, `n_eval_episodes: 40` per seat on skirmish/corner (with
      T recomputed at n = 80: 0.85 → 0.77, 0.70 → 0.61, 0.65 → 0.56,
-     0.60 → 0.51) saves about a third of their eval cost. But a policy
+     0.60 → 0.51, 0.50 → 0.41) saves about a third of their eval cost. But a policy
      0.05 below t would then promote about 20–50% of the time instead of
      about 10%.
 10. **Non-transitive map tops.**
@@ -771,7 +866,8 @@ these config changes):
     - A stronger final opponent has to come from outside the scripted
       tiers: self-play or a frozen checkpoint.
 11. **Budgets are a prior.** Run the slice first and calibrate them, and
-    the eval speed-up, from its stage wall-times.
+    the eval throughput, from its report's per-map throughput and active
+    hours (§5).
 12. **`extends:` and `curriculum.stage_defaults` are not used.** The seed
     tooling added both to the config loader
     ([`configs/README.md`](../configs/README.md)). The configs were left as

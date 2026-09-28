@@ -337,6 +337,45 @@ class TestResumeIfExists:
         assert train_bootstrap.main([*argv, "--output-dir", str(launched)]) == 0
         assert "resume" not in calls[-1]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="flock")
+    def test_a_run_dir_another_trainer_holds_is_refused(self, train_bootstrap, fake_curriculum, tmp_path, monkeypatch):
+        """One trainer per run dir: a relaunch while the first still runs exits 1 and touches nothing."""
+        import fcntl
+
+        import reinforcetactics.rl.bootstrap as bootstrap
+        from reinforcetactics.experiments import seed_runs as sr
+
+        calls, config = fake_curriculum
+        out = tmp_path / "run"
+        argv = ["--config", str(config), "--output-dir", str(out), "--resume-if-exists", *_COMMON]
+        # Held while the curriculum runs; released when main() returns (as when the process exits).
+        seen = []
+        recorder = bootstrap.run_curriculum
+
+        def run_holding(cfg, output_dir, **kwargs):
+            seen.append(sr.run_lock_held(output_dir))
+            return recorder(cfg, output_dir, **kwargs)
+
+        monkeypatch.setattr(bootstrap, "run_curriculum", run_holding)
+        assert train_bootstrap.main(argv) == 0 and len(calls) == 1 and seen == [True]
+        assert sr.run_lock_held(out) is False
+        # Another process holds it (a trainer still running there): refused before anything is read or written.
+        fd = os.open(out / sr.RUN_LOCK, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            before = sorted(p.name for p in out.iterdir())
+            n = len(calls)
+            with pytest.raises(SystemExit, match="in use by another process"):
+                train_bootstrap.main(argv)
+            with pytest.raises(SystemExit, match="in use by another process"):
+                train_bootstrap.main(["--resume", str(out), *_COMMON])
+            assert len(calls) == n and sorted(p.name for p in out.iterdir()) == before
+            # --check-only writes nothing and takes no lock.
+            assert train_bootstrap.main([*argv, "--check-only"]) == 0
+        finally:
+            os.close(fd)
+        assert train_bootstrap.main(argv) == 0 and len(calls) == n + 1
+
     def test_usage(self, train_bootstrap, fake_curriculum, tmp_path):
         _, config = fake_curriculum
         with pytest.raises(SystemExit, match="needs --output-dir"):

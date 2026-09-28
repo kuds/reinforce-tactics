@@ -24,10 +24,16 @@ Exit codes: 0 ok; 1 the replicate check failed (the runs' resolved configs
 differ beyond seed, device and logging; ``--allow-mixed`` accepts it) or an
 input was unreadable; 2 no runs, or a usage error.
 
+Runs that share a seed (the legacy archive is all seed 42) are labelled
+``s<seed>@<run id>``. With ``--group-manifest`` a run's active hours come
+from its launch sessions.
+
 Examples:
     python3 scripts/eval/summarize_seeds.py \\
         --group-manifest benchmarks/bootstrap/_groups/20260928_120000_val/seed_group.json \\
         --compare v52a=/content/drive/MyDrive/reinforce-tactics/benchmarks/bootstrap/20260601_172412
+    # Off Colab: download that Drive folder (its YAML, bootstrap_results.csv and
+    # stage folders) and pass the local path instead.
     python3 scripts/eval/summarize_seeds.py benchmarks/bootstrap/run_a benchmarks/bootstrap/run_b --out-dir /tmp/report
 """
 
@@ -72,21 +78,24 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _manifest_runs(path: Path) -> tuple[dict, list[Path], list[str]]:
+def _manifest_runs(path: Path) -> tuple[dict, list[Path], list[str], dict[str, list]]:
+    """``(manifest, run dirs, missing seeds, {run dir name: its launch sessions})``."""
     manifest = read_group(path)
     # <root>/_groups/<group>/seed_group.json: the root is where the manifest
     # sits, so the group can be summarized wherever it was copied to.
     root = path.resolve().parent.parent.parent
     dirs: list[Path] = []
     missing: list[str] = []
+    sessions: dict[str, list] = {}
     for seed in manifest.get("seeds", []):
         run = (manifest.get("runs") or {}).get(str(seed)) or {}
         run_dir = root / str(run.get("run_dir"))
+        sessions[run_dir.name] = list(run.get("sessions") or [])
         if run_dir.is_dir():
             dirs.append(run_dir)
         else:
             missing.append(f"s{seed} ({run_dir.name})")
-    return manifest, dirs, missing
+    return manifest, dirs, missing, sessions
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,11 +105,12 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     inputs: list[str] = list(args.run_dirs)
     group_id = config_path = digest = None
+    sessions: dict[str, list] = {}
     default_out = Path("seed_report")
     if args.group_manifest:
         path = Path(args.group_manifest)
         try:
-            manifest, dirs, missing = _manifest_runs(path)
+            manifest, dirs, missing, sessions = _manifest_runs(path)
         except (OSError, ValueError) as exc:
             print(f"cannot read {path}: {exc}", file=sys.stderr)
             return EXIT_BAD_INPUT
@@ -149,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         baselines=baselines,
         inputs={"runs": inputs, "group_manifest": args.group_manifest, "compare": compare_inputs},
         allow_mixed=args.allow_mixed,
+        sessions=sessions,
     )
     out_dir = Path(args.out_dir) if args.out_dir else default_out
     paths = rs.write_outputs(summary, out_dir)

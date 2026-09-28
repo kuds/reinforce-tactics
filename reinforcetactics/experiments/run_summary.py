@@ -82,9 +82,15 @@ DEFINITIONS: dict[str, str] = {
     "episode_abs_share": "The abs share from per-episode magnitudes (reward_components_abs; new logging only).",
     "by_outcome": "Non-terminal, terminal and total return per episode for wins / draws / losses "
     "(reward_components_by_outcome; new logging only).",
-    "draw_breakeven": "A draw returns >= 0 on average: from by_outcome or the per-episode rewards and outcomes "
-    "(new rows); for legacy rows, when even the lowest possible draw total (the row's total return minus its "
-    "largest wins+losses episode returns) is >= 0. Counted over every eval row of the stage.",
+    "draw_return_per_ep": "Mean return of the final row's draws without the potential term: terminal + action + "
+    "invalid penalty per draw (reward_components_by_outcome). The undiscounted eval sum of the potential term "
+    "carries -(1-gamma)*sum(Phi), which drifts with game length and sign of Phi, so it is left out "
+    "(docs/validation_run_config.md section 1). Rows without per-outcome components (legacy) only give whole-episode "
+    "returns, potential term included (draw_return_has_potential).",
+    "draw_return_raw_per_ep": "The same with the potential term (shaping_delta) included: the full episode return.",
+    "draw_breakeven": "A draw returns >= 0 on average, measured by draw_return_per_ep (the potential term left out "
+    "where the row allows); for legacy rows, when even the lowest possible draw total (the row's total return "
+    "minus its largest wins+losses episode returns) is >= 0. Counted over every eval row of the stage.",
     "end_reason_rates": "end_reasons / episodes of the final row.",
     "flat_truncated_rate": "Share of decision points whose flat_discrete table was cut to max_flat_actions (final row).",
     "peak_gate_wr": "The stage record's peak_win_rate, else the highest gate (or plain) win rate of its rows.",
@@ -92,6 +98,15 @@ DEFINITIONS: dict[str, str] = {
     "steps_per_hour": "Median of delta-timesteps / delta-wall-time over consecutive rows of one session "
     "(gaps under 1 h); legacy fallback: stage records' created_at.",
     "eval_share": "Sum of the rows' eval_seconds over the wall time they span (new logging only).",
+    "eval_agent_steps_per_s": "Eval throughput: sum of the rows' episode lengths / sum of their eval_seconds "
+    "(agent steps per second; rows that also ran the other mode are left out, their lengths cover one mode). "
+    "Compare with the compute model's 675/s (270 serial x 2.5).",
+    "train_steps_per_s": "Training throughput between consecutive rows of one session: sum of delta-timesteps / "
+    "sum of (delta-wall_time - the later row's eval_seconds); PPO updates included, evals excluded. Compare with "
+    "the compute model's 1000/s. TensorBoard's time/fps mixes both in.",
+    "active_h": "Hours the run's processes ran: the group manifest's sessions (started_at to ended_at) when given, "
+    "else the eval rows' wall_time span with each gap longer than 3x the run's median gap counted as 3x the "
+    "median (a pause between sessions is not training). wall_clock_h is the plain first-to-last span.",
     "seed_sensitive": "A stage at least one seed cleared and at least one seed stalled on.",
 }
 
@@ -128,6 +143,7 @@ AGG_METRICS: tuple[str, ...] = (
     "dense_share_abs",
     "episode_abs_share",
     "draw_return_per_ep",
+    "draw_return_raw_per_ep",
     "end_reason_rate_hq_capture",
     "end_reason_rate_elimination",
     "end_reason_rate_max_turns_draw",
@@ -135,6 +151,8 @@ AGG_METRICS: tuple[str, ...] = (
     "flat_truncated_rate",
     "steps_per_hour",
     "eval_share",
+    "eval_agent_steps_per_s",
+    "train_steps_per_s",
 )
 
 
@@ -171,9 +189,13 @@ class RunRecord:
     manifest: dict[str, Any] = field(default_factory=dict)
     stages: list[StageRecord] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Set by build_summary when two runs would share a label (the same seed).
+    label_override: str | None = None
 
     @property
     def label(self) -> str:
+        if self.label_override:
+            return self.label_override
         return f"s{self.seed}" if self.seed is not None else self.run_id
 
 
@@ -618,20 +640,26 @@ def _turn_penalty(run: RunRecord, stage: StageRecord) -> float | None:
     return 0.0 if run.layout == "new" else None
 
 
-def draw_return(row: Mapping[str, Any]) -> tuple[float | None, bool]:
+def draw_return(row: Mapping[str, Any], *, with_potential: bool = False) -> tuple[float | None, bool]:
     """``(mean return of the row's draws, exact)``; for legacy rows the lowest value it can have.
 
-    New rows give it exactly (by_outcome, or the rewards and outcomes lists).
-    A legacy row has the per-episode rewards but not which episode drew: the
-    draws' total is at least the row's total minus its ``wins + losses``
-    largest episode returns, so that bound is returned (``exact`` False).
+    From by_outcome, the potential term (``shaping_delta``) is left out
+    unless ``with_potential``: its undiscounted eval sum drifts with game
+    length, so it can make a losing draw look break-even or hide one that
+    is. Without by_outcome only whole-episode returns exist (potential term
+    included; :func:`draw_return_has_potential`): the rewards and outcomes
+    lists give them exactly, and a legacy row, which has the per-episode
+    rewards but not which episode drew, gives a bound -- the draws' total is
+    at least the row's total minus its ``wins + losses`` largest episode
+    returns (``exact`` False).
     """
     by_outcome = row.get("reward_components_by_outcome")
     if isinstance(by_outcome, Mapping):
         draws = by_outcome.get("draws") or {}
         n = int(draws.get("episodes") or 0)
+        parts = REWARD_COMPONENTS if with_potential else tuple(c for c in REWARD_COMPONENTS if c != "shaping_delta")
         if n:
-            return sum(float(draws.get(c) or 0.0) for c in REWARD_COMPONENTS) / n, True
+            return sum(float(draws.get(c) or 0.0) for c in parts) / n, True
         return None, True
     rewards, outcomes = row.get("rewards"), row.get("outcomes")
     if isinstance(rewards, list) and isinstance(outcomes, list) and len(rewards) == len(outcomes):
@@ -647,6 +675,39 @@ def draw_return(row: Mapping[str, Any]) -> tuple[float | None, bool]:
     if decisive == 0 and row.get("avg_reward") is not None:
         return float(row["avg_reward"]), True
     return None, False
+
+
+def draw_return_has_potential(row: Mapping[str, Any] | None) -> bool:
+    """Whether :func:`draw_return` of ``row`` could not leave the potential term out (no per-outcome components)."""
+    return bool(row) and not isinstance(row.get("reward_components_by_outcome"), Mapping)  # type: ignore[union-attr]
+
+
+def _eval_throughput(rows: Sequence[Mapping[str, Any]]) -> float | None:
+    """Agent steps per second of eval: sum of episode lengths / sum of eval_seconds (single-mode rows)."""
+    steps = seconds = 0.0
+    for r in rows:
+        lengths, secs = r.get("lengths"), r.get("eval_seconds")
+        if r.get("other_mode") or not isinstance(lengths, list) or not isinstance(secs, (int, float)) or secs <= 0:
+            continue
+        steps += float(sum(lengths))
+        seconds += float(secs)
+    return steps / seconds if seconds > 0 else None
+
+
+def _train_throughput(rows: Sequence[Mapping[str, Any]], max_gap_s: float = 3600.0) -> float | None:
+    """Env steps per second of training between consecutive rows of one session (their evals taken out)."""
+    timed = sorted(
+        (float(r["wall_time"]), int(r["timesteps"]), float(r.get("eval_seconds") or 0.0))
+        for r in rows
+        if isinstance(r.get("wall_time"), (int, float)) and r.get("timesteps") is not None
+    )
+    steps = seconds = 0.0
+    for (t0, s0, _), (t1, s1, eval_s) in zip(timed, timed[1:], strict=False):
+        train_s = (t1 - t0) - eval_s
+        if 0 < t1 - t0 < max_gap_s and s1 > s0 and train_s > 0:
+            steps += s1 - s0
+            seconds += train_s
+    return steps / seconds if seconds > 0 else None
 
 
 def _components_mismatch(row: Mapping[str, Any]) -> bool:
@@ -825,6 +886,8 @@ def stage_metrics(
             }
     draw_ret, exact_draw = draw_return(final) if final else (None, True)
     m["draw_return_per_ep"] = draw_ret
+    m["draw_return_raw_per_ep"] = draw_return(final, with_potential=True)[0] if final else None
+    m["draw_return_has_potential"] = draw_return_has_potential(final)
     m["draw_return_exact"] = exact_draw
     m["draw_breakeven"] = bool(draw_ret is not None and draw_ret >= 0)
     breakeven_rows = []
@@ -863,12 +926,47 @@ def stage_metrics(
         if 0 < t1 - t0 < 3600.0:
             spent, span = spent + secs, span + (t1 - t0)
     m["eval_share"] = spent / span if span > 0 else None
+    m["eval_agent_steps_per_s"] = _eval_throughput(rows)
+    m["train_steps_per_s"] = _train_throughput(rows)
     m["created_at"] = stage.meta.get("created_at")
     return m
 
 
-def run_metrics(run: RunRecord, *, confidence: float = 0.95) -> dict[str, Any]:
-    """Every stage's metrics and the run-level summary of one run."""
+def _session_hours(sessions: Sequence[Mapping[str, Any]] | None, walls: Sequence[float]) -> float | None:
+    """Hours the launcher's sessions ran (``started_at`` to ``ended_at``; a session still open, or ended without
+    a stamp, to its last eval row). None without a session that has a start."""
+    total, counted = 0.0, False
+    for session in sessions or []:
+        start = _parse_time(session.get("started_at"))
+        if start is None:  # a Vertex submission: no process times
+            continue
+        end = _parse_time(session.get("ended_at"))
+        if end is None:  # still running, or its launcher died: up to the last eval row after its start
+            later = [w for w in walls if w >= start]
+            end = max(later) if later else start
+        total += max(0.0, end - start)
+        counted = True
+    return total / 3600.0 if counted else None
+
+
+def _active_hours(walls: Sequence[float], cap_factor: float = 3.0) -> float | None:
+    """The eval rows' span with each gap capped at ``cap_factor`` x the median gap (pauses between sessions)."""
+    gaps = sorted(b - a for a, b in zip(walls, walls[1:], strict=False) if b > a)
+    mid = median(gaps)
+    if mid is None:
+        return None
+    cap = cap_factor * mid
+    return sum(min(g, cap) for g in gaps) / 3600.0
+
+
+def run_metrics(
+    run: RunRecord, *, confidence: float = 0.95, sessions: Sequence[Mapping[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Every stage's metrics and the run-level summary of one run.
+
+    ``sessions`` (the group manifest's launch sessions of this run) give its
+    active hours; without them they are estimated from the eval rows.
+    """
     reached_flags = [bool(s.rows) or s.extra.get("promoted") is not None or bool(s.outcome_hint) for s in run.stages]
     if run.layout == "runs_per_stage":
         reached_flags = [s.outcome_hint not in (None, "not_reached") for s in run.stages]
@@ -883,11 +981,15 @@ def run_metrics(run: RunRecord, *, confidence: float = 0.95) -> dict[str, Any]:
     # Wall clock: from the eval rows' wall_time, else the stage records' created_at.
     walls = sorted(float(r["wall_time"]) for s in run.stages for r in s.rows if isinstance(r.get("wall_time"), (int, float)))
     wall_h = active_h = None
-    wall_source = None
+    wall_source = active_source = None
     if len(walls) > 1:
         wall_h = (walls[-1] - walls[0]) / 3600.0
-        active_h = sum(b - a for a, b in zip(walls, walls[1:], strict=False) if 0 < b - a < 3600.0) / 3600.0
+        active_h = _active_hours(walls)
+        active_source = "eval rows (gaps capped)"
         wall_source = "eval rows"
+    from_sessions = _session_hours(sessions, walls)
+    if from_sessions is not None:
+        active_h, active_source = from_sessions, "launcher sessions"
     else:
         created = sorted(t for t in (_parse_time(s.meta.get("created_at")) for s in run.stages) if t is not None)
         if len(created) > 1:
@@ -908,6 +1010,14 @@ def run_metrics(run: RunRecord, *, confidence: float = 0.95) -> dict[str, Any]:
             rates.setdefault(str(m["map_file"]), []).append(rate)
         if t is not None:
             prev_t, prev_cum = t, cum_end
+    # Throughput per map: the median of its stages' values.
+    throughput: dict[str, dict[str, list[float]]] = {}
+    for m in stages:
+        if not m.get("map_file"):
+            continue
+        for key in ("train_steps_per_s", "eval_agent_steps_per_s"):
+            if m.get(key) is not None:
+                throughput.setdefault(str(m["map_file"]), {}).setdefault(key, []).append(float(m[key]))
     status = run.run_status
     manifest = run.manifest
     return {
@@ -928,12 +1038,14 @@ def run_metrics(run: RunRecord, *, confidence: float = 0.95) -> dict[str, Any]:
         "wall_clock_h": wall_h,
         "active_h": active_h,
         "wall_clock_source": wall_source,
+        "active_source": active_source,
         "resume_count": int(status.get("resume_count", manifest.get("resume_count", 0)) or 0),
         "retries_used": sum(int(s.get("retries") or 0) for s in stages),
         "metadata_write_failures": status.get("metadata_write_failures", manifest.get("metadata_write_failures")),
         "git": run.git.get("short") or (run.git.get("commit") or "")[:7] or None,
         "created_at": next((s.meta.get("created_at") for s in run.stages if s.meta.get("created_at")), None),
         "steps_per_hour_by_map": {k: median(v) for k, v in sorted(rates.items())},
+        "throughput_by_map": {m: {k: median(v) for k, v in sorted(d.items())} for m, d in sorted(throughput.items())},
         "notes": list(run.notes),
         "stages": stages,
     }
@@ -995,12 +1107,38 @@ def _stage_union(orders: Iterable[Sequence[str]]) -> list[str]:
     return union
 
 
+def unique_labels(labels: Sequence[str], run_ids: Sequence[str]) -> list[str]:
+    """``labels`` with every label two runs share suffixed by the run id (``s42@<run id>``).
+
+    Per-run values are keyed by label; two runs of the same seed (the whole
+    legacy archive is seed 42) would otherwise overwrite each other.
+    """
+    counts: dict[str, int] = {}
+    for lab in labels:
+        counts[lab] = counts.get(lab, 0) + 1
+    out = [f"{lab}@{rid}" if counts[lab] > 1 else lab for lab, rid in zip(labels, run_ids, strict=True)]
+    seen: dict[str, int] = {}
+    for i, lab in enumerate(out):  # the same run read twice: number the copies
+        seen[lab] = seen.get(lab, 0) + 1
+        if seen[lab] > 1:
+            out[i] = f"{lab}#{seen[lab]}"
+    return out
+
+
 def aggregate(run_summaries: Sequence[Mapping[str, Any]], *, label: str = "group") -> dict[str, Any]:
-    """Per stage across runs: reached / cleared counts and describe() of every :data:`AGG_METRICS` value."""
+    """Per stage across runs: reached / cleared counts and describe() of every :data:`AGG_METRICS` value.
+
+    Per-run values and outcomes are keyed by each run's label, made unique
+    (:func:`unique_labels`) when two runs share one.
+    """
     order = _stage_union([s["stage"] for s in r["stages"]] for r in run_summaries)
+    keys = unique_labels([str(r["label"]) for r in run_summaries], [str(r.get("run_id")) for r in run_summaries])
     stages = []
     for index, name in enumerate(order):
-        per_run = [(r["label"], next((s for s in r["stages"] if s["stage"] == name), None)) for r in run_summaries]
+        per_run = [
+            (key, next((s for s in r["stages"] if s["stage"] == name), None))
+            for key, r in zip(keys, run_summaries, strict=True)
+        ]
         reached = [(lab, s) for lab, s in per_run if s is not None and s["reached"]]
         entry: dict[str, Any] = {
             "stage": name,
@@ -1351,6 +1489,7 @@ def collect_flags(runs: Sequence[Mapping[str, Any]], agg: Mapping[str, Any]) -> 
                 )
             if s.get("draw_breakeven_evals"):
                 exact = "" if s.get("draw_return_exact", True) else " (legacy lower bound)"
+                exact += " (potential term included)" if s.get("draw_return_has_potential") else ""
                 flags.append(
                     {
                         "kind": "draw_breakeven",
@@ -1511,6 +1650,7 @@ def render_report(summary: Mapping[str, Any]) -> str:
             "stalled at",
             "env steps",
             "wall h",
+            "active h",
             "resumes",
             "retries",
             "meta fails",
@@ -1525,6 +1665,7 @@ def render_report(summary: Mapping[str, Any]) -> str:
                 r.get("stalled_stage") or "—",
                 _steps(r.get("total_steps")),
                 _num_fmt(r.get("wall_clock_h"), 1),
+                _num_fmt(r.get("active_h"), 1),
                 r.get("resume_count", 0),
                 r.get("retries_used", 0),
                 "—" if r.get("metadata_write_failures") is None else r["metadata_write_failures"],
@@ -1584,6 +1725,12 @@ def render_report(summary: Mapping[str, Any]) -> str:
     out.append("")
 
     out.append("## 3. Per-seed detail")
+    out.append("")
+    out.append(
+        "draw return/ep: the mean return of the final eval's draws without the potential term (its undiscounted "
+        "eval sum drifts with game length); (+Φ) marks a row that records whole-episode returns only, (≥) a legacy "
+        "lower bound."
+    )
     for r in runs:
         out.append("")
         out.append(f"### {r['label']} — {r['run_id']} ({r['status']}, {r['layout']} layout)")
@@ -1609,7 +1756,9 @@ def render_report(summary: Mapping[str, Any]) -> str:
                     "—" if s.get("dense_share_abs") is None else f"{s['dense_share_abs']:.2f}",
                     "—"
                     if s.get("draw_return_per_ep") is None
-                    else f"{s['draw_return_per_ep']:+.1f}" + ("" if s.get("draw_return_exact", True) else " (≥)"),
+                    else f"{s['draw_return_per_ep']:+.1f}"
+                    + ("" if s.get("draw_return_exact", True) else " (≥)")
+                    + (" (+Φ)" if s.get("draw_return_has_potential") else ""),
                     _steps(s.get("cum_steps_end")),
                 ]
             )
@@ -1635,6 +1784,16 @@ def render_report(summary: Mapping[str, Any]) -> str:
         if by_map:
             out.append("")
             out.append("Steps/h by map: " + ", ".join(f"{Path(k).stem} {_steps(v)}" for k, v in by_map.items()))
+        throughput = r.get("throughput_by_map") or {}
+        if throughput:
+            out.append("")
+            out.append(
+                "Throughput by map (train env steps/s, evals excluded / eval agent steps/s): "
+                + ", ".join(
+                    f"{Path(k).stem} {_num_fmt(v.get('train_steps_per_s'), 0)} / {_num_fmt(v.get('eval_agent_steps_per_s'), 0)}"
+                    for k, v in throughput.items()
+                )
+            )
         for note in r.get("notes") or []:
             out.append(f"- note: {note}")
     out.append("")
@@ -1799,10 +1958,19 @@ def build_summary(
     baselines: Sequence[Side] = (),
     inputs: Mapping[str, Any] | None = None,
     allow_mixed: bool = False,
+    sessions: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    """Everything the report and the files show (``summary.json``'s content)."""
+    """Everything the report and the files show (``summary.json``'s content).
+
+    ``sessions`` maps a run id (its directory name) to its launch sessions in
+    the group manifest (active hours). Runs that share a label (the same
+    seed) are labelled ``s<seed>@<run id>`` throughout.
+    """
     ordered = sorted(records, key=lambda r: (r.seed is None, r.seed if r.seed is not None else 0, r.run_id))
-    summaries = [run_metrics(r, confidence=confidence) for r in ordered]
+    for record, lab in zip(ordered, unique_labels([r.label for r in ordered], [r.run_id for r in ordered]), strict=True):
+        if lab != record.label:
+            record.label_override = lab
+    summaries = [run_metrics(r, confidence=confidence, sessions=(sessions or {}).get(r.run_id)) for r in ordered]
     diffs, notes = replicate_differences(ordered)
     if diffs:
         verdict = f"FAILED: {len(diffs)} difference(s) beyond seed/device/logging" + (
@@ -1863,6 +2031,7 @@ _RUN_COLUMNS = (
     "total_steps",
     "wall_clock_h",
     "active_h",
+    "active_source",
     "resume_count",
     "retries_used",
     "metadata_write_failures",
@@ -1922,6 +2091,8 @@ _STAGE_COLUMNS = (
     "dense_share_abs",
     "episode_abs_share",
     "draw_return_per_ep",
+    "draw_return_raw_per_ep",
+    "draw_return_has_potential",
     "draw_return_exact",
     "draw_breakeven",
     "draw_breakeven_evals",
@@ -1933,6 +2104,8 @@ _STAGE_COLUMNS = (
     "eval_resampled",
     "steps_per_hour",
     "eval_share",
+    "eval_agent_steps_per_s",
+    "train_steps_per_s",
     "rows_source",
     "label",
 )

@@ -34,6 +34,10 @@
 #                      continues its run this way.
 #   RESTART_ON_WORKER_RESTART  1 = restart the job when its worker restarts
 #                      (scheduling.restartJobOnWorkerRestart; optional)
+#   RT_GIT_COMMIT      The commit the image was built from (optional; passed
+#                      to the container, where the image has no .git, so run
+#                      records name it; run_seeds.py sets it when TAG names a
+#                      commit of its checkout)
 #   SERVICE_ACCOUNT    Run-as service account    (optional)
 #
 # On success the script prints JOB_RESOURCE=projects/.../customJobs/<id>
@@ -150,6 +154,10 @@ trap 'rm -f "${CONFIG_FILE}"' EXIT
   if [[ -n "${RESTORE_DIRS:-}" ]]; then
     echo "        - name: GCS_RESTORE_DIRS"
     echo "          value: $(yaml_squote "${RESTORE_DIRS}")"
+  fi
+  if [[ -n "${RT_GIT_COMMIT:-}" ]]; then
+    echo "        - name: RT_GIT_COMMIT"
+    echo "          value: $(yaml_squote "${RT_GIT_COMMIT}")"
   fi
   # Pass W&B credentials through when present so --wandb works on the worker.
   if [[ -n "${WANDB_API_KEY:-}" ]]; then

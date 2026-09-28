@@ -35,6 +35,9 @@ from typing import Any
 
 import pytest
 
+from reinforcetactics.rl.config import load_config
+from reinforcetactics.rl.evaluation import wilson_lower_bound, z_for_confidence
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "eval" / "bot_ladder.py"
 CONFIG = REPO_ROOT / "configs" / "ppo" / "bootstrap.yaml"
@@ -135,6 +138,92 @@ def test_the_check_has_teeth(ladder):
     checks = ladder.check_curriculum(others + beginner[::-1], result)
     flagged = {c.stage.name for c in checks if c.flagged}
     assert {"beginner_mixed_med_adv_50", "beginner_mixed_50"} <= flagged
+
+
+# How far a gate may ask beyond scripted play (see test_every_gate_is_within_reach_of_scripted_play).
+BRIDGE_MARGIN = 0.01
+MAP_TOP_CAP = 0.50
+
+
+def _best_scripted(br, opponent) -> tuple[float, float]:
+    """The best pooled two-seat win rate, and the best seat-2 win rate, of any other bot against ``opponent``.
+
+    Win rates count wins only (a draw is a loss), as the gate does.
+    """
+    pooled = seat2 = 0.0
+    for other in br.opponents:
+        if other == opponent:
+            continue
+        total = br.head_to_head(other, opponent)
+        second = br.seat_record(opponent, other).flipped()  # ``other`` moving second
+        pooled = max(pooled, total.w / total.n)
+        seat2 = max(seat2, second.w / second.n)
+    return pooled, seat2
+
+
+def _gate_problems(ladder, result, stages, thresholds: dict[str, float], cfg) -> list[str]:
+    n_seat = cfg.eval.n_eval_episodes
+    n = n_seat * len(cfg.eval.resolve_eval_seats(cfg.env))
+    z = z_for_confidence(cfg.curriculum.promotion_confidence)
+    map_tops = {s.map_file: s.name for s in stages}  # the last stage of each map block
+    problems = []
+    for st in stages:
+        threshold = thresholds[st.name]
+        k_min = next(k for k in range(n + 1) if wilson_lower_bound(k, n, z) >= threshold - 1e-9)
+        pooled, seat2 = _best_scripted(ladder.board_of(result, st.map_file, st.max_turns), st.opponent)
+        if map_tops[st.map_file] == st.name:
+            if k_min / n > max(pooled, MAP_TOP_CAP) + BRIDGE_MARGIN:
+                problems.append(f"{st.name}: map top asks {k_min}/{n}, above max(best scripted {pooled:.2f}, 0.50)")
+            if k_min > n_seat + seat2 * n_seat:
+                problems.append(
+                    f"{st.name}: {k_min}/{n} needs more than a perfect seat 1 plus the best seat-2 record ({seat2:.2f})"
+                )
+        elif k_min / n > pooled + BRIDGE_MARGIN:
+            problems.append(f"{st.name}: asks {k_min}/{n}, above the best scripted bot's {pooled:.2f}")
+    return problems
+
+
+def test_every_gate_is_within_reach_of_scripted_play(ladder):
+    """No stage's gate asks for a two-seat win rate the scripted bots do not come near.
+
+    The gate pools both seats: T needs k_min wins of n = 60 episodes per seat
+    x 2 seats, so a seat-1-only record can never pass it. On the cached games:
+
+    * a bridge stage asks at most the best scripted bot's pooled win rate
+      against its opponent (+ ``BRIDGE_MARGIN`` for T's rounding: t 0.60 needs
+      73/120 = 0.608);
+    * a map top (the last stage on its map) asks at most an even 0.50, or the
+      best scripted rate if a bot does better, and never more than a perfect
+      seat 1 plus the best scripted seat-2 record (the seat-1 carry).
+
+    The cache holds 50 games per pairing, and the best of 14 bots is biased
+    upward, so the config stays below these caps where fresh seeds measured
+    lower (docs/validation_run_config.md section 4).
+    """
+    result, _ = _cached_result(ladder)
+    _, _, stages = _curriculum(ladder)
+    cfg = load_config(CONFIG)
+    thresholds = {s.name: s.resolve_promotion(cfg.curriculum)["threshold"] for s in cfg.curriculum.stages}
+    assert not _gate_problems(ladder, result, stages, thresholds, cfg)
+    # Teeth: the thresholds shipped before (t 0.70 into MediumBot, t 0.60 on the map tops) fail it.
+    before = {
+        **thresholds,
+        "starter_mixed_random_medium": 0.63,
+        "starter_medium": 0.53,
+        "beginner_mixed_med_adv_50": 0.63,
+        "beginner_medium": 0.53,
+        "intermediate_medium": 0.53,
+        "corner_points_simple": 0.53,
+    }
+    flagged = {line.split(":")[0] for line in _gate_problems(ladder, result, stages, before, cfg)}
+    assert flagged == {
+        "starter_mixed_random_medium",
+        "starter_medium",
+        "beginner_mixed_med_adv_50",
+        "beginner_medium",
+        "intermediate_medium",
+        "corner_points_simple",
+    }
 
 
 REPLAY_SEEDS = 3

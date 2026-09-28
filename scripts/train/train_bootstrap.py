@@ -48,6 +48,15 @@ empty or missing directory starts fresh. ``--seed N`` is ``--set seed=N``.
 ``--check-only`` loads, overrides and validates the config, prints the stage
 table and exits 0 without writing anything.
 
+One trainer per run directory: the script holds an exclusive lock on
+``<output-dir>/.train_bootstrap.lock`` for as long as it runs (taken before
+``--resume-if-exists`` looks at an existing directory, or when it creates a
+new one), and exits 1 without writing anything else there when another live
+process holds it -- a relaunch while the first trainer still runs (an orphan
+of a launcher that was killed, say). The lock ends with the process, however
+it ends. On a filesystem without flock support the run goes on unlocked,
+with a note.
+
 Exit codes (so a scheduler can tell the outcomes apart):
 
     0    every curriculum stage promoted
@@ -621,7 +630,37 @@ def _exit_on_sigterm(signum: int, _frame: FrameType | None) -> NoReturn:
     raise SystemExit(EXIT_TERMINATED)
 
 
+# Run dirs this invocation of main() locked; released when it returns.
+_LOCKED_DIRS: list[Path] = []
+
+
+def _lock_run_dir(run_dir: Path) -> int | None:
+    """Hold ``run_dir``'s lock until main() returns (SystemExit if another process holds it)."""
+    from reinforcetactics.experiments.seed_runs import RunLockedError, acquire_run_lock
+
+    try:
+        fd = acquire_run_lock(run_dir)
+    except RunLockedError as exc:
+        raise SystemExit(f"{exc}") from None
+    if fd is None:
+        print(f"  note: cannot lock {run_dir} (no file locks here); nothing stops a second trainer in it")
+    else:
+        _LOCKED_DIRS.append(run_dir)
+    return fd
+
+
 def main(argv: list[str] | None = None) -> int:
+    """The CLI (see the module docstring); the run dir's lock is held until it returns."""
+    try:
+        return _main(argv)
+    finally:
+        from reinforcetactics.experiments.seed_runs import release_run_lock
+
+        while _LOCKED_DIRS:
+            release_run_lock(_LOCKED_DIRS.pop())
+
+
+def _main(argv: list[str] | None = None) -> int:
     # Installed first so a SIGTERM at any point after startup reaches the
     # finally block below instead of killing the process outright.
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
@@ -631,6 +670,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--seed and --set seed=... both set the seed; use one of them")
     if args.torch_threads is not None and args.torch_threads < 1:
         raise SystemExit(f"--torch-threads must be >= 1, got {args.torch_threads}")
+    # The run dir's lock, before anything reads the directory. A directory
+    # that does not exist yet is locked when it is created, below (so a run
+    # refused before then writes nothing), still before anything is written
+    # into it. The lock is held until main() returns.
+    lock_taken = False
+    early = args.resume or args.output_dir
+    if not args.check_only and early and Path(early).is_dir():
+        _lock_run_dir(Path(early))
+        lock_taken = True
     if args.resume_if_exists and not args.check_only:
         decided = _resume_if_exists(args)
         if decided is not None:
@@ -734,6 +782,8 @@ def main(argv: list[str] | None = None) -> int:
         torch.set_num_threads(args.torch_threads)
         print(f"torch threads: {torch.get_num_threads()}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not lock_taken:
+        _lock_run_dir(output_dir)
     charts_dir = output_dir / "charts"
     charts_dir.mkdir(parents=True, exist_ok=True)
 

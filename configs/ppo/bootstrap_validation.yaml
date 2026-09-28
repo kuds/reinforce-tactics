@@ -19,7 +19,8 @@
 #   2. The starter ladder (simple -> mix(random/simple) -> random ->
 #      mix(random/medium) -> medium) promotes under the Wilson gate; if
 #      starter_medium walls, compare its per-seat win rates (seat 2 against
-#      MediumBot moving first is the expected hard half).
+#      MediumBot moving first is the expected hard half: the gate at t 0.50
+#      needs 61 of 120 pooled wins, which a strong seat 1 nearly carries).
 #   3. The map change to beginner.csv does not collapse the value function.
 #   4. beginner_random_15, the stage most archived runs stalled at, shows an
 #      upward trend (clearing it is a bonus, not required).
@@ -49,6 +50,11 @@ env:
   # before the max_turns clock (see bootstrap.yaml).
   max_steps: 1300
   action_space_type: flat_discrete
+  # The canonical run's padding (corner_points' 10x12). The slice's maps are
+  # all 6x6, so without it the runner would not pad at all, and the probe
+  # would train on other inputs (coord_conv's position planes span the
+  # padded grid) at ~1/4 of the canonical compute per update.
+  pad_to_size: [10, 12]
   # Identical to bootstrap.yaml's reward_config (comments there), so the
   # probe tests the production reward landscape.
   reward_config:
@@ -167,7 +173,7 @@ curriculum:
       map_file: maps/1v1/starter.csv
       opponent: mixed
       opponent_kwargs: {easy: random, hard: medium, p_hard: 0.5}
-      promotion_win_rate: 0.63      # t 0.70
+      promotion_win_rate: 0.53      # t 0.60
       patience: 2
       max_timesteps: 500_000        # bootstrap.yaml 1_000_000
       anneal_horizon: 300_000       # bootstrap.yaml 500_000
@@ -177,7 +183,7 @@ curriculum:
     - name: starter_medium
       map_file: maps/1v1/starter.csv
       opponent: medium
-      promotion_win_rate: 0.53      # t 0.60
+      promotion_win_rate: 0.43      # t 0.50
       patience: 2
       max_timesteps: 750_000        # bootstrap.yaml 1_500_000
       anneal_horizon: 400_000       # bootstrap.yaml 750_000
