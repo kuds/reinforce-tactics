@@ -10,6 +10,7 @@ reader; nothing touches the network.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -1106,3 +1107,35 @@ def test_run_records_take_the_commit_from_the_job_env_without_a_checkout(monkeyp
     meta = run_config._git_meta()
     assert meta["commit"] == "d7bd68498ec0b512049e279b6c6f8279b6e0d8ab" and meta["short"] == "d7bd684"
     assert meta["dirty"] is None and meta["source"] == "RT_GIT_COMMIT"
+
+
+def test_a_teed_child_writes_to_its_log_file_not_through_the_launcher(tmp_path):
+    """With tee on, the child used to write to a pipe the launcher read, so a killed launcher
+    broke the child at its next print; it now writes to its log file, which the console follows."""
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os, stat, sys\n"
+        "print('stdout is a regular file:', stat.S_ISREG(os.fstat(1).st_mode), flush=True)\n"
+        "for i in range(3):\n"
+        "    print(f'line {i}', flush=True)\n"
+        "sys.stdout.write('last line without a newline')\n"
+    )
+    console = io.StringIO()
+
+    def make_spec(seed: int, slot: int) -> sr.ChildSpec:
+        return sr.ChildSpec(
+            seed=seed,
+            run_dir=tmp_path / f"s{seed}",
+            cmd=[sys.executable, str(child)],
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            cwd=tmp_path,
+        )
+
+    result = sr.run_local([7], make_spec, tee=True, console=console, handle_signals=False, poll_interval=0.05)
+
+    assert result.exit_codes == {7: 0}
+    shown = console.getvalue()
+    assert "stdout is a regular file: True" in shown
+    assert "line 0\nline 1\nline 2\n" in shown and shown.endswith("last line without a newline\n")
+    (log,) = (tmp_path / "s7" / "logs").glob("train.*")
+    assert "line 2" in log.read_text() and "last line without a newline" in log.read_text()

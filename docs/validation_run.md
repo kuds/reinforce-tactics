@@ -77,6 +77,13 @@ afterwards. Expected here, and not a problem:
   `corner_points_mixed_50`: an untrained policy meets 770–805 legal actions
   on that map, and 15–17% of its decision points were cut to 512 in the
   2026-09-28 smoke test (§5 says when to act on it);
+- `draw_breakeven` on the first corner_points stages (for example
+  `corner_points_balanced_random`, +450 to +560 per draw in the smoke
+  test): over 200 turns an untrained policy's seize stream alone pays more
+  than the draw costs. It is the `seize_progress` farm that
+  [validation_run_config.md §10.1](validation_run_config.md) keeps for
+  archive parity; in the real run, act on it only if it persists once the
+  stage is trained (the first follow-up arm is `seize_progress: 1.0`);
 - once per stage in each seed's log, `[warn] no best_model.zip for
   '<stage>'; carrying end-of-stage policy forward`: a stage that promotes
   at its first eval never saves a best model.
@@ -125,8 +132,8 @@ Run the commands from the repository root (the default `--root` is
 `benchmarks/bootstrap` there; the children always run from the root, where
 the config's map paths resolve).
 
-Seeds default to `--n-seeds 3` with a stride of 1000 from the config's seed:
-**42, 1042, 2042** (42 for continuity with the archive). Consecutive seeds
+Pass the seeds explicitly (there is no default count): `--n-seeds 3` uses a
+stride of 1000 from the config's seed, giving **42, 1042, 2042** (42 for continuity with the archive). Consecutive seeds
 (42, 43, 44) would share 7 of 8 training env streams and 59 of 60 gate-eval
 episode seeds per seat (policy-sampling streams included); the launcher
 refuses seeds whose streams overlap unless `--allow-seed-overlap`.
@@ -165,7 +172,8 @@ group trains on. A launcher started with none of them stops the group
 cleanly on a hangup: every child gets SIGTERM, checkpoints and exits, and
 the group continues with `--group <id>`. But a launcher killed outright
 (SIGKILL, the OOM killer) leaves its children training with nobody
-recording them; `status` then shows them as `running`, and a relaunch
+recording them (each child writes to its own log file, never through the
+launcher, so it keeps logging; only the console copy stops); `status` then shows them as `running`, and a relaunch
 leaves them alone until they exit.
 
 ### 4.2 Colab

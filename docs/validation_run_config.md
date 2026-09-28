@@ -776,8 +776,11 @@ these config changes):
     alone queued them with the stored `--parallel 2 --no-pin --device cpu`.
     SIGHUP to a launcher: the child checkpointed and exited 143, the
     launcher exited 129, and the seed was recorded `interrupted`.
-  - Lint and types clean; the default `pytest` run: 3266 passed, 9 skipped;
-    `pytest -m slow --no-cov`: 64 passed.
+    SIGKILL of a teed launcher: the child had written its log itself, so it
+    kept logging and ran to completion.
+  - Lint and types clean; the default `pytest` run (with main's pygame
+    changes merged in): 3348 passed, 9 skipped; `pytest -m slow --no-cov`:
+    64 passed.
 
 ---
 

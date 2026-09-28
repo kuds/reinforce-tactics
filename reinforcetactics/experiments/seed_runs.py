@@ -1045,6 +1045,7 @@ class _Running:
     session: dict[str, Any]
     log: IO[str]
     pump: threading.Thread | None = None
+    child_done: threading.Event | None = None
 
 
 @dataclass
@@ -1063,16 +1064,39 @@ def _normalize_returncode(rc: int) -> int:
     return 128 - rc if rc < 0 else rc
 
 
-def _pump(stream: IO[str], log: IO[str], console: IO[str], prefix: str) -> None:
-    """Copy a child's output to its log and the console, line by line, until the pipe closes."""
-    for line in iter(stream.readline, ""):
-        for target, text in ((log, line), (console, prefix + line)):
-            try:
-                target.write(text)
-                target.flush()
-            except (OSError, ValueError):  # a closed log (the launcher gave up waiting) or console
-                pass
-    stream.close()
+def _follow(path: Path, offset: int, console: IO[str], prefix: str, child_done: threading.Event, poll: float = 0.2) -> None:
+    """Copy what a child appends to its log (from byte ``offset``) to the console until it has exited.
+
+    The child writes to its log file itself, so it trains on (and keeps
+    logging) if this launcher dies. It used to write to a pipe the launcher
+    read, which broke the child at its next print once the launcher was gone.
+    """
+
+    def show(raw: bytes) -> None:
+        try:
+            console.write(prefix + raw.decode("utf-8", errors="replace"))
+            console.flush()
+        except (OSError, ValueError):  # a closed console
+            pass
+
+    with open(path, "rb") as stream:
+        stream.seek(offset)
+        partial = b""
+        while True:
+            chunk = stream.readline()
+            if chunk:
+                partial += chunk
+                if partial.endswith(b"\n"):
+                    show(partial)
+                    partial = b""
+                continue
+            if child_done.is_set():
+                # The child has exited: whatever is left is final.
+                rest = partial + stream.read()
+                for line in rest.splitlines(keepends=True):
+                    show(line if line.endswith(b"\n") else line + b"\n")
+                return
+            time.sleep(poll)
 
 
 def _preexec(cpu_set: Sequence[int] | None) -> Callable[[], None] | None:
@@ -1143,6 +1167,8 @@ def run_local(
 
     def finish(slot: int, rc: int) -> None:
         item = running.pop(slot)
+        if item.child_done is not None:
+            item.child_done.set()
         if item.pump is not None:
             item.pump.join(timeout=10)
         item.log.close()
@@ -1162,23 +1188,27 @@ def run_local(
         log = log_path.open("a", encoding="utf-8")
         log.write(f"# {utc_now()} {shlex.join(spec.cmd)}\n")
         log.flush()
+        offset = log_path.stat().st_size
+        # The child writes to its log file directly, never through this
+        # process: with ``tee`` the console follows the file instead.
         proc = subprocess.Popen(
             spec.cmd,
             env=spec.env,
             cwd=spec.cwd,
-            stdout=subprocess.PIPE if tee else log,
+            stdout=log,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
             start_new_session=True,
             preexec_fn=_preexec(spec.cpu_set),
         )
         pump = None
+        child_done = None
         if tee:
-            assert proc.stdout is not None
             prefix = f"[s{seed}] " if parallel > 1 else ""
-            pump = threading.Thread(target=_pump, args=(proc.stdout, log, console, prefix), daemon=True)
+            child_done = threading.Event()
+            pump = threading.Thread(
+                target=_follow, args=(log_path, offset, console, prefix, child_done, poll_interval), daemon=True
+            )
             pump.start()
         session = {
             "started_at": utc_now(),
@@ -1191,7 +1221,7 @@ def run_local(
             "host": _hostname(),
             "log": str(log_path),
         }
-        running[slot] = _Running(spec=spec, proc=proc, session=session, log=log, pump=pump)
+        running[slot] = _Running(spec=spec, proc=proc, session=session, log=log, pump=pump, child_done=child_done)
         if on_start is not None:
             on_start(spec, session)
 
