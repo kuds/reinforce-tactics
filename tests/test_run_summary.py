@@ -188,6 +188,20 @@ class TestNewLayout:
         assert (a["captures_per_ep_tower"], a["captures_per_ep_building"], a["captures_per_ep_hq"]) == (1.0, 0.5, 0.0)
         assert a["opponent_captures_per_ep_neutral"] == 1.0 and a["opponent_captures_per_ep_owned"] == 0.0
 
+    def test_a_row_whose_components_do_not_add_up_is_flagged(self, tmp_path):
+        rows = [eval_row(100, 9, 1, 0), eval_row(200, 9, 1, 0)]
+        rows[0]["avg_reward"] += 5.0
+        path = write_run(tmp_path, "run_m", [stage("A", rows, promoted=True, start=0, end=200)], seed=5)
+        summary = rs.build_summary([rs.read_run(path)])
+        a = summary["runs"][0]["stages"][0]
+        assert a["reward_sum_mismatch"] is True and a["reward_sum_mismatch_at"] == [100]
+        assert any(f["kind"] == "reward_sum_mismatch" and f["stage"] == "A" for f in summary["flags"])
+
+    def test_a_stage_record_without_rows(self, tmp_path):
+        path = write_run(tmp_path, "run_n", [stage("A", [], promoted=True, start=0, end=100)], seed=6)
+        a = rs.run_metrics(rs.read_run(path))["stages"][0]
+        assert (a["outcome"], a["gate_mode"], a["stoch_win_rate"], a["steps_to_promotion"]) == ("cleared", None, None, 100)
+
     def test_signed_share_is_none_when_the_return_nearly_cancels(self):
         comps = {"action": 5.0, "shaping_delta": 0.0, "invalid_penalty": 0.0, "terminal": -5.5}
         assert rs._share_signed(comps, episodes=1) is None

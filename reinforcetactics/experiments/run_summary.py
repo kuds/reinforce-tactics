@@ -65,8 +65,8 @@ DEFINITIONS: dict[str, str] = {
     "almost at once.",
     "captures_per_ep": "The agent's captures by structure type per episode in the final row's gate-mode eval.",
     "opponent_captures_per_ep": "Structures the opponent seized per episode (neutral / the agent's), new logging only.",
-    "reward_per_ep": "reward_components / episodes of the final row (gate mode); flagged when their sum differs "
-    "from avg_reward.",
+    "reward_per_ep": "reward_components / episodes of the final row (gate mode); any eval row whose components "
+    "do not sum to its avg_reward is flagged (reward_sum_mismatch).",
     "shaping_share_abs": "(|A|+|S|+|I|) / (|A|+|S|+|I|+|T|) from the final row's eval-level sums of the action (A), "
     "shaping_delta (S), invalid_penalty (I) and terminal (T) components. Headline; archive-comparable.",
     "shaping_share_signed": "(A+S+I) / (A+S+I+T); None when |A+S+I+T| < 1 per episode.",
@@ -614,6 +614,15 @@ def draw_return(row: Mapping[str, Any]) -> tuple[float | None, bool]:
     return None, False
 
 
+def _components_mismatch(row: Mapping[str, Any]) -> bool:
+    """Whether a row's reward components per episode differ from its avg_reward (beyond rounding)."""
+    comps, episodes, avg = row.get("reward_components"), row.get("episodes"), row.get("avg_reward")
+    if not isinstance(comps, Mapping) or not episodes or avg is None:
+        return False
+    total = sum(float(comps.get(c) or 0.0) for c in REWARD_COMPONENTS) / int(episodes)
+    return abs(total - float(avg)) > max(0.01, 1e-4 * abs(float(avg)))
+
+
 def _stage_outcome(run: RunRecord, stage: StageRecord, later_reached: bool) -> str:
     promoted = stage.extra.get("promoted")
     if promoted is True:
@@ -670,8 +679,10 @@ def stage_metrics(
     final = rows[-1] if rows else None
     if final is None and stage.rows:
         final = stage.rows[-1]
-    gate_det = final.get("deterministic", True) if final else True
-    m["gate_mode"] = "greedy" if gate_det in (True, None) else "stochastic"
+    if final is None:
+        m["gate_mode"] = None  # a stage record without its eval rows (a failed best-effort write)
+    else:
+        m["gate_mode"] = "greedy" if final.get("deterministic", True) in (True, None) else "stochastic"
     for mode, stochastic in (("stoch", True), ("greedy", False)):
         c = row_counts(final, stochastic=stochastic)
         for key in ("wins", "draws", "losses", "episodes", "win_rate", "draw_rate", "loss_rate"):
@@ -738,11 +749,10 @@ def stage_metrics(
         m[f"reward_per_ep_{key}"] = (
             float(comps.get(key) or 0.0) / episodes if isinstance(comps, Mapping) and episodes else None
         )
-    m["reward_sum_mismatch"] = False
-    if isinstance(comps, Mapping) and episodes and final and final.get("avg_reward") is not None:
-        total = sum(float(comps.get(c) or 0.0) for c in REWARD_COMPONENTS) / episodes
-        avg = float(final["avg_reward"])
-        m["reward_sum_mismatch"] = abs(total - avg) > max(0.01, 1e-4 * abs(avg))
+    # Every row whose components do not add up to its average return.
+    mismatched = [int(r.get("timesteps") or 0) for r in rows if _components_mismatch(r)]
+    m["reward_sum_mismatch"] = bool(mismatched)
+    m["reward_sum_mismatch_at"] = mismatched[:5]
     m["shaping_share_abs"] = _share_abs(comps) if isinstance(comps, Mapping) else None
     m["shaping_share_signed"] = _share_signed(comps, episodes) if isinstance(comps, Mapping) else None
     m["episode_abs_share"] = _share_abs(final.get("reward_components_abs")) if final else None
@@ -1325,7 +1335,7 @@ def collect_flags(runs: Sequence[Mapping[str, Any]], agg: Mapping[str, Any]) -> 
                         "kind": "reward_sum_mismatch",
                         "run": run["label"],
                         "stage": s["stage"],
-                        "detail": "reward components do not sum to avg_reward",
+                        "detail": f"reward components do not sum to avg_reward at {s.get('reward_sum_mismatch_at')}",
                     }
                 )
     for st in agg["stages"]:

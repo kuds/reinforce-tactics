@@ -806,14 +806,14 @@ def _normalize_returncode(rc: int) -> int:
 
 
 def _pump(stream: IO[str], log: IO[str], console: IO[str], prefix: str) -> None:
+    """Copy a child's output to its log and the console, line by line, until the pipe closes."""
     for line in iter(stream.readline, ""):
-        log.write(line)
-        log.flush()
-        try:
-            console.write(prefix + line)
-            console.flush()
-        except (OSError, ValueError):
-            pass
+        for target, text in ((log, line), (console, prefix + line)):
+            try:
+                target.write(text)
+                target.flush()
+            except (OSError, ValueError):  # a closed log (the launcher gave up waiting) or console
+                pass
     stream.close()
 
 
