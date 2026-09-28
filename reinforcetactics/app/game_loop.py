@@ -286,7 +286,10 @@ class GameSession:  # pylint: disable=too-few-public-methods
 
     def _handle_save_game(self):
         """Handle save game request."""
-        save_menu = SaveGameMenu(self.game)
+        # On the game's own screen: given none, the menu opens a 900x700
+        # window, which cropped the board and the HUD panel for the rest of
+        # the game (review pygame-4).
+        save_menu = SaveGameMenu(self.game, self.renderer.screen)
         result = save_menu.run()
         if result:
             print(f"✅ Game saved to {result}")

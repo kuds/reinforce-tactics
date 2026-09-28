@@ -26,6 +26,7 @@ from reinforcetactics.ui.assets import (
     tile_color,
 )
 from reinforcetactics.ui.sprite_animator import SpriteAnimator, animation_key, scale_unit_sprite
+from reinforcetactics.ui.widgets.text import ellipsize
 from reinforcetactics.utils.clipboard import init_clipboard
 from reinforcetactics.utils.fonts import get_display_font, get_font
 from reinforcetactics.utils.language import get_language
@@ -118,9 +119,20 @@ class Renderer:
         if not pygame.get_init():
             pygame.init()
 
+        # The board is drawn at the window's top-left corner, one TILE_SIZE
+        # square per tile. In play the HUD (gold, turn, End Turn, Resign) is
+        # a panel to the right of it: drawn over the board, as it used to be,
+        # it hid units in the top rows of a 20x20 map and took their clicks.
+        # Replays and headless capture keep a board-sized surface (the replay
+        # player lays out its own controls, and videos are the board alone).
+        self.board_rect = pygame.Rect(0, 0, game_state.grid.width * TILE_SIZE, game_state.grid.height * TILE_SIZE)
+        self.has_hud_panel = not (headless or replay_mode)
+
+        # UI elements (lays out the HUD panel, which sets the window size)
+        self._setup_ui_elements()
+
         # Setup display
-        screen_width = game_state.grid.width * TILE_SIZE
-        screen_height = game_state.grid.height * TILE_SIZE
+        screen_width, screen_height = self.window_size
         if headless:
             # Headless: prefer a dummy SDL display so the surface lives on
             # a properly initialised SDL backbuffer. On some environments
@@ -205,9 +217,6 @@ class Renderer:
 
         # Per-overlay fade-in state: kind -> (signature, start_ticks)
         self._overlay_anim = {}
-
-        # UI elements
-        self._setup_ui_elements()
 
     def _resolve_sprites_path(self, category):
         """Resolve sprite directory for a category, honouring the override."""
@@ -382,30 +391,63 @@ class Renderer:
         self.animator = self._init_animator()
 
     def _setup_ui_elements(self):
-        """Setup UI elements like buttons (localized, sized to their labels)."""
-        screen_width = self.game_state.grid.width * TILE_SIZE
+        """Lay out the HUD and pre-render its static labels (localized).
+
+        In play the HUD is a panel to the right of the board: the player
+        card, gold and turn at the top, End Turn and Resign at the bottom.
+        Without the panel (replays, headless capture) there are no buttons.
+        """
         lang = get_language()
 
-        self._hud_font = get_font(28)
-        self._hud_button_font = get_display_font(24)
-        self._hud_badge_font = get_font(20)
+        self._hud_font = get_font(theme.FONT_SIZE_SUBHEADING)
+        self._hud_caption_font = get_font(theme.FONT_SIZE_HINT)
+        self._hud_title_font = get_display_font(theme.FONT_SIZE_BODY)
+        self._hud_button_font = get_display_font(theme.FONT_SIZE_BODY)
+        self._hud_badge_font = get_font(theme.FONT_SIZE_LABEL)
 
         self._hud_player_label = lang.get("player", "Player")
         self._hud_gold_label = lang.get("gold", "Gold")
         self._hud_turn_label = lang.get("turn", "Turn")
 
-        # Pre-render the static button labels and size buttons to fit them.
-        self._end_turn_label = self._hud_button_font.render(lang.get("end_turn", "End Turn"), True, theme.TEXT)
-        self._resign_label = self._hud_button_font.render(lang.get("resign", "Resign"), True, theme.TEXT)
-        button_height = 40
-        button_width = max(140, self._end_turn_label.get_width() + 28, self._resign_label.get_width() + 28)
-        self.end_turn_button = pygame.Rect(screen_width - button_width - 10, 10, button_width, button_height)
-        self.resign_button = pygame.Rect(screen_width - button_width - 10, 60, button_width, button_height)
+        pad = theme.HUD_PANEL_PADDING
+        content_width = theme.HUD_PANEL_WIDTH - 2 * pad
+        text_width = content_width - 16
 
-        # Pre-render the fog-of-war badge
-        self._fow_label = self._hud_badge_font.render(
-            lang.get("player_config.fog_of_war", "Fog of War"), True, theme.HUD_FOW_TEXT
-        )
+        def label(font, text, color):
+            return font.render(ellipsize(text, font, text_width), True, color)
+
+        self._end_turn_label = label(self._hud_button_font, lang.get("end_turn", "End Turn"), theme.TEXT)
+        self._resign_label = label(self._hud_button_font, lang.get("resign", "Resign"), theme.TEXT)
+        self._fow_label = label(self._hud_badge_font, lang.get("player_config.fog_of_war", "Fog of War"), theme.HUD_FOW_TEXT)
+        self._hud_gold_caption = label(self._hud_caption_font, self._hud_gold_label, theme.HUD_LABEL_TEXT)
+        self._hud_turn_caption = label(self._hud_caption_font, self._hud_turn_label, theme.HUD_LABEL_TEXT)
+
+        if not self.has_hud_panel:
+            self.hud_rect = pygame.Rect(self.board_rect.right, 0, 0, self.board_rect.height)
+            self.end_turn_button = pygame.Rect(0, 0, 0, 0)
+            self.resign_button = pygame.Rect(0, 0, 0, 0)
+            return
+
+        x = self.board_rect.right + pad
+        stat_height = self._hud_caption_font.get_height() + self._hud_font.get_height()
+        self._hud_player_card = pygame.Rect(x, pad, content_width, 40)
+        self._hud_gold_pos = (x, self._hud_player_card.bottom + 16)
+        self._hud_turn_pos = (x, self._hud_gold_pos[1] + stat_height + 12)
+        self._hud_fow_pos = (x, self._hud_turn_pos[1] + stat_height + 16)
+        info_bottom = self._hud_fow_pos[1] + self._fow_label.get_height() + 4
+
+        # End Turn and Resign sit at the bottom of the panel. A board too
+        # short to fit the panel beside it gets a taller window instead.
+        button_height, gap = 40, 10
+        height = max(self.board_rect.height, info_bottom + 16 + 2 * button_height + gap + pad)
+        self.hud_rect = pygame.Rect(self.board_rect.right, 0, theme.HUD_PANEL_WIDTH, height)
+        self.resign_button = pygame.Rect(x, height - pad - button_height, content_width, button_height)
+        self.end_turn_button = pygame.Rect(x, self.resign_button.y - gap - button_height, content_width, button_height)
+
+    @property
+    def window_size(self):
+        """(width, height) of the window: the board, plus the HUD panel in play."""
+        return self.hud_rect.right, max(self.board_rect.height, self.hud_rect.height)
 
     def render(self):
         """Render the entire game state."""
@@ -828,66 +870,90 @@ class Renderer:
         self._text_cache[key] = ((text, color), surface)
         return surface
 
+    def _gold_text(self):
+        """The current player's gold, written as the unit shop writes prices."""
+        return f"{self.game_state.player_gold[self.game_state.current_player]}g"
+
+    def _turn_text(self):
+        """The turn number, out of the turn limit when there is one."""
+        text = str(self.game_state.turn_number + 1)
+        if self.game_state.max_turns:
+            text += f" / {self.game_state.max_turns}"
+        return text
+
     def _draw_ui(self):
-        """Draw UI elements."""
-        # In headless mode the screen is exactly the grid size, so any HUD
-        # drawn here would overlap the playfield. Skip it for video capture.
+        """Draw the HUD: the side panel in play, two labels in a replay."""
+        # Headless capture (videos, notebooks) is the board alone.
         if self.headless:
             return
+        if self.has_hud_panel:
+            self._draw_hud_panel()
+        else:
+            self._draw_replay_hud()
 
-        player_color = PLAYER_COLORS.get(self.game_state.current_player, theme.TEXT)
+    def _draw_player_card(self, rect, text_surface, player_color):
+        """Draw ``text_surface`` on a dark card with a player-colour accent strip and border."""
+        radius = theme.BORDER_RADIUS_SMALL
+        pygame.draw.rect(self.screen, theme.HUD_CARD_BG, rect, border_radius=radius)
+        accent = pygame.Rect(rect.x, rect.y, theme.HUD_ACCENT_WIDTH, rect.height)
+        pygame.draw.rect(self.screen, player_color, accent, border_top_left_radius=radius, border_bottom_left_radius=radius)
+        pygame.draw.rect(self.screen, player_color, rect, 2, border_radius=radius)
+        self.screen.blit(text_surface, text_surface.get_rect(midleft=(accent.right + 8, rect.centery)))
 
-        # Draw player info and gold
-        gold = self.game_state.player_gold[self.game_state.current_player]
-        gold_text = f"{self._hud_player_label} {self.game_state.current_player} {self._hud_gold_label}: ${gold}"
-        text_surface = self._cached_text("gold", gold_text, self._hud_font, theme.HUD_GOLD_TEXT)
-        text_rect = text_surface.get_rect(topleft=(10, 10))
-        bg_rect = text_rect.inflate(10, 5)
+    def _draw_hud_panel(self):
+        """Draw the HUD panel to the right of the board."""
+        panel = self.hud_rect
+        pygame.draw.rect(self.screen, theme.HUD_PANEL_BG, panel)
+        pygame.draw.line(self.screen, theme.HUD_PANEL_BORDER, panel.topleft, (panel.left, panel.bottom - 1), 2)
 
-        pygame.draw.rect(self.screen, player_color, bg_rect)
-        pygame.draw.rect(self.screen, theme.HUD_GOLD_TEXT, bg_rect, 2)
-        self.screen.blit(text_surface, text_rect)
+        player = self.game_state.current_player
+        name = self._cached_text("hud_player", f"{self._hud_player_label} {player}", self._hud_title_font, theme.TEXT)
+        self._draw_player_card(self._hud_player_card, name, PLAYER_COLORS.get(player, theme.TEXT))
 
-        # Draw turn counter
-        turn_text = f"{self._hud_turn_label}: {self.game_state.turn_number + 1}"
-        if self.game_state.max_turns:
-            turn_text += f" / {self.game_state.max_turns}"
+        for key, caption, text, color, (x, y) in (
+            ("hud_gold", self._hud_gold_caption, self._gold_text(), theme.HUD_GOLD_TEXT, self._hud_gold_pos),
+            ("hud_turn", self._hud_turn_caption, self._turn_text(), theme.TEXT, self._hud_turn_pos),
+        ):
+            self.screen.blit(caption, (x, y))
+            self.screen.blit(self._cached_text(key, text, self._hud_font, color), (x, y + caption.get_height()))
+
+        if self.game_state.fog_of_war:
+            fow_rect = self._fow_label.get_rect(topleft=(self._hud_fow_pos[0] + 4, self._hud_fow_pos[1] + 2))
+            fow_bg = fow_rect.inflate(8, 4)
+            pygame.draw.rect(self.screen, theme.HUD_FOW_BG, fow_bg, border_radius=theme.BORDER_RADIUS_SMALL)
+            pygame.draw.rect(self.screen, theme.HUD_FOW_BORDER, fow_bg, width=1, border_radius=theme.BORDER_RADIUS_SMALL)
+            self.screen.blit(self._fow_label, fow_rect)
+
+        mouse_pos = pygame.mouse.get_pos()
+        for button, label, color, hover_color, border_color in (
+            (self.end_turn_button, self._end_turn_label, theme.BTN_END_TURN, theme.BTN_END_TURN_HOVER, theme.TEXT),
+            (self.resign_button, self._resign_label, theme.BTN_RESIGN, theme.BTN_RESIGN_HOVER, theme.BTN_RESIGN_BORDER),
+        ):
+            fill = hover_color if button.collidepoint(mouse_pos) else color
+            pygame.draw.rect(self.screen, fill, button, border_radius=theme.BORDER_RADIUS)
+            pygame.draw.rect(self.screen, border_color, button, 2, border_radius=theme.BORDER_RADIUS)
+            self.screen.blit(label, label.get_rect(center=button.center))
+
+    def _draw_replay_hud(self):
+        """Draw the gold and turn labels over the board's top-left corner.
+
+        A replay keeps a board-sized window (the replay player lays out its
+        own controls) and takes no clicks on the board, so these stay on it.
+        """
+        player = self.game_state.current_player
+        gold_text = f"{self._hud_player_label} {player} {self._hud_gold_label}: {self._gold_text()}"
+        gold_surface = self._cached_text("gold", gold_text, self._hud_font, theme.HUD_GOLD_TEXT)
+        card = pygame.Rect(5, 5, theme.HUD_ACCENT_WIDTH + gold_surface.get_width() + 16, gold_surface.get_height() + 6)
+        self._draw_player_card(card, gold_surface, PLAYER_COLORS.get(player, theme.TEXT))
+
+        turn_text = f"{self._hud_turn_label}: {self._turn_text()}"
         turn_surface = self._cached_text("turn", turn_text, self._hud_font, theme.TEXT)
-        turn_rect = turn_surface.get_rect(topleft=(10, bg_rect.bottom + 5))
+        turn_rect = turn_surface.get_rect(topleft=(10, card.bottom + 5))
         turn_bg_rect = turn_rect.inflate(10, 5)
 
         pygame.draw.rect(self.screen, theme.HUD_TURN_BG, turn_bg_rect)
         pygame.draw.rect(self.screen, theme.HUD_TURN_BORDER, turn_bg_rect, 2)
         self.screen.blit(turn_surface, turn_rect)
-
-        # Skip End Turn and Resign buttons in replay mode or headless mode
-        if self.replay_mode or self.headless:
-            return
-
-        # Draw End Turn button
-        mouse_pos = pygame.mouse.get_pos()
-        et_hover = self.end_turn_button.collidepoint(mouse_pos)
-        button_color = theme.BTN_END_TURN_HOVER if et_hover else theme.BTN_END_TURN
-
-        pygame.draw.rect(self.screen, button_color, self.end_turn_button, border_radius=theme.BORDER_RADIUS)
-        pygame.draw.rect(self.screen, theme.TEXT, self.end_turn_button, 2, border_radius=theme.BORDER_RADIUS)
-        self.screen.blit(self._end_turn_label, self._end_turn_label.get_rect(center=self.end_turn_button.center))
-
-        # Draw Resign button
-        rs_hover = self.resign_button.collidepoint(mouse_pos)
-        resign_color = theme.BTN_RESIGN_HOVER if rs_hover else theme.BTN_RESIGN
-
-        pygame.draw.rect(self.screen, resign_color, self.resign_button, border_radius=theme.BORDER_RADIUS)
-        pygame.draw.rect(self.screen, theme.BTN_RESIGN_BORDER, self.resign_button, 2, border_radius=theme.BORDER_RADIUS)
-        self.screen.blit(self._resign_label, self._resign_label.get_rect(center=self.resign_button.center))
-
-        # Draw fog of war indicator if enabled
-        if self.game_state.fog_of_war:
-            fow_rect = self._fow_label.get_rect(topright=(self.screen.get_width() - 10, self.resign_button.bottom + 10))
-            fow_bg = fow_rect.inflate(8, 4)
-            pygame.draw.rect(self.screen, theme.HUD_FOW_BG, fow_bg, border_radius=theme.BORDER_RADIUS_SMALL)
-            pygame.draw.rect(self.screen, theme.HUD_FOW_BORDER, fow_bg, width=1, border_radius=theme.BORDER_RADIUS_SMALL)
-            self.screen.blit(self._fow_label, fow_rect)
 
     def _overlay_alpha(self, kind, signature, base_alpha):
         """Fade an overlay in over OVERLAY_FADE_MS when its target changes.
