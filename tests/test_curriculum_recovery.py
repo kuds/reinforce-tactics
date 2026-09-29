@@ -433,6 +433,17 @@ class TestRunHygiene:
         assert status["metadata_write_failures"] == 2
         assert any("bootstrap_results.csv" in r.getMessage() and r.exc_info for r in caplog.records)
 
+    def test_eval_rows_carry_wall_time_and_eval_seconds(self, tmp_path, monkeypatch):
+        before = time.time()
+        _run(_cfg(_stage("a", patience=2)), tmp_path, {"a": [[0.5, 0.95, 0.95]]}, monkeypatch)
+        rows = json.loads((tmp_path / "a" / "eval_results.json").read_text())
+        walls = [r["wall_time"] for r in rows]
+        assert len(rows) == 3 and walls == sorted(walls) and before <= walls[0] <= time.time()
+        assert all(isinstance(r["eval_seconds"], float) and r["eval_seconds"] >= 0 for r in rows)
+        # bootstrap_results.csv keeps its fixed schema.
+        header = (tmp_path / "bootstrap_results.csv").read_text().splitlines()[0].split(",")
+        assert header == list(bootstrap._RESULTS_CSV_COLUMNS)
+
     def test_promoting_eval_reaches_the_logger(self, tmp_path, monkeypatch):
         cfg = _cfg(_stage("a", patience=1))
         _, model = _run(cfg, tmp_path, {"a": [[0.95]]}, monkeypatch)
@@ -478,6 +489,8 @@ class TestResume:
         current = manifest["current"]
         assert current["stage"] == "b" and current["latest_timesteps"] == 30
         assert current["promotion_state"]["streak"] == 1 and len(current["promotion_state"]["window"]) == 2
+        killed_rows = [json.loads(line) for line in (tmp_path / "b" / "eval_results.jsonl").read_text().splitlines()]
+        wall_before = {r["timesteps"]: r["wall_time"] for r in killed_rows}
 
         loaded: dict[str, Any] = {}
 
@@ -519,6 +532,10 @@ class TestResume:
         # The rewritten JSONL holds each eval once.
         rows = [json.loads(line) for line in (tmp_path / "b" / "eval_results.jsonl").read_text().splitlines()]
         assert [r["timesteps"] for r in rows] == [20, 30, 40, 50]
+        # Rows kept from the killed session keep their own wall_time; the
+        # resumed session's rows are later (summarize_seeds' steps/h skips the gap).
+        assert {r["timesteps"]: r["wall_time"] for r in rows[:2]} == wall_before
+        assert rows[2]["wall_time"] >= rows[1]["wall_time"] and all(r["eval_seconds"] >= 0 for r in rows)
 
     def test_plan_between_stages_and_completed_and_stalled(self, tmp_path, monkeypatch):
         cfg = _cfg(_stage("a", patience=1), _stage("b", patience=1))

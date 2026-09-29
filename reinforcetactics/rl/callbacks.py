@@ -34,6 +34,7 @@ import json
 import logging
 import math
 import os
+import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -405,6 +406,9 @@ class PeriodicEvalCallback(BaseCallback):
         self.peak_win_rate: float | None = best_state.get("peak_win_rate")
         self.peak_timestep: int = int(best_state.get("peak_timestep", -1))
         self._last_eval_block: int = int(last_eval_block) if last_eval_block is not None else -1
+        # A resumed stage (``last_eval_block`` restored from its checkpoint);
+        # see ``_on_training_start``.
+        self._resumed = last_eval_block is not None
         # Cumulative counter at this stage's ``learn()`` entry, so
         # ``best_eligible_after`` is measured stage-relative. Mirrors
         # ``PromotionCallback._stage_start_step`` / ``EntropyScheduleCallback``.
@@ -432,6 +436,13 @@ class PeriodicEvalCallback(BaseCallback):
         from reinforcetactics.rl.gym_env import check_flat_action_version
 
         check_flat_action_version(self.model, self.eval_env, what="the eval env")
+        # A checkpoint taken with an eval still pending (an interrupt mid-eval,
+        # or between the step that crossed the block and its eval) holds the
+        # weights and the step that eval was due at. Replay it now, before the
+        # first step, so the resumed stage evaluates at the same step as an
+        # uninterrupted run instead of a step later.
+        if self._resumed and int(self.num_timesteps) // self.eval_freq > self._last_eval_block:
+            self._do_eval()
 
     def _on_training_end(self) -> None:
         # The last eval of a learn() that ran out of budget would otherwise
@@ -485,6 +496,7 @@ class PeriodicEvalCallback(BaseCallback):
         # fires, so traces from different evals don't collide and a stalled
         # episode is easy to map back to the eval row in the printed log.
         trace_dir = self.trace_dir / f"eval_{int(self.num_timesteps):09d}" if self.trace_dir is not None else None
+        started = time.perf_counter()
         m = self._evaluate(
             deterministic=self.deterministic, seed=eval_seed, trace_dir=trace_dir, track_breakdown=self.track_breakdown
         )
@@ -508,6 +520,11 @@ class PeriodicEvalCallback(BaseCallback):
                 },
                 "win_rate_by_seat": {s: v["win_rate"] for s, v in (other.get("by_seat") or {}).items()},
             }
+        # When the row was produced (epoch seconds) and how long its evals took
+        # (both modes): throughput and the eval share of wall-clock, per row,
+        # for scripts/eval/summarize_seeds.py and run_seeds.py status.
+        m["eval_seconds"] = time.perf_counter() - started
+        m["wall_time"] = time.time()
         m["win_rate_stochastic"] = mode_wr.get(False)
         m["win_rate_greedy"] = mode_wr.get(True)
         m["win_rate_by_seat"] = {s: v["win_rate"] for s, v in (m.get("by_seat") or {}).items()}

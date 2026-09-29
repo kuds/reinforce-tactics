@@ -21,6 +21,14 @@ Environment variables:
                        ``<base>/dir/``; ``dir=prefix`` goes to ``<base>/prefix/``;
                        ``dir=`` puts the directory's contents straight under
                        ``<base>/``. A file under two entries goes to both places.
+    GCS_RESTORE_DIRS   Directories to download from the output base BEFORE the
+                       command starts, comma-separated ``dir=prefix`` entries
+                       (the GCS_SYNC_DIRS syntax): ``<base>/prefix/`` lands in
+                       ``dir/``. Used by resubmitted seed jobs to continue
+                       their run; charts/, videos/, checkpoints/, traces/ and
+                       tensorboard/ are not restored. A failed restore fails
+                       the job without running the command (a fresh start
+                       would overwrite the stored run).
     GCS_CREDENTIALS    Optional path to a service-account JSON file.
 
 The child gets ``GCS_WRAPPER_SYNC`` describing what the final sync uploads, so
@@ -34,6 +42,7 @@ Usage:
 import logging
 import os
 import posixpath
+import re
 import signal
 import subprocess
 import sys
@@ -48,6 +57,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from reinforcetactics.cloud.storage import (  # noqa: E402
     DEFAULT_OUTPUT_DIRS,
     WRAPPER_SYNC_ENV,
+    download_tree,
     resolve_output_base,
     sync_directories,
     wrapper_sync_env,
@@ -56,6 +66,9 @@ from reinforcetactics.cloud.storage import (  # noqa: E402
 logger = logging.getLogger("vertex_train")
 
 DEFAULT_SYNC_INTERVAL = 300
+
+# What a restore leaves in GCS: output a resumed run does not read.
+RESTORE_EXCLUDE = re.compile(r"(^|/)(videos|charts|checkpoints|traces|tensorboard)/")
 
 # scripts/train/train_bootstrap.py writes each run to benchmarks/bootstrap/<run_id>/
 # by default, outside every DEFAULT_OUTPUT_DIRS entry, so a cancelled or
@@ -80,7 +93,15 @@ def resolve_sync_dirs(env: Mapping[str, str] | None = None) -> dict[str, str]:
     resolved = os.environ if env is None else env
     dirs = {name: name for name in DEFAULT_OUTPUT_DIRS}
     dirs[BOOTSTRAP_RUNS_DIR] = ""
-    for entry in resolved.get("GCS_SYNC_DIRS", "").split(","):
+    dirs.update(_parse_dir_entries(resolved.get("GCS_SYNC_DIRS", ""), "GCS_SYNC_DIRS"))
+    _warn_about_overlaps(dirs)
+    return dirs
+
+
+def _parse_dir_entries(value: str, variable: str) -> dict[str, str]:
+    """``dir``, ``dir=prefix`` and ``dir=`` entries of a comma-separated list, normalized."""
+    dirs: dict[str, str] = {}
+    for entry in value.split(","):
         local, sep, remote = entry.partition("=")
         local = local.strip()
         if not local:
@@ -93,11 +114,44 @@ def resolve_sync_dirs(env: Mapping[str, str] | None = None) -> dict[str, str]:
         if prefix == ".":
             prefix = ""
         if prefix == ".." or prefix.startswith("../"):
-            logger.warning("Ignoring GCS_SYNC_DIRS entry %r: prefix %r points above the output base", entry, prefix)
+            logger.warning("Ignoring %s entry %r: prefix %r points above the output base", variable, entry, prefix)
             continue
         dirs[local] = prefix
-    _warn_about_overlaps(dirs)
     return dirs
+
+
+def resolve_restore_dirs(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Map each local directory to restore onto its prefix under the GCS base (``GCS_RESTORE_DIRS``).
+
+    Same syntax as ``GCS_SYNC_DIRS`` (``dir``, ``dir=prefix``, ``dir=``); no
+    defaults. scripts/train/run_seeds.py --backend vertex sets
+    ``benchmarks/bootstrap/<run>=<run>``, so a resubmitted seed continues the
+    run its earlier job synced.
+    """
+    resolved = os.environ if env is None else env
+    return _parse_dir_entries(resolved.get("GCS_RESTORE_DIRS", ""), "GCS_RESTORE_DIRS")
+
+
+def restore_directories(
+    base_uri: str,
+    restore_dirs: Mapping[str, str],
+    credentials_file: str | None = None,
+    client: object = None,
+) -> dict[str, int]:
+    """Download ``<base>/<prefix>/`` into each local directory before the training command starts.
+
+    Charts, videos, the flattened checkpoints/ copies, traces and tensorboard
+    are left out (the run does not need them to continue); the per-stage
+    zips are restored, since the resume plan and the final checkpoint
+    snapshot load them.
+    """
+    restored: dict[str, int] = {}
+    for local, prefix in restore_dirs.items():
+        source = f"{base_uri.rstrip('/')}/{prefix}" if prefix else base_uri.rstrip("/")
+        restored[local] = download_tree(
+            source, local, exclude=RESTORE_EXCLUDE, credentials_file=credentials_file, client=client
+        )
+    return restored
 
 
 def _warn_about_overlaps(dirs: Mapping[str, str]) -> None:
@@ -200,6 +254,23 @@ def main() -> int:
     child_env = {key: value for key, value in os.environ.items() if key != WRAPPER_SYNC_ENV}
     if base_uri:
         child_env[WRAPPER_SYNC_ENV] = wrapper_sync_env(base_uri, sync_dirs)
+
+    # Restore before the child starts and before the first periodic sync: the
+    # command then finds the run it continues, and nothing is uploaded over
+    # the stored copy first.
+    restore_dirs = resolve_restore_dirs()
+    if restore_dirs:
+        if not base_uri:
+            logger.warning("GCS_RESTORE_DIRS is set but there is no output base to restore from; ignoring it")
+        else:
+            try:
+                restored = restore_directories(base_uri, restore_dirs, credentials_file)
+            except Exception as e:
+                logger.error(
+                    "Restoring %s from %s failed (%s); not starting the command", ", ".join(restore_dirs), base_uri, e
+                )
+                return 1
+            logger.info("Restored from %s: %s", base_uri, ", ".join(f"{k}={v}" for k, v in restored.items()))
 
     logger.info("Running: %s", " ".join(command))
     proc = subprocess.Popen(command, env=child_env)

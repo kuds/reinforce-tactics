@@ -360,6 +360,17 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
     gold_banked_sum_total = 0.0
     action_counts = {name: 0 for name in ACTION_TYPE_NAMES}
     reward_components = {name: 0.0 for name in REWARD_COMPONENTS}
+    # The same components per outcome, and the sum of each episode's
+    # magnitude: the eval-level sums alone cannot say whether shaping pays
+    # for a draw (net shaping per draw) or how much of the return is shaping
+    # when positive and negative episodes cancel (review §2.1).
+    components_by_outcome = {
+        outcome: {"episodes": 0, **{name: 0.0 for name in REWARD_COMPONENTS}} for outcome in ("wins", "draws", "losses")
+    }
+    components_abs = {name: 0.0 for name in REWARD_COMPONENTS}
+    # Structures the opponent captured: neutral ones (a race lost) and the
+    # agent's own (ground lost). episode_stats counts them per episode.
+    opponent_captures = {"neutral": 0, "owned": 0}
 
     for rec in records:
         reason = rec["end_reason"]
@@ -395,11 +406,20 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
         own_units_sum_total += int(episode_stats.get("own_units_sum", 0) or 0)
         peak_gold_banked = max(peak_gold_banked, float(episode_stats.get("peak_gold_banked", 0.0) or 0.0))
         gold_banked_sum_total += float(episode_stats.get("gold_banked_sum", 0.0) or 0.0)
+        opponent_captures["neutral"] += int(episode_stats.get("structures_lost_neutral", 0) or 0)
+        opponent_captures["owned"] += int(episode_stats.get("structures_lost_owned", 0) or 0)
         if track_breakdown:
             for name, count in (rec["action_counts"] or {}).items():
                 action_counts[name] += count
+            by_outcome = components_by_outcome.get(rec["outcome"])
+            if by_outcome is not None:
+                by_outcome["episodes"] += 1
             for name, value in (rec["reward_components"] or {}).items():
                 reward_components[name] += value
+                if name in components_abs:
+                    components_abs[name] += abs(float(value))
+                    if by_outcome is not None:
+                        by_outcome[name] += float(value)
 
     rewards_arr = np.array([r["reward"] for r in records], dtype=float)
     lengths_arr = np.array([r["length"] for r in records], dtype=float)
@@ -444,10 +464,13 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
         "mean_own_units": (own_units_sum_total / steps_total) if steps_total > 0 else 0.0,
         "peak_gold_banked": float(peak_gold_banked),
         "mean_gold_banked": (gold_banked_sum_total / steps_total) if steps_total > 0 else 0.0,
+        "opponent_captures": opponent_captures,
     }
     if track_breakdown:
         result["action_counts"] = action_counts
         result["reward_components"] = reward_components
+        result["reward_components_by_outcome"] = components_by_outcome
+        result["reward_components_abs"] = components_abs
     if traced:
         result["traces"] = [r["trace_path"] for r in records if r["trace_path"] is not None]
     return result
@@ -533,7 +556,15 @@ def evaluate_model(
         When ``track_breakdown=True`` the dict also includes
         ``action_counts`` (dict keyed by ACTION_TYPE_NAMES, summed over
         every step of every episode) and ``reward_components`` (dict
-        keyed by REWARD_COMPONENTS, summed analogously).
+        keyed by REWARD_COMPONENTS, summed analogously), plus
+        ``reward_components_by_outcome`` (``{"wins"|"draws"|"losses":
+        {"episodes": n, <component>: sum}}``, whose component sums add up
+        to ``reward_components``) and ``reward_components_abs`` (per
+        component, the sum over episodes of the episode's absolute value).
+
+        Always includes ``opponent_captures`` (``{"neutral": n, "owned":
+        n}``: structures the opponent seized from neutral / from the
+        agent, summed over the episodes).
 
         Always includes ``seize_available_rate`` (fraction of decision
         points across all eval steps where a seize action was legal) and

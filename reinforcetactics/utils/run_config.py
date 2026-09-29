@@ -24,6 +24,12 @@ from typing import Any
 PathLike = str | Path
 
 
+# Set on a Vertex job by scripts/train/run_seeds.py (through
+# submit_vertex_job.sh): the training image leaves out .git, so without it a
+# job's records would name no commit.
+GIT_COMMIT_ENV = "RT_GIT_COMMIT"
+
+
 def _git_meta() -> dict[str, Any]:
     try:
         sha = subprocess.check_output(
@@ -32,6 +38,10 @@ def _git_meta() -> dict[str, Any]:
             text=True,
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        # No checkout (the training image): the commit the launcher passed, if any.
+        env_sha = os.environ.get(GIT_COMMIT_ENV, "").strip()
+        if env_sha:
+            return {"commit": env_sha, "short": env_sha[:7], "dirty": None, "source": GIT_COMMIT_ENV}
         return {"commit": None, "short": None, "dirty": None}
     try:
         rc = subprocess.call(
