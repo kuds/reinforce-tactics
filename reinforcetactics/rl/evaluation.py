@@ -102,7 +102,31 @@ UNIT_TYPE_LETTERS = ("W", "M", "C", "A", "K", "R", "S", "B")
 # Combat / progression scalars surfaced via ``info["episode_stats"]``.
 # Aggregated by summing across eval episodes so per-stage diagnostics
 # can plot e.g. "captures per game" or "damage delta" curves.
-COMBAT_STAT_KEYS = ("captures", "kills", "attacks", "seize_attempts", "damage_dealt", "damage_taken")
+COMBAT_STAT_KEYS = (
+    "captures",
+    "kills",
+    "attacks",
+    "seize_attempts",
+    "damage_dealt",
+    "damage_taken",
+    "units_lost",
+    "counter_damage_dealt",
+    "counter_damage_taken",
+    "counter_kills",
+)
+
+# Decision-point counters emitted by current envs. Choice rates divide by
+# availability, not episode length: an agent cannot seize where none was
+# offered. Older environments contribute no diagnostic samples.
+OPPORTUNITY_STAT_KEYS = (
+    "diagnostic_steps",
+    "attack_available_steps",
+    "attack_chosen_steps",
+    "seize_available_steps",
+    "seize_chosen_steps",
+    "forced_end_turns",
+    "voluntary_end_turns",
+)
 
 # Structure auto-heal economics surfaced via ``info["episode_stats"]``.
 # Summed across eval episodes into the same ``combat_stats`` dict, but
@@ -260,6 +284,8 @@ class _EpisodeTracker:
                     "turn": int(info.get("turn", 0)),
                     "valid_action": bool(info.get("valid_action", False)),
                     "n_legal_actions": int(info.get("n_legal_actions", 0)),
+                    "seize_available": info.get("seize_available"),
+                    "attack_available": info.get("attack_available"),
                     "reward": float(reward),
                     "reward_breakdown": {k: float(v) for k, v in info.get("reward_breakdown", {}).items()},
                     "terminated": bool(terminated),
@@ -274,6 +300,7 @@ class _EpisodeTracker:
         trace_dir: Path | None,
         trace_triggers: set,
         seat_tag: bool,
+        trace_recorder: _TraceRecorder,
     ) -> dict[str, Any]:
         """The episode's record; dumps its trace when the end reason is a trigger."""
         episode_stats = info.get("episode_stats", {}) or {}
@@ -286,31 +313,9 @@ class _EpisodeTracker:
         else:
             outcome = "draws"
         reason = info.get("end_reason")
-        trace_path: str | None = None
-        if self.trace is not None and reason in trace_triggers and trace_dir is not None:
-            # Created lazily so eval blocks with no trigger-matching episode
-            # leave no empty folder behind.
-            trace_dir.mkdir(parents=True, exist_ok=True)
-            seat_part = f"_seat{self.seat}" if seat_tag and self.seat is not None else ""
-            trace_file = trace_dir / f"episode_{self.index:04d}{seat_part}_{reason}.jsonl"
-            with trace_file.open("w") as fh:
-                header = {
-                    "episode_index": self.index,
-                    "seed": self.seed,
-                    "end_reason": reason,
-                    "outcome": outcome,
-                    "winner": winner,
-                    "agent_player": int(agent_player) if agent_player is not None else None,
-                    "ep_length": self.length,
-                    "ep_reward": float(self.reward),
-                    "final_turn": int(info.get("turn", 0)),
-                }
-                fh.write(json.dumps({"_header": header}) + "\n")
-                for record in self.trace:
-                    fh.write(json.dumps(record) + "\n")
-            trace_path = str(trace_file)
-        return {
+        record = {
             "index": self.index,
+            "seed": self.seed,
             "seat": int(agent_player) if isinstance(agent_player, (int, np.integer)) else agent_player,
             "reward": self.reward,
             "length": self.length,
@@ -320,8 +325,69 @@ class _EpisodeTracker:
             "episode_stats": episode_stats,
             "action_counts": self.action_counts,
             "reward_components": self.reward_components,
-            "trace_path": trace_path,
+            "trace_path": None,
         }
+        if self.trace is not None and reason in trace_triggers and trace_dir is not None:
+            seat_part = f"_seat{self.seat}" if seat_tag and self.seat is not None else ""
+            trace_file = trace_dir / f"episode_{self.index:04d}{seat_part}_{reason}.jsonl"
+            header = {
+                "episode_index": self.index,
+                "seed": self.seed,
+                "end_reason": reason,
+                "outcome": outcome,
+                "winner": winner,
+                "agent_player": int(agent_player) if agent_player is not None else None,
+                "ep_length": self.length,
+                "ep_reward": float(self.reward),
+                "final_turn": int(info.get("turn", 0)),
+            }
+            trace_recorder.add(trace_file, header, self.trace, record)
+        return record
+
+
+class _TraceRecorder:
+    """Keep the earliest matching plan episodes, independent of completion order.
+
+    Uncapped traces retain the historical immediate-write behavior. With a
+    cap, at most that many completed candidates (plus active episodes) stay
+    in memory, and files are written after every episode has finished.
+    """
+
+    def __init__(self, max_traces: int | None) -> None:
+        if max_traces is not None and (not isinstance(max_traces, (int, np.integer)) or max_traces < 0):
+            raise ValueError(f"max_traces must be a nonnegative integer or None, got {max_traces!r}")
+        self.max_traces = max_traces
+        self.candidates: dict[int, tuple[Path, dict, list[dict], dict]] = {}
+
+    def should_capture(self, index: int) -> bool:
+        if self.max_traces is None:
+            return True
+        return self.max_traces > 0 and (len(self.candidates) < self.max_traces or index < max(self.candidates))
+
+    @staticmethod
+    def _write(path: Path, header: dict, steps: list[dict], record: dict) -> None:
+        # Create lazily: no matching episodes means no empty directory.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as fh:
+            fh.write(json.dumps({"_header": header}) + "\n")
+            for step in steps:
+                fh.write(json.dumps(step) + "\n")
+        record["trace_path"] = str(path)
+
+    def add(self, path: Path, header: dict, steps: list[dict], record: dict) -> None:
+        if self.max_traces is None:
+            self._write(path, header, steps, record)
+            return
+        index = int(record["index"])
+        if self.should_capture(index):
+            self.candidates[index] = (path, header, steps, record)
+            if len(self.candidates) > self.max_traces:
+                del self.candidates[max(self.candidates)]
+
+    def flush(self) -> None:
+        for index in sorted(self.candidates):
+            self._write(*self.candidates[index])
+        self.candidates.clear()
 
 
 def _outcome_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -342,13 +408,18 @@ def _outcome_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, traced: bool) -> dict[str, Any]:
+def _aggregate(
+    records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, traced: bool, include_episode_records: bool = False
+) -> dict[str, Any]:
     """The evaluation result for per-episode ``records`` (in episode order)."""
     n_episodes = len(records)
     outcome_reasons = {f"{outcome}_by_{reason}": 0 for outcome in ("wins", "losses", "draws") for reason in END_REASONS}
     end_reasons = {reason: 0 for reason in END_REASONS}
     units_built = {ut: 0 for ut in UNIT_TYPE_LETTERS}
     combat_stats = {k: 0.0 for k in (*COMBAT_STAT_KEYS, *HEALING_STAT_KEYS)}
+    opportunity_stats = {k: 0 for k in OPPORTUNITY_STAT_KEYS}
+    legal_action_counts: dict[int, int] = {}
+    invalid_actions = 0
     captures_by_type = {k: 0 for k in CAPTURE_STRUCTURE_TYPES}
     seize_available_steps_total = 0
     steps_total = 0
@@ -378,6 +449,15 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
             end_reasons[reason] += 1
             outcome_reasons[f"{rec['outcome']}_by_{reason}"] += 1
         episode_stats = rec["episode_stats"]
+        invalid_actions += int(episode_stats.get("invalid_actions", 0) or 0)
+        for key in OPPORTUNITY_STAT_KEYS:
+            opportunity_stats[key] += int(episode_stats.get(key, 0) or 0)
+        for size, count in (episode_stats.get("legal_action_counts") or {}).items():
+            # Histogram keys are integers in-memory and strings after JSON
+            # round-tripping. Both describe the same offered legal-set size.
+            size, count = int(size), int(count)
+            if size > 0 and count > 0:
+                legal_action_counts[size] = legal_action_counts.get(size, 0) + count
         # Older envs that don't populate these keys contribute zeros.
         for ut, count in (episode_stats.get("units_built") or {}).items():
             if ut in units_built:
@@ -425,6 +505,20 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
     lengths_arr = np.array([r["length"] for r in records], dtype=float)
     turns_arr = np.array([r["turn"] for r in records], dtype=float)
     summary = _outcome_summary(records)
+    legal_samples = sum(legal_action_counts.values())
+    p95_legal_actions = None
+    if legal_samples:
+        rank = math.ceil(0.95 * legal_samples)
+        cumulative = 0
+        for size, count in sorted(legal_action_counts.items()):
+            cumulative += count
+            if cumulative >= rank:
+                p95_legal_actions = size
+                break
+
+    def _choice_rate(action: str) -> float | None:
+        available = opportunity_stats[f"{action}_available_steps"]
+        return opportunity_stats[f"{action}_chosen_steps"] / available if available else None
 
     # Per-seat outcomes, keyed by the seat as a string (JSON object keys).
     by_seat: dict[str, dict[str, Any]] = {}
@@ -456,6 +550,16 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
         "outcome_reasons": outcome_reasons,
         "units_built": units_built,
         "combat_stats": combat_stats,
+        "invalid_actions": invalid_actions,
+        "invalid_action_rate": invalid_actions / steps_total if steps_total else 0.0,
+        "opportunity_stats": opportunity_stats,
+        "attack_choice_rate": _choice_rate("attack"),
+        "seize_choice_rate": _choice_rate("seize"),
+        "mean_legal_actions": (
+            sum(size * count for size, count in legal_action_counts.items()) / legal_samples if legal_samples else None
+        ),
+        "p95_legal_actions": p95_legal_actions,
+        "forced_action_rate": legal_action_counts.get(1, 0) / legal_samples if legal_samples else None,
         "captures_by_type": captures_by_type,
         "seize_available_rate": (seize_available_steps_total / steps_total) if steps_total > 0 else 0.0,
         "max_legal_actions": int(max_legal_actions),
@@ -473,6 +577,10 @@ def _aggregate(records: Sequence[Mapping[str, Any]], *, track_breakdown: bool, t
         result["reward_components_abs"] = components_abs
     if traced:
         result["traces"] = [r["trace_path"] for r in records if r["trace_path"] is not None]
+    if include_episode_records:
+        # Keep the rich rows opt-in: repeated evaluations in long curricula
+        # otherwise duplicate episode statistics in every JSONL snapshot.
+        result["episode_records"] = [dict(r) for r in records]
     return result
 
 
@@ -510,6 +618,9 @@ def evaluate_model(
     trace_dir: str | Path | None = None,
     trace_end_reasons: tuple | None = ("max_steps_truncate",),
     seats: Sequence[int] | None = None,
+    *,
+    include_episode_records: bool = False,
+    max_traces: int | None = None,
 ) -> dict[str, Any]:
     """
     Evaluate a trained model and return summary statistics.
@@ -539,6 +650,13 @@ def evaluate_model(
             with the same seeds, the env's seat set with
             ``set_agent_seat`` before each reset (and restored after).
             ``None`` plays the env's own seat (the historical behaviour).
+        include_episode_records: Retain the rich per-episode rows under
+            ``episode_records`` for paired seed comparisons and scatter
+            plots. Off by default to keep long-run JSONL logs compact.
+        max_traces: Maximum matching episode traces written per evaluation.
+            ``None`` is unlimited; ``0`` disables trace collection. A positive
+            cap selects the earliest matching episodes in episode-plan order,
+            independent of vectorized completion order, and writes at eval end.
 
     Returns:
         Dict with keys: win_rate, avg_reward, std_reward, avg_length,
@@ -572,6 +690,23 @@ def evaluate_model(
         action-space diagnostics for the capture bottleneck and the
         flat_discrete truncation guardrail respectively.
 
+        ``opportunity_stats`` contains decision-point availability and
+        valid-choice counts for attack/seize, and forced/voluntary end
+        turns. ``attack_choice_rate`` / ``seize_choice_rate`` divide by
+        offered opportunities; they are ``None`` when none were observed.
+        ``mean_legal_actions``, ``p95_legal_actions`` (nearest-rank pooled
+        percentile), and ``forced_action_rate`` describe offered legal sets,
+        with ``None`` when an older env emitted no histogram samples.
+        ``invalid_actions`` / ``invalid_action_rate`` expose invalid choices;
+        the rate divides by all evaluation steps.
+
+        With ``include_episode_records=True``, ``episode_records`` preserves
+        each episode's ``index``, ``seed``, agent ``seat``, ``reward``,
+        ``length``, final ``turn``, ``outcome``, ``end_reason``, and complete
+        ``episode_stats`` (including combat and first-capture step/turn).
+        ``action_counts`` / ``reward_components`` are populated only with
+        ``track_breakdown=True``; otherwise those two fields are ``None``.
+
         When ``trace_dir`` is set, episodes whose ``info["end_reason"]``
         is in ``trace_end_reasons`` are dumped to JSON Lines at
         ``<trace_dir>/episode_<ep_idx>_<end_reason>.jsonl`` (with a
@@ -593,6 +728,7 @@ def evaluate_model(
 
     check_flat_action_version(model, env, what="the evaluation env")
     plan = _episode_plan(n_episodes, seats)
+    trace_recorder = _TraceRecorder(max_traces)
     trace_dir_path, trace_triggers = _trace_settings(trace_dir, trace_end_reasons)
     seat_tag = seats is not None and len(seats) > 1
     # Only forward action masks to ``model.predict`` when the model itself
@@ -625,8 +761,15 @@ def evaluate_model(
             trace_dir_path=trace_dir_path,
             trace_triggers=trace_triggers,
             seat_tag=seat_tag,
+            trace_recorder=trace_recorder,
         )
-    return _aggregate(records, track_breakdown=track_breakdown, traced=trace_dir_path is not None)
+    trace_recorder.flush()
+    return _aggregate(
+        records,
+        track_breakdown=track_breakdown,
+        traced=trace_dir_path is not None,
+        include_episode_records=include_episode_records,
+    )
 
 
 def _evaluate_serial(
@@ -645,6 +788,7 @@ def _evaluate_serial(
     trace_dir_path: Path | None,
     trace_triggers: set,
     seat_tag: bool,
+    trace_recorder: _TraceRecorder,
 ) -> None:
     """:func:`evaluate_model`'s episode loop: plays ``plan`` and appends one record per episode."""
     try:
@@ -661,7 +805,7 @@ def _evaluate_serial(
                 seat=seat,
                 agent_player=_agent_player_of(env),
                 track_breakdown=track_breakdown,
-                keep_trace=trace_dir_path is not None,
+                keep_trace=trace_dir_path is not None and trace_recorder.should_capture(index),
             )
             done = False
             info: dict[str, Any] = {}
@@ -673,7 +817,15 @@ def _evaluate_serial(
                 obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
                 tracker.on_step(action, reward, terminated, truncated, info)
-            records.append(tracker.finish(info, trace_dir=trace_dir_path, trace_triggers=trace_triggers, seat_tag=seat_tag))
+            records.append(
+                tracker.finish(
+                    info,
+                    trace_dir=trace_dir_path,
+                    trace_triggers=trace_triggers,
+                    seat_tag=seat_tag,
+                    trace_recorder=trace_recorder,
+                )
+            )
     finally:
         if set_seat is not None and previous_seat is not None:
             set_seat(previous_seat)
@@ -885,6 +1037,9 @@ def evaluate_model_vec(
     trace_dir: str | Path | None = None,
     trace_end_reasons: tuple | None = ("max_steps_truncate",),
     seats: Sequence[int] | None = None,
+    *,
+    include_episode_records: bool = False,
+    max_traces: int | None = None,
 ) -> dict[str, Any]:
     """:func:`evaluate_model` over the K envs of ``pool``, one batched ``predict`` per step.
 
@@ -907,6 +1062,7 @@ def evaluate_model_vec(
 
     check_flat_action_version(model, pool, what="the evaluation envs")
     plan = _episode_plan(n_episodes, seats)
+    trace_recorder = _TraceRecorder(max_traces)
     trace_dir_path, trace_triggers = _trace_settings(trace_dir, trace_end_reasons)
     seat_tag = seats is not None and len(seats) > 1
     probe = pool._probe
@@ -944,7 +1100,7 @@ def evaluate_model_vec(
                 seat=seat,
                 agent_player=agent_player,
                 track_breakdown=track_breakdown,
-                keep_trace=trace_dir_path is not None,
+                keep_trace=trace_dir_path is not None and trace_recorder.should_capture(index),
             )
 
     # A seeded stochastic eval samples from its own stream, seeded once:
@@ -972,7 +1128,11 @@ def evaluate_model_vec(
                     tracker.on_step(actions[k], reward, terminated, truncated, info)
                     if terminated or truncated:
                         records[tracker.index] = tracker.finish(
-                            info, trace_dir=trace_dir_path, trace_triggers=trace_triggers, seat_tag=seat_tag
+                            info,
+                            trace_dir=trace_dir_path,
+                            trace_triggers=trace_triggers,
+                            seat_tag=seat_tag,
+                            trace_recorder=trace_recorder,
                         )
                         finished.append(j)
                     else:
@@ -987,7 +1147,13 @@ def evaluate_model_vec(
                         inner.set_seat(j, previous)
     done = [r for r in records if r is not None]
     assert len(done) == len(plan), "every planned episode must finish"
-    return _aggregate(done, track_breakdown=track_breakdown, traced=trace_dir_path is not None)
+    trace_recorder.flush()
+    return _aggregate(
+        done,
+        track_breakdown=track_breakdown,
+        traced=trace_dir_path is not None,
+        include_episode_records=include_episode_records,
+    )
 
 
 def _stack_obs(observations: Sequence[Any]) -> Any:

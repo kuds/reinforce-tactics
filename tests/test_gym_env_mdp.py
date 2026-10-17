@@ -96,6 +96,114 @@ class TestEndReasonComesFromTheEngine:
         env.close()
 
 
+class TestEpisodeDiagnosticAccounting:
+    """Episode telemetry must describe the actual rewards and offered choices."""
+
+    @pytest.mark.parametrize("winner,terminal", [(1, 123.0), (2, -87.0), (None, -13.0)])
+    def test_episode_return_includes_terminal_reward(self, winner, terminal):
+        env = _env(reward_config={"win": 123.0, "loss": -87.0, "draw": -13.0, **_ISOLATE})
+        try:
+            _, first, _, _, _ = env.step(END_TURN)
+            env.game_state.game_over = True
+            env.game_state.winner = winner
+            _, last, terminated, _, info = env.step(END_TURN)
+            assert terminated
+            assert info["reward_breakdown"]["terminal"] == pytest.approx(terminal)
+            assert sum(info["reward_breakdown"].values()) == pytest.approx(last)
+            assert info["episode_stats"]["reward"] == pytest.approx(first + last)
+        finally:
+            env.close()
+
+    def test_episode_return_includes_explicit_truncation_penalty(self):
+        env = _env(max_steps=2, reward_config={"truncation": -12.5, **_ISOLATE})
+        try:
+            _, first, _, _, _ = env.step(END_TURN)
+            _, last, terminated, truncated, info = env.step(END_TURN)
+            assert truncated and not terminated
+            assert info["reward_breakdown"]["terminal"] == -12.5
+            assert info["episode_stats"]["reward"] == pytest.approx(first + last)
+        finally:
+            env.close()
+
+    @pytest.mark.parametrize("action_space_type", ["multi_discrete", "flat_discrete"])
+    def test_capture_opportunity_and_first_capture(self, action_space_type):
+        env = _env(action_space_type=action_space_type)
+        try:
+            env.game_state.place_unit("W", 5, 5, env.agent_player)
+            env.game_state.grid.get_tile(5, 5).health = 1
+            action = np.array([3, 0, 5, 5, 5, 5])
+            if action_space_type == "flat_discrete":
+                env.action_masks()
+                action = next(i for i, a in enumerate(env._current_actions) if np.array_equal(a, action))
+            _, _, terminated, _, info = env.step(action)
+            assert terminated and info["valid_action"] and info["seize_available"]
+            stats = info["episode_stats"]
+            assert stats["seize_available_steps"] == stats["seize_chosen_steps"] == 1
+            assert stats["first_capture_step"] == 1
+            assert stats["first_capture_turn"] == info["turn"]
+            assert sum(stats["legal_action_counts"].values()) == stats["diagnostic_steps"] == 1
+        finally:
+            env.close()
+
+    def test_attack_opportunity_records_a_valid_choice(self):
+        env = _env()
+        try:
+            env.game_state.place_unit("K", 2, 2, env.agent_player)
+            env.game_state.place_unit("W", 3, 2, 2).health = 1
+            _, _, terminated, _, info = env.step(np.array([2, 0, 2, 2, 3, 2]))
+            assert terminated and info["valid_action"] and info["attack_available"]
+            assert info["episode_stats"]["attack_available_steps"] == 1
+            assert info["episode_stats"]["attack_chosen_steps"] == 1
+        finally:
+            env.close()
+
+    def test_invalid_seize_is_not_counted_as_taking_an_opportunity(self):
+        env = _env()
+        try:
+            env.game_state.place_unit("W", 5, 5, env.agent_player)
+            _, _, _, _, info = env.step(np.array([3, 0, 0, 0, 0, 0]))
+            assert info["seize_available"] and not info["valid_action"]
+            assert env.episode_stats["invalid_actions"] == 1
+            assert env.episode_stats["seize_available_steps"] == 1
+            assert env.episode_stats["seize_chosen_steps"] == 0
+            assert env.episode_stats["first_capture_step"] is None
+        finally:
+            env.close()
+
+    @pytest.mark.parametrize("action_space_type", ["multi_discrete", "flat_discrete"])
+    def test_forced_and_voluntary_end_turns_use_pre_action_legal_set(self, action_space_type):
+        env = _env(action_space_type=action_space_type, max_actions_per_turn=1, max_steps=4)
+        try:
+            # Purchases are initially legal, so ending immediately is voluntary.
+            if action_space_type == "flat_discrete":
+                env.action_masks()
+                end = next(i for i, a in enumerate(env._current_actions) if a[0] == 5)
+            else:
+                end = END_TURN
+            env.step(end)
+            # Take a valid purchase, spending the entire one-action budget.
+            if action_space_type == "flat_discrete":
+                env.action_masks()
+                purchase = next(i for i, a in enumerate(env._current_actions) if a[0] == 0)
+            else:
+                purchase = np.array([0, 0, 1, 0, 1, 0])
+            _, _, _, _, purchase_info = env.step(purchase)
+            assert purchase_info["valid_action"]
+            if action_space_type == "flat_discrete":
+                env.action_masks()
+                end = next(i for i, a in enumerate(env._current_actions) if a[0] == 5)
+            env.step(end)
+            assert env.episode_stats["voluntary_end_turns"] == 1
+            assert env.episode_stats["forced_end_turns"] == 1
+            assert env.episode_stats["legal_action_counts"][1] == 1
+            assert env.episode_stats["diagnostic_steps"] == 3
+            env.reset(seed=1)
+            assert env.episode_stats["legal_action_counts"] == {}
+            assert env.episode_stats["first_capture_step"] is None
+        finally:
+            env.close()
+
+
 # ---------------------------------------------------------------------------
 # rlenv-6
 # ---------------------------------------------------------------------------

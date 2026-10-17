@@ -34,18 +34,24 @@ import json
 import logging
 import math
 import os
+import tempfile
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import torch
+from gymnasium.spaces import Discrete
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.logger import TensorBoardOutputFormat
 from stable_baselines3.common.utils import safe_mean
 
 from reinforcetactics.cloud.storage import PARTIAL_SUFFIX
 from reinforcetactics.rl.evaluation import (
     EvalEnvPool,
+    _isolated_policy_rng,
     evaluate_model,
     evaluate_model_vec,
     wilson_lower_bound,
@@ -157,6 +163,15 @@ class TrainingMetricsCallback(BaseCallback):
     continuous file across stages. ``context`` (when set by the caller,
     e.g. the curriculum runner setting the stage name before each
     ``learn()``) is stamped onto each record as ``stage``.
+
+    ``policy_diagnostic_samples`` bounds an evenly spaced sample of the
+    completed rollout used to measure a flat masked Discrete policy. These
+    are pre-update policy measurements, using the exact masks offered
+    during collection. Normalized entropy averages ``H / log(n_legal)``
+    only over decisions with more than one legal choice; forced decisions
+    are reported separately. Sampling never calls the buffer's ``get()``
+    (which shuffles with training's RNG and mutates its layout). Set 0 to
+    disable the extra policy forward pass.
     """
 
     TRAIN_KEYS = (
@@ -170,6 +185,18 @@ class TrainingMetricsCallback(BaseCallback):
         "train/value_loss",
     )
 
+    POLICY_KEYS = (
+        "rollout/policy_entropy",
+        "rollout/normalized_policy_entropy",
+        "rollout/forced_action_fraction",
+        "rollout/empty_action_mask_fraction",
+        "rollout/legal_actions_mean",
+        "rollout/legal_actions_p10",
+        "rollout/legal_actions_p50",
+        "rollout/legal_actions_p90",
+        "rollout/policy_diagnostic_samples",
+    )
+
     # Fixed CSV schema: identity/context first, then rollout/* and train/*.
     # ``train/ent_coef`` is read live off the model (schedules mutate the
     # attribute) because the logger copy is cleared by dump() before the
@@ -181,13 +208,18 @@ class TrainingMetricsCallback(BaseCallback):
         "rollout/ep_len_mean",
         *TRAIN_KEYS,
         "train/ent_coef",
+        *POLICY_KEYS,
     )
 
-    def __init__(self, csv_path: str | Path | None = None) -> None:
+    def __init__(self, csv_path: str | Path | None = None, *, policy_diagnostic_samples: int = 256) -> None:
         super().__init__()
+        if policy_diagnostic_samples < 0:
+            raise ValueError("policy_diagnostic_samples must be non-negative")
         self.records: list[dict] = []
         self._pending: dict | None = None
         self.csv_path = Path(csv_path) if csv_path is not None else None
+        self.policy_diagnostic_samples = int(policy_diagnostic_samples)
+        self._policy_diagnostic_warned = False
         # Free-form context label (typically the curriculum stage name);
         # stamped onto records committed while it is set.
         self.context: str | None = None
@@ -211,7 +243,70 @@ class TrainingMetricsCallback(BaseCallback):
                 snapshot["rollout/ep_rew_mean"] = float(safe_mean(rewards))
             if lengths:
                 snapshot["rollout/ep_len_mean"] = float(safe_mean(lengths))
+        diagnostics = self._policy_diagnostics()
+        snapshot.update(diagnostics)
+        for key, value in diagnostics.items():
+            self.logger.record(key, value)
         self._pending = snapshot
+
+    def _policy_diagnostics(self) -> dict[str, float]:
+        """Read a bounded deterministic rollout sample without altering training state."""
+        buffer = getattr(self.model, "rollout_buffer", None)
+        if (
+            buffer is None
+            or self.policy_diagnostic_samples == 0
+            or not isinstance(getattr(self.model, "action_space", None), Discrete)
+            or getattr(buffer, "action_masks", None) is None
+            or getattr(buffer, "generator_ready", False)
+        ):
+            return {}
+        n_steps = int(buffer.buffer_size if buffer.full else buffer.pos)
+        n_envs = int(buffer.n_envs)
+        total = n_steps * n_envs
+        if total == 0:
+            return {}
+        indices = np.linspace(0, total - 1, min(total, self.policy_diagnostic_samples), dtype=np.int64)
+        rows, envs = np.divmod(indices, n_envs)
+        masks = np.asarray(buffer.action_masks[rows, envs], dtype=np.bool_)
+        legal = masks.sum(axis=-1)
+        diagnostics = {
+            "rollout/forced_action_fraction": float(np.mean(legal == 1)),
+            "rollout/empty_action_mask_fraction": float(np.mean(legal == 0)),
+            "rollout/legal_actions_mean": float(legal.mean()),
+            "rollout/policy_diagnostic_samples": float(len(legal)),
+        }
+        for q in (10, 50, 90):
+            diagnostics[f"rollout/legal_actions_p{q}"] = float(np.percentile(legal, q))
+        observations = buffer.observations
+        sample = (
+            {key: value[rows, envs] for key, value in observations.items()}
+            if isinstance(observations, dict)
+            else observations[rows, envs]
+        )
+        policy: Any = self.model.policy
+        was_training = policy.training
+        try:
+            # BatchNorm/dropout must not update or introduce training-mode
+            # noise. Fork torch's RNG too, so custom feature extractors cannot
+            # consume the action-sampling stream during diagnostics.
+            policy.set_training_mode(False)
+            with _isolated_policy_rng(self.model, enabled=True), torch.no_grad():
+                obs_tensor, _ = policy.obs_to_tensor(sample)
+                distribution = policy.get_distribution(obs_tensor, action_masks=masks)
+                entropy = distribution.entropy().detach().cpu().numpy().reshape(-1)
+            valid = legal > 0
+            if valid.any():
+                diagnostics["rollout/policy_entropy"] = float(entropy[valid].mean())
+            choices = legal > 1
+            if choices.any():
+                diagnostics["rollout/normalized_policy_entropy"] = float((entropy[choices] / np.log(legal[choices])).mean())
+        except Exception:  # noqa: BLE001 - diagnostics must not abort training
+            if not self._policy_diagnostic_warned:
+                logger.warning("could not measure rollout policy entropy", exc_info=True)
+                self._policy_diagnostic_warned = True
+        finally:
+            policy.set_training_mode(was_training)
+        return diagnostics
 
     def _commit_pending(self) -> None:
         if self._pending is None:
@@ -237,14 +332,53 @@ class TrainingMetricsCallback(BaseCallback):
             return
         try:
             self.csv_path.parent.mkdir(parents=True, exist_ok=True)
-            write_header = not self.csv_path.exists()
+            columns = self._prepare_csv_schema()
+            write_header = not self.csv_path.exists() or self.csv_path.stat().st_size == 0
             with self.csv_path.open("a", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=list(self._CSV_COLUMNS))
+                writer = csv.DictWriter(fh, fieldnames=columns)
                 if write_header:
                     writer.writeheader()
-                writer.writerow({col: record.get(col, "") for col in self._CSV_COLUMNS})
+                writer.writerow({col: record.get(col, "") for col in columns})
         except Exception:  # noqa: BLE001 - best effort; reported, never raised
             _report_write_failure(self.on_write_failure, f"append a row to {self.csv_path}")
+
+    def _prepare_csv_schema(self) -> list[str]:
+        """Atomically add new metric columns when resuming an older CSV.
+
+        Keep the existing order and unknown columns so external annotations
+        survive. Stream old rows through a sibling partial file: an
+        interruption or malformed old row leaves the original CSV intact.
+        """
+        assert self.csv_path is not None
+        if not self.csv_path.exists() or self.csv_path.stat().st_size == 0:
+            return list(self._CSV_COLUMNS)
+        temporary: Path | None = None
+        try:
+            with self.csv_path.open(newline="", encoding="utf-8") as source:
+                reader = csv.DictReader(source)
+                existing = list(reader.fieldnames or [])
+                columns = existing + [col for col in self._CSV_COLUMNS if col not in existing]
+                if columns == existing:
+                    return columns
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    newline="",
+                    encoding="utf-8",
+                    dir=self.csv_path.parent,
+                    prefix=f".{self.csv_path.name}.",
+                    suffix=PARTIAL_SUFFIX,
+                    delete=False,
+                ) as target:
+                    temporary = Path(target.name)
+                    writer = csv.DictWriter(target, fieldnames=columns)
+                    writer.writeheader()
+                    for row in reader:
+                        writer.writerow(row)
+            os.replace(temporary, self.csv_path)
+            return columns
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def _on_rollout_start(self) -> None:
         # train() of the previous iteration has run by this hook, so
@@ -337,6 +471,9 @@ class PeriodicEvalCallback(BaseCallback):
         *,
         deterministic: bool = True,
         eval_both_modes: bool = False,
+        trace_end_reasons: Sequence[str] | None = None,
+        max_traces: int | None = None,
+        include_episode_records: bool = False,
         seats: Sequence[int] | None = None,
         seat_aggregate: str = "mean",
         start_step: int | None = None,
@@ -374,9 +511,14 @@ class PeriodicEvalCallback(BaseCallback):
         # ``trace_dir`` (when set) is the root under which per-eval-block
         # subdirectories are created -- each block's stall-episode JSONL
         # files land in ``trace_dir/eval_<timesteps>/``. Forwarded to
-        # ``evaluate_model``; only ``max_steps_truncate`` episodes are
-        # dumped, so healthy evals leave no artefacts on disk.
+        # ``evaluate_model``; by default only ``max_steps_truncate`` episodes
+        # are dumped. Include ``max_turns_draw`` for turn-limit stall traces.
         self.trace_dir = Path(trace_dir) if trace_dir is not None else None
+        self.trace_end_reasons = tuple(trace_end_reasons) if trace_end_reasons is not None else None
+        if max_traces is not None and max_traces < 0:
+            raise ValueError("max_traces must be non-negative or None")
+        self.max_traces = int(max_traces) if max_traces is not None else None
+        self.include_episode_records = bool(include_episode_records)
         self.results_jsonl_path = Path(results_jsonl_path) if results_jsonl_path is not None else None
         self.deterministic = bool(deterministic)
         self.eval_both_modes = bool(eval_both_modes)
@@ -474,6 +616,12 @@ class PeriodicEvalCallback(BaseCallback):
             kwargs["seats"] = self.seats
         if trace_dir is not None:
             kwargs["trace_dir"] = trace_dir
+            if self.trace_end_reasons is not None:
+                kwargs["trace_end_reasons"] = self.trace_end_reasons
+            if self.max_traces is not None:
+                kwargs["max_traces"] = self.max_traces
+        if self.include_episode_records:
+            kwargs["include_episode_records"] = True
         if isinstance(self.eval_env, EvalEnvPool):
             return evaluate_model_vec(self.model, self.eval_env, **kwargs)
         return evaluate_model(self.model, self.eval_env, **kwargs)
@@ -588,20 +736,22 @@ class PeriodicEvalCallback(BaseCallback):
     def _log(self, m: Mapping[str, Any]) -> None:
         # Tensorboard: log the most useful scalars so they show up alongside
         # the SB3-internal train/* and rollout/* curves.
-        self.logger.record("eval/win_rate", m["win_rate"])
-        self.logger.record("eval/gate_win_rate", m["gate_win_rate"])
+        values: dict[str, Any] = {}
+        record = values.__setitem__
+        record("eval/win_rate", m["win_rate"])
+        record("eval/gate_win_rate", m["gate_win_rate"])
         if m.get("win_rate_stochastic") is not None:
-            self.logger.record("eval/win_rate_stochastic", m["win_rate_stochastic"])
+            record("eval/win_rate_stochastic", m["win_rate_stochastic"])
         if m.get("win_rate_greedy") is not None:
-            self.logger.record("eval/win_rate_greedy", m["win_rate_greedy"])
+            record("eval/win_rate_greedy", m["win_rate_greedy"])
         if "draw_rate" in m:
-            self.logger.record("eval/draw_rate", m["draw_rate"])
-            self.logger.record("eval/loss_rate", m.get("loss_rate", 0.0))
+            record("eval/draw_rate", m["draw_rate"])
+            record("eval/loss_rate", m.get("loss_rate", 0.0))
         for seat, wr in (m.get("win_rate_by_seat") or {}).items():
-            self.logger.record(f"eval/win_rate_seat{seat}", wr)
-        self.logger.record("eval/mean_reward", m["avg_reward"])
-        self.logger.record("eval/mean_ep_length", m["avg_length"])
-        self.logger.record("eval/mean_ep_turns", m["avg_turns"])
+            record(f"eval/win_rate_seat{seat}", wr)
+        record("eval/mean_reward", m["avg_reward"])
+        record("eval/mean_ep_length", m["avg_length"])
+        record("eval/mean_ep_turns", m["avg_turns"])
         # Action-space diagnostics. ``seize_available_rate`` is the fraction
         # of decision points where a capture was legal -- a low value means
         # the policy rarely even reaches a capturable tile (navigation
@@ -611,21 +761,31 @@ class PeriodicEvalCallback(BaseCallback):
         # flat_discrete table was cut to max_flat_actions) show when the
         # cap bites and should be raised.
         if "seize_available_rate" in m:
-            self.logger.record("eval/seize_available_rate", m["seize_available_rate"])
+            record("eval/seize_available_rate", m["seize_available_rate"])
         if "max_legal_actions" in m:
-            self.logger.record("eval/max_legal_actions", m["max_legal_actions"])
+            record("eval/max_legal_actions", m["max_legal_actions"])
         if "flat_truncated_rate" in m:
-            self.logger.record("eval/flat_truncated_rate", m["flat_truncated_rate"])
+            record("eval/flat_truncated_rate", m["flat_truncated_rate"])
+        for key in (
+            "invalid_action_rate",
+            "mean_legal_actions",
+            "p95_legal_actions",
+            "forced_action_rate",
+            "attack_choice_rate",
+            "seize_choice_rate",
+        ):
+            if m.get(key) is not None:
+                record(f"eval/{key}", m[key])
         # Army-economy diagnostics: peak/mean army size and unspent gold.
         # A high peak army with near-zero banked gold means the economy is
         # funding mass (convert-all-gold-to-units) -- the "slow-walk a big
         # army" signature -- vs. a small army winning with banked gold to
         # spare, which is the precise/efficient regime.
         if "peak_own_units" in m:
-            self.logger.record("eval/peak_own_units", m["peak_own_units"])
-            self.logger.record("eval/mean_own_units", m["mean_own_units"])
-            self.logger.record("eval/peak_gold_banked", m["peak_gold_banked"])
-            self.logger.record("eval/mean_gold_banked", m["mean_gold_banked"])
+            record("eval/peak_own_units", m["peak_own_units"])
+            record("eval/mean_own_units", m["mean_own_units"])
+            record("eval/peak_gold_banked", m["peak_gold_banked"])
+            record("eval/mean_gold_banked", m["mean_gold_banked"])
         # Structure auto-heal economics (sums over the eval in
         # ``combat_stats``; normalised per episode here). own_heal_gold is
         # the agent's silent gold drain from parking wounded units on its
@@ -634,10 +794,14 @@ class PeriodicEvalCallback(BaseCallback):
         combat = m.get("combat_stats") or {}
         heal_eps = max(1, int(m.get("episodes", 0) or self.n_eval_episodes or 1))
         if "own_heal_gold" in combat:
-            self.logger.record("eval/own_heal_gold_per_ep", combat["own_heal_gold"] / heal_eps)
-            self.logger.record("eval/own_heal_hp_per_ep", combat.get("own_heal_hp", 0.0) / heal_eps)
-            self.logger.record("eval/opp_heal_gold_per_ep", combat.get("opp_heal_gold", 0.0) / heal_eps)
-            self.logger.record("eval/opp_heal_hp_per_ep", combat.get("opp_heal_hp", 0.0) / heal_eps)
+            record("eval/own_heal_gold_per_ep", combat["own_heal_gold"] / heal_eps)
+            record("eval/own_heal_hp_per_ep", combat.get("own_heal_hp", 0.0) / heal_eps)
+            record("eval/opp_heal_gold_per_ep", combat.get("opp_heal_gold", 0.0) / heal_eps)
+            record("eval/opp_heal_hp_per_ep", combat.get("opp_heal_hp", 0.0) / heal_eps)
+        for key in ("seize_attempts", "captures"):
+            if key in combat:
+                record(f"eval/{key}_per_ep", combat[key] / heal_eps)
+        self._record_eval_scalars(values, int(m["timesteps"]))
 
         if self.verbose:
             mode = "greedy" if self.deterministic else "stoch"
@@ -661,6 +825,25 @@ class PeriodicEvalCallback(BaseCallback):
                 f"gold(pk/mn)={m.get('peak_gold_banked', 0.0):.0f}/{m.get('mean_gold_banked', 0.0):.0f}  "
                 f"heal$(own/opp)={combat.get('own_heal_gold', 0.0) / heal_eps:.0f}/{combat.get('opp_heal_gold', 0.0) / heal_eps:.0f}"
             )
+
+    def _record_eval_scalars(self, values: Mapping[str, Any], step: int) -> None:
+        """Write TensorBoard at the measured step without dumping pending train metrics.
+
+        SB3 ordinarily buffers values until a rollout ends. Two evaluations
+        within one rollout would overwrite each other, and even a single
+        eval would be plotted at the later rollout boundary. Writing only
+        the TensorBoard output format now preserves every evaluation and
+        its exact timestamp; normal logger outputs still receive the values
+        at their usual cadence, excluding a second TensorBoard write.
+        """
+        formats = [f for f in getattr(self.logger, "output_formats", ()) if isinstance(f, TensorBoardOutputFormat)]
+        for output in formats:
+            output.write(dict(values), {key: () for key in values}, step)
+        for key, value in values.items():
+            if formats:
+                self.logger.record(key, value, exclude="tensorboard")
+            else:
+                self.logger.record(key, value)
 
 
 # ---------------------------------------------------------------------------

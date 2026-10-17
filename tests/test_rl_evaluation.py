@@ -121,6 +121,7 @@ class TestEvaluateModel:
         result = evaluate_model(_StubModel(), env, n_episodes=1)
         assert "action_counts" not in result
         assert "reward_components" not in result
+        assert "episode_records" not in result
 
     def test_track_breakdown_accumulates_action_and_reward_breakdown(self):
         # Stub env that emits action_type + reward_breakdown in step info.
@@ -364,3 +365,120 @@ class TestRewardComponentsByOutcome:
         assert by["draws"]["episodes"] == 1 and by["draws"]["action"] == 1.0
         assert result["reward_components_abs"]["shaping_delta"] == 3.0
         assert result["opponent_captures"] == {"neutral": 2, "owned": 0}
+
+
+class TestDecisionDiagnostics:
+    def test_pooled_denominators_and_existing_combat_counters(self):
+        from reinforcetactics.rl.evaluation import _aggregate
+
+        short = _record("wins", {}, index=0)
+        short["length"] = 2
+        short["episode_stats"].update(
+            {
+                "invalid_actions": 1,
+                "units_lost": 2,
+                "counter_kills": 1,
+                "counter_damage_dealt": 3.5,
+                "counter_damage_taken": 2.5,
+                "diagnostic_steps": 2,
+                "legal_action_counts": {1: 1, 4: 1},
+                "attack_available_steps": 1,
+                "attack_chosen_steps": 1,
+                "seize_available_steps": 0,
+                "seize_chosen_steps": 0,
+                "forced_end_turns": 1,
+                "voluntary_end_turns": 0,
+            }
+        )
+        long = _record("draws", {}, index=1)
+        long["length"] = 8
+        long["episode_stats"].update(
+            {
+                "invalid_actions": 2,
+                "units_lost": 3,
+                "counter_kills": 2,
+                "counter_damage_dealt": 7.5,
+                "counter_damage_taken": 1.5,
+                # String histogram keys must also work after JSON round-trip.
+                "diagnostic_steps": 8,
+                "legal_action_counts": {"8": 8},
+                "attack_available_steps": 3,
+                "attack_chosen_steps": 1,
+                "seize_available_steps": 2,
+                "seize_chosen_steps": 1,
+                "forced_end_turns": 0,
+                "voluntary_end_turns": 3,
+            }
+        )
+        result = _aggregate([short, long], track_breakdown=False, traced=False)
+        assert result["invalid_actions"] == 3
+        assert result["invalid_action_rate"] == pytest.approx(3 / 10)
+        assert result["combat_stats"]["units_lost"] == 5
+        assert result["combat_stats"]["counter_kills"] == 3
+        assert result["combat_stats"]["counter_damage_dealt"] == 11.0
+        assert result["combat_stats"]["counter_damage_taken"] == 4.0
+        assert result["attack_choice_rate"] == pytest.approx(2 / 4)
+        assert result["seize_choice_rate"] == pytest.approx(1 / 2)
+        assert result["mean_legal_actions"] == pytest.approx(6.9)
+        assert result["p95_legal_actions"] == 8
+        assert result["forced_action_rate"] == pytest.approx(1 / 10)
+        assert result["opportunity_stats"]["diagnostic_steps"] == 10
+        assert result["opportunity_stats"]["voluntary_end_turns"] == 3
+
+    def test_no_opportunity_or_histogram_is_missing_not_zero_success(self):
+        result = evaluate_model(_StubModel(), _StubEnv([[(0.0, True, 1)]]), n_episodes=1)
+        assert result["seize_choice_rate"] is None
+        assert result["attack_choice_rate"] is None
+        assert result["mean_legal_actions"] is None
+        assert result["p95_legal_actions"] is None
+        assert result["forced_action_rate"] is None
+
+    def test_rich_episode_records_retain_seed_outcome_and_breakdown(self):
+        class _RichEnv(_StubEnv):
+            def reset(self, seed=None):
+                self.seed = seed
+                return super().reset()
+
+            def step(self, action):
+                obs, reward, terminated, truncated, info = super().step(action)
+                info.update(
+                    {
+                        "turn": self._step + 1,
+                        "action_type": 1,
+                        "reward_breakdown": {"action": reward},
+                    }
+                )
+                if terminated:
+                    info["end_reason"] = "elimination"
+                    info["episode_stats"].update({"units_lost": 2, "first_capture_step": 1, "first_capture_turn": 2})
+                return obs, reward, terminated, truncated, info
+
+        result = evaluate_model(
+            _StubModel(),
+            _RichEnv([[(1.0, False, None), (3.0, True, 2)], [(5.0, True, 1)]]),
+            n_episodes=2,
+            seed=123,
+            track_breakdown=True,
+            include_episode_records=True,
+        )
+        episodes = result["episode_records"]
+        assert [r["seed"] for r in episodes] == [123, 124]
+        assert [r["seat"] for r in episodes] == [1, 1]
+        assert [r["reward"] for r in episodes] == result["rewards"] == [4.0, 5.0]
+        assert [r["length"] for r in episodes] == result["lengths"] == [2, 1]
+        assert [r["outcome"] for r in episodes] == ["losses", "wins"]
+        assert episodes[0]["turn"] == 3
+        assert episodes[0]["end_reason"] == "elimination"
+        assert episodes[0]["action_counts"]["move"] == 2
+        assert episodes[0]["reward_components"]["action"] == 4.0
+        assert episodes[0]["episode_stats"]["units_lost"] == 2
+        assert episodes[0]["episode_stats"]["first_capture_step"] == 1
+        # Rich records also work without paying for per-step breakdowns.
+        sparse = evaluate_model(
+            _StubModel(),
+            _StubEnv([[(0.0, True, 1)]]),
+            n_episodes=1,
+            include_episode_records=True,
+        )["episode_records"][0]
+        assert sparse["seed"] is None
+        assert sparse["action_counts"] is sparse["reward_components"] is None

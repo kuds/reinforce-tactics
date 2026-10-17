@@ -1146,6 +1146,17 @@ class StrategyGameEnv(gym.Env):
             #     table was truncated to max_flat_actions (always 0 for
             #     multi_discrete).
             "seize_available_steps": 0,
+            "attack_available_steps": 0,
+            "seize_chosen_steps": 0,
+            "attack_chosen_steps": 0,
+            "forced_end_turns": 0,
+            "voluntary_end_turns": 0,
+            "diagnostic_steps": 0,
+            # Histogram of offered legal-set sizes, rather than a per-step
+            # list: exact pooled percentiles without growing with ep length.
+            "legal_action_counts": {},
+            "first_capture_step": None,
+            "first_capture_turn": None,
             "max_legal_actions": 0,
             "truncated_steps": 0,
             # Army-economy diagnostics (see step()): these separate "the agent
@@ -1909,7 +1920,7 @@ class StrategyGameEnv(gym.Env):
 
         return reward, breakdown
 
-    def _decision_point_diagnostics(self) -> tuple[int, int, bool, bool]:
+    def _decision_point_diagnostics(self) -> tuple[int, int, bool, bool, bool]:
         """Legal-action diagnostics for the decision point the agent acts at.
 
         Taken *before* the action runs, in both action-space modes (the
@@ -1919,22 +1930,24 @@ class StrategyGameEnv(gym.Env):
         what is reported.
 
         Returns:
-            ``(n_offered, n_legal, truncated, seize_available)``: actions
+            ``(n_offered, n_legal, truncated, seize_available, attack_available)``: actions
             offered to the policy, legal actions before flat_discrete
-            truncation, whether the table was truncated, and whether a seize
-            was on offer.
+            truncation, whether the table was truncated, and whether seize
+            and attack were on offer.
         """
         if self.action_space_type == "flat_discrete":
             n_offered = len(self._current_actions)
-            seize_available = any(int(a[0]) == 3 for a in self._current_actions)
-            return n_offered, max(self._flat_n_legal, n_offered), self._flat_truncated, seize_available
+            action_types = {int(a[0]) for a in self._current_actions}
+            seize_available = 3 in action_types
+            attack_available = 2 in action_types
+            return n_offered, max(self._flat_n_legal, n_offered), self._flat_truncated, seize_available, attack_available
         if self._budget_exhausted():
-            return 1, 1, False, False
+            return 1, 1, False, False, False
         legal_actions = self.game_state.get_legal_actions(player=self.agent_player)
         # get_legal_actions returns lists of action dicts plus a boolean
         # "end_turn" flag — count list lengths, then +1 for end_turn.
         n_legal = sum(len(v) for v in legal_actions.values() if isinstance(v, list)) + 1
-        return n_legal, n_legal, False, bool(legal_actions.get("seize"))
+        return n_legal, n_legal, False, bool(legal_actions.get("seize")), bool(legal_actions.get("attack"))
 
     def step(self, action) -> tuple[dict, float, bool, bool, dict]:
         """
@@ -1969,7 +1982,9 @@ class StrategyGameEnv(gym.Env):
 
         # Diagnostics describe the decision point the action was chosen at,
         # so they are taken before it runs.
-        n_legal_actions, n_legal_pre_truncation, flat_truncated, seize_available = self._decision_point_diagnostics()
+        n_legal_actions, n_legal_pre_truncation, flat_truncated, seize_available, attack_available = (
+            self._decision_point_diagnostics()
+        )
 
         self.current_step += 1
         self.episode_stats["length"] = self.current_step
@@ -2012,7 +2027,6 @@ class StrategyGameEnv(gym.Env):
 
         # Calculate total reward
         reward, breakdown = self._calculate_reward(action_reward, is_valid, terminated=terminated)
-        self.episode_stats["reward"] += reward
 
         # How the episode ended, for eval/diagnostics (win/loss/draw split by
         # the actual game-over condition) and for the terminal bonus
@@ -2084,6 +2098,7 @@ class StrategyGameEnv(gym.Env):
 
         reward += terminal_bonus
         breakdown["terminal"] = float(terminal_bonus)
+        self.episode_stats["reward"] += reward
 
         # Accumulate the action-space diagnostics into episode_stats so the
         # eval pipeline (which only reads the terminal info dict) can surface
@@ -2092,6 +2107,21 @@ class StrategyGameEnv(gym.Env):
         self.episode_stats["max_legal_actions"] = max(self.episode_stats["max_legal_actions"], int(n_legal_pre_truncation))
         if seize_available:
             self.episode_stats["seize_available_steps"] += 1
+        if attack_available:
+            self.episode_stats["attack_available_steps"] += 1
+        if is_valid and action_dict["action_type"] == 3 and seize_available:
+            self.episode_stats["seize_chosen_steps"] += 1
+        if is_valid and action_dict["action_type"] == 2 and attack_available:
+            self.episode_stats["attack_chosen_steps"] += 1
+        if is_valid and action_dict["action_type"] == 5:
+            key = "forced_end_turns" if n_legal_actions == 1 else "voluntary_end_turns"
+            self.episode_stats[key] += 1
+        self.episode_stats["diagnostic_steps"] += 1
+        legal_hist = self.episode_stats["legal_action_counts"]
+        legal_hist[n_legal_actions] = legal_hist.get(n_legal_actions, 0) + 1
+        if self.episode_stats["captures"] > 0 and self.episode_stats["first_capture_step"] is None:
+            self.episode_stats["first_capture_step"] = self.current_step
+            self.episode_stats["first_capture_turn"] = self.game_state.turn_number
         if flat_truncated:
             self.episode_stats["truncated_steps"] += 1
 
@@ -2150,6 +2180,7 @@ class StrategyGameEnv(gym.Env):
             "n_legal_actions_pre_truncation": int(n_legal_pre_truncation),
             "flat_actions_truncated": bool(flat_truncated),
             "seize_available": bool(seize_available),
+            "attack_available": bool(attack_available),
         }
 
         return obs, reward, terminated, truncated, info
