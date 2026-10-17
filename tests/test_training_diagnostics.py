@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import random
 from types import SimpleNamespace
 
 import numpy as np
@@ -16,6 +17,21 @@ from stable_baselines3.common.torch_layers import CombinedExtractor, FlattenExtr
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 from reinforcetactics.rl.callbacks import PeriodicEvalCallback, TrainingMetricsCallback
+
+
+def _consume_random_streams():
+    torch.rand(7)
+    np.random.random(7)
+    random.random()
+
+
+def _assert_random_states_unchanged(torch_rng, numpy_rng, python_rng):
+    assert torch.equal(torch.get_rng_state(), torch_rng)
+    after_numpy_rng = np.random.get_state()
+    assert after_numpy_rng[0] == numpy_rng[0]
+    np.testing.assert_array_equal(after_numpy_rng[1], numpy_rng[1])
+    assert after_numpy_rng[2:] == numpy_rng[2:]
+    assert random.getstate() == python_rng
 
 
 def _masked_model(*, dictionary=False, forced_only=False):
@@ -64,13 +80,21 @@ def test_normalized_entropy_and_forced_fraction_preserve_policy_rng_and_buffer(d
     original_get_distribution = model.policy.get_distribution
 
     def get_distribution(*args, **kwargs):
-        torch.rand(7)
+        _consume_random_streams()
         return original_get_distribution(*args, **kwargs)
 
     model.policy.get_distribution = get_distribution
     model.policy.set_training_mode(True)
+    original_set_training_mode = model.policy.set_training_mode
+
+    def set_training_mode(mode):
+        _consume_random_streams()
+        original_set_training_mode(mode)
+
+    model.policy.set_training_mode = set_training_mode
     before_rng = torch.get_rng_state().clone()
     before_numpy_rng = np.random.get_state()
+    before_python_rng = random.getstate()
     before_masks = model.rollout_buffer.action_masks.copy()
     cb = TrainingMetricsCallback(csv_path=tmp_path / "metrics.csv")
     cb.model = model
@@ -85,11 +109,7 @@ def test_normalized_entropy_and_forced_fraction_preserve_policy_rng_and_buffer(d
     assert row["rollout/legal_actions_mean"] == pytest.approx(7 / 3)
     assert row["rollout/legal_actions_p50"] == 2
     assert row["rollout/policy_diagnostic_samples"] == 6
-    assert torch.equal(torch.get_rng_state(), before_rng)
-    after_numpy_rng = np.random.get_state()
-    assert after_numpy_rng[0] == before_numpy_rng[0]
-    np.testing.assert_array_equal(after_numpy_rng[1], before_numpy_rng[1])
-    assert after_numpy_rng[2:] == before_numpy_rng[2:]
+    _assert_random_states_unchanged(before_rng, before_numpy_rng, before_python_rng)
     np.testing.assert_array_equal(model.rollout_buffer.action_masks, before_masks)
     assert model.rollout_buffer.generator_ready is False
     assert model.policy.training is True
@@ -97,6 +117,38 @@ def test_normalized_entropy_and_forced_fraction_preserve_policy_rng_and_buffer(d
     with (tmp_path / "metrics.csv").open() as fh:
         persisted = list(csv.DictReader(fh))[0]
     assert float(persisted["rollout/normalized_policy_entropy"]) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("failure_at", ["distribution", "disable_mode", "restore_mode"])
+def test_policy_probe_restores_all_random_streams_and_mode_after_failure(failure_at):
+    model = _masked_model()
+    original_get_distribution = model.policy.get_distribution
+    original_set_training_mode = model.policy.set_training_mode
+    model.policy.set_training_mode(True)
+
+    def get_distribution(*args, **kwargs):
+        _consume_random_streams()
+        if failure_at == "distribution":
+            raise RuntimeError("custom feature extractor failed")
+        return original_get_distribution(*args, **kwargs)
+
+    def set_training_mode(mode):
+        original_set_training_mode(mode)
+        _consume_random_streams()
+        if failure_at == ("restore_mode" if mode else "disable_mode"):
+            raise RuntimeError("custom mode hook failed")
+
+    model.policy.get_distribution = get_distribution
+    model.policy.set_training_mode = set_training_mode
+    before_rng = torch.get_rng_state().clone()
+    before_numpy_rng = np.random.get_state()
+    before_python_rng = random.getstate()
+    cb = TrainingMetricsCallback()
+    cb.model = model
+    cb._policy_diagnostics()
+    assert cb._policy_diagnostic_warned
+    assert model.policy.training is True
+    _assert_random_states_unchanged(before_rng, before_numpy_rng, before_python_rng)
 
 
 def test_forced_only_rollout_omits_undefined_normalized_entropy():
@@ -189,7 +241,17 @@ class _MaskedChoiceEnv(Env):
         return np.full(2, self.steps / 8, dtype=np.float32), float(action), self.steps == 8, False, {}
 
 
-def test_policy_probe_does_not_change_actual_maskable_ppo_updates():
+class _RandomizedFeaturesExtractor(FlattenExtractor):
+    """Exercise custom preprocessing that samples outside torch's RNG."""
+
+    def forward(self, observations):
+        features = super().forward(observations)
+        numpy_noise = torch.as_tensor(np.random.normal(size=features.shape), device=features.device, dtype=features.dtype)
+        return features + 0.1 * (numpy_noise + random.random() + torch.rand_like(features))
+
+
+@pytest.mark.parametrize("extractor", [FlattenExtractor, _RandomizedFeaturesExtractor])
+def test_policy_probe_does_not_change_actual_maskable_ppo_updates(extractor):
     models = []
     for sample_count in (0, 8):
         model = MaskablePPO(
@@ -199,7 +261,7 @@ def test_policy_probe_does_not_change_actual_maskable_ppo_updates():
             batch_size=8,
             n_epochs=1,
             seed=123,
-            policy_kwargs={"net_arch": [8]},
+            policy_kwargs={"net_arch": [8], "features_extractor_class": extractor},
             device="cpu",
         )
         cb = TrainingMetricsCallback(policy_diagnostic_samples=sample_count)

@@ -1337,22 +1337,8 @@ def plot_curriculum_metrics(
     if history:
         all_results.extend(history[-1].get("results") or [])
 
-    if not all_results:
-        return {
-            "episode_length": None,
-            "outcome_breakdown": None,
-            "reward_decomposition": None,
-            "action_distribution": None,
-            "unit_build_distribution": None,
-            "combat_summary": None,
-            "reward_by_outcome": None,
-            "episode_distributions": None,
-            "optimization_diagnostics": None,
-            "action_space_diagnostics": None,
-        }
-
     sub_dir = None
-    if charts_dir is not None:
+    if charts_dir is not None and (all_results or train_records):
         sub_dir = Path(charts_dir) / "curriculum"
         sub_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1366,6 +1352,26 @@ def plot_curriculum_metrics(
         if src.exists():
             src.rename(sub_dir / new)
         return fig
+
+    if not all_results:
+        # Optimization records are independent of the evaluation schedule.
+        # A short or interrupted run may have completed PPO updates before
+        # its first evaluation; preserve its diagnostic chart as well.
+        optimization = plot_optimization_diagnostics(train_records, charts_dir=sub_dir) if train_records else None
+        return {
+            "episode_length": None,
+            "outcome_breakdown": None,
+            "reward_decomposition": None,
+            "action_distribution": None,
+            "unit_build_distribution": None,
+            "combat_summary": None,
+            "reward_by_outcome": None,
+            "episode_distributions": None,
+            "optimization_diagnostics": _renamed(
+                optimization, "optimization_diagnostics.png", "curriculum_optimization_diagnostics.png"
+            ),
+            "action_space_diagnostics": None,
+        }
 
     figures = {
         "episode_length": _renamed(

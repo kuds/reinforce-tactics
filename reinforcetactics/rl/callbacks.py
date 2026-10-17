@@ -34,6 +34,7 @@ import json
 import logging
 import math
 import os
+import random
 import tempfile
 import time
 from collections import deque
@@ -285,27 +286,37 @@ class TrainingMetricsCallback(BaseCallback):
         )
         policy: Any = self.model.policy
         was_training = policy.training
+        numpy_rng = np.random.get_state()
+        python_rng = random.getstate()
         try:
             # BatchNorm/dropout must not update or introduce training-mode
-            # noise. Fork torch's RNG too, so custom feature extractors cannot
-            # consume the action-sampling stream during diagnostics.
-            policy.set_training_mode(False)
-            with _isolated_policy_rng(self.model, enabled=True), torch.no_grad():
-                obs_tensor, _ = policy.obs_to_tensor(sample)
-                distribution = policy.get_distribution(obs_tensor, action_masks=masks)
-                entropy = distribution.entropy().detach().cpu().numpy().reshape(-1)
-            valid = legal > 0
-            if valid.any():
-                diagnostics["rollout/policy_entropy"] = float(entropy[valid].mean())
-            choices = legal > 1
-            if choices.any():
-                diagnostics["rollout/normalized_policy_entropy"] = float((entropy[choices] / np.log(legal[choices])).mean())
+            # noise. Custom policies may also draw from NumPy or Python's
+            # random module, even in eval mode. Isolate all three streams,
+            # including custom training-mode hooks and their restoration.
+            with _isolated_policy_rng(self.model, enabled=True):
+                try:
+                    policy.set_training_mode(False)
+                    with torch.no_grad():
+                        obs_tensor, _ = policy.obs_to_tensor(sample)
+                        distribution = policy.get_distribution(obs_tensor, action_masks=masks)
+                        entropy = distribution.entropy().detach().cpu().numpy().reshape(-1)
+                    valid = legal > 0
+                    if valid.any():
+                        diagnostics["rollout/policy_entropy"] = float(entropy[valid].mean())
+                    choices = legal > 1
+                    if choices.any():
+                        diagnostics["rollout/normalized_policy_entropy"] = float(
+                            (entropy[choices] / np.log(legal[choices])).mean()
+                        )
+                finally:
+                    policy.set_training_mode(was_training)
         except Exception:  # noqa: BLE001 - diagnostics must not abort training
             if not self._policy_diagnostic_warned:
                 logger.warning("could not measure rollout policy entropy", exc_info=True)
                 self._policy_diagnostic_warned = True
         finally:
-            policy.set_training_mode(was_training)
+            np.random.set_state(numpy_rng)
+            random.setstate(python_rng)
         return diagnostics
 
     def _commit_pending(self) -> None:

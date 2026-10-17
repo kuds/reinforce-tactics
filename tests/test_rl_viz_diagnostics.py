@@ -196,3 +196,17 @@ def test_suite_handles_legacy_rows_and_curriculum_saves_new_canonical_names(tmp_
         assert (tmp_path / "curriculum" / f"curriculum_{key}.png").is_file()
         assert not (tmp_path / "curriculum" / f"{key}.png").exists()
     assert set(plot_curriculum_metrics([])) == set(figures)
+
+
+@pytest.mark.parametrize("history", [[], [{"stage": "interrupted", "results": []}]])
+def test_curriculum_keeps_optimizer_diagnostics_without_evaluations(tmp_path, history):
+    figures = plot_curriculum_metrics(
+        history,
+        charts_dir=tmp_path,
+        train_records=[{"timesteps": 100, "train/entropy_loss": -1.0}],
+    )
+    assert figures["optimization_diagnostics"] is not None
+    assert all(fig is None for name, fig in figures.items() if name != "optimization_diagnostics")
+    output = tmp_path / "curriculum"
+    assert (output / "curriculum_optimization_diagnostics.png").is_file()
+    assert not (output / "optimization_diagnostics.png").exists()

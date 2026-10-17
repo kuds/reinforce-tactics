@@ -27,7 +27,8 @@ Normalized masked entropy is measured for flat-discrete policies as
 `H(policy) / log(n_offered)` only where `n_offered > 1`. Forced decisions and empty
 masks are reported separately. The callback uses an evenly spaced sample of at
 most 256 rollout observations before the update, without shuffling the rollout
-buffer or consuming the action-sampling RNG. Set
+buffer or consuming the global Torch, NumPy, or Python random streams,
+including when a custom extractor raises. Set
 `TrainingMetricsCallback(policy_diagnostic_samples=0)` to disable that extra
 forward pass. The same CSV row pairs these collection-policy measurements with
 the subsequent optimizer metrics; they describe different phases of the update.
