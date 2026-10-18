@@ -71,14 +71,19 @@ class TestSerialVectorizedParity:
     @pytest.mark.parametrize("seats", [None, [1, 2]])
     def test_same_episodes_same_results(self, seats):
         model = _HashPolicy()
-        serial = evaluate_model(model, _env(), n_episodes=5, seed=123, track_breakdown=True, seats=seats)
+        serial = evaluate_model(
+            model, _env(), n_episodes=5, seed=123, track_breakdown=True, seats=seats, include_episode_records=True
+        )
         pool = EvalEnvPool.from_envs([_env() for _ in range(3)])
         try:
-            vec = evaluate_model_vec(model, pool, n_episodes=5, seed=123, track_breakdown=True, seats=seats)
+            vec = evaluate_model_vec(
+                model, pool, n_episodes=5, seed=123, track_breakdown=True, seats=seats, include_episode_records=True
+            )
         finally:
             pool.close()
         assert _comparable(vec) == _comparable(serial)
         assert len(vec["rewards"]) == 5 * (len(seats) if seats else 1)
+        assert [r["seed"] for r in vec["episode_records"]] == list(range(123, 128)) * (len(seats) if seats else 1)
         # The per-outcome components, their magnitudes and the opponent's
         # captures (§2.1 logging) are part of the parity, and add up.
         by = vec["reward_components_by_outcome"]

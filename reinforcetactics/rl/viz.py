@@ -6,7 +6,7 @@ These functions consume the per-eval ``results`` list produced by
 ``TrainingMetricsCallback``. They return the matplotlib ``Figure`` so
 callers can ``fig.savefig(...)`` or further customize before display.
 
-Kept deliberately minimal — three plot families that together cover the
+Plot families that together cover the
 "why isn't PPO learning?" debugging surface:
 
 - ``plot_eval_curves``: win rate / reward / episode length curves +
@@ -14,8 +14,15 @@ Kept deliberately minimal — three plot families that together cover the
   shared axes. Supports ``stage_boundaries`` for the bootstrap-curriculum
   view where a single metrics timeline spans multiple stages.
 - ``plot_reward_decomposition``: stacked area of action / shaping /
-  invalid-penalty / terminal contributions per eval. Distinguishes
-  "shaping-reward stalemate" from "actually winning".
+  invalid-penalty / terminal contributions per eval.
+- ``plot_reward_by_outcome``: component rewards conditional on outcome,
+  without cancellation between wins and draws/losses.
+- ``plot_episode_distributions``: outcome-conditioned turns/steps
+  medians and interquartile ranges, with optional episode-cap references.
+- ``plot_optimization_diagnostics``: entropy, clipping, learning rate,
+  and entropy-coefficient timelines.
+- ``plot_action_space_diagnostics``: legal-action coverage, forced-action
+  rates, and capture opportunities vs choices.
 - ``plot_action_distribution``: stacked area of action-type usage % per
   eval. Surfaces failure modes like "agent collapsed to spamming end_turn".
 - ``plot_unit_build_distribution``: stacked area of unit-type build mix
@@ -135,6 +142,17 @@ def _episodes(r: Mapping[str, Any]) -> int:
     return max(1, int(r.get("episodes", 1) or 1))
 
 
+def _wilson_bounds(value: float, n: int) -> tuple[float, float]:
+    """Pointwise 95% Wilson interval for a binomial proportion."""
+    if n <= 0 or not np.isfinite(value) or not 0 <= value <= 1:
+        return np.nan, np.nan
+    z = 1.959963984540054
+    denominator = 1 + z * z / n
+    center = (value + z * z / (2 * n)) / denominator
+    half = z * np.sqrt(value * (1 - value) / n + z * z / (4 * n * n)) / denominator
+    return max(0.0, center - half), min(1.0, center + half)
+
+
 def format_win_rate(value: Any) -> str:
     """A win rate for a chart label: ``'n/a'`` for ``None`` or the old ``-1.0`` "no best" sentinel."""
     if value is None:
@@ -156,6 +174,7 @@ def plot_eval_curves(
     charts_dir: Any | None = None,
     stage_boundaries: Sequence[int] | None = None,
     target_win_rate: float | None = None,
+    target_kl: float | None = None,
 ) -> plt.Figure:
     """Win rate / avg reward / episode length / approx_kl / explained_variance / value_loss.
 
@@ -169,11 +188,9 @@ def plot_eval_curves(
       *whether the policy is updating at all* (approx_kl) and *whether
       the value head is fitting the returns* (explained_variance,
       value_loss). Both health panels matter when reward magnitudes
-      are large (terminal bonuses in the thousands): explained_variance
-      should climb toward 1.0; value_loss should plateau or decline.
-      A value_loss curve that grows without bound while
-      explained_variance stays near zero is the signature of a value
-      head that can't keep up with the target distribution.
+      are large (terminal bonuses in the thousands). Interpret value
+      loss together with explained variance and return scale: policy
+      improvement can itself change the target distribution.
 
     Args:
         results: Per-eval dicts from ``PeriodicEvalCallback.results``.
@@ -188,11 +205,18 @@ def plot_eval_curves(
         target_win_rate: Optional win rate (0-1) to draw as a dashed target
             line. None (default) draws none: a fixed 70% line misread every
             curriculum stage whose own threshold differs (review rltrain-20).
+        target_kl: Configured PPO target KL, if any; no universal target
+            or failure threshold is assumed.
 
-    The win-rate panel plots the gate mode's win rate and, when the rows
+    The win-rate panel plots the eval mode's pooled win rate and, when the rows
     record both (``eval.eval_both_modes``), the greedy and stochastic win
     rates as thinner lines. Carry-in evals (``best_eligible`` False) are
-    drawn as hollow markers.
+    drawn as hollow markers. Pointwise 95% Wilson bands describe episode
+    sampling uncertainty, not uncertainty across training seeds or a
+    simultaneous guarantee over checkpoint selection. When multiple seats
+    share evaluation seeds, seat-specific curves/bands replace the pooled
+    band to avoid treating paired samples as independent. For a min-seat
+    promotion gate the main line is still pooled, not the gate statistic.
     """
     if train_records:
         fig, axes_grid = plt.subplots(2, 3, figsize=(15, 8))
@@ -209,7 +233,43 @@ def plot_eval_curves(
     # Panel 1: win rate
     ax = axes[0]
     wr = [r["win_rate"] * 100 for r in results]
-    ax.plot(eval_ts, wr, "-", color="#2196F3", linewidth=2, label="win rate (gate mode)")
+    ax.plot(eval_ts, wr, "-", color="#2196F3", linewidth=2, label="pooled win rate (eval mode)")
+    counts = [
+        0
+        if len(r.get("by_seat") or {}) > 1
+        else int(r.get("episodes") or sum(r.get(k, 0) for k in ("wins", "losses", "draws")))
+        for r in results
+    ]
+    bounds = [_wilson_bounds(float(r["win_rate"]), n) for r, n in zip(results, counts)]
+    if any(n > 0 for n in counts):
+        ax.fill_between(
+            eval_ts,
+            [100 * low for low, _ in bounds],
+            [100 * high for _, high in bounds],
+            color="#2196F3",
+            alpha=0.15,
+            label="95% Wilson interval (single seat, pointwise)",
+        )
+    seats = sorted({str(seat) for row in results if len(row.get("by_seat") or {}) > 1 for seat in row["by_seat"]})
+    seat_colors = ("#7b1fa2", "#00897b")
+    for index, seat in enumerate(seats):
+        seat_rates, seat_bounds = [], []
+        for row in results:
+            group = {str(key): value for key, value in (row.get("by_seat") or {}).items()}.get(seat) or {}
+            n = int(group.get("episodes", 0) or 0)
+            rate = float(group.get("win_rate", np.nan)) if n > 0 else np.nan
+            seat_rates.append(100 * rate)
+            seat_bounds.append(_wilson_bounds(rate, n))
+        color = seat_colors[index % len(seat_colors)]
+        ax.plot(eval_ts, seat_rates, ":", color=color, linewidth=1, label=f"seat {seat} win rate")
+        ax.fill_between(
+            eval_ts,
+            [100 * low for low, _ in seat_bounds],
+            [100 * high for _, high in seat_bounds],
+            color=color,
+            alpha=0.12,
+            label=f"seat {seat}: 95% Wilson interval (pointwise)",
+        )
     eligible = [(t, w) for t, w, r in zip(eval_ts, wr, results) if not _is_carry_in(r)]
     carry_in = [(t, w) for t, w, r in zip(eval_ts, wr, results) if _is_carry_in(r)]
     if eligible:
@@ -224,7 +284,7 @@ def plot_eval_curves(
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Win Rate (%)")
     ax.set_title(f"Win Rate vs {opponent_label}" if opponent_label else "Win Rate")
-    # Linear x-axis matching the other four panels in this row. The
+    # Linear x-axis matching the other panels in this row. The
     # previous log scale was added to surface the t=4 baseline eval but
     # made the panel hard to compare with the rest of the dashboard.
     ax.set_ylim(-5, 105)
@@ -245,10 +305,12 @@ def plot_eval_curves(
         [a + s for a, s in zip(avg_r, std_r)],
         alpha=0.2,
         color="#FF9800",
+        label="±1 episode SD",
     )
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Average Reward")
     ax.set_title("Average Episode Reward")
+    ax.legend(fontsize=8)
     _draw_stage_lines(ax)
     ax.grid(True, alpha=0.3)
 
@@ -263,10 +325,12 @@ def plot_eval_curves(
         [a + s for a, s in zip(avg_l, std_l)],
         alpha=0.2,
         color="#4CAF50",
+        label="±1 episode SD",
     )
     ax.set_xlabel("Timesteps")
     ax.set_ylabel("Average Length (steps)")
     ax.set_title("Average Episode Length")
+    ax.legend(fontsize=8)
     _draw_stage_lines(ax)
     ax.grid(True, alpha=0.3)
 
@@ -278,9 +342,9 @@ def plot_eval_curves(
         kl = [r.get("train/approx_kl") for r in train_records]
         if any(v is not None for v in kl):
             ax.plot(train_ts, kl, color="#9c27b0", linewidth=1.5)
-            ax.axhline(0.02, color="#4caf50", linestyle="--", alpha=0.5, label="target ~0.02")
-            ax.axhline(0.05, color="#f44336", linestyle="--", alpha=0.5, label="danger >0.05")
-            ax.legend(fontsize=7)
+            if target_kl is not None:
+                ax.axhline(target_kl, color="#4caf50", linestyle="--", alpha=0.5, label="configured target_kl")
+                ax.legend(fontsize=7)
         ax.set_xlabel("Timesteps")
         ax.set_title("approx_kl (PPO update size)")
         _draw_stage_lines(ax)
@@ -291,19 +355,15 @@ def plot_eval_curves(
         ev = [r.get("train/explained_variance") for r in train_records]
         if any(v is not None for v in ev):
             ax.plot(train_ts, ev, color="#00bcd4", linewidth=1.5)
-            ax.axhline(1.0, color="#4caf50", linestyle="--", alpha=0.5, label="ideal 1.0")
-            ax.axhline(0.1, color="#f44336", linestyle="--", alpha=0.5, label="danger <0.1")
+            ax.axhline(1.0, color="#4caf50", linestyle="--", alpha=0.5, label="reference 1.0")
             ax.legend(fontsize=7)
         ax.set_xlabel("Timesteps")
         ax.set_title("explained_variance (value fit)")
         _draw_stage_lines(ax)
         ax.grid(True, alpha=0.3)
 
-        # Panel 6: value_loss — should plateau / decline once the value
-        # head catches up to the return scale. A monotonically growing
-        # curve while explained_variance stays near zero means the
-        # value targets are too large for the head's capacity / lr;
-        # consider scaling rewards down or adding clip_range_vf.
+        # Panel 6: value_loss depends on both fit and changing return scale;
+        # a rise alone does not establish critic divergence.
         # Plot on log scale because value_loss can span 4-5 orders of
         # magnitude across a run (huge at init, small once converged).
         ax = axes[5]
@@ -365,8 +425,9 @@ def plot_reward_decomposition(
     breakdown is missing from every entry (older runs).
 
     Reading guide:
-    - large green ``action`` band, ~0 ``terminal``: agent farms shaping but
-      doesn't win.
+    - large green ``action`` band: inspect outcome-conditioned rewards
+      before concluding that the agent farms reward; positive and negative
+      terminal rewards can cancel in this pooled average.
     - large grey ``invalid_penalty`` band: action masks aren't being
       applied or are over-approximating.
     - growing orange ``terminal`` band over time: agent is learning to
@@ -400,6 +461,224 @@ def plot_reward_decomposition(
     return _save_and_return(fig, charts_dir, "reward_decomposition.png")
 
 
+def plot_reward_by_outcome(
+    results: Sequence[dict],
+    *,
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
+    """Component means conditional on wins, draws, or losses.
+
+    Each group uses its own episode count. An absent/empty group is a
+    gap, never a zero-reward observation. Works with existing aggregate
+    ``reward_components_by_outcome``; no episode traces are required.
+    """
+    if not any(r.get("reward_components_by_outcome") for r in results):
+        return None
+    timesteps = [r["timesteps"] for r in results]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, sharey=True)
+    for ax, outcome in zip(axes, ("wins", "draws", "losses")):
+        groups = [(r.get("reward_components_by_outcome") or {}).get(outcome) or {} for r in results]
+        counts = [int(group.get("episodes", 0) or 0) for group in groups]
+        component_means = []
+        for component in REWARD_COMPONENTS:
+            values = [float(group.get(component, 0)) / n if n > 0 else np.nan for group, n in zip(groups, counts)]
+            component_means.append(values)
+            ax.plot(timesteps, values, "o-", label=component, color=_REWARD_COMPONENT_COLORS[component], markersize=3)
+        ax.plot(timesteps, np.sum(component_means, axis=0), "k--", label="net reward", linewidth=1)
+        ax.axhline(0, color="black", linewidth=0.5, alpha=0.4)
+        if not any(counts):
+            ax.text(0.5, 0.5, f"No {outcome} recorded", transform=ax.transAxes, ha="center")
+        ax.set_title(f"{outcome.capitalize()} (conditional mean)")
+        ax.set_xlabel("Timesteps")
+        ax.grid(alpha=0.3)
+        _draw_stage_boundaries(ax, stage_boundaries)
+    axes[0].set_ylabel("Mean reward per episode of this outcome")
+    axes[-1].legend(fontsize=8)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "reward_by_outcome.png")
+
+
+def plot_episode_distributions(
+    results: Sequence[dict],
+    *,
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+    max_turns: int | None = None,
+    max_steps: int | None = None,
+) -> plt.Figure | None:
+    """Median and interquartile ranges of turns/steps, separated by outcome.
+
+    Missing arrays in legacy snapshots are gaps. Reference limits are
+    optional because curriculum stages can have different episode caps.
+    """
+    if not any(r.get("outcomes") and (r.get("turns") or r.get("lengths")) for r in results):
+        return None
+    timesteps = [r["timesteps"] for r in results]
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.2), sharex=True)
+    colors = {"wins": "#4caf50", "draws": "#757575", "losses": "#f44336"}
+    for ax, key, label, cap in zip(axes, ("turns", "lengths"), ("Game turns", "Agent steps"), (max_turns, max_steps)):
+        for outcome, color in colors.items():
+            quantiles = []
+            for row in results:
+                values, outcomes = row.get(key) or [], row.get("outcomes") or []
+                selected = [float(v) for v, o in zip(values, outcomes) if o == outcome and np.isfinite(v)]
+                # Do not silently align a corrupted/partial episode array.
+                quantiles.append(
+                    np.quantile(selected, [0.25, 0.5, 0.75])
+                    if selected and len(values) == len(outcomes)
+                    else [np.nan, np.nan, np.nan]
+                )
+            lower, median, upper = np.asarray(quantiles).T
+            ax.plot(timesteps, median, "o-", color=color, label=outcome, markersize=3)
+            ax.fill_between(timesteps, lower, upper, color=color, alpha=0.15)
+        if cap is not None:
+            ax.axhline(cap, color="black", linestyle="--", linewidth=1, label=f"configured cap ({cap})")
+        ax.set_title(f"{label} by outcome (median + IQR)")
+        ax.set_ylabel(label)
+        ax.set_xlabel("Timesteps")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+        _draw_stage_boundaries(ax, stage_boundaries)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "episode_distributions.png")
+
+
+def _plot_record_series(ax: Any, records: Sequence[dict], key: str, label: str, *, scale: float = 1.0) -> bool:
+    """Plot an optional scalar without interpolating across missing records."""
+    values = [float(r[key]) * scale if r.get(key) is not None else np.nan for r in records]
+    if not np.any(np.isfinite(values)):
+        return False
+    ax.plot([r["timesteps"] for r in records], values, label=label)
+    return True
+
+
+def plot_optimization_diagnostics(
+    train_records: Sequence[dict],
+    *,
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
+    """Exploration, clipping, learning rate, and entropy-coefficient timelines.
+
+    SB3 reports negative entropy as ``entropy_loss``; this chart reverses
+    that sign. Raw entropy also depends on mask size. When an explicitly
+    normalized entropy measurement is recorded it is shown separately;
+    aggregate entropy is never divided by an aggregate legal-action count.
+    """
+    panels = (
+        ("train/entropy_loss", "Policy entropy (nats, raw)", -1.0),
+        ("train/clip_fraction", "PPO clip fraction", 1.0),
+        ("train/learning_rate", "Learning rate", 1.0),
+        ("train/ent_coef", "Entropy coefficient", 1.0),
+    )
+    policy_keys = (
+        "rollout/policy_entropy",
+        "rollout/normalized_policy_entropy",
+        "rollout/forced_action_fraction",
+        "rollout/empty_action_mask_fraction",
+        "rollout/legal_actions_mean",
+    )
+    has_policy = any(r.get(key) is not None for r in train_records for key in policy_keys)
+    if not has_policy and not any(r.get(key) is not None for r in train_records for key, _, _ in panels):
+        return None
+    fig, axes = plt.subplots(2, 3 if has_policy else 2, figsize=(15 if has_policy else 12, 7), sharex=True)
+    for ax, (key, title, scale) in zip(axes.flat, panels):
+        label = "PPO minibatch entropy" if key == "train/entropy_loss" else title
+        plotted = _plot_record_series(ax, train_records, key, label, scale=scale)
+        alternate_entropy = key == "train/entropy_loss" and any(
+            r.get("rollout/policy_entropy") is not None for r in train_records
+        )
+        if not plotted and not alternate_entropy:
+            ax.text(0.5, 0.5, "Not recorded", transform=ax.transAxes, ha="center")
+        ax.set_title(title)
+        ax.set_xlabel("Timesteps")
+        ax.grid(alpha=0.3)
+        _draw_stage_boundaries(ax, stage_boundaries)
+    entropy_ax = axes.flat[0]
+    if _plot_record_series(entropy_ax, train_records, "rollout/policy_entropy", "pre-update rollout sample"):
+        # entropy_loss averages the PPO update's minibatches; the sampled
+        # rollout entropy describes the policy before those updates.
+        entropy_ax.legend(fontsize=8)
+    if has_policy:
+        for key, label in (
+            ("rollout/normalized_policy_entropy", "H/log(legal choices), choices > 1"),
+            ("rollout/forced_action_fraction", "forced decisions"),
+            ("rollout/empty_action_mask_fraction", "empty masks"),
+        ):
+            _plot_record_series(axes.flat[4], train_records, key, label)
+        for key, label in (
+            ("rollout/legal_actions_mean", "mean"),
+            ("rollout/legal_actions_p10", "p10"),
+            ("rollout/legal_actions_p50", "median"),
+            ("rollout/legal_actions_p90", "p90"),
+        ):
+            _plot_record_series(axes.flat[5], train_records, key, label)
+        axes.flat[4].set_ylim(-0.03, 1.03)
+        for ax, title in zip(
+            list(axes.flat)[4:], ("Normalized entropy and forced decisions", "Offered legal actions (rollout sample)")
+        ):
+            ax.set_title(title)
+            ax.set_xlabel("Timesteps")
+            ax.grid(alpha=0.3)
+            if ax.lines:
+                ax.legend(fontsize=8)
+            _draw_stage_boundaries(ax, stage_boundaries)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "optimization_diagnostics.png")
+
+
+def plot_action_space_diagnostics(
+    results: Sequence[dict],
+    *,
+    charts_dir: Any | None = None,
+    stage_boundaries: Sequence[int] | None = None,
+) -> plt.Figure | None:
+    """Mask coverage, forced actions, and capture opportunities vs choices.
+
+    Choice rates are conditional on the action being offered; an undefined
+    denominator is a gap. This distinguishes reaching capture opportunities
+    from choosing them. Legacy rows without these scalars remain supported.
+    """
+    panels = (
+        (
+            ("mean_legal_actions", "mean offered"),
+            ("p95_legal_actions", "p95 offered"),
+            ("max_legal_actions", "max legal (before cap)"),
+        ),
+        (
+            ("forced_action_rate", "forced action"),
+            ("invalid_action_rate", "invalid action"),
+            ("flat_truncated_rate", "flat table truncated"),
+        ),
+        (
+            ("seize_available_rate", "seize offered / all steps"),
+            ("seize_choice_rate", "seize chosen / offered"),
+            ("attack_choice_rate", "attack chosen / offered"),
+        ),
+    )
+    if not any(r.get(key) is not None for r in results for panel in panels for key, _ in panel):
+        return None
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True)
+    for ax, panel, title in zip(
+        axes, panels, ("Legal-action counts", "Action constraints and errors", "Action opportunities and choices")
+    ):
+        for key, label in panel:
+            _plot_record_series(ax, results, key, label)
+        ax.set_title(title)
+        ax.set_xlabel("Timesteps")
+        ax.grid(alpha=0.3)
+        if ax.lines:
+            ax.legend(fontsize=8)
+        _draw_stage_boundaries(ax, stage_boundaries)
+    axes[0].set_ylabel("Actions")
+    for ax in axes[1:]:
+        ax.set_ylabel("Fraction")
+        ax.set_ylim(-0.03, 1.03)
+    fig.tight_layout()
+    return _save_and_return(fig, charts_dir, "action_space_diagnostics.png")
+
+
 def plot_action_distribution(
     results: Sequence[dict],
     *,
@@ -415,11 +694,11 @@ def plot_action_distribution(
     took. Returns ``None`` if no entry has the data.
 
     Reading guide:
-    - dominant grey ``end_turn`` band: agent learned to skip turns to
-      avoid penalties (a common collapse mode).
+    - dominant grey ``end_turn`` band: inspect forced-action rates before
+      attributing it to voluntary skipping; exhausted action budgets can
+      leave end_turn as the only legal choice.
     - dominant blue ``create_unit`` band early, then green ``move`` /
       orange ``seize`` taking over: healthy progression.
-    - large grey area at every checkpoint: agent never differentiates.
     """
     timesteps, series = _stack_inputs(results, "action_counts", ACTION_TYPE_NAMES)
     if not timesteps:
@@ -905,10 +1184,9 @@ def plot_episode_length(
     """Mean episode length per eval — small standalone chart.
 
     A single-panel plot of ``avg_length`` vs ``timesteps``. The value
-    also appears on ``plot_eval_curves`` panel 3, but breaking it out
-    on its own makes the saturating-at-cap pattern (agent always
-    timing out into a draw) unmistakable when scanning a stage's
-    diagnostics directory.
+    also appears on ``plot_eval_curves`` panel 3. Interpret it with
+    outcomes and :func:`plot_episode_distributions`: a game-turn cap can
+    end episodes at very different step counts as action usage changes.
 
     Args:
         results: Per-eval dicts from ``PeriodicEvalCallback.results``.
@@ -1020,6 +1298,7 @@ def plot_curriculum_metrics(
     history: Sequence[Mapping[str, Any]],
     *,
     charts_dir: Any | None = None,
+    train_records: Sequence[dict] | None = None,
 ) -> dict[str, plt.Figure | None]:
     """Curriculum-wide diagnostic timelines on a single timestep axis.
 
@@ -1042,6 +1321,7 @@ def plot_curriculum_metrics(
             eval dicts). Stage order in the list defines the timeline.
         charts_dir: Optional save directory. PNGs go under
             ``{charts_dir}/curriculum/``.
+        train_records: Optional continuous PPO metrics timeline.
 
     Returns:
         Dict keyed by chart name with the matplotlib ``Figure``
@@ -1057,18 +1337,8 @@ def plot_curriculum_metrics(
     if history:
         all_results.extend(history[-1].get("results") or [])
 
-    if not all_results:
-        return {
-            "episode_length": None,
-            "outcome_breakdown": None,
-            "reward_decomposition": None,
-            "action_distribution": None,
-            "unit_build_distribution": None,
-            "combat_summary": None,
-        }
-
     sub_dir = None
-    if charts_dir is not None:
+    if charts_dir is not None and (all_results or train_records):
         sub_dir = Path(charts_dir) / "curriculum"
         sub_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1083,7 +1353,27 @@ def plot_curriculum_metrics(
             src.rename(sub_dir / new)
         return fig
 
-    return {
+    if not all_results:
+        # Optimization records are independent of the evaluation schedule.
+        # A short or interrupted run may have completed PPO updates before
+        # its first evaluation; preserve its diagnostic chart as well.
+        optimization = plot_optimization_diagnostics(train_records, charts_dir=sub_dir) if train_records else None
+        return {
+            "episode_length": None,
+            "outcome_breakdown": None,
+            "reward_decomposition": None,
+            "action_distribution": None,
+            "unit_build_distribution": None,
+            "combat_summary": None,
+            "reward_by_outcome": None,
+            "episode_distributions": None,
+            "optimization_diagnostics": _renamed(
+                optimization, "optimization_diagnostics.png", "curriculum_optimization_diagnostics.png"
+            ),
+            "action_space_diagnostics": None,
+        }
+
+    figures = {
         "episode_length": _renamed(
             plot_episode_length(
                 all_results,
@@ -1141,6 +1431,23 @@ def plot_curriculum_metrics(
             "curriculum_combat_summary.png",
         ),
     }
+    for name, fig in (
+        ("reward_by_outcome", plot_reward_by_outcome(all_results, charts_dir=sub_dir, stage_boundaries=stage_boundaries)),
+        (
+            "episode_distributions",
+            plot_episode_distributions(all_results, charts_dir=sub_dir, stage_boundaries=stage_boundaries),
+        ),
+        (
+            "optimization_diagnostics",
+            plot_optimization_diagnostics(train_records or [], charts_dir=sub_dir, stage_boundaries=stage_boundaries),
+        ),
+        (
+            "action_space_diagnostics",
+            plot_action_space_diagnostics(all_results, charts_dir=sub_dir, stage_boundaries=stage_boundaries),
+        ),
+    ):
+        figures[name] = _renamed(fig, f"{name}.png", f"curriculum_{name}.png")
+    return figures
 
 
 def plot_curriculum_composition_summary(
@@ -1326,13 +1633,18 @@ def plot_stage_diagnostics(
     *,
     charts_dir: Any | None = None,
     title_suffix: str = "",
+    train_records: Sequence[dict] | None = None,
+    max_turns: int | None = None,
+    max_steps: int | None = None,
 ) -> dict[str, plt.Figure | None]:
     """Render the full per-stage diagnostic suite into ``charts_dir``.
 
     Calls, in order: ``plot_episode_length``, ``plot_outcome_breakdown``,
     ``plot_reward_decomposition``, ``plot_action_distribution``,
-    ``plot_unit_build_distribution``, ``plot_combat_summary`` — each
-    saving its canonical filename under ``charts_dir``. Used by both
+    ``plot_unit_build_distribution``, ``plot_combat_summary``, plus outcome
+    reward/distribution and action-space diagnostics. Optional train_records
+    enable optimization diagnostics; max_turns/max_steps mark episode caps.
+    Each saves its canonical filename under ``charts_dir``. Used by both
     the bootstrap notebook (per-stage subdirectory) and the self-play
     training notebook (single run-level call) so the produced
     filenames stay identical.
@@ -1348,6 +1660,12 @@ def plot_stage_diagnostics(
         "action_distribution": plot_action_distribution(results, charts_dir=charts_dir),
         "unit_build_distribution": plot_unit_build_distribution(results, charts_dir=charts_dir),
         "combat_summary": plot_combat_summary(results, charts_dir=charts_dir),
+        "reward_by_outcome": plot_reward_by_outcome(results, charts_dir=charts_dir),
+        "episode_distributions": plot_episode_distributions(
+            results, charts_dir=charts_dir, max_turns=max_turns, max_steps=max_steps
+        ),
+        "optimization_diagnostics": plot_optimization_diagnostics(train_records or [], charts_dir=charts_dir),
+        "action_space_diagnostics": plot_action_space_diagnostics(results, charts_dir=charts_dir),
     }
 
 

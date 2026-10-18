@@ -373,6 +373,10 @@ class TestPlotStageDiagnostics:
             "action_distribution",
             "unit_build_distribution",
             "combat_summary",
+            "reward_by_outcome",
+            "episode_distributions",
+            "optimization_diagnostics",
+            "action_space_diagnostics",
         }
         assert set(figures.keys()) == expected_keys
         # episode_length always has data when results is non-empty.
